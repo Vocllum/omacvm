@@ -17,6 +17,11 @@ final class VMCursorHider {
     private var vmRects: [CGRect] = []
     private var lastCheck = CFAbsoluteTime(0)
     private var lastResult = false
+    private var wasInVM = false
+    private var onStrip = false
+    /// Called when the pointer arrives over a full-screen VM window
+    /// (CG point, that window's rect).
+    var onEnterVM: ((CGPoint, CGRect) -> Void)?
 
     init(vmOwner: String, ownOwner: String) {
         self.vmOwner = vmOwner
@@ -37,9 +42,16 @@ final class VMCursorHider {
         if vmRects.isEmpty { setHidden(false) }
     }
 
-    /// The pointer is over the strip panel: the strip shows its own cursor.
-    func pointerOnStrip() {
-        setHidden(false)
+    /// The pointer is over the strip panel, which shows the guest's cursor
+    /// images. Showing is delayed a little so the guest (which hides its own
+    /// cursor on the same event) has time to do so: no second cursor.
+    func pointerOnStrip(showAfter delay: TimeInterval) {
+        onStrip = true
+        wasInVM = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.onStrip else { return }
+            self.setHidden(false)
+        }
     }
 
     func stop() {
@@ -49,8 +61,10 @@ final class VMCursorHider {
     }
 
     private func update() {
+        onStrip = false  // global events never come from the strip (our own window)
         let p = Self.cgMouseLocation()
-        guard vmRects.contains(where: { $0.contains(p) }) else {
+        guard let rect = vmRects.first(where: { $0.contains(p) }) else {
+            wasInVM = false
             setHidden(false)
             return
         }
@@ -63,6 +77,8 @@ final class VMCursorHider {
             lastResult = topWindowIsVM(at: p)
         }
         setHidden(lastResult)
+        if lastResult && !wasInVM { onEnterVM?(p, rect) }
+        wasInVM = lastResult
     }
 
     private func setHidden(_ h: Bool) {

@@ -39,6 +39,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var view: StripView?
     private var geometry: StripGeometry?
     private var parked = false
+    /// The VM's full-screen window on the built-in display, tracked across Spaces.
+    private var vmWindow: CGWindowID?
+    private var misses = 0
+    /// Set when the pointer left the strip; the guest cursor is shown again
+    /// where the pointer lands in a VM window.
+    private var pendingGuestCursor = false
     private var pollTimer: Timer?
     private var beatTimer: Timer?
     private var lastBackground: CGColor?
@@ -53,6 +59,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "Mirrors the VM bar into the notch strip")
         cursorHider = VMCursorHider(vmOwner: settings.vmOwner, ownOwner: "Omarchy Notch Bar")
+        cursorHider.onEnterVM = { [weak self] point, rect in self?.pointerEnteredVM(at: point, window: rect) }
         cursorHider.start()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [weak self] _ in self?.cursorHider.stop() }
@@ -90,19 +97,33 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         cursorHider?.refresh()
         let ready = link.isConnected && stream.hasImage
         let visibleNow = ready ? StripDetector.detect(vmOwner: settings.vmOwner) : nil
-        let anySpace = ready ? (visibleNow ?? StripDetector.detect(vmOwner: settings.vmOwner, onScreenOnly: false)) : nil
 
         if let g = visibleNow {
+            misses = 0
+            vmWindow = g.windowID
             if g != geometry || panel?.isVisible != true || panel?.isOnActiveSpace != true {
                 showPanel(g)
                 link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
             }
             geometry = g
-        } else if anySpace == nil, geometry != nil {
+        } else if ready, let id = vmWindow, StripDetector.stillFullScreen(id) {
+            // The VM's Space is not in front (or is sliding): keep everything as
+            // is, so the panel moves with that Space.
+            misses = 0
+        } else if !ready {
+            vmWindow = nil
             geometry = nil
             hidePanel()
+        } else if vmWindow != nil || geometry != nil {
+            // Gone or no longer full screen; require two checks in a row.
+            misses += 1
+            if misses >= 2 {
+                vmWindow = nil
+                geometry = nil
+                hidePanel()
+            }
         }
-        setParked(anySpace != nil)
+        setParked(ready && vmWindow != nil)
     }
 
     private func setParked(_ on: Bool) {
@@ -225,12 +246,40 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         // Only one cursor at a time: the guest hides its own while the pointer
         // is over the strip, where the helper shows the guest's cursor images.
         if inside {
-            cursorHider.pointerOnStrip()
+            pendingGuestCursor = false
             link.send("cursor 0")
+            cursorHider.pointerOnStrip(showAfter: 0.03)
             link.send("targets")
-        } else if let exit {
-            // Put the guest cursor where the pointer leaves, then show it.
-            link.send(String(format: "cursor 1 %@ %.1f", exit.direction, exit.x))
+        } else if exit != nil {
+            // Show the guest cursor once the pointer lands in a VM window (at
+            // that exact spot, see pointerEnteredVM). If it lands elsewhere,
+            // show it anyway after a moment so it is never left hidden.
+            pendingGuestCursor = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
+                guard let self, self.pendingGuestCursor else { return }
+                self.pendingGuestCursor = false
+                self.link.send("cursor 1")
+            }
+        } else {
+            pendingGuestCursor = false
+            link.send("cursor 1")
+        }
+    }
+
+    /// The pointer arrived over a full-screen VM window (CG coordinates).
+    private func pointerEnteredVM(at p: CGPoint, window: CGRect) {
+        guard pendingGuestCursor, let screen = StripDetector.builtinScreen(),
+              let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        else { return }
+        pendingGuestCursor = false
+        let builtin = CGDisplayBounds(number.uint32Value)
+        let x = p.x - builtin.minX
+        if window.maxY == builtin.maxY {
+            // Back into the built-in display's VM window, below the strip.
+            link.send(String(format: "cursor 1 down %.1f %.1f", x, p.y - window.minY))
+        } else if window.maxY <= builtin.minY {
+            // Up to the display above.
+            link.send(String(format: "cursor 1 up %.1f %.1f", x, window.maxY - p.y))
         } else {
             link.send("cursor 1")
         }

@@ -7,6 +7,8 @@ struct StripGeometry: Equatable {
     /// Camera housing, as x offsets from the left edge of the display.
     var notchLeft: CGFloat
     var notchRight: CGFloat
+    /// The VM's full-screen window on the built-in display.
+    var windowID: CGWindowID
 }
 
 /// Finds the notch strip above a full-screen VM window using public APIs only.
@@ -50,8 +52,23 @@ enum StripDetector {
                                width: screen.frame.width, height: height)
             return StripGeometry(frame: frame,
                                  notchLeft: left.maxX - screen.frame.minX,
-                                 notchRight: right.minX - screen.frame.minX)
+                                 notchRight: right.minX - screen.frame.minX,
+                                 windowID: CGWindowID((w[kCGWindowNumber as String] as? Int) ?? 0))
         }
         return nil
+    }
+
+    /// Whether the window is still the VM's full-screen window on the built-in
+    /// display, wherever its Space currently is. Only its size is compared: the
+    /// origin moves while a Space slides in or out.
+    static func stillFullScreen(_ id: CGWindowID) -> Bool {
+        guard let screen = builtinScreen(),
+              let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+              let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]])?.first,
+              let dict = info[kCGWindowBounds as String] as? NSDictionary,
+              let r = CGRect(dictionaryRepresentation: dict)
+        else { return false }
+        let display = CGDisplayBounds(number.uint32Value)
+        return r.width == display.width && r.height >= display.height * 0.9
     }
 }

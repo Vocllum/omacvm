@@ -343,7 +343,7 @@ static void set_guest_cursor_visible(int visible) {
 // the top edge of the built-in display ("down"), or just above it on the
 // display arranged above ("up"). Without this the cursor would reappear where
 // it was hidden and jump once Parallels reports the next position.
-static void show_guest_cursor_at_exit(const char *dir, double strip_x) {
+static void show_guest_cursor_at_exit(const char *dir, double strip_x, double depth) {
     char *j = hypr_request("j/monitors all");
     double x, y, w, s;
     if (!j || monitor_field(j, cfg_screen, "x", &x) || monitor_field(j, cfg_screen, "y", &y) ||
@@ -355,7 +355,10 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x) {
     free(j);
     double lw = w / s;
     double tx = x + (strip_x < 0 ? 0 : strip_x > lw - 1 ? lw - 1 : strip_x);
-    double ty = !strcmp(dir, "up") ? y - 2 : y + 1;
+    // depth: how far the pointer already is inside the destination display,
+    // measured from the edge it crossed.
+    if (depth < 1) depth = 1;
+    double ty = !strcmp(dir, "up") ? y - 1 - depth : y + depth;
     char lua[256];
     snprintf(lua, sizeof lua,
              "hl.dispatch(hl.dsp.cursor.move({ x = %d, y = %d })) hl.config({ cursor = { invisible = false } })",
@@ -402,9 +405,10 @@ static void handle_command(char *line) {
         }
     } else if (!strcmp(c, "cursor") && argc == 2) {
         set_guest_cursor_visible(!strcmp(argv[1], "1"));
-    } else if (!strcmp(c, "cursor") && argc == 4 && !strcmp(argv[1], "1") &&
-               (!strcmp(argv[2], "down") || !strcmp(argv[2], "up")) && is_number(argv[3])) {
-        show_guest_cursor_at_exit(argv[2], strtod(argv[3], NULL));
+    } else if (!strcmp(c, "cursor") && (argc == 4 || argc == 5) && !strcmp(argv[1], "1") &&
+               (!strcmp(argv[2], "down") || !strcmp(argv[2], "up")) && is_number(argv[3]) &&
+               (argc == 4 || is_number(argv[4]))) {
+        show_guest_cursor_at_exit(argv[2], strtod(argv[3], NULL), argc == 5 ? strtod(argv[4], NULL) : 1);
     } else if (!strcmp(c, "cursors") && argc == 1) {
         send_cursors();
     } else if (!strcmp(c, "key") && argc == 1) {
@@ -417,6 +421,42 @@ static void handle_command(char *line) {
     } else {
         LOG("ignored command: %s", c);
     }
+}
+
+// Slow commands (each runs a `qs ipc` process, ~25 ms) go through a queue and a
+// worker thread, so cursor show/hide never waits behind them.
+#define QUEUE_MAX 64
+static char *queue_items[QUEUE_MAX];
+static int queue_len;
+static pthread_mutex_t queue_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t queue_cond = PTHREAD_COND_INITIALIZER;
+
+static void enqueue_command(const char *line) {
+    pthread_mutex_lock(&queue_lock);
+    if (queue_len < QUEUE_MAX) {
+        queue_items[queue_len++] = strdup(line);
+        pthread_cond_signal(&queue_cond);
+    } else {
+        LOG("command queue full, dropping: %s", line);
+    }
+    pthread_mutex_unlock(&queue_lock);
+}
+
+static void *worker_thread(void *unused) {
+    (void)unused;
+    for (;;) {
+        pthread_mutex_lock(&queue_lock);
+        while (!queue_len) pthread_cond_wait(&queue_cond, &queue_lock);
+        char *line = queue_items[0];
+        memmove(queue_items, queue_items + 1, (size_t)(queue_len - 1) * sizeof(char *));
+        queue_len--;
+        pthread_mutex_unlock(&queue_lock);
+        if (line) {
+            handle_command(line);
+            free(line);
+        }
+    }
+    return NULL;
 }
 
 static void *net_thread(void *unused) {
@@ -457,7 +497,8 @@ static void *net_thread(void *unused) {
             char *start = buf, *nl;
             while ((nl = memchr(start, '\n', len - (size_t)(start - buf)))) {
                 *nl = 0;
-                handle_command(start);
+                if (!strncmp(start, "cursor ", 7)) handle_command(start);  // fast path
+                else enqueue_command(start);
                 start = nl + 1;
             }
             len -= (size_t)(start - buf);
@@ -936,6 +977,8 @@ int main(int argc, char **argv) {
     set_guest_cursor_visible(1);
     pthread_t th, keeper, sigth;
     pthread_create(&sigth, NULL, signal_thread, &term);
+    pthread_t worker;
+    pthread_create(&worker, NULL, worker_thread, NULL);
     pthread_create(&th, NULL, net_thread, NULL);
     pthread_create(&keeper, NULL, keeper_thread, NULL);
     if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
