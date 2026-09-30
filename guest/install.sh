@@ -75,6 +75,16 @@ if [[ $patch_result != already* || $bg_result != already* ]]; then
   omarchy-restart-shell >/dev/null 2>&1 || true
 fi
 
+# Heartbeat and bar state files (see guest/bar/apply-patch.py).
+mkdir -p "${XDG_STATE_HOME:-$HOME/.local/state}/omanotch"
+
+# A development build cloned Omarchy's notification service. Omarchy runs
+# cloned services sandboxed, which keeps their popups from showing: undo it.
+if [[ -d $plugins/$USER.notifications ]]; then
+  omarchy-plugin-enable omarchy.notifications >/dev/null 2>&1 || true
+  rm -rf "$plugins/$USER.notifications"
+fi
+
 say "installing Hyprland config"
 mkdir -p "$hypr"
 sed -e "s|^local NOTCH_OUTPUT = .*|local NOTCH_OUTPUT = \"${NOTCHBAR_OUTPUT:-NOTCH}\"|" \

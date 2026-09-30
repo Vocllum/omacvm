@@ -47,6 +47,15 @@ end
 
 hl.monitor(notch_rule())
 
+-- On NOTCH, the bar copy and the wallpaper live on the overlay layer (see the
+-- patches), stacked above Omarchy's notification popups, which are shown on
+-- every output and would otherwise draw their top edge into the notch strip.
+-- On the other outputs the bar and wallpaper are on other layers, where the
+-- order does not matter.
+-- (A higher order is "closer to the monitor edge", i.e. further down.)
+hl.layer_rule({ match = { namespace = "^omarchy-bar$" }, order = -20 })
+hl.layer_rule({ match = { namespace = "^omarchy-background$" }, order = -10 })
+
 -- Its own workspace, so no real workspace or window is ever moved onto it.
 hl.workspace_rule({ workspace = "name:notch", monitor = NOTCH_OUTPUT, default = true, persistent = true })
 
@@ -65,8 +74,11 @@ end)
 
 -- The overlap with the built-in display is deliberate (see above), but
 -- Hyprland warns about any overlapping monitors after every layout change
--- ("Your monitor layout is set up incorrectly. Monitor NOTCH overlaps …").
--- Dismiss that one warning, and only when it names the NOTCH output.
+-- ("Your monitor layout is set up incorrectly. Monitor NOTCH overlaps …"),
+-- and has no option to turn that off. Dismiss that one warning, and only when
+-- it names the NOTCH output: at once in the event handler, which catches it
+-- before the next frame is drawn (no flash), plus a few late checks just in
+-- case. No timer runs otherwise.
 local function dismiss_notch_overlap_warning()
   for _, n in ipairs(hl.notification.get()) do
     local text = n:get_text()
@@ -74,13 +86,14 @@ local function dismiss_notch_overlap_warning()
   end
 end
 
-local function schedule_dismiss()
-  for _, ms in ipairs({ 1, 40, 200, 1000 }) do
+local function on_layout_event()
+  dismiss_notch_overlap_warning()
+  for _, ms in ipairs({ 16, 50, 150, 500, 1500 }) do
     hl.timer(dismiss_notch_overlap_warning, { timeout = ms, type = "oneshot" })
   end
 end
 
-hl.on("monitor.layout_changed", schedule_dismiss)
-hl.on("monitor.added", schedule_dismiss)
-hl.on("config.reloaded", schedule_dismiss)
-schedule_dismiss()
+hl.on("monitor.layout_changed", on_layout_event)
+hl.on("monitor.added", on_layout_event)
+hl.on("config.reloaded", on_layout_event)
+on_layout_event()

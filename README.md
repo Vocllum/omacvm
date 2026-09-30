@@ -76,9 +76,9 @@ show whatever the VM would have shown.
 5. **Cursor juggling.** Over the strip, the Mac shows the *guest's* cursor
    images (sent over from the VM) while the VM hides its own; over the VM, the
    macOS cursor is hidden for real. One cursor at a time.
-6. **Fail-safe.** The Mac app says "keep the bar parked" every second. If it
-   stops, crashes or you leave full screen, the VM brings its bar back within
-   five seconds.
+6. **Fail-safe.** The Mac app says "keep the bar parked" every second. If you
+   leave full screen or the Mac app quits or crashes, the VM brings its bar
+   back at once; if even the program in the VM dies, within 15 seconds.
 
 ## Any notched MacBook
 
@@ -160,6 +160,11 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 
 - Full-screen video (or anything in real fullscreen, Super+F) turns the strip
   black, like macOS does. Maximized and tiled-fullscreen windows keep the bar.
+- Omarchy's notification popups keep their usual distance below where the
+  bar *would* be (a bar's height lower than panels). The notification service
+  takes that distance from the bar's size and runs cloned copies sandboxed, so
+  Omanotch cannot change it without editing Omarchy's own files. The popups
+  never reach into the strip, though.
 - Hover effects (tooltips, hover highlights) are not mirrored; clicks, right
   and middle clicks and scrolling are. Tray icons show up but can't be clicked
   in the strip.

@@ -23,7 +23,7 @@ import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 1
+VERSION = 2
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
@@ -72,7 +72,13 @@ def main():
   function imageUrl(path) {{
 ''')
 
-    # 2. The shared canvas: the strip on top, the built-in display below it.
+    # 2. On the strip the wallpaper sits on the overlay layer (ordered below the
+    #    bar, above notification popups by notchbar.lua): with the bar hidden
+    #    it covers the popups' top edge, which would otherwise show in the strip.
+    text = replace_once(text, "      WlrLayershell.layer: WlrLayer.Background\n",
+                        "      WlrLayershell.layer: root.notchIsStrip(panel.modelData) ? WlrLayer.Overlay : WlrLayer.Background\n")
+
+    # 3. The shared canvas: the strip on top, the built-in display below it.
     text = replace_once(text, '''      Image {
         id: base
         anchors.fill: parent

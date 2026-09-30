@@ -86,9 +86,15 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
         // Entering and leaving full screen has no public notification for other
-        // apps' windows; a cheap poll covers it.
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.evaluate() }
-        beatTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.heartbeat() }
+        // apps' windows; a cheap once-a-second poll covers it (Space, app and
+        // screen changes are handled at once through the notifications above).
+        // Timer tolerance lets macOS batch the wake-ups with others.
+        pollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.evaluate() }
+        pollTimer?.tolerance = 0.2
+        // The guest notices a vanished helper through the connection itself;
+        // this only has to beat its watchdog (15 s) comfortably.
+        beatTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.heartbeat() }
+        beatTimer?.tolerance = 0.5
         evaluate()
         Log.info("started")
     }
@@ -160,9 +166,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         link.send("strip \(Int((g.frame.height * k).rounded()))")
     }
 
-    /// Re-asserts the parked state every second rather than only sending a
-    /// heartbeat, so a restarted Omarchy shell (which starts unparked) is
-    /// parked again within a second. The notch geometry is refreshed as well.
+    /// Re-asserts the parked state every two seconds. notchcast turns this
+    /// into a heartbeat file for the bar and re-parks a restarted Omarchy
+    /// shell (which starts unparked). The notch geometry is refreshed too;
+    /// notchcast only passes it on when it changed.
     private func heartbeat() {
         guard parked else { return }
         link.send("park 1")

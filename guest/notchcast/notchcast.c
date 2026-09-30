@@ -399,20 +399,65 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x, double de
     hypr_eval(lua);
 }
 
+// ~/.local/state/omanotch/<name> (created on first use). Small files there
+// carry the heartbeat and the bar's state without starting any process.
+static void state_path(char *out, size_t size, const char *name) {
+    const char *state = getenv("XDG_STATE_HOME");
+    char dir[512];
+    if (state && *state) snprintf(dir, sizeof dir, "%s/omanotch", state);
+    else snprintf(dir, sizeof dir, "%s/.local/state/omanotch", getenv("HOME") ? getenv("HOME") : "/tmp");
+    static int made;
+    if (!made) {
+        char parent[512];
+        snprintf(parent, sizeof parent, "%s", dir);
+        char *slash = strrchr(parent, '/');
+        if (slash) *slash = 0;
+        mkdir(parent, 0755);
+        mkdir(dir, 0755);
+        made = 1;
+    }
+    snprintf(out, size, "%s/%s", dir, name);
+}
+
+// Heartbeat for the bar's watchdog: the time in ms, rewritten in place.
+static void write_beat(void) {
+    char path[600];
+    state_path(path, sizeof path, "beat");
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%.0f\n", ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6);
+        fclose(f);
+    }
+}
+
+// The bar's own report (bar patch v9+): {"parked":…,"barSize":…,"started":…}.
+struct bar_state {
+    int parked;
+    double bar_size, started;
+};
+static int read_bar_state(struct bar_state *st) {
+    char path[600], buf[256];
+    state_path(path, sizeof path, "bar-state");
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    size_t n = fread(buf, 1, sizeof buf - 1, f);
+    fclose(f);
+    buf[n] = 0;
+    char *p = strstr(buf, "\"parked\":"), *b = strstr(buf, "\"barSize\":"), *t = strstr(buf, "\"started\":");
+    if (!p || !b || !t) return 0;
+    st->parked = !strncmp(p + 9, "true", 4);
+    st->bar_size = strtod(b + 10, NULL);
+    st->started = strtod(t + 10, NULL);
+    return 1;
+}
+
 // The hidden output's logical height, remembered for notchbar.lua so a
 // Hyprland config reload recreates the output at the right height right away.
 static void save_strip_height(int h) {
-    const char *state = getenv("XDG_STATE_HOME");
-    char dir[512], path[600];
-    if (state && *state) snprintf(dir, sizeof dir, "%s/omanotch", state);
-    else snprintf(dir, sizeof dir, "%s/.local/state/omanotch", getenv("HOME") ? getenv("HOME") : "/tmp");
-    char parent[512];
-    snprintf(parent, sizeof parent, "%s", dir);
-    char *slash = strrchr(parent, '/');
-    if (slash) *slash = 0;
-    mkdir(parent, 0755);
-    mkdir(dir, 0755);
-    snprintf(path, sizeof path, "%s/strip-height", dir);
+    char path[600];
+    state_path(path, sizeof path, "strip-height");
     FILE *f = fopen(path, "w");
     if (f) {
         fprintf(f, "%d\n", h);
@@ -442,6 +487,26 @@ static int is_number(const char *s) {
     return *end == 0;
 }
 
+// Bar state as last told to the shell (worker thread only). -1: unknown.
+#define BEAT_EVERY_MS 4000
+static int bar_parked = -1;
+static double bar_beat_ms;
+static char want_notch_l[32], want_notch_r[32], want_strip[32];
+static char sent_notch_l[32], sent_notch_r[32], sent_strip[32];
+
+// Passes the notch geometry on to the bar when it changed (or always).
+static void sync_geometry(int always) {
+    if (*want_notch_l && (always || strcmp(want_notch_l, sent_notch_l) || strcmp(want_notch_r, sent_notch_r))) {
+        free(ipc_call(0, "setNotch", want_notch_l, want_notch_r, NULL));
+        snprintf(sent_notch_l, sizeof sent_notch_l, "%s", want_notch_l);
+        snprintf(sent_notch_r, sizeof sent_notch_r, "%s", want_notch_r);
+    }
+    if (*want_strip && (always || strcmp(want_strip, sent_strip))) {
+        free(ipc_call(0, "setNotchHeight", want_strip, NULL, NULL));
+        snprintf(sent_strip, sizeof sent_strip, "%s", want_strip);
+    }
+}
+
 // One command line from the helper. Everything is validated before use.
 static void handle_command(char *line) {
     char *argv[6] = {0};
@@ -453,19 +518,51 @@ static void handle_command(char *line) {
     if (!argc) return;
     const char *c = argv[0];
     DBG("cmd: %s %s %s %s", c, argv[1] ? argv[1] : "", argv[2] ? argv[2] : "", argv[3] ? argv[3] : "");
+    // Every call into the bar starts a `qs ipc` process (a Qt program), so
+    // they are kept rare: the helper's once-a-second "park 1" becomes one
+    // heartbeat every few seconds, and the notch geometry is only passed on
+    // when it changes, or again when the heartbeat shows that the shell was
+    // restarted (it then starts unparked, from its defaults).
     if (!strcmp(c, "park") && argc == 2) {
-        // Re-sent every time: a restarted shell starts from its defaults.
-        if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
-        free(ipc_call(0, "setParked", !strcmp(argv[1], "1") ? "true" : "false", NULL, NULL));
+        int on = !strcmp(argv[1], "1");
+        double now = now_ms();
+        if (on != bar_parked || now - bar_beat_ms > BEAT_EVERY_MS) {
+            int fresh = 0;
+            if (on) write_beat();
+            if (on && bar_parked == 1) {
+                struct bar_state st;
+                static double started;
+                if (read_bar_state(&st)) {
+                    // Unparked although we keep it parked, or a new shell.
+                    fresh = !st.parked || (started && st.started != started);
+                    started = st.started;
+                } else {
+                    // A bar patched before v9 only knows the IPC heartbeat.
+                    char *r = ipc_call(1, "heartbeat", NULL, NULL, NULL);
+                    fresh = !r || strncmp(r, "parked", 6);
+                    free(r);
+                }
+            }
+            if (on != bar_parked || fresh) {
+                if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
+                free(ipc_call(0, "setParked", on ? "true" : "false", NULL, NULL));
+                if (on && fresh) sync_geometry(1);
+            }
+            bar_parked = on;
+            bar_beat_ms = now;
+        }
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
     } else if (!strcmp(c, "notch") && argc == 3 && is_number(argv[1]) && is_number(argv[2])) {
-        free(ipc_call(0, "setNotch", argv[1], argv[2], NULL));
+        snprintf(want_notch_l, sizeof want_notch_l, "%s", argv[1]);
+        snprintf(want_notch_r, sizeof want_notch_r, "%s", argv[2]);
+        sync_geometry(0);
     } else if (!strcmp(c, "strip") && argc == 2 && is_number(argv[1])) {
         double h = strtod(argv[1], NULL);
         if (h >= 10 && h <= 200) {
             atomic_store(&strip_height, (int)(h + 0.5));
-            free(ipc_call(0, "setNotchHeight", argv[1], NULL, NULL));
+            snprintf(want_strip, sizeof want_strip, "%s", argv[1]);
+            sync_geometry(0);
         }
     } else if (!strcmp(c, "click") && argc == 4 && is_number(argv[1]) && is_number(argv[2]) && is_number(argv[3])) {
         free(ipc_call(0, "click", argv[1], argv[2], argv[3]));
@@ -671,6 +768,7 @@ static void *net_thread(void *unused) {
             if (len >= sizeof buf - 1) len = 0;  // oversized line: discard
         }
         LOG("helper disconnected");
+        enqueue_command("park 0");  // bring the bar back now, not after the watchdog
         pthread_mutex_lock(&lock);
         if (sock_fd == fd) sock_fd = -1;
         pthread_mutex_unlock(&lock);
@@ -788,7 +886,14 @@ static void run_quiet(const char *const argv[]) {
     if (pid > 0) waitpid(pid, NULL, 0);
 }
 
+// The bar's own height, asked for at most every 30 s (it only changes with
+// the theme or font; see the note on ipc_call costs in handle_command).
 static double bar_size(void) {
+    static double cached = 26, at = -1e9;
+    struct bar_state bs;
+    if (read_bar_state(&bs) && bs.bar_size > 0 && bs.bar_size < 200) return cached = bs.bar_size;
+    if (now_ms() - at < 30000) return cached;
+    at = now_ms();
     char *st = ipc_call(1, "state", NULL, NULL, NULL);
     double v = 26;
     if (st) {
@@ -796,7 +901,7 @@ static double bar_size(void) {
         if (q) v = strtod(q + strlen("\"barSize\":"), NULL);
         free(st);
     }
-    return v > 0 && v < 200 ? v : 26;
+    return cached = v > 0 && v < 200 ? v : 26;
 }
 
 // UTM resizes the guest display to its window: the virtio-gpu connector gets
@@ -1242,6 +1347,19 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "-v")) verbose = 1;
     cfg_output = getenv("NOTCHBAR_OUTPUT") ? getenv("NOTCHBAR_OUTPUT") : "NOTCH";
     cfg_host = getenv("NOTCHBAR_HOST");  // NULL: find the Mac by itself
+    {
+        // Start at the strip height of the last run, not at the bar's: no
+        // resize flash while the helper has not said it again yet.
+        char path[600];
+        state_path(path, sizeof path, "strip-height");
+        FILE *f = fopen(path, "r");
+        int h = 0;
+        if (f) {
+            if (fscanf(f, "%d", &h) != 1) h = 0;
+            fclose(f);
+        }
+        if (h >= 10 && h <= 200) atomic_store(&strip_height, h);
+    }
     cfg_port = getenv("NOTCHBAR_PORT") ? atoi(getenv("NOTCHBAR_PORT")) : 47811;
     // The display whose bar is parked while the strip shows (the built-in one).
     cfg_screen = getenv("NOTCHBAR_SCREEN") ? getenv("NOTCHBAR_SCREEN") : "Virtual-1";

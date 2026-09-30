@@ -25,7 +25,7 @@ import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 7
+VERSION = 11
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -249,13 +249,49 @@ def main():
     }
   }
 
-  // Unpark when the helper goes quiet, so the built-in display never ends up
-  // without a bar.
+  // Heartbeat and state go through two small files in
+  // ~/.local/state/omanotch, so the steady state costs no process at all:
+  // notchcast writes `beat` (a millisecond timestamp) every few seconds, the
+  // bar writes `bar-state` whenever its parking or size changes. (An IPC call
+  // starts a `qs` process each time.)
+  readonly property string notchStateDir: home + "/.local/state/omanotch"
+  readonly property real notchStartedAt: Date.now()
+  FileView {
+    id: notchBeatFile
+    path: root.notchStateDir + "/beat"
+    blockLoading: true
+    printErrors: false
+  }
+  FileView {
+    id: notchStateFile
+    path: root.notchStateDir + "/bar-state"
+    printErrors: false
+  }
+  function notchWriteState() {
+    if (!notchStateFile.path) return  // still being created; the timer below writes it
+    notchStateFile.setText(JSON.stringify({ parked: notchParked, barSize: barSize, started: notchStartedAt }) + "\n")
+  }
+  onNotchParkedChanged: notchWriteState()
+  onBarSizeChanged: notchWriteState()
   Timer {
-    interval: 1000
+    interval: 500
+    running: true
+    onTriggered: root.notchWriteState()
+  }
+
+  // Unpark when the helper goes quiet, so the built-in display never ends up
+  // without a bar. notchcast beats every 4 s and unparks by itself when the
+  // helper or the service stops; this only catches a notchcast that died.
+  Timer {
+    interval: 3000
     repeat: true
     running: root.notchParked
-    onTriggered: if (Date.now() - root.notchLastBeat > 5000) root.notchParked = false
+    onTriggered: {
+      notchBeatFile.reload()
+      var beat = parseFloat(String(notchBeatFile.text()).trim())
+      if (beat > root.notchLastBeat) root.notchLastBeat = beat
+      if (Date.now() - root.notchLastBeat > 15000) root.notchParked = false
+    }
   }
 
   Variants {
@@ -401,7 +437,10 @@ def main():
     text = replace_once(text, '''    WlrLayershell.namespace: "omarchy-bar"
     WlrLayershell.layer: WlrLayer.Top
 ''', '''    WlrLayershell.namespace: "omarchy-bar"
-    WlrLayershell.layer: WlrLayer.Top
+    // omarchy-notch-bar: on the NOTCH output the bar sits on the overlay
+    // layer, above Omarchy's notification popups (overlay too; notchbar.lua
+    // orders them), which would otherwise show their top edge in the strip.
+    WlrLayershell.layer: barWindow.notchRole === "notch" ? WlrLayer.Overlay : WlrLayer.Top
 
     // omarchy-notch-bar: repaint trigger, see notchPokeSerial.
     Rectangle {
