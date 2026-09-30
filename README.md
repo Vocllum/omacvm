@@ -134,6 +134,8 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 
 ## Good to know
 
+- Full-screen video (or anything in real fullscreen, Super+F) turns the strip
+  black, like macOS does. Maximized and tiled-fullscreen windows keep the bar.
 - Hover effects (tooltips, hover highlights) are not mirrored; clicks, right
   and middle clicks and scrolling are. Tray icons show up but can't be clicked
   in the strip.

@@ -24,7 +24,7 @@ import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 6
+VERSION = 7
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -73,6 +73,59 @@ def main():
   // Bumped by the helper's capture program: repaints every bar surface once,
   // so a new capture session gets a frame without waiting for a change.
   property int notchPokeSerial: 0
+  // True while a window on the built-in display's active workspace is in
+  // real fullscreen (a video, Super+F; not "maximized" or tiled fullscreen).
+  // The strip then goes black, as macOS does over full-screen video.
+  property bool notchFullscreen: false
+  property bool notchFullscreenRecheck: false
+  function notchWorkspaceId() {
+    var ms = Hyprland.monitors.values
+    for (var i = 0; i < ms.length; i++)
+      if (ms[i].name === notchParkedScreen && ms[i].activeWorkspace) return ms[i].activeWorkspace.id
+    return null
+  }
+  function notchCheckFullscreen() {
+    if (notchFullscreenProc.running) notchFullscreenRecheck = true
+    else notchFullscreenProc.running = true
+  }
+  Process {
+    id: notchFullscreenProc
+    command: ["hyprctl", "-j", "clients"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var ws = root.notchWorkspaceId(), fs = false
+        try {
+          var clients = JSON.parse(text)
+          for (var i = 0; i < clients.length; i++) {
+            var c = clients[i]
+            // fullscreen is Hyprland's mode bitmask: 1 maximized, 2 fullscreen.
+            if (c.workspace && c.workspace.id === ws && (c.fullscreen & 2)) fs = true
+          }
+        } catch (e) {}
+        root.notchFullscreen = fs
+      }
+    }
+    onExited: if (root.notchFullscreenRecheck) {
+      root.notchFullscreenRecheck = false
+      running = true
+    }
+  }
+  Timer {
+    id: notchFullscreenDebounce
+    interval: 50
+    running: true  // initial check
+    onTriggered: root.notchCheckFullscreen()
+  }
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var n = String(event.name)
+      if (n === "fullscreen" || n.indexOf("workspace") === 0 || n.indexOf("focusedmon") === 0 ||
+          n === "openwindow" || n === "closewindow" || n.indexOf("movewindow") === 0 ||
+          n.indexOf("monitor") === 0)
+        notchFullscreenDebounce.restart()
+    }
+  }
   function notchRoleFor(s) {
     // Only a bar along the top edge can live in the notch strip.
     if (position !== "top") return ""
@@ -144,21 +197,22 @@ def main():
       return root.notchParked ? "parked" : "unparked"
     }
     function click(x: real, y: real, button: int): string {
-      if (root.barHidden) return "miss"  // bar-off: nothing is shown in the strip
+      // bar-off or fullscreen: nothing is shown in the strip
+      if (root.barHidden || root.notchFullscreen) return "miss"
       var t = root.notchTargetAt(x, y)
       if (!t) return "miss"
       t.triggerPress(button === 3 ? Qt.MiddleButton : button === 2 ? Qt.RightButton : Qt.LeftButton)
       return "ok"
     }
     function wheel(x: real, y: real, delta: int): string {
-      if (root.barHidden) return "miss"
+      if (root.barHidden || root.notchFullscreen) return "miss"
       var t = root.notchTargetAt(x, y)
       if (!t || typeof t.wheelMoved !== "function") return "miss"
       t.wheelMoved(delta)
       return "ok"
     }
     function targets(): string {
-      return JSON.stringify(root.barHidden ? [] : root.notchTargetRects())
+      return JSON.stringify(root.barHidden || root.notchFullscreen ? [] : root.notchTargetRects())
     }
     function state(): string {
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,
@@ -192,7 +246,10 @@ def main():
 ''', '''    visible: !remapGuard.remapping
     // omarchy-notch-bar: role of this copy ("notch", "parked" or "").
     readonly property string notchRole: root.notchRoleFor(screen)
-    readonly property bool parked: root.barHidden || notchRole === "parked"
+    // Over fullscreen the NOTCH copy stays mapped, even with the bar off, to
+    // paint the strip black.
+    readonly property bool notchBlack: notchRole === "notch" && root.notchFullscreen
+    readonly property bool parked: (root.barHidden && !notchBlack) || notchRole === "parked"
     readonly property bool notchLayout: notchRole !== ""
     // The parked copy is 1 px tall: panels open at its height + gap, so they
     // appear right below the notch strip instead of a bar height lower.
@@ -326,6 +383,13 @@ def main():
       x: 0; y: 0; width: 1; height: 1; z: -1
       color: root.transparent ? "transparent" : root.background
       opacity: root.notchPokeSerial % 2 ? 0.999 : 1
+    }
+    // omarchy-notch-bar: black strip over fullscreen windows.
+    Rectangle {
+      anchors.fill: parent
+      z: 1000
+      visible: barWindow.notchBlack
+      color: "black"
     }
 ''')
 
