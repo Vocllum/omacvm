@@ -1,0 +1,7 @@
+# build output
+/build/
+mac/build/
+*.o
+.DS_Store
+# local, machine-specific settings
+/config.local.*
