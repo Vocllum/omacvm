@@ -256,10 +256,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             v.input = self
             v.vmOwners = settings.vmOwners
             v.onGuestScaleChange = { [weak self] in
-                guard let self, let g = self.geometry else { return }
+                guard let self else { return }
                 Log.info(String(format: "guest bar: %.3f logical px per strip point", self.view?.guestPerPoint ?? 1))
-                self.sendGeometry(g)
+                // Cursors first: they must follow even while the strip is hidden.
                 for name in self.cursorImages.keys { self.buildCursor(name) }
+                if let g = self.geometry { self.sendGeometry(g) }
             }
             if let arrowCursor { v.arrowCursor = arrowCursor }
             if let pointerCursor { v.pointerCursor = pointerCursor }
