@@ -12,6 +12,12 @@ across the top that nobody asked for. This project puts Omarchy's **real** bar
 into that black strip — not a look-alike, the actual Quickshell bar, pixels and
 all — and gives the space the bar used to take back to your windows.
 
+> [!NOTE]
+> **Got an M1 or M2 Mac?** Run Omarchy natively on [Asahi Linux](https://asahilinux.org)
+> instead — no VM, full hardware, and it uses the notch area itself. This project
+> is for **M3 and M4** Macs, which Asahi does not support yet, so a VM is the way
+> to run Omarchy there. (It works on M1 and M2 too.)
+
 <p align="center">
   <img src="docs/before-after.svg" alt="Before: a black strip above the VM plus Omarchy's bar inside it. After: the bar sits beside the notch and the windows use the whole screen below." width="100%">
 </p>
