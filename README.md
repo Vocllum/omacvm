@@ -154,6 +154,14 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   ghost of the VM cursor for a frame or two: the VM draws its own cursor and
   the display pipeline has a little latency.
 
+## Tip: a macOS-style clock
+
+With the bar in the menu-bar spot, a macOS-like clock at the far right feels
+natural. In `~/.config/omarchy/shell.json`, move the `omarchy.clock` entry to
+the end of `bar.layout.right`, give it `"format": "ddd MMM d HH:mm"`
+(→ `Wed Sep 30 19:20`) and set `"centerAnchor": ""`. The shell picks the change
+up by itself.
+
 ## Troubleshooting
 
 | Symptom | Look at |
