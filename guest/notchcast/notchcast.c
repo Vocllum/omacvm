@@ -27,6 +27,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +66,9 @@ struct __attribute__((packed)) text_header {
 };
 
 static const char *cfg_output, *cfg_host, *cfg_shell, *cfg_screen;
+// Height of the Mac's black strip in points (`strip H`); 0 until reported.
+// The hidden output is made this tall so the strip needs no padding.
+static _Atomic int strip_height;
 static int cfg_port;
 static int verbose;
 
@@ -408,6 +412,12 @@ static void handle_command(char *line) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
     } else if (!strcmp(c, "notch") && argc == 3 && is_number(argv[1]) && is_number(argv[2])) {
         free(ipc_call(0, "setNotch", argv[1], argv[2], NULL));
+    } else if (!strcmp(c, "strip") && argc == 2 && is_number(argv[1])) {
+        double h = strtod(argv[1], NULL);
+        if (h >= 10 && h <= 200) {
+            atomic_store(&strip_height, (int)(h + 0.5));
+            free(ipc_call(0, "setNotchHeight", argv[1], NULL, NULL));
+        }
     } else if (!strcmp(c, "click") && argc == 4 && is_number(argv[1]) && is_number(argv[2]) && is_number(argv[3])) {
         free(ipc_call(0, "click", argv[1], argv[2], argv[3]));
     } else if (!strcmp(c, "wheel") && argc == 4 && is_number(argv[1]) && is_number(argv[2]) && is_number(argv[3])) {
@@ -675,6 +685,8 @@ static void *keeper_thread(void *unused) {
             } else if (have_notch && have_screen) {
                 created_attempts = 0;
                 double bs = bar_size();
+                int sh = atomic_load(&strip_height);
+                if (sh > bs) bs = sh;
                 int want_w = (int)(sw + 0.5), want_h = (int)(bs * ss + 0.5);
                 if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)sx || (int)ny != (int)sy ||
                     ns < ss - 0.01 || ns > ss + 0.01) {

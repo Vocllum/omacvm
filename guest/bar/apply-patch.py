@@ -24,7 +24,7 @@ import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 5
+VERSION = 6
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -64,6 +64,11 @@ def main():
   // Camera housing in bar coordinates (logical px == macOS points).
   property real notchLeft: 918
   property real notchRight: 1138
+  // Height of the black strip on the Mac (points). The NOTCH copy of the bar
+  // is this tall with its content centred, so the strip has no padding the
+  // helper would have to fill, and the wallpaper can show through when the
+  // bar is hidden. 0 until the helper reports it.
+  property real notchHeight: 0
   property real notchLastBeat: 0
   // Bumped by the helper's capture program: repaints every bar surface once,
   // so a new capture session gets a frame without waiting for a change.
@@ -126,6 +131,10 @@ def main():
       root.notchRight = right
       return left + "," + right
     }
+    function setNotchHeight(height: real): string {
+      root.notchHeight = height > 0 && height < 200 ? height : 0
+      return String(root.notchHeight)
+    }
     function poke(): string {
       root.notchPokeSerial++
       return String(root.notchPokeSerial)
@@ -153,7 +162,7 @@ def main():
     }
     function state(): string {
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,
-                              notch: [root.notchLeft, root.notchRight], barSize: root.barSize,
+                              notch: [root.notchLeft, root.notchRight], notchHeight: root.notchHeight, barSize: root.barSize,
                               beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1,
                               bars: notchBarVariants.instances.map(function(p) {
                                 return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height]
@@ -187,7 +196,12 @@ def main():
     readonly property bool notchLayout: notchRole !== ""
     // The parked copy is 1 px tall: panels open at its height + gap, so they
     // appear right below the notch strip instead of a bar height lower.
-    readonly property int parkedSize: notchRole === "parked" ? 1 : root.barSize
+    // The NOTCH copy fills the whole strip (notchHeight) and centres its
+    // content in it.
+    readonly property int parkedSize: notchRole === "parked" ? 1
+      : notchRole === "notch" ? Math.max(root.barSize, Math.round(root.notchHeight)) : root.barSize
+    readonly property int notchPadTop: notchRole === "notch" ? Math.floor((parkedSize - root.barSize) / 2) : 0
+    readonly property int notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
 ''')
     text = replace_once(text, '''      top: root.barHidden && root.position === "top" ? -root.barSize : 0
@@ -202,6 +216,16 @@ def main():
     implicitHeight: root.vertical ? 0 : root.barSize
 ''', '''    implicitWidth: root.vertical ? root.barSize : 0
     implicitHeight: root.vertical ? 0 : barWindow.parkedSize
+''')
+
+    text = replace_once(text, '''    Loader {
+      anchors.fill: parent
+      sourceComponent: root.vertical ? verticalBar : horizontalBar
+''', '''    Loader {
+      anchors.fill: parent
+      anchors.topMargin: barWindow.notchPadTop
+      anchors.bottomMargin: barWindow.notchPadBottom
+      sourceComponent: root.vertical ? verticalBar : horizontalBar
 ''')
 
     # 4. Pass the layout mode to the horizontal centre section.

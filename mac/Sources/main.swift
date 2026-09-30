@@ -103,7 +103,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             vmWindow = g.windowID
             if g != geometry || panel?.isVisible != true || panel?.isOnActiveSpace != true {
                 showPanel(g)
-                link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
+                sendGeometry(g)
             }
             geometry = g
         } else if ready, let id = vmWindow, StripDetector.stillFullScreen(id) {
@@ -135,6 +135,13 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
 
     private var beats = 0
 
+    /// Tells the guest where the camera housing is and how tall the strip is,
+    /// so the hidden output (and the bar in it) fill the strip exactly.
+    private func sendGeometry(_ g: StripGeometry) {
+        link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
+        link.send("strip \(Int(g.frame.height.rounded()))")
+    }
+
     /// Re-asserts the parked state every second rather than only sending a
     /// heartbeat, so a restarted Omarchy shell (which starts unparked) is
     /// parked again within a second. The notch geometry is refreshed as well.
@@ -143,7 +150,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         link.send("park 1")
         beats += 1
         if beats % 5 == 0, let g = geometry {
-            link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
+            sendGeometry(g)
         }
     }
 
@@ -151,6 +158,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         parked = false
         if connected {
             link.send("targets")
+            if let g = geometry { sendGeometry(g) }
         }
         evaluate()
     }
