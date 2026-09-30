@@ -1,6 +1,6 @@
 <h1 align="center">omarchy-mac-vm-notch-bar</h1>
 
-<p align="center"><b>The Omarchy bar around the notch, for Omarchy in Apple Silicon VMs — right where Parallels leaves a black hole.</b></p>
+<p align="center"><b>The Omarchy bar around the notch, for Omarchy in Apple Silicon VMs.<br>Right where Parallels leaves a black hole.</b></p>
 
 <p align="center">
   <img src="docs/hero.svg" alt="Animated diagram: Parallels leaves the notch strip black; inside the VM Omarchy renders its bar on an invisible monitor; notchcast streams the changed pixels to a small Mac app that paints them over the strip; clicks travel back and open Omarchy's panels right below the notch." width="100%">
