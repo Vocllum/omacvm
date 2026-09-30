@@ -1,8 +1,9 @@
 #!/bin/bash
 # Remove the guest side of Omanotch. Run inside the Omarchy VM as the
-# desktop user. The bar clone in ~/.config/omarchy/plugins/$USER.bar is kept
-# (switch back with `omarchy bar use omarchy.bar`, then delete it if you like),
-# unless you pass --remove-bar-clone.
+# desktop user. Omarchy's own background plugin is switched back on and the
+# patched clone removed. The bar clone in ~/.config/omarchy/plugins/$USER.bar
+# is kept (switch back with `omarchy bar use omarchy.bar`, then delete it if
+# you like), unless you pass --remove-bar-clone.
 set -euo pipefail
 
 hypr=$HOME/.config/hypr
@@ -21,6 +22,13 @@ rm -f "$hypr/notchbar.lua"
 hyprctl output remove NOTCH >/dev/null 2>&1 || true
 hyprctl eval 'hl.config({ cursor = { invisible = false } })' >/dev/null 2>&1 || true
 hyprctl reload >/dev/null 2>&1 || true
+
+say "restoring Omarchy's background"
+if [[ -d $HOME/.config/omarchy/plugins/$USER.background ]]; then
+  omarchy-plugin-enable omarchy.background >/dev/null 2>&1 || true
+  rm -rf "$HOME/.config/omarchy/plugins/$USER.background"
+  omarchy-shell -q shell rescanPlugins >/dev/null 2>&1 || true
+fi
 
 say "restoring Omarchy's bar"
 omarchy-shell -q notchbar setParked false || true

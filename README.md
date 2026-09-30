@@ -57,7 +57,9 @@ show whatever the VM would have shown.
    you will see), the copy on the real display shrinks to 1 px and hides just
    off screen. It is not gone, though — your clicks are pressed on that hidden
    copy, so Omarchy opens its panels (clock, audio, network, …) on the visible
-   display, right below the notch.
+   display, right below the notch. The wallpaper is patched the same way: it is
+   laid out once across the strip and the display, so with the bar hidden
+   (Super+Shift+Space) the image runs straight through the notch strip.
 3. **Streaming only what changes.** `notchcast`, a small C program in the VM,
    captures `NOTCH` with Wayland's `ext-image-copy-capture`. A capture only
    completes when Hyprland actually repaints, so an idle bar costs zero CPU. It
@@ -135,9 +137,9 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 - Hover effects (tooltips, hover highlights) are not mirrored; clicks, right
   and middle clicks and scrolling are. Tray icons show up but can't be clicked
   in the strip.
-- The bar clone is a fork of Omarchy's bar. After an Omarchy update that
-  changes the bar, re-clone and run `./guest/install.sh` again — the patch is
-  versioned and refuses to apply blindly.
+- The bar and background clones are forks of Omarchy's plugins. After an
+  Omarchy update that changes them, re-clone and run `./guest/install.sh`
+  again — the patches are versioned and refuse to apply blindly.
 - Hyprland warns about overlapping monitors after layout changes. The overlap
   is deliberate; `notchbar.lua` dismisses that one warning and nothing else.
 - Cursor handling uses the window-server property `SetsCursorInBackground`,
@@ -178,9 +180,9 @@ requests welcome.
 - [Omarchy](https://omarchy.org) by DHH and contributors — the bar, the
   shell, the whole beautiful thing
 - [Hyprland](https://hyprland.org) and [Quickshell](https://quickshell.org)
-- Not affiliated with Omarchy, Parallels or Apple. Omarchy's bar code is not
-  included here: it is cloned from your own Omarchy installation and patched
-  at install time.
+- Not affiliated with Omarchy, Parallels or Apple. Omarchy's bar and
+  background code is not included here: it is cloned from your own Omarchy
+  installation and patched at install time.
 
 ## License
 

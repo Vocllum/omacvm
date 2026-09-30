@@ -8,9 +8,12 @@
 #   1. builds notchcast and installs it to ~/.local/bin
 #   2. clones Omarchy's bar into ~/.config/omarchy/plugins/$USER.bar (Omarchy's
 #      supported way to customise the bar) and applies the notch patch to it
-#   3. installs ~/.config/hypr/notchbar.lua (hidden NOTCH output) and loads it
+#   3. clones Omarchy's background into ~/.config/omarchy/plugins/$USER.background
+#      and patches it so the wallpaper runs through the notch strip and the
+#      built-in display as one image (seen when the bar is hidden)
+#   4. installs ~/.config/hypr/notchbar.lua (hidden NOTCH output) and loads it
 #      from ~/.config/hypr/hyprland.lua
-#   4. installs and starts the systemd user service notchcast.service
+#   5. installs and starts the systemd user service notchcast.service
 # Undo with ./guest/uninstall.sh.
 set -euo pipefail
 
@@ -20,6 +23,7 @@ plugins=$HOME/.config/omarchy/plugins
 hypr=$HOME/.config/hypr
 units=$HOME/.config/systemd/user
 clone=$plugins/$USER.bar
+bgclone=$plugins/$USER.background
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
@@ -54,8 +58,20 @@ echo "    $patch_result"
 if command -v omarchy-bar-use >/dev/null; then
   omarchy-bar-use "$USER.bar" >/dev/null 2>&1 || true
 fi
+
+say "patching Omarchy's background"
+if [[ ! -f $bgclone/Background.qml ]]; then
+  omarchy-plugin-clone omarchy.background >/dev/null
+fi
+[[ -f $bgclone/Background.qml ]] || die "background clone not found at $bgclone"
+if ! grep -q omarchy-notch-bar "$bgclone/Background.qml"; then
+  cp "$bgclone/Background.qml" "$bgclone/Background.qml.before-notchbar"
+fi
+bg_result=$(python3 "$here/background/apply-patch.py" "$bgclone/Background.qml")
+echo "    $bg_result"
+
 # The shell caches plugin code: a changed patch only takes effect after a restart.
-if [[ $patch_result != already* ]]; then
+if [[ $patch_result != already* || $bg_result != already* ]]; then
   omarchy-restart-shell >/dev/null 2>&1 || true
 fi
 
