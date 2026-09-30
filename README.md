@@ -1,6 +1,8 @@
 <h1 align="center">Omanotch</h1>
 
-<p align="center"><b>The Omarchy bar around the notch, for Omarchy in Apple Silicon VMs.<br>Right where Parallels leaves a black hole.</b></p>
+<h3 align="center">Enabling the MacBook notch in Omarchy VMs</h3>
+
+<p align="center">The real Omarchy bar, right where Parallels leaves a black hole.</p>
 
 <p align="center">
   <img src="docs/hero.svg" alt="Animated diagram: Parallels leaves the notch strip black; inside the VM Omarchy renders its bar on an invisible monitor; Omanotch streams the changed pixels into the strip, the windows grow to full height, and a click on the clock travels back and opens the calendar right below the notch." width="100%">
