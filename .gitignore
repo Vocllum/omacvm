@@ -5,3 +5,4 @@ mac/build/
 .DS_Store
 # local, machine-specific settings
 /config.local.*
+guest/notchcast/build/
