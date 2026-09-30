@@ -42,9 +42,20 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var pollTimer: Timer?
     private var beatTimer: Timer?
     private var lastBackground: CGColor?
+    private var cursorHider: VMCursorHider!
+    /// Keeps timers running on schedule (App Nap would stretch the 1 s
+    /// heartbeat past the guest's 5 s watchdog).
+    private var activity: NSObjectProtocol?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         _ = BackgroundCursor.enabled
+        activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
+            reason: "Mirrors the VM bar into the notch strip")
+        cursorHider = VMCursorHider(vmOwner: settings.vmOwner, ownOwner: "Omarchy Notch Bar")
+        cursorHider.start()
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
+                                               queue: .main) { [weak self] _ in self?.cursorHider.stop() }
         link = GuestLink(host: settings.listenHost, port: settings.port, allowedPrefix: settings.guestPrefix,
                          stream: stream)
         link.onMessages = { [weak self] in self?.handle($0) }
@@ -69,18 +80,29 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     // MARK: state
 
     /// Decides whether the strip is shown, and tells the guest.
+    ///
+    /// The panel lives on the VM's full-screen Space: it is ordered in while
+    /// that Space is active and then left alone, so it moves with the Space
+    /// when switching. It is only removed when the VM leaves full screen on the
+    /// built-in display (or the guest goes away). The guest bar stays parked
+    /// meanwhile, so the VM does not re-layout on every Space switch.
     private func evaluate() {
-        let g = link.isConnected && stream.hasImage ? StripDetector.detect(vmOwner: settings.vmOwner) : nil
-        if g != geometry {
-            geometry = g
-            if let g {
+        cursorHider?.refresh()
+        let ready = link.isConnected && stream.hasImage
+        let visibleNow = ready ? StripDetector.detect(vmOwner: settings.vmOwner) : nil
+        let anySpace = ready ? (visibleNow ?? StripDetector.detect(vmOwner: settings.vmOwner, onScreenOnly: false)) : nil
+
+        if let g = visibleNow {
+            if g != geometry || panel?.isVisible != true || panel?.isOnActiveSpace != true {
                 showPanel(g)
                 link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
-            } else {
-                hidePanel()
             }
+            geometry = g
+        } else if anySpace == nil, geometry != nil {
+            geometry = nil
+            hidePanel()
         }
-        setParked(g != nil)
+        setParked(anySpace != nil)
     }
 
     private func setParked(_ on: Bool) {
@@ -199,11 +221,19 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         link.send(String(format: "wheel %.1f %.1f %d", x, y, steps * 120))
     }
 
-    func stripHoverChanged(_ inside: Bool) {
+    func stripHoverChanged(_ inside: Bool, exit: (direction: String, x: CGFloat)?) {
         // Only one cursor at a time: the guest hides its own while the pointer
         // is over the strip, where the helper shows the guest's cursor images.
-        link.send("cursor \(inside ? 0 : 1)")
-        if inside { link.send("targets") }
+        if inside {
+            cursorHider.pointerOnStrip()
+            link.send("cursor 0")
+            link.send("targets")
+        } else if let exit {
+            // Put the guest cursor where the pointer leaves, then show it.
+            link.send(String(format: "cursor 1 %@ %.1f", exit.direction, exit.x))
+        } else {
+            link.send("cursor 1")
+        }
     }
 }
 

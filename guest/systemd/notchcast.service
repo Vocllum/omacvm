@@ -8,6 +8,8 @@ PartOf=graphical-session.target
 ExecStart=%h/.local/bin/notchcast
 Restart=always
 RestartSec=2
+# Belt and braces: never leave the guest cursor hidden.
+ExecStopPost=-/usr/bin/hyprctl eval "hl.config({ cursor = { invisible = false } })"
 
 [Install]
 WantedBy=graphical-session.target

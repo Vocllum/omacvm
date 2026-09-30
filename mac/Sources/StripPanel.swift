@@ -25,8 +25,11 @@ final class StripPanel: NSPanel {
         // Parallels keeps an invisible window over the strip at level 26 and the
         // menu bar sits at 24, so the panel must be at 27 or above.
         level = NSWindow.Level(27)
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle,
-                              .fullScreenDisallowsTiling]
+        // Belongs to the Space it is first shown on (the VM's full-screen
+        // Space), so it slides in and out with the VM when switching Spaces.
+        // .moveToActiveSpace: when (re)shown it joins the Space that is active
+        // then, even if the VM's full-screen Space was recreated meanwhile.
+        collectionBehavior = [.fullScreenAuxiliary, .moveToActiveSpace, .ignoresCycle, .fullScreenDisallowsTiling]
     }
 }
 
@@ -34,7 +37,9 @@ final class StripPanel: NSPanel {
 protocol StripInputDelegate: AnyObject {
     func stripClicked(x: CGFloat, y: CGFloat, button: Int)
     func stripScrolled(x: CGFloat, y: CGFloat, steps: Int)
-    func stripHoverChanged(_ inside: Bool)
+    /// `exit`: where the pointer left the strip ("down" into the built-in
+    /// display, "up" towards the display above) and at which x, if known.
+    func stripHoverChanged(_ inside: Bool, exit: (direction: String, x: CGFloat)?)
 }
 
 /// Draws the mirrored bar and turns mouse events into bar coordinates.
@@ -133,13 +138,15 @@ final class StripView: NSView {
 
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
-        input?.stripHoverChanged(true)
+        input?.stripHoverChanged(true, exit: nil)
         updateCursor(event)
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        input?.stripHoverChanged(false)
+        let p = convert(event.locationInWindow, from: nil)  // flipped: y grows downwards
+        let direction = p.y >= bounds.height / 2 ? "down" : "up"
+        input?.stripHoverChanged(false, exit: (direction, min(max(p.x, 0), bounds.width - 1)))
         // Leaving into a VM window: show nothing, like Parallels does there
         // (the guest draws its own cursor). Parallels does not reliably reset
         // the cursor when the pointer comes from another app's window, which
@@ -178,7 +185,7 @@ final class StripView: NSView {
     func resetHover() {
         guard isHovered else { return }
         isHovered = false
-        input?.stripHoverChanged(false)
+        input?.stripHoverChanged(false, exit: nil)
     }
 
     override func mouseDown(with event: NSEvent) { click(event, button: 1) }

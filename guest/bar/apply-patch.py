@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """Patch a clone of Omarchy's bar (Bar.qml) for omarchy-notch-bar.
 
-usage: apply-patch.py <Bar.qml>        (patches the file in place, idempotent)
+usage: apply-patch.py <Bar.qml>        (patches the file in place)
+
+The patch is versioned. A file carrying the current version is left alone; a
+file patched by an older version is restored from its unpatched backup
+(<Bar.qml>.before-notchbar, kept by install.sh) and patched again.
 
 What the patch adds:
   * A copy of the bar on any output whose name starts with NOTCH (the hidden
@@ -15,9 +19,13 @@ What the patch adds:
   * IPC target "notchbar" for the helper, and a watchdog that unparks the bar
     when the helper stops sending heartbeats.
 """
+import os
+import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
+VERSION = 5
+VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
 def replace_once(text, old, new):
@@ -30,14 +38,23 @@ def replace_once(text, old, new):
 def main():
     path = sys.argv[1]
     text = open(path).read()
-    if MARK in text:
-        print("already patched")
+    if VERSION_LINE in text:
+        print(f"already patched (v{VERSION})")
         return
+    if MARK in text:
+        backup = path + ".before-notchbar"
+        if not os.path.exists(backup) or MARK in open(backup).read():
+            sys.exit(f"apply-patch: {path} carries an older patch and no clean backup exists; "
+                     "re-clone the bar (omarchy plugin clone omarchy.bar) and run install.sh again")
+        shutil.copyfile(backup, path)
+        text = open(path).read()
+        print("replacing an older patch version")
 
-    # 1. State and role helpers.
+    # 1. State and role helpers (the version line marks the patch).
     text = replace_once(text, '  property string home: Quickshell.env("HOME")\n', '''  property string home: Quickshell.env("HOME")
 
   // --- omarchy-notch-bar ------------------------------------------------
+  {VERSION_LINE}
   // A hidden output named NOTCH* renders this bar for the macOS notch helper.
   // While the helper shows the strip, the bar on notchParkedScreen is parked
   // (mapped off-screen, no exclusive zone) and takes the helper's clicks, so
@@ -52,6 +69,8 @@ def main():
   // so a new capture session gets a frame without waiting for a change.
   property int notchPokeSerial: 0
   function notchRoleFor(s) {
+    // Only a bar along the top edge can live in the notch strip.
+    if (position !== "top") return ""
     var n = s && s.name ? String(s.name) : ""
     if (n.indexOf("NOTCH") === 0) return "notch"
     if (notchParked && n === notchParkedScreen) return "parked"
@@ -82,7 +101,7 @@ def main():
     return out
   }
   // --- end omarchy-notch-bar --------------------------------------------
-''')
+'''.replace("{VERSION_LINE}", VERSION_LINE))
 
     # 2. IPC target and watchdog, next to the existing omarchy.bar handler.
     text = replace_once(text, '''  Variants {
@@ -116,19 +135,21 @@ def main():
       return root.notchParked ? "parked" : "unparked"
     }
     function click(x: real, y: real, button: int): string {
+      if (root.barHidden) return "miss"  // bar-off: nothing is shown in the strip
       var t = root.notchTargetAt(x, y)
       if (!t) return "miss"
       t.triggerPress(button === 3 ? Qt.MiddleButton : button === 2 ? Qt.RightButton : Qt.LeftButton)
       return "ok"
     }
     function wheel(x: real, y: real, delta: int): string {
+      if (root.barHidden) return "miss"
       var t = root.notchTargetAt(x, y)
       if (!t || typeof t.wheelMoved !== "function") return "miss"
       t.wheelMoved(delta)
       return "ok"
     }
     function targets(): string {
-      return JSON.stringify(root.notchTargetRects())
+      return JSON.stringify(root.barHidden ? [] : root.notchTargetRects())
     }
     function state(): string {
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,

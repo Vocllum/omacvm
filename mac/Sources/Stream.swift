@@ -66,7 +66,10 @@ final class GuestStream {
                 let codec = pending[pending.startIndex + 20]
                 let scale100 = Int(pending.readUInt16(at: 22))
                 let payloadLen = Int(pending.readUInt32(at: 24))
-                guard payloadLen < 64 << 20, fullW > 0, fullH > 0, x + w <= fullW, y + h <= fullH else {
+                // The bar is at most a few thousand pixels wide and ~100 tall;
+                // anything bigger is a corrupt or hostile stream.
+                guard payloadLen < 16 << 20, fullW > 0, fullW <= 16384, fullH > 0, fullH <= 1024,
+                      x + w <= fullW, y + h <= fullH, w > 0, h > 0 else {
                     throw StreamError.corrupt("bad frame header")
                 }
                 guard pending.count >= Self.frameHeaderSize + payloadLen else { break }
@@ -91,7 +94,7 @@ final class GuestStream {
             pixels = [UInt8](repeating: 0, count: fullW * fullH * 4)
             hasImage = false
         }
-        if scale100 > 0 { scale = CGFloat(scale100) / 100 }
+        if (50 ... 400).contains(scale100) { scale = CGFloat(scale100) / 100 }
         let rawLen = w * h * 4
         var raw: [UInt8]
         switch codec {
@@ -99,6 +102,8 @@ final class GuestStream {
             guard payload.count == rawLen else { throw StreamError.corrupt("raw size") }
             raw = [UInt8](payload)
         case 1:
+            // LZ4 cannot expand data by more than ~255x.
+            guard rawLen <= payload.count * 255 + 16 else { throw StreamError.corrupt("lz4 size") }
             raw = [UInt8](repeating: 0, count: rawLen)
             let n = payload.withUnsafeBytes { src -> Int in
                 raw.withUnsafeMutableBytes { dst in

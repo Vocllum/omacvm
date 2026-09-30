@@ -110,11 +110,12 @@ static int write_all(int fd, const void *buf, size_t len) {
     return 0;
 }
 
-// Caller holds `lock`.
+// Caller holds `lock`. Only shuts the socket down: the network thread owns
+// the descriptor and closes it once its recv() returns, so the number cannot
+// be reused by another thread while it is still in use.
 static void drop_socket_locked(void) {
     if (sock_fd >= 0) {
         shutdown(sock_fd, SHUT_RDWR);
-        close(sock_fd);
         sock_fd = -1;
     }
 }
@@ -213,6 +214,17 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
     return out;
 }
 
+static char *hypr_request(const char *req);
+static int monitor_field(const char *json, const char *name, const char *field, double *out);
+
+// Runs Lua in Hyprland through its command socket (no hyprctl process).
+static void hypr_eval(const char *lua) {
+    char *req;
+    if (asprintf(&req, "eval %s", lua) < 0) return;
+    free(hypr_request(req));
+    free(req);
+}
+
 // ------------------------------------------------------------- cursors --
 
 // Guest cursor images are sent to the helper so the strip shows the same
@@ -274,20 +286,24 @@ static void send_cursor(const char *label, const char *const names[], int nomina
         }
     }
     uint32_t hdr[9];
-    if (!best_nom || best_pos + 36 > (uint32_t)size) {
+    if (!best_nom || (size_t)best_pos + 36 > (size_t)size) {
         free(d);
         return;
     }
     memcpy(hdr, d + best_pos, 36);
     uint32_t w = hdr[4], h = hdr[5], xh = hdr[6], yh = hdr[7];
     size_t pix = (size_t)w * h * 4;
-    if (w > 256 || h > 256 || best_pos + 36 + pix > (size_t)size) {
+    if (w > 256 || h > 256 || (size_t)best_pos + 36 + pix > (size_t)size) {
         free(d);
         return;
     }
     size_t nlen = strlen(label);
     size_t body = 1 + nlen + 10 + pix;
     uint8_t *msg = malloc(8 + body);
+    if (!msg) {
+        free(d);
+        return;
+    }
     uint32_t magic = CURSOR_MAGIC, blen = (uint32_t)body;
     memcpy(msg, &magic, 4);
     memcpy(msg + 4, &blen, 4);
@@ -317,22 +333,34 @@ static void send_cursors(void) {
 }
 
 // Hides or shows the guest's own cursor (while the pointer is over the strip
-// the helper draws the cursor itself).
+// the helper shows the guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
-    const char *argv[] = {"hyprctl", "eval",
-                          visible ? "hl.config({ cursor = { invisible = false } })"
-                                  : "hl.config({ cursor = { invisible = true } })",
-                          NULL};
-    pid_t pid = fork();
-    if (pid == 0) {
-        int devnull = open("/dev/null", O_RDWR);
-        dup2(devnull, 0);
-        dup2(devnull, 1);
-        dup2(devnull, 2);
-        execvp(argv[0], (char **)argv);
-        _exit(127);
+    hypr_eval(visible ? "hl.config({ cursor = { invisible = false } })"
+                      : "hl.config({ cursor = { invisible = true } })");
+}
+
+// Shows the guest cursor again where the pointer leaves the strip: just below
+// the top edge of the built-in display ("down"), or just above it on the
+// display arranged above ("up"). Without this the cursor would reappear where
+// it was hidden and jump once Parallels reports the next position.
+static void show_guest_cursor_at_exit(const char *dir, double strip_x) {
+    char *j = hypr_request("j/monitors all");
+    double x, y, w, s;
+    if (!j || monitor_field(j, cfg_screen, "x", &x) || monitor_field(j, cfg_screen, "y", &y) ||
+        monitor_field(j, cfg_screen, "width", &w) || monitor_field(j, cfg_screen, "scale", &s) || s <= 0) {
+        free(j);
+        set_guest_cursor_visible(1);
+        return;
     }
-    if (pid > 0) waitpid(pid, NULL, 0);
+    free(j);
+    double lw = w / s;
+    double tx = x + (strip_x < 0 ? 0 : strip_x > lw - 1 ? lw - 1 : strip_x);
+    double ty = !strcmp(dir, "up") ? y - 2 : y + 1;
+    char lua[256];
+    snprintf(lua, sizeof lua,
+             "hl.dispatch(hl.dsp.cursor.move({ x = %d, y = %d })) hl.config({ cursor = { invisible = false } })",
+             (int)tx, (int)ty);
+    hypr_eval(lua);
 }
 
 static int is_number(const char *s) {
@@ -351,6 +379,8 @@ static void handle_command(char *line) {
     const char *c = argv[0];
     DBG("cmd: %s %s %s %s", c, argv[1] ? argv[1] : "", argv[2] ? argv[2] : "", argv[3] ? argv[3] : "");
     if (!strcmp(c, "park") && argc == 2) {
+        // Re-sent every time: a restarted shell starts from its defaults.
+        if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
         free(ipc_call(0, "setParked", !strcmp(argv[1], "1") ? "true" : "false", NULL, NULL));
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
@@ -372,6 +402,9 @@ static void handle_command(char *line) {
         }
     } else if (!strcmp(c, "cursor") && argc == 2) {
         set_guest_cursor_visible(!strcmp(argv[1], "1"));
+    } else if (!strcmp(c, "cursor") && argc == 4 && !strcmp(argv[1], "1") &&
+               (!strcmp(argv[2], "down") || !strcmp(argv[2], "up")) && is_number(argv[3])) {
+        show_guest_cursor_at_exit(argv[2], strtod(argv[3], NULL));
     } else if (!strcmp(c, "cursors") && argc == 1) {
         send_cursors();
     } else if (!strcmp(c, "key") && argc == 1) {
@@ -432,11 +465,11 @@ static void *net_thread(void *unused) {
             if (len >= sizeof buf - 1) len = 0;  // oversized line: discard
         }
         LOG("helper disconnected");
-        set_guest_cursor_visible(1);
         pthread_mutex_lock(&lock);
-        if (sock_fd == fd) drop_socket_locked();
-        else close(fd);
+        if (sock_fd == fd) sock_fd = -1;
         pthread_mutex_unlock(&lock);
+        close(fd);
+        set_guest_cursor_visible(1);
     }
     return NULL;
 }
@@ -482,28 +515,17 @@ static double out_x, out_y, out_scale = 2;
 static void refresh_output_geometry(void) {
     char *j = hypr_request("j/monitors all");
     if (!j) return;
-    char pat[96];
-    snprintf(pat, sizeof pat, "\"name\": \"%s\"", cfg_output);
-    char *p = strstr(j, pat);
-    if (!p) {
-        snprintf(pat, sizeof pat, "\"name\":\"%s\"", cfg_output);
-        p = strstr(j, pat);
-    }
-    if (p) {
-        char *end = strchr(p, '}');
-        if (end) *end = 0;
-        // hyprctl -j prints `"x": 0` with a space; normalise by trying both.
-        double v;
-        char *q;
-        if ((q = strstr(p, "\"x\": ")) || (q = strstr(p, "\"x\":"))) out_x = strtod(strchr(q, ':') + 1, NULL);
-        if ((q = strstr(p, "\"y\": ")) || (q = strstr(p, "\"y\":"))) out_y = strtod(strchr(q, ':') + 1, NULL);
-        if ((q = strstr(p, "\"scale\": ")) || (q = strstr(p, "\"scale\":"))) {
-            v = strtod(strchr(q, ':') + 1, NULL);
-            if (v > 0) out_scale = v;
-        }
+    double x, y, sc;
+    if (!monitor_field(j, cfg_output, "x", &x) && !monitor_field(j, cfg_output, "y", &y) &&
+        !monitor_field(j, cfg_output, "scale", &sc) && sc > 0) {
+        pthread_mutex_lock(&lock);
+        out_x = x;
+        out_y = y;
+        out_scale = sc;
+        scale100 = (int)(sc * 100 + 0.5);
+        pthread_mutex_unlock(&lock);
     }
     free(j);
-    scale100 = (int)(out_scale * 100 + 0.5);
 }
 
 static int cursor_pos(double *x, double *y) {
@@ -612,6 +634,7 @@ static void *keeper_thread(void *unused) {
             }
             free(j);
         }
+        refresh_output_geometry();
         sleep(2);
     }
     return NULL;
@@ -753,6 +776,25 @@ static void mask_cursor(uint8_t *px, double cx, double cy) {
         memcpy(px + ((size_t)r * W + (size_t)x0) * 4, prev + ((size_t)r * W + (size_t)x0) * 4, (size_t)(x1 - x0) * 4);
 }
 
+// First frame of a session: there is no clean previous frame, so paint the
+// cursor rectangle with the pixels just left of it (the bar background).
+static void fill_cursor(uint8_t *px, double cx, double cy) {
+    double s = out_scale;
+    int x0 = (int)((cx - out_x - CURSOR_BEFORE) * s), y0 = (int)((cy - out_y - CURSOR_BEFORE) * s);
+    int x1 = (int)((cx - out_x + CURSOR_AFTER) * s), y1 = (int)((cy - out_y + CURSOR_AFTER) * s);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > (int)W) x1 = (int)W;
+    if (y1 > (int)H) y1 = (int)H;
+    if (x0 >= x1 || y0 >= y1) return;
+    int src = x0 > 0 ? x0 - 1 : (x1 < (int)W ? x1 : -1);
+    if (src < 0) return;
+    for (int r = y0; r < y1; r++) {
+        uint32_t *row = (uint32_t *)(px + (size_t)r * W * 4);
+        for (int c = x0; c < x1; c++) row[c] = row[src];
+    }
+}
+
 // Runs one capture session until it stops or the output disappears.
 static void capture_session(struct wl_output *out) {
     struct ext_image_capture_source_v1 *src = ext_output_image_capture_source_manager_v1_create_source(source_mgr, out);
@@ -815,9 +857,13 @@ static void capture_session(struct wl_output *out) {
         double t0 = now_ms();
         double cx, cy;
         pthread_mutex_lock(&lock);
-        if (have_frame && !cursor_pos(&cx, &cy)) {
-            mask_cursor(px, cx, cy);
-            mask_cursor(px, pcx, pcy);
+        if (!cursor_pos(&cx, &cy)) {
+            if (have_frame) {
+                mask_cursor(px, cx, cy);
+                mask_cursor(px, pcx, pcy);
+            } else {
+                fill_cursor(px, cx, cy);
+            }
             pcx = cx;
             pcy = cy;
         }
@@ -858,8 +904,25 @@ out_no_buf:
     wl_display_roundtrip(dpy);
 }
 
+// Restores the guest cursor when the service is stopped (it may have been
+// hidden while the pointer was over the strip).
+static void *signal_thread(void *arg) {
+    sigset_t *set = arg;
+    int sig = 0;
+    sigwait(set, &sig);
+    LOG("signal %d, restoring the guest cursor and exiting", sig);
+    set_guest_cursor_visible(1);
+    _exit(0);
+    return NULL;
+}
+
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
+    static sigset_t term;
+    sigemptyset(&term);
+    sigaddset(&term, SIGTERM);
+    sigaddset(&term, SIGINT);
+    pthread_sigmask(SIG_BLOCK, &term, NULL);  // inherited by every thread created below
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
     cfg_output = getenv("NOTCHBAR_OUTPUT") ? getenv("NOTCHBAR_OUTPUT") : "NOTCH";
@@ -871,7 +934,8 @@ int main(int argc, char **argv) {
     if (asprintf((char **)&cfg_shell, "%s/shell", op) < 0) return 1;
 
     set_guest_cursor_visible(1);
-    pthread_t th, keeper;
+    pthread_t th, keeper, sigth;
+    pthread_create(&sigth, NULL, signal_thread, &term);
     pthread_create(&th, NULL, net_thread, NULL);
     pthread_create(&keeper, NULL, keeper_thread, NULL);
     if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));

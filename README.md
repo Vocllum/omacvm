@@ -115,14 +115,23 @@ Guest (`systemctl --user edit notchcast`, `Environment=`):
 
 - Hover effects of the bar (tooltips, hover highlights) are not mirrored;
   clicks, right/middle clicks and scrolling are.
+- Tray icons are shown in the strip but cannot be clicked there (they handle
+  input themselves rather than through the bar's click targets).
+- Only a bar at the top edge is mirrored.
 - The bar clone is a fork of Omarchy's `Bar.qml`. After an Omarchy update that
   changes the bar, re-clone and re-run `./guest/install.sh` (the patch refuses
   to apply if the code it expects has moved).
 - Omarchy's shell caches plugin code: after changing the patch, restart the
   shell with `omarchy restart shell`.
 - Other tools that manage Hyprland monitors must ignore the `NOTCH` output.
-- The cursor handling over the strip uses the window server property
-  `SetsCursorInBackground`, which is not public API.
+- The cursor handling uses the window server property
+  `SetsCursorInBackground`, which is not public API: over the strip the helper
+  shows the guest's own cursor images, and over the VM's full-screen windows it
+  hides the macOS cursor (Parallels does not reliably do so when the pointer
+  arrives from another window, which otherwise leaves a macOS arrow on top of
+  the guest cursor).
+- Hyprland warns whenever monitors overlap. The overlap of `NOTCH` with the
+  built-in display is deliberate; `notchbar.lua` dismisses that one warning.
 
 ## Troubleshooting
 

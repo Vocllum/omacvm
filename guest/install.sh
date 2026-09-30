@@ -45,15 +45,25 @@ if [[ ! -f $clone/Bar.qml ]]; then
   omarchy-plugin-clone omarchy.bar >/dev/null
 fi
 [[ -f $clone/Bar.qml ]] || die "bar clone not found at $clone"
-cp -n "$clone/Bar.qml" "$clone/Bar.qml.before-notchbar" 2>/dev/null || true
-python3 "$here/bar/apply-patch.py" "$clone/Bar.qml"
+# Keep an unpatched copy: apply-patch.py restores it to upgrade older patches.
+if ! grep -q omarchy-notch-bar "$clone/Bar.qml"; then
+  cp "$clone/Bar.qml" "$clone/Bar.qml.before-notchbar"
+fi
+patch_result=$(python3 "$here/bar/apply-patch.py" "$clone/Bar.qml")
+echo "    $patch_result"
 if command -v omarchy-bar-use >/dev/null; then
   omarchy-bar-use "$USER.bar" >/dev/null 2>&1 || true
+fi
+# The shell caches plugin code: a changed patch only takes effect after a restart.
+if [[ $patch_result != already* ]]; then
+  omarchy-restart-shell >/dev/null 2>&1 || true
 fi
 
 say "installing Hyprland config"
 mkdir -p "$hypr"
-install -m 644 "$here/hypr/notchbar.lua" "$hypr/notchbar.lua"
+sed -e "s|^local NOTCH_OUTPUT = .*|local NOTCH_OUTPUT = \"${NOTCHBAR_OUTPUT:-NOTCH}\"|" \
+    -e "s|^local BUILTIN_OUTPUT = .*|local BUILTIN_OUTPUT = \"${NOTCHBAR_SCREEN:-Virtual-1}\"|" \
+    "$here/hypr/notchbar.lua" > "$hypr/notchbar.lua"
 if ! grep -q 'require("hypr.notchbar")' "$hypr/hyprland.lua"; then
   cp -p "$hypr/hyprland.lua" "$hypr/hyprland.lua.before-notchbar"
   printf '\n-- omarchy-notch-bar: hidden output for the macOS notch helper.\nrequire("hypr.notchbar")\n' >> "$hypr/hyprland.lua"

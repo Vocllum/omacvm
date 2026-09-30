@@ -25,13 +25,16 @@ enum StripDetector {
         }
     }
 
-    static func detect(vmOwner: String) -> StripGeometry? {
+    /// `onScreenOnly: false` also finds the VM's full-screen window while its
+    /// Space is not the active one.
+    static func detect(vmOwner: String, onScreenOnly: Bool = true) -> StripGeometry? {
         guard let screen = builtinScreen(),
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea
         else { return nil }
         let display = CGDisplayBounds(number.uint32Value)  // top-left origin
-        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        let options: CGWindowListOption = onScreenOnly ? [.optionOnScreenOnly, .excludeDesktopElements]
+                                                       : [.optionAll, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return nil }
         for w in list {
             guard (w[kCGWindowOwnerName as String] as? String) == vmOwner,
