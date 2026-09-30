@@ -1,6 +1,6 @@
 import AppKit
 
-/// omarchy-mac-vm-notch-bar macOS helper.
+/// Omanotch, the macOS side.
 ///
 /// Shows the real Omarchy bar, streamed from the VM, in the MacBook notch strip
 /// while the VM is full screen on the built-in display, and sends clicks and
@@ -11,12 +11,12 @@ enum Log {
     static func info(_ message: String) {
         let ts = ISO8601DateFormatter.string(from: Date(), timeZone: .current,
                                              formatOptions: [.withTime, .withColonSeparatorInTime])
-        FileHandle.standardError.write(Data("\(ts) notchbar: \(message)\n".utf8))
+        FileHandle.standardError.write(Data("\(ts) omanotch: \(message)\n".utf8))
     }
 }
 
 struct Settings {
-    let defaults = UserDefaults.standard  // domain ch.gillesgoetsch.notchbar (bundle id)
+    let defaults = UserDefaults.standard  // domain ch.gillesgoetsch.omanotch (bundle id)
 
     /// Host side of the Parallels shared network (the guest connects here).
     var listenHost: String { defaults.string(forKey: "listenHost") ?? "10.211.55.2" }
@@ -58,7 +58,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "Mirrors the VM bar into the notch strip")
-        cursorHider = VMCursorHider(vmOwner: settings.vmOwner, ownOwner: "Omarchy Notch Bar")
+        cursorHider = VMCursorHider(vmOwner: settings.vmOwner, ownOwner: "Omanotch")
         cursorHider.onEnterVM = { [weak self] point, rect in self?.pointerEnteredVM(at: point, window: rect) }
         cursorHider.start()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,

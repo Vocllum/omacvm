@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>ch.gillesgoetsch.notchbar</string>
-  <key>CFBundleName</key><string>Omarchy Notch Bar</string>
-  <key>CFBundleExecutable</key><string>notchbar</string>
+  <key>CFBundleIdentifier</key><string>ch.gillesgoetsch.omanotch</string>
+  <key>CFBundleName</key><string>Omanotch</string>
+  <key>CFBundleExecutable</key><string>omanotch</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>1</string>

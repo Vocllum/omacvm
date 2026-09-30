@@ -1,4 +1,4 @@
-<h1 align="center">omarchy-mac-vm-notch-bar</h1>
+<h1 align="center">Omanotch</h1>
 
 <p align="center"><b>The Omarchy bar around the notch, for Omarchy in Apple Silicon VMs.<br>Right where Parallels leaves a black hole.</b></p>
 
@@ -8,7 +8,7 @@
 
 You run [Omarchy](https://omarchy.org) full screen in a Parallels VM on a
 MacBook with a notch. It is fast, it is beautiful, and it has a black bar
-across the top that nobody asked for. This project puts Omarchy's **real** bar
+across the top that nobody asked for. **Omanotch** puts Omarchy's **real** bar
 into that black strip — not a look-alike, the actual Quickshell bar, pixels and
 all — and gives the space the bar used to take back to your windows.
 
@@ -61,7 +61,7 @@ show whatever the VM would have shown.
    completes when Hyprland actually repaints, so an idle bar costs zero CPU. It
    sends just the rectangle that changed, LZ4-compressed — usually 0.5–3 KB —
    over Parallels' private network.
-4. **A panel above everything.** *Omarchy Notch Bar.app* draws the frames in a
+4. **A panel above everything.** *Omanotch.app* draws the frames in a
    borderless panel at window level 27 — above the menu bar (24) and above an
    invisible window Parallels keeps over the strip (26). It never takes focus,
    so your keyboard stays with the VM. It lives on the VM's full-screen Space
@@ -97,8 +97,8 @@ On the Mac:
 ./mac/install.sh
 ```
 
-That builds `~/Applications/Omarchy Notch Bar.app` and starts it at login
-(log: `~/Library/Logs/notchbar.log`). Put the VM in full screen on the built-in
+That builds `~/Applications/Omanotch.app` and starts it at login
+(log: `~/Library/Logs/omanotch.log`). Put the VM in full screen on the built-in
 display and the bar moves into the strip.
 
 ## Uninstall
@@ -110,8 +110,8 @@ display and the bar moves into the strip.
 
 ## Configuration
 
-Mac app — `defaults write ch.gillesgoetsch.notchbar <key> <value>`, then
-`launchctl kickstart -k gui/$(id -u)/ch.gillesgoetsch.notchbar`:
+Mac app — `defaults write ch.gillesgoetsch.omanotch <key> <value>`, then
+`launchctl kickstart -k gui/$(id -u)/ch.gillesgoetsch.omanotch`:
 
 | Key | Default | |
 |---|---|---|
@@ -156,7 +156,7 @@ up by itself.
 
 | Symptom | Look at |
 |---|---|
-| Strip stays black | `~/Library/Logs/notchbar.log` ("guest connected"?) · in the VM: `systemctl --user status notchcast` |
+| Strip stays black | `~/Library/Logs/omanotch.log` ("guest connected"?) · in the VM: `systemctl --user status notchcast` |
 | Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
 | Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display |

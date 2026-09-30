@@ -1,47 +1,73 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 400" width="1000" height="400" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" width="1000" height="380" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>Before and after</title>
+  <desc>Left: Parallels full screen leaves a black strip beside the notch and Omarchy's bar takes another row below it. Right: the bar sits beside the notch and the windows use the whole height below.</desc>
   <defs>
-    <linearGradient id="wall2" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#f3d9d0"/><stop offset="0.5" stop-color="#d9c6e6"/><stop offset="1" stop-color="#b8d3dd"/>
-    </linearGradient>
-    <g id="minibar">
-      <rect x="0" y="0" width="400" height="12" fill="#faf4ed"/>
-      <rect x="5" y="3.5" width="5" height="5" rx="1" fill="none" stroke="#575279" stroke-width="1"/>
-      <circle cx="16" cy="6" r="2.2" fill="#575279"/><circle cx="23" cy="6" r="1.4" fill="#9893a5"/><circle cx="29" cy="6" r="1.4" fill="#9893a5"/>
-      <rect x="352" y="3.5" width="4" height="5" rx="1" fill="#575279"/><rect x="361" y="3.5" width="5" height="5" rx="1" fill="#575279"/>
-      <path d="M372,4 l2.5,0 l2.5,-1.6 l0,7 l-2.5,-1.6 l-2.5,0 z" fill="#575279"/>
-      <rect x="384" y="3" width="3" height="6" rx="0.7" fill="#575279"/>
+    <!-- Omarchy bar in Rosé Pine Dawn, 400 wide; clock at the far right -->
+    <g id="bar">
+      <rect x="0" y="0" width="400" height="14" fill="#faf4ed"/>
+      <rect x="6" y="4" width="6" height="6" fill="none" stroke="#575279" stroke-width="1.3"/>
+      <rect x="17" y="4.5" width="5" height="5" fill="#575279"/>
+      <rect x="25" y="5.5" width="3" height="3" fill="#9893a5"/>
+      <rect x="31" y="5.5" width="3" height="3" fill="#9893a5"/>
+      <rect x="37" y="5.5" width="3" height="3" fill="#9893a5"/>
+      <rect x="262" y="4.5" width="5" height="5" fill="#575279"/>
+      <rect x="271" y="4.5" width="6" height="5" fill="#575279"/>
+      <path d="M281,5 h2.5 l3,-2 v8 l-3,-2 h-2.5 z" fill="#575279"/>
+      <rect x="291" y="4" width="7" height="6" fill="none" stroke="#575279" stroke-width="1.2"/>
+      <rect x="302" y="3.5" width="3.5" height="7" fill="#575279"/>
+      <text x="394" y="10.3" text-anchor="end" font-size="7.4" fill="#575279" font-family="ui-monospace, 'SF Mono', Menlo, monospace">Wed Sep 30 19:20</text>
     </g>
   </defs>
-  <rect width="1000" height="400" rx="18" fill="#12141b"/>
 
-  <!-- before -->
-  <text x="250" y="36" text-anchor="middle" font-size="16" font-weight="600" fill="#e8e9f0">Parallels full screen</text>
-  <g transform="translate(-24 0)">
-  <rect x="40" y="52" width="420" height="270" rx="16" fill="#1c1e26" stroke="#3b3f4d" stroke-width="2"/>
-  <rect x="50" y="62" width="400" height="250" rx="8" fill="url(#wall2)"/>
-  <rect x="50" y="62" width="400" height="18" fill="#000"/>
-  <g transform="translate(50 80)"><use href="#minibar"/><text x="175" y="9" font-size="6.5" fill="#575279">Wednesday 18:55</text></g>
-  <rect x="215" y="62" width="70" height="15" rx="6" fill="#000"/>
-  <rect x="56" y="98" width="190" height="208" rx="5" fill="#232136"/>
-  <rect x="254" y="98" width="190" height="208" rx="5" fill="#fffaf3"/>
-  <!-- dimension marks -->
-  <path d="M466,62 L474,62 M470,62 L470,92 M466,92 L474,92" stroke="#ff7a59" stroke-width="2"/>
-  <text x="478" y="73" font-size="10.5" fill="#ff7a59">43 pt black</text>
-  <text x="478" y="87" font-size="10.5" fill="#ff7a59">+ 26 pt bar</text>
+  <rect width="1000" height="380" fill="#191724"/>
+
+  <!-- ===== before ===== -->
+  <g transform="translate(40 40)">
+    <rect x="0" y="0" width="420" height="272" fill="#1f1d2e" stroke="#403d52" stroke-width="2"/>
+    <rect x="10" y="10" width="400" height="252" fill="#26233a"/>
+    <!-- black strip, notch -->
+    <rect x="10" y="10" width="400" height="22" fill="#000"/>
+    <path d="M180,10 h60 v13 q0,5 -5,5 h-50 q-5,0 -5,-5 z" fill="#000"/>
+    <circle cx="222" cy="18" r="2.2" fill="#26233a"/>
+    <!-- bar inside the VM -->
+    <use href="#bar" x="10" y="32"/>
+    <!-- windows -->
+    <rect x="16" y="52" width="192" height="204" fill="#191724" stroke="#c4a7e7" stroke-width="2"/>
+    <rect x="214" y="52" width="190" height="204" fill="#fffaf3" stroke="#403d52" stroke-width="2"/>
+    <rect x="26" y="64" width="90" height="5" fill="#9ccfd8"/>
+    <rect x="26" y="76" width="130" height="5" fill="#908caa"/>
+    <rect x="26" y="88" width="110" height="5" fill="#908caa"/>
+    <rect x="224" y="64" width="170" height="8" fill="#f2e9e1"/>
+    <rect x="224" y="82" width="120" height="5" fill="#dfdad9"/>
+    <rect x="224" y="94" width="150" height="5" fill="#dfdad9"/>
+    <!-- lost space marker -->
+    <path d="M428,10 h8 M432,10 v36 M428,46 h8" stroke="#eb6f92" stroke-width="2.5"/>
+    <text x="442" y="33" font-size="13" font-weight="700" fill="#eb6f92">69 pt</text>
   </g>
-  <text x="250" y="346" text-anchor="middle" font-size="13" fill="#c6c9d6">The notch strip stays black, and the bar</text>
-  <text x="250" y="364" text-anchor="middle" font-size="13" fill="#c6c9d6">takes another row of your screen.</text>
+  <text x="250" y="348" text-anchor="middle" font-size="15" font-weight="600" fill="#908caa">Parallels</text>
 
-  <!-- after -->
-  <text x="750" y="36" text-anchor="middle" font-size="16" font-weight="600" fill="#e8e9f0">+ omarchy-mac-vm-notch-bar</text>
-  <rect x="540" y="52" width="420" height="270" rx="16" fill="#1c1e26" stroke="#3b3f4d" stroke-width="2"/>
-  <rect x="550" y="62" width="400" height="250" rx="8" fill="url(#wall2)"/>
-  <rect x="550" y="62" width="400" height="18" fill="#faf4ed"/>
-  <g transform="translate(550 65)"><use href="#minibar"/><text x="243" y="9" font-size="6.5" fill="#575279">Wednesday 18:55</text></g>
-  <rect x="715" y="62" width="70" height="15" rx="6" fill="#000"/>
-  <rect x="556" y="86" width="190" height="220" rx="5" fill="#232136"/>
-  <rect x="754" y="86" width="190" height="220" rx="5" fill="#fffaf3"/>
-  <path d="M970,86 L978,86 M974,86 L974,306 M970,306 L978,306" stroke="#5fd4c4" stroke-width="2"/>
-  <text x="750" y="346" text-anchor="middle" font-size="13" fill="#c6c9d6">The real Omarchy bar lives beside the notch,</text>
-  <text x="750" y="364" text-anchor="middle" font-size="13" fill="#c6c9d6">and your windows get the whole screen below it.</text>
+  <!-- arrow -->
+  <path d="M488,176 h24 m-8,-8 l8,8 l-8,8" stroke="#6e6a86" stroke-width="3" fill="none"/>
+
+  <!-- ===== after ===== -->
+  <g transform="translate(540 40)">
+    <rect x="0" y="0" width="420" height="272" fill="#1f1d2e" stroke="#403d52" stroke-width="2"/>
+    <rect x="10" y="10" width="400" height="252" fill="#26233a"/>
+    <!-- the bar lives in the strip -->
+    <rect x="10" y="10" width="400" height="22" fill="#faf4ed"/>
+    <use href="#bar" x="10" y="14"/>
+    <path d="M180,10 h60 v13 q0,5 -5,5 h-50 q-5,0 -5,-5 z" fill="#000"/>
+    <circle cx="222" cy="18" r="2.2" fill="#26233a"/>
+    <!-- windows: full height -->
+    <rect x="16" y="38" width="192" height="218" fill="#191724" stroke="#c4a7e7" stroke-width="2"/>
+    <rect x="214" y="38" width="190" height="218" fill="#fffaf3" stroke="#403d52" stroke-width="2"/>
+    <rect x="26" y="50" width="90" height="5" fill="#9ccfd8"/>
+    <rect x="26" y="62" width="130" height="5" fill="#908caa"/>
+    <rect x="26" y="74" width="110" height="5" fill="#908caa"/>
+    <rect x="224" y="50" width="170" height="8" fill="#f2e9e1"/>
+    <rect x="224" y="68" width="120" height="5" fill="#dfdad9"/>
+    <rect x="224" y="80" width="150" height="5" fill="#dfdad9"/>
+    <path d="M428,38 h8 M432,38 v218 M428,256 h8" stroke="#9ccfd8" stroke-width="2.5"/>
+  </g>
+  <text x="750" y="348" text-anchor="middle" font-size="15" font-weight="600" fill="#9ccfd8">+ Omanotch</text>
 </svg>

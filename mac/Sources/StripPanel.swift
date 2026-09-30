@@ -175,7 +175,7 @@ final class StripView: NSView {
                   let r = CGRect(dictionaryRepresentation: dict), r.insetBy(dx: 0, dy: -2).contains(cg)
             else { continue }
             if (w[kCGWindowAlpha as String] as? Double ?? 1) == 0 { continue }
-            if w[kCGWindowOwnerName as String] as? String == "Omarchy Notch Bar" { continue }
+            if w[kCGWindowOwnerName as String] as? String == "Omanotch" { continue }
             return w[kCGWindowOwnerName as String] as? String == vmOwner && layer == 0
         }
         return false
