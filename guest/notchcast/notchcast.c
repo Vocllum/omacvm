@@ -215,6 +215,7 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
 }
 
 static char *hypr_request(const char *req);
+static int json_int(const char *json, const char *key, double *out);
 static int monitor_field(const char *json, const char *name, const char *field, double *out);
 
 // Runs Lua in Hyprland through its command socket (no hyprctl process).
@@ -335,8 +336,26 @@ static void send_cursors(void) {
 // Hides or shows the guest's own cursor (while the pointer is over the strip
 // the helper shows the guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
-    hypr_eval(visible ? "hl.config({ cursor = { invisible = false } })"
-                      : "hl.config({ cursor = { invisible = true } })");
+    if (visible) {
+        hypr_eval("hl.config({ cursor = { invisible = false } })");
+        return;
+    }
+    // Hyprland applies `invisible` only at its next repaint, and nothing
+    // repaints while the pointer sits on the strip, so the old cursor image
+    // lingered (~50-100 ms measured). A 1 px nudge makes it repaint at once
+    // (~0-40 ms measured).
+    char *j = hypr_request("j/cursorpos");
+    double x, y;
+    if (j && !json_int(j, "x", &x) && !json_int(j, "y", &y)) {
+        char lua[160];
+        snprintf(lua, sizeof lua,
+                 "hl.config({ cursor = { invisible = true } }) hl.dispatch(hl.dsp.cursor.move({ x = %d, y = %d }))",
+                 (int)x, (int)y + 1);
+        hypr_eval(lua);
+    } else {
+        hypr_eval("hl.config({ cursor = { invisible = true } })");
+    }
+    free(j);
 }
 
 // Shows the guest cursor again where the pointer leaves the strip: just below

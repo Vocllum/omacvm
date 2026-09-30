@@ -248,7 +248,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         if inside {
             pendingGuestCursor = false
             link.send("cursor 0")
-            cursorHider.pointerOnStrip(showAfter: 0.03)
+            cursorHider.pointerOnStrip(showAfter: 0.045)
             link.send("targets")
         } else if exit != nil {
             // Show the guest cursor once the pointer lands in a VM window (at
