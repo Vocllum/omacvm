@@ -22,7 +22,7 @@ final class StripPanel: NSPanel {
         isMovable = false
         animationBehavior = .none
         isReleasedWhenClosed = false
-        // Parallels keeps an invisible window over the strip at level 26 and the
+        // Parallels and UTM keep an invisible window over the strip at level 26 and the
         // menu bar sits at 24, so the panel must be at 27 or above.
         level = NSWindow.Level(27)
         // Belongs to the Space it is first shown on (the VM's full-screen
@@ -46,9 +46,23 @@ protocol StripInputDelegate: AnyObject {
 final class StripView: NSView {
     weak var input: StripInputDelegate?
     private let barLayer = CALayer()
-    /// Height of the bar image in points (26 for Omarchy's default bar).
+    /// Size of the bar image in guest logical px (the NOTCH output's size).
     private var barHeight: CGFloat = 26
     private var barWidth: CGFloat = 0
+    /// Guest logical px per strip point: 1 when the guest display matches the
+    /// Mac point for point (Parallels "Retina", UTM "Retina Mode" + resize to
+    /// window), anything else when it does not. The image is always drawn
+    /// across the full strip width and input is converted with this.
+    private(set) var guestPerPoint: CGFloat = 1
+    /// Called when guestPerPoint changes.
+    var onGuestScaleChange: (() -> Void)?
+    /// Guest logical px per point as drawn: guestPerPoint, or more when the
+    /// bar is taller than the strip allows (then it is fitted, not cut off).
+    private var drawScale: CGFloat = 1
+    /// Where the drawn image sits inside the strip, in points.
+    private var drawTop: CGFloat = 0
+    private var drawLeft: CGFloat = 0
+    private var imagePixelWidth: CGFloat = 0
     /// Clickable rectangles in bar coordinates, reported by the guest.
     var targets: [CGRect] = []
     /// The guest's cursors, so the strip shows the same cursor as the VM.
@@ -84,6 +98,7 @@ final class StripView: NSView {
         barHeight = CGFloat(image.height) / scale
         barLayer.contents = image
         barLayer.contentsScale = scale
+        imagePixelWidth = CGFloat(image.width)
         if let background { layer?.backgroundColor = background }
         layoutBar()
         CATransaction.commit()
@@ -97,13 +112,28 @@ final class StripView: NSView {
         CATransaction.commit()
     }
 
-    /// Vertical offset of the bar image inside the strip (bar centred).
-    private var barTop: CGFloat { ((bounds.height - barHeight) / 2).rounded(.down) }
-
     private func layoutBar() {
+        let k = barWidth > 0 && bounds.width > 0 ? barWidth / bounds.width : 1
+        if abs(k - guestPerPoint) > 0.001 {
+            guestPerPoint = k
+            DispatchQueue.main.async { [weak self] in self?.onGuestScaleChange?() }
+        }
+        // Full width, the height following the image's aspect (it equals the
+        // strip once the guest has sized NOTCH to it), centred. A bar taller
+        // than the strip (its minimum height) is shrunk to fit instead.
+        drawScale = bounds.height > 0 ? max(k, barHeight / bounds.height) : k
+        let w = barWidth > 0 ? barWidth / drawScale : bounds.width
+        let h = barHeight / drawScale
+        drawLeft = ((bounds.width - w) / 2).rounded(.down)
+        drawTop = ((bounds.height - h) / 2).rounded(.down)
         // Layer geometry is bottom-left based even in a flipped view.
-        let y = bounds.height - barTop - barHeight
-        barLayer.frame = CGRect(x: 0, y: y, width: barWidth > 0 ? barWidth : bounds.width, height: barHeight)
+        barLayer.frame = CGRect(x: drawLeft, y: bounds.height - drawTop - h, width: w, height: h)
+        // Pixel-exact when the guest renders at the Mac's backing scale,
+        // smooth when the image has to be resampled.
+        let backing = window?.backingScaleFactor ?? 2
+        let exact = w > 0 && abs(imagePixelWidth / w - backing) < 0.01
+        barLayer.magnificationFilter = exact ? .nearest : .linear
+        barLayer.minificationFilter = exact ? .nearest : .trilinear
     }
 
     // MARK: input
@@ -118,10 +148,11 @@ final class StripView: NSView {
         trackingArea = area
     }
 
+    /// Pointer position in bar coordinates (guest logical px).
     private func barPoint(_ event: NSEvent) -> CGPoint {
         let p = convert(event.locationInWindow, from: nil)
-        let y = min(max(p.y - barTop, 0.5), barHeight - 0.5)
-        return CGPoint(x: p.x, y: y)
+        let y = min(max((p.y - drawTop) * drawScale, 0.5), barHeight - 0.5)
+        return CGPoint(x: (p.x - drawLeft) * drawScale, y: y)
     }
 
     private func updateCursor(_ event: NSEvent) {
@@ -146,25 +177,28 @@ final class StripView: NSView {
         isHovered = false
         let p = convert(event.locationInWindow, from: nil)  // flipped: y grows downwards
         let direction = p.y >= bounds.height / 2 ? "down" : "up"
-        input?.stripHoverChanged(false, exit: (direction, min(max(p.x, 0), bounds.width - 1)))
-        // Leaving into a VM window: show nothing, like Parallels does there
+        input?.stripHoverChanged(false, exit: (direction, min(max(p.x, 0), bounds.width - 1) * guestPerPoint))
+        // (guestPerPoint, not drawScale: that x is a position on the VM display.)
+        // Leaving into a VM window: show nothing, like the VM app does there
         // (the guest draws its own cursor). Parallels does not reliably reset
         // the cursor when the pointer comes from another app's window, which
         // would leave a macOS arrow on top of the guest cursor.
         if let screenPoint = window?.convertPoint(toScreen: event.locationInWindow),
-           StripView.isOverVMWindow(screenPoint, vmOwner: vmOwner) {
+           let owner = activeOwner, StripView.isOverVMWindow(screenPoint, vmOwners: [owner]) {
             BackgroundCursor.transparent.set()
         } else {
             NSCursor.arrow.set()
         }
     }
 
-    /// Owner name of the VM windows (set by the controller).
-    var vmOwner = "Parallels Desktop"
+    /// Owner names of the VM windows (set by the controller).
+    var vmOwners: Set<String> = ["Parallels Desktop", "UTM"]
+    /// The VM app whose guest feeds the strip (it draws its own cursor).
+    var activeOwner: String?
 
     /// Whether a point just outside the strip (Cocoa screen coordinates) lies
     /// on a normal-layer window of the VM app.
-    static func isOverVMWindow(_ cocoaPoint: NSPoint, vmOwner: String) -> Bool {
+    static func isOverVMWindow(_ cocoaPoint: NSPoint, vmOwners: Set<String>) -> Bool {
         guard let primary = NSScreen.screens.first else { return false }
         let cg = CGPoint(x: cocoaPoint.x, y: primary.frame.maxY - cocoaPoint.y)
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
@@ -176,7 +210,7 @@ final class StripView: NSView {
             else { continue }
             if (w[kCGWindowAlpha as String] as? Double ?? 1) == 0 { continue }
             if w[kCGWindowOwnerName as String] as? String == "Omanotch" { continue }
-            return w[kCGWindowOwnerName as String] as? String == vmOwner && layer == 0
+            return vmOwners.contains(w[kCGWindowOwnerName as String] as? String ?? "") && layer == 0
         }
         return false
     }

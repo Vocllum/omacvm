@@ -9,6 +9,8 @@ struct StripGeometry: Equatable {
     var notchRight: CGFloat
     /// The VM's full-screen window on the built-in display.
     var windowID: CGWindowID
+    /// App that owns it ("Parallels Desktop", "UTM").
+    var owner: String
 }
 
 /// Finds the notch strip above a full-screen VM window using public APIs only.
@@ -16,7 +18,8 @@ struct StripGeometry: Equatable {
 /// The VM counts as full screen on the built-in display when a normal-layer
 /// window of the VM app spans the display's full width, reaches its bottom
 /// edge and covers at least 90 % of its height. The strip is the gap between
-/// the top of the display and the top of that window (43 pt with Parallels).
+/// the top of the display and the top of that window (the menu bar height:
+/// 43 pt on a 16-inch MacBook Pro at "More Space", less on smaller models).
 enum StripDetector {
     static func builtinScreen() -> NSScreen? {
         NSScreen.screens.first { screen in
@@ -29,7 +32,7 @@ enum StripDetector {
 
     /// `onScreenOnly: false` also finds the VM's full-screen window while its
     /// Space is not the active one.
-    static func detect(vmOwner: String, onScreenOnly: Bool = true) -> StripGeometry? {
+    static func detect(vmOwners: Set<String>, onScreenOnly: Bool = true) -> StripGeometry? {
         guard let screen = builtinScreen(),
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let left = screen.auxiliaryTopLeftArea, let right = screen.auxiliaryTopRightArea
@@ -39,7 +42,7 @@ enum StripDetector {
                                                        : [.optionAll, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return nil }
         for w in list {
-            guard (w[kCGWindowOwnerName as String] as? String) == vmOwner,
+            guard let owner = w[kCGWindowOwnerName as String] as? String, vmOwners.contains(owner),
                   (w[kCGWindowLayer as String] as? Int) == 0,
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict)
@@ -53,15 +56,17 @@ enum StripDetector {
             return StripGeometry(frame: frame,
                                  notchLeft: left.maxX - screen.frame.minX,
                                  notchRight: right.minX - screen.frame.minX,
-                                 windowID: CGWindowID((w[kCGWindowNumber as String] as? Int) ?? 0))
+                                 windowID: CGWindowID((w[kCGWindowNumber as String] as? Int) ?? 0),
+                                 owner: owner)
         }
         return nil
     }
 
     /// Whether the window is still the VM's full-screen window on the built-in
-    /// display, wherever its Space currently is. Only its size is compared: the
-    /// origin moves while a Space slides in or out.
-    static func stillFullScreen(_ id: CGWindowID) -> Bool {
+    /// display below a strip of `stripHeight`, wherever its Space currently is.
+    /// Only its size is compared: the origin moves while a Space slides in or
+    /// out. (A window that grew into the notch area no longer leaves a strip.)
+    static func stillFullScreen(_ id: CGWindowID, stripHeight: CGFloat) -> Bool {
         guard let screen = builtinScreen(),
               let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
               let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], id) as? [[String: Any]])?.first,
@@ -69,6 +74,6 @@ enum StripDetector {
               let r = CGRect(dictionaryRepresentation: dict)
         else { return false }
         let display = CGDisplayBounds(number.uint32Value)
-        return r.width == display.width && r.height >= display.height * 0.9
+        return abs(r.width - display.width) < 1 && abs(r.height - (display.height - stripHeight)) <= 1
     }
 }

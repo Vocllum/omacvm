@@ -5,8 +5,14 @@
 // (default NOTCH), shared-memory buffer. A capture request blocks until
 // Hyprland re-renders the output, so an idle bar costs nothing.
 //
-// Stream: TCP client to $NOTCHBAR_HOST:$NOTCHBAR_PORT (default
-// 10.211.55.2:47811, the macOS side of the Parallels shared network). Each
+// Stream: TCP client to the Mac on port $NOTCHBAR_PORT (default 47811). The
+// Mac is found by itself on the hypervisors' shared (NAT) networks: the
+// default gateway (UTM, where the gateway is the Mac) and address .2 of that
+// network (Parallels, where .1 is its NAT and the Mac is .2) are tried in turn,
+// but only when that network is a known VM network ($NOTCHBAR_VM_NETS, default
+// 192.168.64.0/24 10.211.55.0/24 10.37.129.0/24): on a bridged network the
+// gateway is a real router. $NOTCHBAR_HOST (one address or a comma-separated
+// list) sets the Mac's address explicitly. Each
 // change is sent as the bounding box of changed pixels, LZ4-compressed. A full
 // frame is sent after every (re)connect.
 //
@@ -20,7 +26,9 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <lz4.h>
+#include <math.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -32,8 +40,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -389,6 +399,42 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x, double de
     hypr_eval(lua);
 }
 
+// The hidden output's logical height, remembered for notchbar.lua so a
+// Hyprland config reload recreates the output at the right height right away.
+static void save_strip_height(int h) {
+    const char *state = getenv("XDG_STATE_HOME");
+    char dir[512], path[600];
+    if (state && *state) snprintf(dir, sizeof dir, "%s/omanotch", state);
+    else snprintf(dir, sizeof dir, "%s/.local/state/omanotch", getenv("HOME") ? getenv("HOME") : "/tmp");
+    char parent[512];
+    snprintf(parent, sizeof parent, "%s", dir);
+    char *slash = strrchr(parent, '/');
+    if (slash) *slash = 0;
+    mkdir(parent, 0755);
+    mkdir(dir, 0755);
+    snprintf(path, sizeof path, "%s/strip-height", dir);
+    FILE *f = fopen(path, "w");
+    if (f) {
+        fprintf(f, "%d\n", h);
+        fclose(f);
+    }
+}
+
+// Tells the helper which hypervisor this guest runs in, so it only takes this
+// VM app's full-screen window for the strip ("hello qemu", "hello parallels").
+static void send_hello(void) {
+    char vendor[64] = "", msg[96];
+    FILE *f = fopen("/sys/class/dmi/id/sys_vendor", "r");
+    if (f) {
+        if (!fgets(vendor, sizeof vendor, f)) vendor[0] = 0;
+        fclose(f);
+    }
+    const char *hv = strstr(vendor, "QEMU") ? "qemu" : strstr(vendor, "Parallels") ? "parallels"
+                   : strstr(vendor, "Apple") ? "apple" : "unknown";
+    snprintf(msg, sizeof msg, "hello %s", hv);
+    send_text(msg);
+}
+
 static int is_number(const char *s) {
     if (!s || !*s) return 0;
     char *end;
@@ -400,7 +446,10 @@ static int is_number(const char *s) {
 static void handle_command(char *line) {
     char *argv[6] = {0};
     int argc = 0;
-    for (char *tok = strtok(line, " \t"); tok && argc < 6; tok = strtok(NULL, " \t")) argv[argc++] = tok;
+    // strtok_r: the net thread (cursor fast path) and the worker run this at the same time.
+    char *save = NULL;
+    for (char *tok = strtok_r(line, " \t", &save); tok && argc < 6; tok = strtok_r(NULL, " \t", &save))
+        argv[argc++] = tok;
     if (!argc) return;
     const char *c = argv[0];
     DBG("cmd: %s %s %s %s", c, argv[1] ? argv[1] : "", argv[2] ? argv[2] : "", argv[3] ? argv[3] : "");
@@ -488,29 +537,116 @@ static void *worker_thread(void *unused) {
     return NULL;
 }
 
+// Whether an address (network byte order) lies in one of the VM shared
+// networks: $NOTCHBAR_VM_NETS, a space- or comma-separated list of a.b.c.d/nn.
+static int on_vm_network(uint32_t addr_be) {
+    const char *nets = getenv("NOTCHBAR_VM_NETS");
+    char buf[512];
+    snprintf(buf, sizeof buf, "%s", nets && *nets ? nets : "192.168.64.0/24 10.211.55.0/24 10.37.129.0/24");
+    uint32_t a = ntohl(addr_be);
+    for (char *save = NULL, *tok = strtok_r(buf, ", ", &save); tok; tok = strtok_r(NULL, ", ", &save)) {
+        char *slash = strchr(tok, '/');
+        int bits = slash ? atoi(slash + 1) : 32;
+        if (slash) *slash = 0;
+        struct in_addr net;
+        if (inet_pton(AF_INET, tok, &net) != 1 || bits < 0 || bits > 32) continue;
+        uint32_t mask = bits ? 0xffffffffu << (32 - bits) : 0;
+        if ((a & mask) == (ntohl(net.s_addr) & mask)) return 1;
+    }
+    return 0;
+}
+
+// Candidate addresses of the Mac, in the order they are tried.
+static int host_candidates(struct in_addr *out, int max) {
+    int n = 0;
+    if (cfg_host && *cfg_host) {
+        char buf[256];
+        snprintf(buf, sizeof buf, "%s", cfg_host);
+        for (char *save = NULL, *tok = strtok_r(buf, ", ", &save); tok && n < max; tok = strtok_r(NULL, ", ", &save))
+            if (inet_pton(AF_INET, tok, &out[n]) == 1) n++;
+        return n;
+    }
+    // Default route from /proc/net/route: "Iface Destination Gateway ..." in
+    // network byte order, printed as hex.
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f) return 0;
+    char line[256];
+    unsigned int gw = 0;
+    while (fgets(line, sizeof line, f)) {
+        char iface[64];
+        unsigned int dest, g, flags;
+        if (sscanf(line, "%63s %x %x %x", iface, &dest, &g, &flags) == 4 && dest == 0 && g) {
+            gw = g;
+            break;
+        }
+    }
+    fclose(f);
+    if (!gw) return 0;
+    if (!on_vm_network(gw)) {
+        static int warned;
+        if (!warned++) LOG("the default route is not on a VM shared network (bridged networking?): set NOTCHBAR_HOST");
+        return 0;
+    }
+    out[n++].s_addr = gw;
+    uint32_t two = (ntohl(gw) & 0xffffff00u) | 2u;
+    if (htonl(two) != gw && n < max) out[n++].s_addr = htonl(two);
+    return n;
+}
+
+// connect() with a timeout, so an address with nobody behind it (no ARP
+// answer) does not stall the rotation for half a minute.
+static int connect_timeout(int fd, const struct sockaddr_in *sa, int timeout_ms) {
+    int fl = fcntl(fd, F_GETFL);
+    fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    int r = connect(fd, (const struct sockaddr *)sa, sizeof *sa);
+    if (r && errno == EINPROGRESS) {
+        struct pollfd p = {.fd = fd, .events = POLLOUT};
+        int err = 0;
+        socklen_t el = sizeof err;
+        r = poll(&p, 1, timeout_ms) == 1 && !getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el) && !err ? 0 : -1;
+    }
+    fcntl(fd, F_SETFL, fl);
+    return r;
+}
+
 static void *net_thread(void *unused) {
     (void)unused;
     int backoff_ms = 250;
+    unsigned attempt = 0;
     for (;;) {
+        struct in_addr hosts[8];
+        int nh = host_candidates(hosts, 8);
+        if (!nh) {
+            usleep(2000 * 1000);
+            continue;
+        }
+        struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons((uint16_t)cfg_port),
+                                 .sin_addr = hosts[attempt++ % (unsigned)nh]};
         int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-        struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons((uint16_t)cfg_port)};
-        inet_pton(AF_INET, cfg_host, &sa.sin_addr);
-        if (fd < 0 || connect(fd, (struct sockaddr *)&sa, sizeof sa)) {
+        if (fd < 0 || connect_timeout(fd, &sa, 1500)) {
             if (fd >= 0) close(fd);
-            usleep((useconds_t)backoff_ms * 1000);
-            if (backoff_ms < 2000) backoff_ms *= 2;
+            // A full round over all candidates failed: back off.
+            if (attempt % (unsigned)nh == 0) {
+                usleep((useconds_t)backoff_ms * 1000);
+                if (backoff_ms < 2000) backoff_ms *= 2;
+            }
             continue;
         }
         backoff_ms = 250;
+        attempt--;  // keep this address first for the next reconnect
         int one = 1;
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
         setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof one);
-        LOG("connected to %s:%d", cfg_host, cfg_port);
+        char ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &sa.sin_addr, ip, sizeof ip);
+        LOG("connected to %s:%d", ip, cfg_port);
+        double connected_at = now_ms();
 
         pthread_mutex_lock(&lock);
         sock_fd = fd;
         if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
         pthread_mutex_unlock(&lock);
+        send_hello();
         send_cursors();
 
         char buf[4096];
@@ -540,6 +676,9 @@ static void *net_thread(void *unused) {
         pthread_mutex_unlock(&lock);
         close(fd);
         set_guest_cursor_visible(1);
+        // Dropped right away: most likely turned away because another VM
+        // holds the strip. Do not hammer the helper.
+        if (now_ms() - connected_at < 2000) sleep(3);
     }
     return NULL;
 }
@@ -660,6 +799,85 @@ static double bar_size(void) {
     return v > 0 && v < 200 ? v : 26;
 }
 
+// UTM resizes the guest display to its window: the virtio-gpu connector gets
+// a new preferred mode. Hyprland neither picks that up (it even keeps the old
+// mode list) nor keeps it across a config reload that re-applies a fixed mode.
+// So the display is kept at the preferred mode, on QEMU (UTM) by default.
+// NOTCHBAR_FOLLOW_MODE=1/on or 0/off forces it (Parallels has its own tools).
+static int follow_modes(void) {
+    static int v = -1;
+    if (v >= 0) return v;
+    const char *e = getenv("NOTCHBAR_FOLLOW_MODE");
+    if (e && *e) {
+        v = !strcmp(e, "1") || !strcasecmp(e, "on") || !strcasecmp(e, "true") || !strcasecmp(e, "yes");
+        if (!v && strcmp(e, "0") && strcasecmp(e, "off") && strcasecmp(e, "false") && strcasecmp(e, "no"))
+            LOG("NOTCHBAR_FOLLOW_MODE=%s not understood, treating it as off", e);
+        return v;
+    }
+    char vendor[64] = "";
+    FILE *f = fopen("/sys/class/dmi/id/sys_vendor", "r");
+    if (f) {
+        if (!fgets(vendor, sizeof vendor, f)) vendor[0] = 0;
+        fclose(f);
+    }
+    return v = strstr(vendor, "QEMU") != NULL;
+}
+
+static int preferred_mode(int *w, int *h) {
+    char pattern[128];
+    snprintf(pattern, sizeof pattern, "/sys/class/drm/card*-%s/modes", cfg_screen);
+    glob_t g;
+    int found = 0;
+    if (glob(pattern, 0, NULL, &g) == 0) {
+        for (size_t i = 0; i < g.gl_pathc && !found; i++) {
+            FILE *f = fopen(g.gl_pathv[i], "r");
+            if (!f) continue;
+            found = fscanf(f, "%dx%d", w, h) == 2 && *w > 0 && *h > 0;
+            fclose(f);
+        }
+        globfree(&g);
+    }
+    return found;
+}
+
+static int whole(double v) { return fabs(v - round(v)) < 0.01; }
+
+static void follow_preferred_mode(const char *monitors_json) {
+    static char last_applied[256];
+    static double last_ms = -1e9;
+    int w, h;
+    if (!follow_modes() || !preferred_mode(&w, &h)) return;
+    double cw, ch, x, y, s, r;
+    if (monitor_field(monitors_json, cfg_screen, "width", &cw) || monitor_field(monitors_json, cfg_screen, "height", &ch) ||
+        monitor_field(monitors_json, cfg_screen, "x", &x) || monitor_field(monitors_json, cfg_screen, "y", &y) ||
+        monitor_field(monitors_json, cfg_screen, "scale", &s) || monitor_field(monitors_json, cfg_screen, "refreshRate", &r) ||
+        s <= 0)
+        return;
+    if ((int)cw == w && (int)ch == h) return;
+    // Keep the scale if it divides the new size; otherwise the nearest one
+    // that does (Hyprland scales are multiples of 1/120).
+    if (!whole(w / s) || !whole(h / s)) {
+        double found = 0;
+        for (int d = 0; d <= 60 && !found; d++)
+            for (int sign = -1; sign <= 1 && !found; sign += 2) {
+                double c = (round(s * 120) + sign * d) / 120.0;
+                if (c >= 0.5 && whole(w / c) && whole(h / c)) found = c;
+            }
+        if (!found) return;
+        s = found;
+    }
+    char lua[256];
+    snprintf(lua, sizeof lua,
+             "hl.monitor({ output = \"%s\", mode = \"%dx%d@%d\", position = \"%dx%d\", scale = %.6f })",
+             cfg_screen, w, h, (int)(r + 0.5), (int)x, (int)y, s);
+    // Do not hammer Hyprland with a rule it keeps refusing.
+    if (!strcmp(lua, last_applied) && now_ms() - last_ms < 30000) return;
+    snprintf(last_applied, sizeof last_applied, "%s", lua);
+    last_ms = now_ms();
+    LOG("display follows the host's window size: %s", lua);
+    hypr_eval(lua);
+}
+
 // Keeps the hidden output present and exactly as wide as the display whose
 // bar it stands in for, overlapping that display's top edge. Overlapping keeps
 // it inside the existing layout, so absolute pointers keep their mapping.
@@ -687,12 +905,21 @@ static void *keeper_thread(void *unused) {
                 double bs = bar_size();
                 int sh = atomic_load(&strip_height);
                 if (sh > bs) bs = sh;
-                int want_w = (int)(sw + 0.5), want_h = (int)(bs * ss + 0.5);
+                // A whole number of logical px that is also a whole number of
+                // pixels at this scale (fractional scales such as 1.6 or 5/3).
+                int lh = (int)ceil(bs - 1e-6);
+                for (int k = 0; k < 120 && fabs(lh * ss - round(lh * ss)) > 1e-3; k++) lh++;
+                int want_w = (int)(sw + 0.5), want_h = (int)round(lh * ss);
+                static int saved_lh;
+                if (lh != saved_lh && atomic_load(&strip_height) > 0) {
+                    saved_lh = lh;
+                    save_strip_height(lh);
+                }
                 if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)sx || (int)ny != (int)sy ||
                     ns < ss - 0.01 || ns > ss + 0.01) {
                     char lua[256];
                     snprintf(lua, sizeof lua,
-                             "hl.monitor({ output = \"%s\", mode = \"%dx%d@60\", position = \"%dx%d\", scale = %.3g })",
+                             "hl.monitor({ output = \"%s\", mode = \"%dx%d@60\", position = \"%dx%d\", scale = %.6f })",
                              cfg_output, want_w, want_h, (int)sx, (int)sy, ss);
                     // Do not hammer Hyprland with a rule it keeps refusing.
                     if (strcmp(lua, last_applied) || now_ms() - last_apply_ms > 30000) {
@@ -704,6 +931,7 @@ static void *keeper_thread(void *unused) {
                     }
                 }
             }
+            follow_preferred_mode(j);
             free(j);
         }
         refresh_output_geometry();
@@ -998,7 +1226,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++)
         if (!strcmp(argv[i], "-v")) verbose = 1;
     cfg_output = getenv("NOTCHBAR_OUTPUT") ? getenv("NOTCHBAR_OUTPUT") : "NOTCH";
-    cfg_host = getenv("NOTCHBAR_HOST") ? getenv("NOTCHBAR_HOST") : "10.211.55.2";
+    cfg_host = getenv("NOTCHBAR_HOST");  // NULL: find the Mac by itself
     cfg_port = getenv("NOTCHBAR_PORT") ? atoi(getenv("NOTCHBAR_PORT")) : 47811;
     // The display whose bar is parked while the strip shows (the built-in one).
     cfg_screen = getenv("NOTCHBAR_SCREEN") ? getenv("NOTCHBAR_SCREEN") : "Virtual-1";

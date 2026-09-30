@@ -18,13 +18,22 @@ enum Log {
 struct Settings {
     let defaults = UserDefaults.standard  // domain ch.gillesgoetsch.omanotch (bundle id)
 
-    /// Host side of the Parallels shared network (the guest connects here).
-    var listenHost: String { defaults.string(forKey: "listenHost") ?? "10.211.55.2" }
+    /// Listen on this one address instead of every VM network interface.
+    var listenHost: String? { defaults.string(forKey: "listenHost") }
     var port: UInt16 { UInt16(defaults.integer(forKey: "port")).nonZero ?? 47811 }
-    /// Only guests whose address starts with this are accepted.
-    var guestPrefix: String { defaults.string(forKey: "guestPrefix") ?? "10.211.55." }
-    /// Owner name of the VM's full-screen window.
-    var vmOwner: String { defaults.string(forKey: "vmOwner") ?? "Parallels Desktop" }
+    /// Interfaces that carry VM networks: Parallels and UTM (vmnet) use
+    /// bridgeNNN, older Parallels versions vnicN.
+    var interfacePrefixes: [String] { defaults.stringArray(forKey: "vmInterfacePrefixes") ?? ["bridge", "vnic"] }
+    /// The VM shared networks: UTM (vmnet), Parallels shared and host-only.
+    var vmSubnets: [String] {
+        defaults.stringArray(forKey: "vmSubnets") ?? ["192.168.64.0/24", "10.211.55.0/24", "10.37.129.0/24"]
+    }
+    /// Owner names (app names) of the VM windows: Parallels Desktop and UTM.
+    var vmOwners: Set<String> {
+        if let list = defaults.stringArray(forKey: "vmOwners"), !list.isEmpty { return Set(list) }
+        if let one = defaults.string(forKey: "vmOwner") { return [one] }
+        return ["Parallels Desktop", "UTM"]
+    }
 }
 
 extension UInt16 {
@@ -58,13 +67,13 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         activity = ProcessInfo.processInfo.beginActivity(
             options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
             reason: "Mirrors the VM bar into the notch strip")
-        cursorHider = VMCursorHider(vmOwner: settings.vmOwner, ownOwner: "Omanotch")
+        cursorHider = VMCursorHider(vmOwners: settings.vmOwners, ownOwner: "Omanotch")
         cursorHider.onEnterVM = { [weak self] point, rect in self?.pointerEnteredVM(at: point, window: rect) }
         cursorHider.start()
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [weak self] _ in self?.cursorHider.stop() }
-        link = GuestLink(host: settings.listenHost, port: settings.port, allowedPrefix: settings.guestPrefix,
-                         stream: stream)
+        link = GuestLink(port: settings.port, interfacePrefixes: settings.interfacePrefixes,
+                         subnets: settings.vmSubnets, onlyAddress: settings.listenHost, stream: stream)
         link.onMessages = { [weak self] in self?.handle($0) }
         link.onConnectionChange = { [weak self] connected in self?.connectionChanged(connected) }
         link.start()
@@ -96,7 +105,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private func evaluate() {
         cursorHider?.refresh()
         let ready = link.isConnected && stream.hasImage
-        let visibleNow = ready ? StripDetector.detect(vmOwner: settings.vmOwner) : nil
+        // Only the connected guest's own VM app counts, once it has said which.
+        let owners = guestOwner.map { settings.vmOwners.contains($0) ? [$0] : settings.vmOwners } ?? settings.vmOwners
+        let visibleNow = ready ? StripDetector.detect(vmOwners: owners) : nil
 
         if let g = visibleNow {
             misses = 0
@@ -106,7 +117,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
                 sendGeometry(g)
             }
             geometry = g
-        } else if ready, let id = vmWindow, StripDetector.stillFullScreen(id) {
+        } else if ready, let id = vmWindow, let g = geometry,
+                  StripDetector.stillFullScreen(id, stripHeight: g.frame.height) {
             // The VM's Space is not in front (or is sliding): keep everything as
             // is, so the panel moves with that Space.
             misses = 0
@@ -124,6 +136,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             }
         }
         setParked(ready && vmWindow != nil)
+        // The macOS cursor is only hidden over the app whose VM feeds the strip.
+        cursorHider?.activeOwner = parked ? geometry?.owner : nil
+        view?.activeOwner = parked ? geometry?.owner : nil
     }
 
     private func setParked(_ on: Bool) {
@@ -138,8 +153,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     /// Tells the guest where the camera housing is and how tall the strip is,
     /// so the hidden output (and the bar in it) fill the strip exactly.
     private func sendGeometry(_ g: StripGeometry) {
-        link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
-        link.send("strip \(Int(g.frame.height.rounded()))")
+        // In guest logical px, which differ from points when the guest display
+        // does not match the Mac point for point.
+        let k = view?.guestPerPoint ?? 1
+        link.send("notch \(Int((g.notchLeft * k).rounded())) \(Int((g.notchRight * k).rounded()))")
+        link.send("strip \(Int((g.frame.height * k).rounded()))")
     }
 
     /// Re-asserts the parked state every second rather than only sending a
@@ -156,6 +174,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
 
     private func connectionChanged(_ connected: Bool) {
         parked = false
+        guestOwner = nil
         if connected {
             link.send("targets")
             if let g = geometry { sendGeometry(g) }
@@ -184,16 +203,28 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
     }
 
+    private var cursorImages: [String: (CGImage, CGPoint)] = [:]
+    /// The app whose VM the connected guest runs in, from its "hello"
+    /// (nil: not said, any VM app).
+    private var guestOwner: String?
     private var arrowCursor: NSCursor?
     private var pointerCursor: NSCursor?
 
     /// Guest cursors are sized for its display (e.g. 48 px for 24 pt at 2x).
     private func setCursor(name: String, image: CGImage, hotSpot: CGPoint, nominal: Int) {
-        // A guest cursor of nominal size N px at output scale S is N/S points.
-        let points = NSSize(width: CGFloat(image.width) / stream.scale, height: CGFloat(image.height) / stream.scale)
-        let cursor = NSCursor(image: NSImage(cgImage: image, size: points),
-                              hotSpot: NSPoint(x: hotSpot.x / stream.scale, y: hotSpot.y / stream.scale))
         Log.info("guest cursor \(name): \(image.width)x\(image.height) px")
+        cursorImages[name] = (image, hotSpot)
+        buildCursor(name)
+    }
+
+    /// The guest cursor as it looks in the VM window: N px at guest scale S
+    /// are N/S guest logical px, which are N/(S*k) strip points.
+    private func buildCursor(_ name: String) {
+        guard let (image, hotSpot) = cursorImages[name] else { return }
+        let d = stream.scale * (view?.guestPerPoint ?? 1)
+        let cursor = NSCursor(image: NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / d,
+                                                                          height: CGFloat(image.height) / d)),
+                              hotSpot: NSPoint(x: hotSpot.x / d, y: hotSpot.y / d))
         switch name {
         case "arrow": arrowCursor = cursor; view?.arrowCursor = cursor
         case "pointer": pointerCursor = cursor; view?.pointerCursor = cursor
@@ -202,7 +233,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private func handleText(_ text: String) {
-        if text.hasPrefix("targets ") {
+        if text.hasPrefix("hello ") {
+            let hv = text.dropFirst("hello ".count)
+            guestOwner = hv == "parallels" ? "Parallels Desktop" : hv == "qemu" ? "UTM" : nil
+            Log.info("guest runs in \(hv) (\(guestOwner ?? "any VM app"))")
+            evaluate()
+        } else if text.hasPrefix("targets ") {
             let json = Data(text.dropFirst("targets ".count).utf8)
             if let arr = try? JSONSerialization.jsonObject(with: json) as? [[Double]] {
                 view?.targets = arr.filter { $0.count == 4 }.map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
@@ -218,7 +254,13 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             let v = StripView(frame: NSRect(origin: .zero, size: g.frame.size))
             v.autoresizingMask = [.width, .height]
             v.input = self
-            v.vmOwner = settings.vmOwner
+            v.vmOwners = settings.vmOwners
+            v.onGuestScaleChange = { [weak self] in
+                guard let self, let g = self.geometry else { return }
+                Log.info(String(format: "guest bar: %.3f logical px per strip point", self.view?.guestPerPoint ?? 1))
+                self.sendGeometry(g)
+                for name in self.cursorImages.keys { self.buildCursor(name) }
+            }
             if let arrowCursor { v.arrowCursor = arrowCursor }
             if let pointerCursor { v.pointerCursor = pointerCursor }
             p.contentView = v
@@ -282,12 +324,14 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         pendingGuestCursor = false
         let builtin = CGDisplayBounds(number.uint32Value)
         let x = p.x - builtin.minX
+        // In guest logical px: the guest may not match the Mac point for point.
+        let k = view?.guestPerPoint ?? 1
         if window.maxY == builtin.maxY {
             // Back into the built-in display's VM window, below the strip.
-            link.send(String(format: "cursor 1 down %.1f %.1f", x, p.y - window.minY))
+            link.send(String(format: "cursor 1 down %.1f %.1f", x * k, (p.y - window.minY) * k))
         } else if window.maxY <= builtin.minY {
             // Up to the display above.
-            link.send(String(format: "cursor 1 up %.1f %.1f", x, window.maxY - p.y))
+            link.send(String(format: "cursor 1 up %.1f %.1f", x * k, window.maxY - p.y))
         } else {
             link.send("cursor 1")
         }

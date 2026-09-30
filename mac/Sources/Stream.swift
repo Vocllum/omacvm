@@ -94,7 +94,9 @@ final class GuestStream {
             pixels = [UInt8](repeating: 0, count: fullW * fullH * 4)
             hasImage = false
         }
-        if (50 ... 400).contains(scale100) { scale = CGFloat(scale100) / 100 }
+        // Sent in 1/100 steps; Hyprland scales are multiples of 1/120 (5/3 is
+        // sent as 167), so snap back to the exact value.
+        if (50 ... 400).contains(scale100) { scale = (CGFloat(scale100) * 1.2).rounded() / 120 }
         let rawLen = w * h * 4
         var raw: [UInt8]
         switch codec {

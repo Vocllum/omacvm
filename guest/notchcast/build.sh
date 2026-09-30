@@ -13,5 +13,5 @@ for x in ext-image-copy-capture/ext-image-copy-capture-v1 \
   wayland-scanner private-code "$P/$x.xml" "$OUT/$n-protocol.c"
 done
 gcc -O2 -Wall -Wextra -Wno-unused-parameter -I"$OUT" -o "$OUT/notchcast" notchcast.c "$OUT"/*-protocol.c \
-  -lwayland-client -llz4 -lpthread
+  -lwayland-client -llz4 -lpthread -lm
 echo "built $OUT/notchcast"

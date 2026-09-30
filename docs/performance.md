@@ -113,7 +113,7 @@ Neither hypervisor uses the strip beside the camera housing in full screen on
 macOS 15. Parallels has no option for it and says it avoids that area on
 purpose; macOS does not let another app move Parallels' window there. UTM
 5.0.6 adds an opt-in "use the area beside the camera housing" on macOS 27
-only. [Omanotch](../README.md) works around it for Parallels.
+only. [Omanotch](../README.md) works around it for both.
 
 ## How the numbers were taken
 

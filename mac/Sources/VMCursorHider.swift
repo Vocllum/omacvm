@@ -2,14 +2,20 @@ import AppKit
 
 /// Hides the macOS cursor while the pointer is over a full-screen VM window.
 ///
-/// Over its VM windows Parallels normally swaps in a transparent cursor (the
-/// guest draws its own), but it does not do so reliably when the pointer comes
+/// Over its VM windows the VM app normally swaps in a transparent cursor (the
+/// guest draws its own), but Parallels does not do so reliably when the pointer comes
 /// from another app's window, e.g. the notch strip or when crossing to another
 /// display through it. The result is a macOS arrow on top of the guest cursor.
 /// This hides the cursor outright over those windows and shows it everywhere
 /// else. It relies on BackgroundCursor (SetsCursorInBackground).
 final class VMCursorHider {
-    private let vmOwner: String
+    private let vmOwners: Set<String>
+    /// The VM app whose guest feeds the strip; nil while the strip is not in
+    /// use. Only that app's full-screen windows hide the cursor: other VMs
+    /// (say a Windows VM in UTM) draw no guest cursor of their own.
+    var activeOwner: String? {
+        didSet { if activeOwner != oldValue { refresh() } }
+    }
     private let ownOwner: String
     private var monitor: Any?
     private var hidden = false
@@ -23,8 +29,8 @@ final class VMCursorHider {
     /// (CG point, that window's rect).
     var onEnterVM: ((CGPoint, CGRect) -> Void)?
 
-    init(vmOwner: String, ownOwner: String) {
-        self.vmOwner = vmOwner
+    init(vmOwners: Set<String>, ownOwner: String) {
+        self.vmOwners = vmOwners
         self.ownOwner = ownOwner
     }
 
@@ -38,7 +44,11 @@ final class VMCursorHider {
 
     /// Refresh the list of full-screen VM windows (cheap; called by the poll timer).
     func refresh() {
-        vmRects = Self.fullScreenVMWindows(vmOwner: vmOwner)
+        if let owner = activeOwner, vmOwners.contains(owner) {
+            vmRects = Self.fullScreenVMWindows(vmOwners: [owner])
+        } else {
+            vmRects = []
+        }
         if vmRects.isEmpty { setHidden(false) }
     }
 
@@ -102,7 +112,7 @@ final class VMCursorHider {
             else { continue }
             let owner = w[kCGWindowOwnerName as String] as? String
             if owner == ownOwner { return false }
-            return owner == vmOwner && layer == 0
+            return owner == activeOwner && layer == 0
         }
         return false
     }
@@ -115,7 +125,7 @@ final class VMCursorHider {
 
     /// Normal-layer VM windows that fill (at least 90 % of) a display's height,
     /// full width, reaching its bottom edge: the VM's full-screen windows.
-    static func fullScreenVMWindows(vmOwner: String) -> [CGRect] {
+    static func fullScreenVMWindows(vmOwners: Set<String>) -> [CGRect] {
         var ids = [CGDirectDisplayID](repeating: 0, count: 16)
         var n: UInt32 = 0
         CGGetActiveDisplayList(16, &ids, &n)
@@ -124,7 +134,7 @@ final class VMCursorHider {
                 as? [[String: Any]] else { return [] }
         var out: [CGRect] = []
         for w in list {
-            guard (w[kCGWindowOwnerName as String] as? String) == vmOwner,
+            guard let owner = w[kCGWindowOwnerName as String] as? String, vmOwners.contains(owner),
                   (w[kCGWindowLayer as String] as? Int) == 0,
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict)

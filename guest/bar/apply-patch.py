@@ -3,8 +3,9 @@
 
 usage: apply-patch.py <Bar.qml>        (patches the file in place)
 
-The patch is versioned. A file carrying the current version is left alone; a
-file patched by an older version is restored from its unpatched backup
+The patch is versioned. A file carrying the current version only gets the
+older-Omarchy compatibility fix (see COMPAT) if it is still missing; a file
+patched by an older version is restored from its unpatched backup
 (<Bar.qml>.before-notchbar, kept by install.sh) and patched again.
 
 What the patch adds:
@@ -35,11 +36,33 @@ def replace_once(text, old, new):
     return text.replace(old, new)
 
 
+# Omarchy builds up to about September 2026 declare these bar properties as
+# `required`. The shell loads a cloned bar by URL and can only set them after
+# creation, so such a clone fails to load (and the shell's fallback to the
+# stock bar breaks too). Newer builds give them defaults; do the same here.
+COMPAT = [
+    ("  required property string omarchyPath\n", '  property string omarchyPath: Quickshell.env("OMARCHY_PATH")\n'),
+    ("  required property var barWidgetRegistry\n", "  property var barWidgetRegistry: null\n"),
+    ("  required property var barConfig\n", "  property var barConfig: ({})\n"),
+]
+
+
+def compat(text):
+    for old, new in COMPAT:
+        text = text.replace(old, new)
+    return text
+
+
 def main():
     path = sys.argv[1]
     text = open(path).read()
     if VERSION_LINE in text:
-        print(f"already patched (v{VERSION})")
+        fixed = compat(text)
+        if fixed != text:
+            open(path, "w").write(fixed)
+            print(f"patched (v{VERSION}, older-Omarchy compatibility)")
+        else:
+            print(f"already patched (v{VERSION})")
         return
     if MARK in text:
         backup = path + ".before-notchbar"
@@ -49,6 +72,8 @@ def main():
         shutil.copyfile(backup, path)
         text = open(path).read()
         print("replacing an older patch version")
+
+    text = compat(text)
 
     # 1. State and role helpers (the version line marks the patch).
     text = replace_once(text, '  property string home: Quickshell.env("HOME")\n', '''  property string home: Quickshell.env("HOME")
