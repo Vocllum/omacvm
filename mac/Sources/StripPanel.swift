@@ -140,6 +140,38 @@ final class StripView: NSView {
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         input?.stripHoverChanged(false)
+        // Leaving into a VM window: show nothing, like Parallels does there
+        // (the guest draws its own cursor). Parallels does not reliably reset
+        // the cursor when the pointer comes from another app's window, which
+        // would leave a macOS arrow on top of the guest cursor.
+        if let screenPoint = window?.convertPoint(toScreen: event.locationInWindow),
+           StripView.isOverVMWindow(screenPoint, vmOwner: vmOwner) {
+            BackgroundCursor.transparent.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
+    /// Owner name of the VM windows (set by the controller).
+    var vmOwner = "Parallels Desktop"
+
+    /// Whether a point just outside the strip (Cocoa screen coordinates) lies
+    /// on a normal-layer window of the VM app.
+    static func isOverVMWindow(_ cocoaPoint: NSPoint, vmOwner: String) -> Bool {
+        guard let primary = NSScreen.screens.first else { return false }
+        let cg = CGPoint(x: cocoaPoint.x, y: primary.frame.maxY - cocoaPoint.y)
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return false }
+        for w in list {
+            guard let layer = w[kCGWindowLayer as String] as? Int, layer >= 0, layer < 1000,
+                  let dict = w[kCGWindowBounds as String] as? NSDictionary,
+                  let r = CGRect(dictionaryRepresentation: dict), r.insetBy(dx: 0, dy: -2).contains(cg)
+            else { continue }
+            if (w[kCGWindowAlpha as String] as? Double ?? 1) == 0 { continue }
+            if w[kCGWindowOwnerName as String] as? String == "Omarchy Notch Bar" { continue }
+            return w[kCGWindowOwnerName as String] as? String == vmOwner && layer == 0
+        }
+        return false
     }
 
     /// Called when the panel hides while the pointer may still be over it.

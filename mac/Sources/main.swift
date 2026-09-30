@@ -44,6 +44,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var lastBackground: CGColor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        _ = BackgroundCursor.enabled
         link = GuestLink(host: settings.listenHost, port: settings.port, allowedPrefix: settings.guestPrefix,
                          stream: stream)
         link.onMessages = { [weak self] in self?.handle($0) }
@@ -141,6 +142,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         let points = NSSize(width: CGFloat(image.width) / stream.scale, height: CGFloat(image.height) / stream.scale)
         let cursor = NSCursor(image: NSImage(cgImage: image, size: points),
                               hotSpot: NSPoint(x: hotSpot.x / stream.scale, y: hotSpot.y / stream.scale))
+        Log.info("guest cursor \(name): \(image.width)x\(image.height) px")
         switch name {
         case "arrow": arrowCursor = cursor; view?.arrowCursor = cursor
         case "pointer": pointerCursor = cursor; view?.pointerCursor = cursor
@@ -165,6 +167,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             let v = StripView(frame: NSRect(origin: .zero, size: g.frame.size))
             v.autoresizingMask = [.width, .height]
             v.input = self
+            v.vmOwner = settings.vmOwner
             if let arrowCursor { v.arrowCursor = arrowCursor }
             if let pointerCursor { v.pointerCursor = pointerCursor }
             p.contentView = v
