@@ -63,8 +63,9 @@ def main():
       if (!moduleTargetClickable(t)) continue
       var w = targetWindow(t)
       if (!w || !w.screen || String(w.screen.name) !== notchParkedScreen) continue
+      // x only: the bar is a single row, and the parked copy is 1 px tall.
       var p = t.mapToItem(w.contentItem, 0, 0)
-      if (x >= p.x && x < p.x + t.width && y >= p.y && y < p.y + t.height) return t
+      if (x >= p.x && x < p.x + t.width) return t
     }
     return null
   }
@@ -132,7 +133,10 @@ def main():
     function state(): string {
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,
                               notch: [root.notchLeft, root.notchRight], barSize: root.barSize,
-                              beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1 })
+                              beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1,
+                              bars: notchBarVariants.instances.map(function(p) {
+                                return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height]
+                              }) })
     }
   }
 
@@ -146,6 +150,7 @@ def main():
   }
 
   Variants {
+    id: notchBarVariants
     model: Quickshell.screens
 
     delegate: Component {
@@ -159,15 +164,24 @@ def main():
     readonly property string notchRole: root.notchRoleFor(screen)
     readonly property bool parked: root.barHidden || notchRole === "parked"
     readonly property bool notchLayout: notchRole !== ""
+    // The parked copy is 1 px tall: panels open at its height + gap, so they
+    // appear right below the notch strip instead of a bar height lower.
+    readonly property int parkedSize: notchRole === "parked" ? 1 : root.barSize
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
 ''')
     text = replace_once(text, '''      top: root.barHidden && root.position === "top" ? -root.barSize : 0
       bottom: root.barHidden && root.position === "bottom" ? -root.barSize : 0
       left: root.barHidden && root.position === "left" ? -root.barSize : 0
-      right: root.barHidden && root.position === "right" ? -root.barSize : 0''', '''      top: barWindow.parked && root.position === "top" ? -root.barSize : 0
-      bottom: barWindow.parked && root.position === "bottom" ? -root.barSize : 0
-      left: barWindow.parked && root.position === "left" ? -root.barSize : 0
-      right: barWindow.parked && root.position === "right" ? -root.barSize : 0''')
+      right: root.barHidden && root.position === "right" ? -root.barSize : 0''', '''      top: barWindow.parked && root.position === "top" ? -barWindow.parkedSize : 0
+      bottom: barWindow.parked && root.position === "bottom" ? -barWindow.parkedSize : 0
+      left: barWindow.parked && root.position === "left" ? -barWindow.parkedSize : 0
+      right: barWindow.parked && root.position === "right" ? -barWindow.parkedSize : 0''')
+
+    text = replace_once(text, '''    implicitWidth: root.vertical ? root.barSize : 0
+    implicitHeight: root.vertical ? 0 : root.barSize
+''', '''    implicitWidth: root.vertical ? root.barSize : 0
+    implicitHeight: root.vertical ? 0 : barWindow.parkedSize
+''')
 
     # 4. Pass the layout mode to the horizontal centre section.
     text = replace_once(text, '''      Item {

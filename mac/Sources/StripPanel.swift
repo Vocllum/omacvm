@@ -46,6 +46,10 @@ final class StripView: NSView {
     private var barWidth: CGFloat = 0
     /// Clickable rectangles in bar coordinates, reported by the guest.
     var targets: [CGRect] = []
+    /// The guest's cursors, so the strip shows the same cursor as the VM.
+    var arrowCursor: NSCursor = .arrow
+    var pointerCursor: NSCursor = .pointingHand
+    private(set) var isHovered = false
     private var scrollAccumulator: CGFloat = 0
     private var trackingArea: NSTrackingArea?
 
@@ -118,9 +122,9 @@ final class StripView: NSView {
     private func updateCursor(_ event: NSEvent) {
         let p = barPoint(event)
         if targets.contains(where: { $0.contains(p) }) {
-            NSCursor.pointingHand.set()
+            pointerCursor.set()
         } else {
-            NSCursor.arrow.set()
+            arrowCursor.set()
         }
     }
 
@@ -128,13 +132,21 @@ final class StripView: NSView {
     override func mouseMoved(with event: NSEvent) { updateCursor(event) }
 
     override func mouseEntered(with event: NSEvent) {
+        isHovered = true
         input?.stripHoverChanged(true)
         updateCursor(event)
     }
 
     override func mouseExited(with event: NSEvent) {
+        isHovered = false
         input?.stripHoverChanged(false)
-        NSCursor.arrow.set()
+    }
+
+    /// Called when the panel hides while the pointer may still be over it.
+    func resetHover() {
+        guard isHovered else { return }
+        isHovered = false
+        input?.stripHoverChanged(false)
     }
 
     override func mouseDown(with event: NSEvent) { click(event, button: 1) }

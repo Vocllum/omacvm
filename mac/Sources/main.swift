@@ -89,8 +89,18 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         Log.info(on ? "strip shown, guest bar parked" : "strip hidden, guest bar restored")
     }
 
+    private var beats = 0
+
+    /// Re-asserts the parked state every second rather than only sending a
+    /// heartbeat, so a restarted Omarchy shell (which starts unparked) is
+    /// parked again within a second. The notch geometry is refreshed as well.
     private func heartbeat() {
-        if parked { link.send("beat") }
+        guard parked else { return }
+        link.send("park 1")
+        beats += 1
+        if beats % 5 == 0, let g = geometry {
+            link.send("notch \(Int(g.notchLeft)) \(Int(g.notchRight))")
+        }
     }
 
     private func connectionChanged(_ connected: Bool) {
@@ -109,6 +119,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
                 gotFrame = true
             case .text(let text):
                 handleText(text)
+            case let .cursor(name, image, hotSpot, nominal):
+                setCursor(name: name, image: image, hotSpot: hotSpot, nominal: nominal)
             }
         }
         if gotFrame {
@@ -117,6 +129,22 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             let bg = stream.backgroundColor()
             view.show(image: image, scale: stream.scale, background: bg == lastBackground ? nil : bg)
             lastBackground = bg
+        }
+    }
+
+    private var arrowCursor: NSCursor?
+    private var pointerCursor: NSCursor?
+
+    /// Guest cursors are sized for its display (e.g. 48 px for 24 pt at 2x).
+    private func setCursor(name: String, image: CGImage, hotSpot: CGPoint, nominal: Int) {
+        // A guest cursor of nominal size N px at output scale S is N/S points.
+        let points = NSSize(width: CGFloat(image.width) / stream.scale, height: CGFloat(image.height) / stream.scale)
+        let cursor = NSCursor(image: NSImage(cgImage: image, size: points),
+                              hotSpot: NSPoint(x: hotSpot.x / stream.scale, y: hotSpot.y / stream.scale))
+        switch name {
+        case "arrow": arrowCursor = cursor; view?.arrowCursor = cursor
+        case "pointer": pointerCursor = cursor; view?.pointerCursor = cursor
+        default: break
         }
     }
 
@@ -137,6 +165,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             let v = StripView(frame: NSRect(origin: .zero, size: g.frame.size))
             v.autoresizingMask = [.width, .height]
             v.input = self
+            if let arrowCursor { v.arrowCursor = arrowCursor }
+            if let pointerCursor { v.pointerCursor = pointerCursor }
             p.contentView = v
             panel = p
             view = v
@@ -150,6 +180,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private func hidePanel() {
+        view?.resetHover()
         panel?.orderOut(nil)
     }
 
@@ -166,6 +197,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     func stripHoverChanged(_ inside: Bool) {
+        // Only one cursor at a time: the guest hides its own while the pointer
+        // is over the strip, where the helper shows the guest's cursor images.
+        link.send("cursor \(inside ? 0 : 1)")
         if inside { link.send("targets") }
     }
 }

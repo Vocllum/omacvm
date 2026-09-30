@@ -6,3 +6,5 @@ mac/build/
 # local, machine-specific settings
 /config.local.*
 guest/notchcast/build/
+guest/bar/Bar.qml
+guest/bar/Bar.qml.orig

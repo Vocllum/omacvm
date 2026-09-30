@@ -44,6 +44,7 @@
 
 #define FRAME_MAGIC 0x4843544eu  // "NTCH" little-endian
 #define TEXT_MAGIC 0x5458544eu   // "NTXT"
+#define CURSOR_MAGIC 0x5255434eu // "NCUR"
 #define CURSOR_BEFORE 28         // logical px masked left of / above the hotspot
 #define CURSOR_AFTER 44          // logical px masked right of / below the hotspot
 
@@ -63,7 +64,7 @@ struct __attribute__((packed)) text_header {
     uint32_t len;
 };
 
-static const char *cfg_output, *cfg_host, *cfg_shell;
+static const char *cfg_output, *cfg_host, *cfg_shell, *cfg_screen;
 static int cfg_port;
 static int verbose;
 
@@ -212,6 +213,128 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
     return out;
 }
 
+// ------------------------------------------------------------- cursors --
+
+// Guest cursor images are sent to the helper so the strip shows the same
+// cursor as the VM. Xcursor files: "Xcur" header, TOC of (type, subtype, pos);
+// image chunks (type 0xfffd0002, subtype = nominal size) hold a 36-byte header
+// then width*height premultiplied ARGB32 pixels.
+static char *cursor_path(const char *name) {
+    const char *home = getenv("HOME");
+    const char *env_theme = getenv("XCURSOR_THEME");
+    const char *themes[] = {env_theme, "default", "Adwaita", NULL};
+    for (int t = 0; t < 3; t++) {
+        if (!themes[t] || !*themes[t]) continue;
+        const char *bases[] = {"%s/.local/share/icons/%s/cursors/%s", "%s/.icons/%s/cursors/%s",
+                               "/usr/share/icons/%s/cursors/%s"};
+        for (int b = 0; b < 3; b++) {
+            char *path = NULL;
+            int r = b < 2 ? asprintf(&path, bases[b], home ? home : "", themes[t], name)
+                          : asprintf(&path, bases[b], themes[t], name);
+            if (r > 0 && access(path, R_OK) == 0) return path;
+            free(path);
+        }
+    }
+    return NULL;
+}
+
+static void send_cursor(const char *label, const char *const names[], int nominal_wanted) {
+    char *path = NULL;
+    for (int i = 0; names[i] && !path; i++) path = cursor_path(names[i]);
+    if (!path) return;
+    FILE *f = fopen(path, "rb");
+    free(path);
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    uint8_t *d = size > 16 && size < (8 << 20) ? malloc((size_t)size) : NULL;
+    if (!d || fread(d, 1, (size_t)size, f) != (size_t)size || memcmp(d, "Xcur", 4)) {
+        free(d);
+        fclose(f);
+        return;
+    }
+    fclose(f);
+    uint32_t ntoc, best_pos = 0, best_nom = 0;
+    memcpy(&ntoc, d + 12, 4);
+    for (uint32_t i = 0; i < ntoc && 16 + (i + 1) * 12 <= (uint32_t)size; i++) {
+        uint32_t type, sub, pos;
+        memcpy(&type, d + 16 + i * 12, 4);
+        memcpy(&sub, d + 20 + i * 12, 4);
+        memcpy(&pos, d + 24 + i * 12, 4);
+        if (type != 0xfffd0002u) continue;
+        // Exact size if available, otherwise the smallest larger one, otherwise the largest.
+        int better = !best_nom || (sub == (uint32_t)nominal_wanted) ||
+                     (best_nom != (uint32_t)nominal_wanted &&
+                      ((sub > (uint32_t)nominal_wanted && (best_nom < (uint32_t)nominal_wanted || sub < best_nom)) ||
+                       (best_nom < (uint32_t)nominal_wanted && sub > best_nom)));
+        if (better) {
+            best_nom = sub;
+            best_pos = pos;
+        }
+    }
+    uint32_t hdr[9];
+    if (!best_nom || best_pos + 36 > (uint32_t)size) {
+        free(d);
+        return;
+    }
+    memcpy(hdr, d + best_pos, 36);
+    uint32_t w = hdr[4], h = hdr[5], xh = hdr[6], yh = hdr[7];
+    size_t pix = (size_t)w * h * 4;
+    if (w > 256 || h > 256 || best_pos + 36 + pix > (size_t)size) {
+        free(d);
+        return;
+    }
+    size_t nlen = strlen(label);
+    size_t body = 1 + nlen + 10 + pix;
+    uint8_t *msg = malloc(8 + body);
+    uint32_t magic = CURSOR_MAGIC, blen = (uint32_t)body;
+    memcpy(msg, &magic, 4);
+    memcpy(msg + 4, &blen, 4);
+    uint8_t *p = msg + 8;
+    *p++ = (uint8_t)nlen;
+    memcpy(p, label, nlen);
+    p += nlen;
+    uint16_t v[5] = {(uint16_t)w, (uint16_t)h, (uint16_t)xh, (uint16_t)yh, (uint16_t)best_nom};
+    memcpy(p, v, 10);
+    p += 10;
+    memcpy(p, d + best_pos + 36, pix);
+    pthread_mutex_lock(&lock);
+    if (sock_fd >= 0 && write_all(sock_fd, msg, 8 + body)) drop_socket_locked();
+    pthread_mutex_unlock(&lock);
+    free(msg);
+    free(d);
+}
+
+static void send_cursors(void) {
+    int size = getenv("XCURSOR_SIZE") ? atoi(getenv("XCURSOR_SIZE")) : 24;
+    if (size <= 0) size = 24;
+    int nominal = (int)(size * (scale100 / 100.0) + 0.5);
+    const char *arrow[] = {"default", "left_ptr", "arrow", NULL};
+    const char *hand[] = {"pointer", "hand2", "hand1", NULL};
+    send_cursor("arrow", arrow, nominal);
+    send_cursor("pointer", hand, nominal);
+}
+
+// Hides or shows the guest's own cursor (while the pointer is over the strip
+// the helper draws the cursor itself).
+static void set_guest_cursor_visible(int visible) {
+    const char *argv[] = {"hyprctl", "eval",
+                          visible ? "hl.config({ cursor = { invisible = false } })"
+                                  : "hl.config({ cursor = { invisible = true } })",
+                          NULL};
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        dup2(devnull, 0);
+        dup2(devnull, 1);
+        dup2(devnull, 2);
+        execvp(argv[0], (char **)argv);
+        _exit(127);
+    }
+    if (pid > 0) waitpid(pid, NULL, 0);
+}
+
 static int is_number(const char *s) {
     if (!s || !*s) return 0;
     char *end;
@@ -247,6 +370,10 @@ static void handle_command(char *line) {
             }
             free(out);
         }
+    } else if (!strcmp(c, "cursor") && argc == 2) {
+        set_guest_cursor_visible(!strcmp(argv[1], "1"));
+    } else if (!strcmp(c, "cursors") && argc == 1) {
+        send_cursors();
     } else if (!strcmp(c, "key") && argc == 1) {
         // Helper asks for a full frame (e.g. after it re-created its buffer).
         pthread_mutex_lock(&lock);
@@ -282,6 +409,7 @@ static void *net_thread(void *unused) {
         sock_fd = fd;
         if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
         pthread_mutex_unlock(&lock);
+        send_cursors();
 
         char buf[4096];
         size_t len = 0;
@@ -304,6 +432,7 @@ static void *net_thread(void *unused) {
             if (len >= sizeof buf - 1) len = 0;  // oversized line: discard
         }
         LOG("helper disconnected");
+        set_guest_cursor_visible(1);
         pthread_mutex_lock(&lock);
         if (sock_fd == fd) drop_socket_locked();
         else close(fd);
@@ -383,6 +512,109 @@ static int cursor_pos(double *x, double *y) {
     int ok = !json_int(j, "x", x) && !json_int(j, "y", y);
     free(j);
     return ok ? 0 : -1;
+}
+
+// ----------------------------------------------------- output keeper --
+
+// Reads one numeric field of the monitor object named `name` from a
+// `j/monitors all` reply. Returns -1 if absent. The search is limited to that
+// monitor's own JSON object (brace-matched), whose nested objects
+// (activeWorkspace, specialWorkspace) never contain the fields read here.
+static int monitor_field(const char *json, const char *name, const char *field, double *out) {
+    char pat[128];
+    snprintf(pat, sizeof pat, "\"name\": \"%s\"", name);
+    const char *p = strstr(json, pat);
+    if (!p) return -1;
+    const char *start = p;
+    while (start > json && *start != '{') start--;
+    if (*start != '{') return -1;
+    int depth = 0;
+    const char *end = start;
+    for (; *end; end++) {
+        if (*end == '{') depth++;
+        else if (*end == '}' && --depth == 0) break;
+    }
+    snprintf(pat, sizeof pat, "\"%s\": ", field);
+    size_t plen = strlen(pat);
+    for (const char *q = start; q + plen <= end; q++)
+        if (!memcmp(q, pat, plen)) {
+            *out = strtod(q + plen, NULL);
+            return 0;
+        }
+    return -1;
+}
+
+static void run_quiet(const char *const argv[]) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        int devnull = open("/dev/null", O_RDWR);
+        dup2(devnull, 0);
+        dup2(devnull, 1);
+        dup2(devnull, 2);
+        execvp(argv[0], (char **)argv);
+        _exit(127);
+    }
+    if (pid > 0) waitpid(pid, NULL, 0);
+}
+
+static double bar_size(void) {
+    char *st = ipc_call(1, "state", NULL, NULL, NULL);
+    double v = 26;
+    if (st) {
+        char *q = strstr(st, "\"barSize\":");
+        if (q) v = strtod(q + strlen("\"barSize\":"), NULL);
+        free(st);
+    }
+    return v > 0 && v < 200 ? v : 26;
+}
+
+// Keeps the hidden output present and exactly as wide as the display whose
+// bar it stands in for, overlapping that display's top edge. Overlapping keeps
+// it inside the existing layout, so absolute pointers keep their mapping.
+static void *keeper_thread(void *unused) {
+    (void)unused;
+    char last_applied[256] = "";
+    double last_apply_ms = -1e9;
+    int created_attempts = 0;
+    for (;;) {
+        char *j = hypr_request("j/monitors all");
+        if (j) {
+            double sx, sy, sw, ss, nx, ny, nw, nh, ns;
+            int have_screen = !monitor_field(j, cfg_screen, "x", &sx) && !monitor_field(j, cfg_screen, "y", &sy) &&
+                              !monitor_field(j, cfg_screen, "width", &sw) && !monitor_field(j, cfg_screen, "scale", &ss);
+            int have_notch = !monitor_field(j, cfg_output, "x", &nx) && !monitor_field(j, cfg_output, "y", &ny) &&
+                             !monitor_field(j, cfg_output, "width", &nw) && !monitor_field(j, cfg_output, "height", &nh) &&
+                             !monitor_field(j, cfg_output, "scale", &ns);
+            if (!have_notch && have_screen && created_attempts < 5) {
+                LOG("creating headless output %s", cfg_output);
+                const char *argv[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
+                run_quiet(argv);
+                created_attempts++;
+            } else if (have_notch && have_screen) {
+                created_attempts = 0;
+                double bs = bar_size();
+                int want_w = (int)(sw + 0.5), want_h = (int)(bs * ss + 0.5);
+                if ((int)nw != want_w || (int)nh != want_h || (int)nx != (int)sx || (int)ny != (int)sy ||
+                    ns < ss - 0.01 || ns > ss + 0.01) {
+                    char lua[256];
+                    snprintf(lua, sizeof lua,
+                             "hl.monitor({ output = \"%s\", mode = \"%dx%d@60\", position = \"%dx%d\", scale = %.3g })",
+                             cfg_output, want_w, want_h, (int)sx, (int)sy, ss);
+                    // Do not hammer Hyprland with a rule it keeps refusing.
+                    if (strcmp(lua, last_applied) || now_ms() - last_apply_ms > 30000) {
+                        LOG("resizing %s: %s", cfg_output, lua);
+                        const char *argv[] = {"hyprctl", "eval", lua, NULL};
+                        run_quiet(argv);
+                        snprintf(last_applied, sizeof last_applied, "%s", lua);
+                        last_apply_ms = now_ms();
+                    }
+                }
+            }
+            free(j);
+        }
+        sleep(2);
+    }
+    return NULL;
 }
 
 // ------------------------------------------------------------- wayland --
@@ -633,11 +865,16 @@ int main(int argc, char **argv) {
     cfg_output = getenv("NOTCHBAR_OUTPUT") ? getenv("NOTCHBAR_OUTPUT") : "NOTCH";
     cfg_host = getenv("NOTCHBAR_HOST") ? getenv("NOTCHBAR_HOST") : "10.211.55.2";
     cfg_port = getenv("NOTCHBAR_PORT") ? atoi(getenv("NOTCHBAR_PORT")) : 47811;
+    // The display whose bar is parked while the strip shows (the built-in one).
+    cfg_screen = getenv("NOTCHBAR_SCREEN") ? getenv("NOTCHBAR_SCREEN") : "Virtual-1";
     const char *op = getenv("OMARCHY_PATH") ? getenv("OMARCHY_PATH") : "/usr/share/omarchy";
     if (asprintf((char **)&cfg_shell, "%s/shell", op) < 0) return 1;
 
-    pthread_t th;
+    set_guest_cursor_visible(1);
+    pthread_t th, keeper;
     pthread_create(&th, NULL, net_thread, NULL);
+    pthread_create(&keeper, NULL, keeper_thread, NULL);
+    if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
 
     for (;;) {
         dpy = wl_display_connect(NULL);

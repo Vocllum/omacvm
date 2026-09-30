@@ -8,6 +8,8 @@ enum GuestMessage {
     case frame
     /// A text reply, e.g. `targets [[x,y,w,h],...]`.
     case text(String)
+    /// A guest cursor image ("arrow", "pointer"): premultiplied BGRA pixels.
+    case cursor(name: String, image: CGImage, hotSpot: CGPoint, nominalSize: Int)
 }
 
 /// Parses the byte stream from `notchcast` and keeps the bar image.
@@ -20,6 +22,7 @@ enum GuestMessage {
 final class GuestStream {
     static let frameMagic: UInt32 = 0x4843_544E
     static let textMagic: UInt32 = 0x5458_544E
+    static let cursorMagic: UInt32 = 0x5255_434E
     static let frameHeaderSize = 28
 
     private var pending = Data()
@@ -48,6 +51,13 @@ final class GuestStream {
                 let body = pending.subdata(in: pending.startIndex + 8 ..< pending.startIndex + 8 + len)
                 out.append(.text(String(decoding: body, as: UTF8.self)))
                 pending.removeFirst(8 + len)
+            } else if magic == Self.cursorMagic {
+                let len = Int(pending.readUInt32(at: 4))
+                guard len < 1 << 20 else { throw StreamError.corrupt("cursor too long") }
+                guard pending.count >= 8 + len else { break }
+                let body = pending.subdata(in: pending.startIndex + 8 ..< pending.startIndex + 8 + len)
+                pending.removeFirst(8 + len)
+                if let c = Self.parseCursor(body) { out.append(c) }
             } else if magic == Self.frameMagic {
                 guard pending.count >= Self.frameHeaderSize else { break }
                 let fullW = Int(pending.readUInt16(at: 8)), fullH = Int(pending.readUInt16(at: 10))
@@ -110,6 +120,27 @@ final class GuestStream {
             }
         }
         if x == 0, y == 0, w == fullW, h == fullH { hasImage = true }
+    }
+
+    /// Cursor body: u8 name length, name, u16 width, height, x hot, y hot,
+    /// nominal size, then width*height premultiplied ARGB32 (BGRA bytes).
+    private static func parseCursor(_ body: Data) -> GuestMessage? {
+        guard let nameLen = body.first.map(Int.init), body.count >= 1 + nameLen + 10 else { return nil }
+        let name = String(decoding: body.subdata(in: body.startIndex + 1 ..< body.startIndex + 1 + nameLen), as: UTF8.self)
+        let o = 1 + nameLen
+        let w = Int(body.readUInt16(at: o)), h = Int(body.readUInt16(at: o + 2))
+        let xh = Int(body.readUInt16(at: o + 4)), yh = Int(body.readUInt16(at: o + 6))
+        let nominal = Int(body.readUInt16(at: o + 8))
+        let start = body.startIndex + o + 10
+        guard w > 0, h > 0, body.count - (o + 10) == w * h * 4,
+              let provider = CGDataProvider(data: body.subdata(in: start ..< start + w * h * 4) as CFData),
+              let image = CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: w * 4,
+                                  space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                      | CGBitmapInfo.byteOrder32Little.rawValue),
+                                  provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { return nil }
+        return .cursor(name: name, image: image, hotSpot: CGPoint(x: xh, y: yh), nominalSize: nominal)
     }
 
     /// The current bar image (BGRX, sRGB).
