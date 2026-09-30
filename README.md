@@ -154,7 +154,7 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 | `NOTCHBAR_PORT` | `47811` | |
 | `NOTCHBAR_OUTPUT` | `NOTCH` | name of the invisible monitor |
 | `NOTCHBAR_SCREEN` | `Virtual-1` | the built-in display's output |
-| `NOTCHBAR_FOLLOW_MODE` | on under QEMU (UTM) | `1`/`0`: keep the display at the size UTM gives it (its window size), which Hyprland does not pick up by itself |
+| `NOTCHBAR_FOLLOW_MODE` | on under QEMU (UTM) | `1`/`0`: when UTM resizes the display to its window while running, apply and keep that size (Hyprland does not pick it up by itself) |
 
 ## Good to know
 

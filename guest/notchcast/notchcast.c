@@ -802,7 +802,10 @@ static double bar_size(void) {
 // UTM resizes the guest display to its window: the virtio-gpu connector gets
 // a new preferred mode. Hyprland neither picks that up (it even keeps the old
 // mode list) nor keeps it across a config reload that re-applies a fixed mode.
-// So the display is kept at the preferred mode, on QEMU (UTM) by default.
+// So once the preferred mode changes while running, the display is kept at it.
+// The preferred mode seen at startup is not trusted: UTM starts a VM with the
+// size of its previous run, which may not fit the window any more, and the
+// user's monitor configuration knows better. On QEMU (UTM) by default.
 // NOTCHBAR_FOLLOW_MODE=1/on or 0/off forces it (Parallels has its own tools).
 static int follow_modes(void) {
     static int v = -1;
@@ -845,8 +848,20 @@ static int whole(double v) { return fabs(v - round(v)) < 0.01; }
 static void follow_preferred_mode(const char *monitors_json) {
     static char last_applied[256];
     static double last_ms = -1e9;
+    static int seen_w, seen_h, following;
     int w, h;
     if (!follow_modes() || !preferred_mode(&w, &h)) return;
+    if (!seen_w) {
+        seen_w = w;
+        seen_h = h;
+        return;
+    }
+    if (w != seen_w || h != seen_h) {
+        seen_w = w;
+        seen_h = h;
+        following = 1;
+    }
+    if (!following) return;
     double cw, ch, x, y, s, r;
     if (monitor_field(monitors_json, cfg_screen, "width", &cw) || monitor_field(monitors_json, cfg_screen, "height", &ch) ||
         monitor_field(monitors_json, cfg_screen, "x", &x) || monitor_field(monitors_json, cfg_screen, "y", &y) ||
