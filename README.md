@@ -1,4 +1,4 @@
-<h1 align="center">omarchy-notch-bar</h1>
+<h1 align="center">omarchy-mac-vm-notch-bar</h1>
 
 <p align="center"><b>Your Omarchy bar, living next to the MacBook notch — where Parallels leaves a black hole.</b></p>
 

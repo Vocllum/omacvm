@@ -1,5 +1,5 @@
 #!/bin/bash
-# Remove the guest side of omarchy-notch-bar. Run inside the Omarchy VM as the
+# Remove the guest side of omarchy-mac-vm-notch-bar. Run inside the Omarchy VM as the
 # desktop user. The bar clone in ~/.config/omarchy/plugins/$USER.bar is kept
 # (switch back with `omarchy bar use omarchy.bar`, then delete it if you like),
 # unless you pass --remove-bar-clone.

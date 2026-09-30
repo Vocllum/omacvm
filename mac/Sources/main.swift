@@ -1,6 +1,6 @@
 import AppKit
 
-/// omarchy-notch-bar macOS helper.
+/// omarchy-mac-vm-notch-bar macOS helper.
 ///
 /// Shows the real Omarchy bar, streamed from the VM, in the MacBook notch strip
 /// while the VM is full screen on the built-in display, and sends clicks and

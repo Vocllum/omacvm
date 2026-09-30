@@ -26,7 +26,7 @@ are large enough to matter.
 | 120 Hz on the built-in display | — | ✅ | ✅ |
 | External monitor | — | ✅ GPU-accelerated, follows the macOS arrangement and scaling, plug/unplug handled | ⚠️ flickers magenta above 1280×800 (see below) |
 | Clipboard Mac ↔ VM | — | ✅ with a small helper for VM → Mac | ✅ (guest agent) |
-| Notch area in full screen | — | ❌ black (hence omarchy-notch-bar) | ❌ black on macOS 15; an option exists on macOS 27 |
+| Notch area in full screen | — | ❌ black (hence omarchy-mac-vm-notch-bar) | ❌ black on macOS 15; an option exists on macOS 27 |
 
 **Verdict:** Parallels runs Omarchy at practically native CPU speed, is much
 faster in the browser and handles a second monitor properly. UTM is free and
@@ -113,7 +113,7 @@ Neither hypervisor uses the strip beside the camera housing in full screen on
 macOS 15. Parallels has no option for it and says it avoids that area on
 purpose; macOS does not let another app move Parallels' window there. UTM
 5.0.6 adds an opt-in "use the area beside the camera housing" on macOS 27
-only. [omarchy-notch-bar](../README.md) works around it for Parallels.
+only. [omarchy-mac-vm-notch-bar](../README.md) works around it for Parallels.
 
 ## How the numbers were taken
 

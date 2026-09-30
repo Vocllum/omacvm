@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Patch a clone of Omarchy's bar (Bar.qml) for omarchy-notch-bar.
+"""Patch a clone of Omarchy's bar (Bar.qml) for omarchy-mac-vm-notch-bar.
 
 usage: apply-patch.py <Bar.qml>        (patches the file in place)
 

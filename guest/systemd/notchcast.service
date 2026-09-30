@@ -1,6 +1,6 @@
 [Unit]
-Description=omarchy-notch-bar: stream the Omarchy bar to the macOS notch helper
-Documentation=https://github.com/gillesgoetsch/omarchy-notch-bar
+Description=omarchy-mac-vm-notch-bar: stream the Omarchy bar to the macOS notch helper
+Documentation=https://github.com/gillesgoetsch/omarchy-mac-vm-notch-bar
 After=graphical-session.target
 PartOf=graphical-session.target
 

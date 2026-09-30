@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" width="1000" height="560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
   <!--
-    omarchy-notch-bar — how it works (animated, 10 s loop)
+    omarchy-mac-vm-notch-bar — how it works (animated, 10 s loop)
     0.0-2.0 s  the notch strip is black (Parallels leaves it unused)
     1.5-4.0 s  the bar is rendered on an invisible monitor and streamed over
     3.6 s      the bar appears in the strip

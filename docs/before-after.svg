@@ -33,7 +33,7 @@
   <text x="250" y="364" text-anchor="middle" font-size="13" fill="#c6c9d6">takes another row of your screen.</text>
 
   <!-- after -->
-  <text x="750" y="36" text-anchor="middle" font-size="16" font-weight="600" fill="#e8e9f0">+ omarchy-notch-bar</text>
+  <text x="750" y="36" text-anchor="middle" font-size="16" font-weight="600" fill="#e8e9f0">+ omarchy-mac-vm-notch-bar</text>
   <rect x="540" y="52" width="420" height="270" rx="16" fill="#1c1e26" stroke="#3b3f4d" stroke-width="2"/>
   <rect x="550" y="62" width="400" height="250" rx="8" fill="url(#wall2)"/>
   <rect x="550" y="62" width="400" height="18" fill="#faf4ed"/>

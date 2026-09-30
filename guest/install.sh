@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install the guest side of omarchy-notch-bar. Run inside the Omarchy VM as the
+# Install the guest side of omarchy-mac-vm-notch-bar. Run inside the Omarchy VM as the
 # desktop user (not root), from a checkout of this repository.
 #
 #   ./guest/install.sh
