@@ -1,0 +1,18 @@
+#!/bin/bash
+# Omaparallels: Omarchy's nightlight toggle (Super+Ctrl+N, the menu) drives the
+# Mac's Night Shift instead of hyprsunset, so the whole screen is tinted once,
+# on the Mac's schedule and strength. Installed to /usr/local/bin, ahead of
+# Omarchy's own /usr/bin/omarchy-toggle-nightlight on PATH.
+#   omarchy-toggle-nightlight            toggle
+#   omarchy-toggle-nightlight --status   {"enabled": bool, "temperature": null}
+set -euo pipefail
+if [[ ${1:-} == --status ]]; then
+  omaparallels-bridge display | jq -c '{enabled: (.night_shift.enabled // false), temperature: null}'
+  exit 0
+fi
+state=$(omaparallels-bridge night-shift toggle | jq -r '.night_shift.enabled')
+if [[ $state == true ]]; then
+  omarchy-notification-send -u low "  Night Shift on (Mac)" 2>/dev/null || true
+else
+  omarchy-notification-send -u low "  Night Shift off (Mac)" 2>/dev/null || true
+fi

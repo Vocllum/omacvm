@@ -127,7 +127,7 @@ final class WiFi: NSObject, CWEventDelegate {
 
   func state(locationOK: Bool) -> [String: Any] {
     let detail = ["ssid", "bssid", "rssi", "noise", "snr", "quality", "channel", "security", "secure",
-                  "tx_rate_mbps", "phy_mode"]
+                  "tx_rate_mbps", "phy_mode", "can_share"]
     var s: [String: Any] = ["location_authorized": locationOK]
     for k in detail { s[k] = NSNull() }
     guard let i = client.interface() else {
@@ -148,6 +148,7 @@ final class WiFi: NSObject, CWEventDelegate {
       s["rssi"] = rssi; s["noise"] = noise; s["snr"] = rssi - noise; s["quality"] = quality(rssi)
       s["channel"] = channelInfo(channel)
       s["security"] = securityName(sec); s["secure"] = sec != .none
+      s["can_share"] = shareableSecurity.contains(securityName(sec))   // QR sharing via /wifi/password
       s["tx_rate_mbps"] = i.transmitRate()
       s["phy_mode"] = nn(phyNames[i.activePHYMode().rawValue])
     }

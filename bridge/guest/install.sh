@@ -4,6 +4,7 @@
 #   ./install.sh <desktop-user>
 # Idempotent. Installs:
 #   /usr/local/bin/omaparallels-bridge, /usr/local/bin/omaparallels-bridge-osd
+#   /usr/local/bin/omarchy-toggle-nightlight (Super+Ctrl+N drives the Mac's Night Shift)
 #   user service omaparallels-bridge-osd (Omarchy OSD for the Mac's media keys)
 #   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
 #   the bar widgets in ../plugins (omaparallels.wifi, omaparallels.audio)
@@ -14,7 +15,7 @@ U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 as_user() { sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" "$@"; }
 
-install -m755 omaparallels-bridge omaparallels-bridge-osd /usr/local/bin/
+install -m755 omaparallels-bridge omaparallels-bridge-osd omarchy-toggle-nightlight /usr/local/bin/
 install -m644 omaparallels-bridge-osd.service /etc/systemd/user/omaparallels-bridge-osd.service
 systemctl --user -M "$U@" daemon-reload
 systemctl --user -M "$U@" enable omaparallels-bridge-osd.service >/dev/null 2>&1

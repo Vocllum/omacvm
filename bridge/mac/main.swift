@@ -13,7 +13,12 @@
 //   POST /audio/mute       {"muted": true|false|"toggle"}        [+ "scope": "input"]
 //   POST /audio/output     {"uid": "<device UID>"}
 //   POST /audio/input      {"uid": "<device UID>"}
-//   GET  /events           Server-Sent Events: "wifi" and "audio" on every change
+//   GET  /display          built-in display brightness, Night Shift, True Tone
+//   POST /display/brightness   {"brightness": 0..1} or {"delta": -1..1}
+//   POST /display/night-shift  {"enabled": true|false|"toggle", "strength": 0..1}
+//   POST /display/true-tone    {"enabled": true|false|"toggle"}
+//   GET  /wifi/password[?ssid=]  saved password + QR string (macOS asks first)
+//   GET  /events           Server-Sent Events: "wifi", "audio" and "display" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
 //                          light changes (keys.swift), ": ping" every 15 s
@@ -83,6 +88,7 @@ let audio = Audio()
 let hub = Hub([
   Feed(event: "wifi", delay: 0.3, read: { wifi.state(locationOK: location.authorized) }, describe: describeWiFi),
   Feed(event: "audio", delay: 0.05, read: { audio.state() }, describe: describeAudio),
+  Feed(event: "display", delay: 0.1, read: { displayState() }, describe: describeDisplay),
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let server = Server { fd, peer in handle(fd, peer: peer) }
@@ -94,6 +100,7 @@ log("starting (pid \(getpid()), token \(tokenPath))")
 location.onChange = { hub.changed("wifi", why: "location") }
 wifi.onEvent = { why in why == "scan-cache" ? scanner.cacheUpdated() : hub.changed("wifi", why: why) }
 audio.onChange = { why in hub.changed("audio", why: why); osdEvents.audioChanged() }
+NightShift.onChange { hub.changed("display", why: "night-shift") }
 wifi.start()
 audio.start()
 location.start()

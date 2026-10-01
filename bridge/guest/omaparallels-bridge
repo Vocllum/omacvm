@@ -1,10 +1,14 @@
 #!/bin/bash
-# omaparallels-bridge (guest side): small client for the Mac helper (tools/omaparallels-bridge/mac).
-#   omaparallels-bridge state | scan [--cached] | audio | events
+# omaparallels-bridge (guest side): small client for the Omaparallels Bridge on the Mac.
+#   omaparallels-bridge state | scan [--cached] | audio | display | events
 #   omaparallels-bridge volume +5 | -5 | 40        percent; +/- = relative, unmutes when raising
 #   omaparallels-bridge mute [on|off|toggle]       default: toggle
 #   omaparallels-bridge mic-volume 60 | mic-mute [on|off|toggle]
 #   omaparallels-bridge output <uid> | input <uid> (UIDs: omaparallels-bridge audio | jq '.devices')
+#   omaparallels-bridge brightness +5 | -5 | 40    the Mac's built-in display
+#   omaparallels-bridge night-shift [on|off|toggle] [strength 0-100]
+#   omaparallels-bridge true-tone [on|off|toggle]
+#   omaparallels-bridge password [ssid]            Wi-Fi password + QR string (the Mac asks first)
 # Env: OMAPARALLELS_BRIDGE_URL (default http://10.211.55.2:47831),
 #      OMAPARALLELS_BRIDGE_TOKEN_FILE (default ~/.config/omaparallels-bridge/token)
 set -euo pipefail
@@ -15,27 +19,41 @@ TOKEN_FILE=${OMAPARALLELS_BRIDGE_TOKEN_FILE:-$HOME/.config/omaparallels-bridge/t
 req() { curl -sS --fail-with-body -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") "$@"; echo; }
 post() { req -X POST -H 'Content-Type: application/json' -d "$2" "$URL$1"; }
 frac() { awk -v p="$1" 'BEGIN { printf "%.4f", p / 100 }'; }
-check_mute() { [[ ${1:-toggle} =~ ^(on|off|toggle)$ ]] || { echo "mute: on, off or toggle" >&2; exit 2; }; }
-mute_json() {
+check_switch() { [[ ${2:-toggle} =~ ^(on|off|toggle)$ ]] || { echo "$1: on, off or toggle" >&2; exit 2; }; }
+switch_json() {
   case ${1:-toggle} in on) echo true ;; off) echo false ;; *) echo '"toggle"' ;; esac
 }
-check_percent() { [[ $1 =~ ^[+-]?[0-9]+(\.[0-9]+)?$ ]] || { echo "volume: a number in percent, e.g. +5, -5 or 40" >&2; exit 2; }; }
-volume_json() {
-  case $1 in
-    +*|-*) echo "{\"delta\": $(frac "$1")$2}" ;;
-    *) echo "{\"volume\": $(frac "$1")$2}" ;;
+check_percent() { [[ $2 =~ ^[+-]?[0-9]+(\.[0-9]+)?$ ]] || { echo "$1: a number in percent, e.g. +5, -5 or 40" >&2; exit 2; }; }
+level_json() {   # <key> <percent> [extra json]
+  case $2 in
+    +*|-*) echo "{\"delta\": $(frac "$2")${3:-}}" ;;
+    *) echo "{\"$1\": $(frac "$2")${3:-}}" ;;
   esac
 }
+urlencode() { jq -rn --arg s "$1" '$s | @uri'; }
 
 case ${1:-} in
   state) req "$URL/state" ;;
   scan) [[ ${2:-} == --cached ]] && req "$URL/scan?cached=1" || req "$URL/scan" ;;
   audio) req "$URL/audio" ;;
+  display) req "$URL/display" ;;
   events) req -N "$URL/events" ;;
-  volume) check_percent "${2:-}"; post /audio/volume "$(volume_json "$2" "")" ;;
-  mute) check_mute "${2:-}"; post /audio/mute "{\"muted\": $(mute_json "${2:-}")}" ;;
-  mic-volume) check_percent "${2:-}"; post /audio/volume "$(volume_json "$2" ', "scope": "input"')" ;;
-  mic-mute) check_mute "${2:-}"; post /audio/mute "{\"muted\": $(mute_json "${2:-}"), \"scope\": \"input\"}" ;;
+  volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
+  mute) check_switch mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}")}" ;;
+  mic-volume) check_percent mic-volume "${2:-}"; post /audio/volume "$(level_json volume "$2" ', "scope": "input"')" ;;
+  mic-mute) check_switch mic-mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}"), \"scope\": \"input\"}" ;;
   output|input) post "/audio/$1" "{\"uid\": \"${2:?device uid}\"}" ;;
-  *) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  brightness) check_percent brightness "${2:-}"; post /display/brightness "$(level_json brightness "$2")" ;;
+  night-shift)
+    body="{"
+    if [[ ${2:-} == strength ]]; then
+      check_percent strength "${3:-}"; body+="\"strength\": $(frac "$3")"
+    else
+      check_switch night-shift "${2:-}"; body+="\"enabled\": $(switch_json "${2:-}")"
+      [[ ${3:-} == strength ]] && { check_percent strength "${4:-}"; body+=", \"strength\": $(frac "$4")"; }
+    fi
+    post /display/night-shift "$body}" ;;
+  true-tone) check_switch true-tone "${2:-}"; post /display/true-tone "{\"enabled\": $(switch_json "${2:-}")}" ;;
+  password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
+  *) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

@@ -220,15 +220,23 @@ func handle(_ fd: Int32, peer: String) {
     respond(fd, code, body)
   case ("GET", "/audio"):
     respond(fd, 200, hub.current("audio"))
+  case ("GET", "/display"):
+    respond(fd, 200, hub.current("display"))
+  case ("GET", "/wifi/password"):
+    let ssid = query.first { $0.name == "ssid" }?.value.flatMap { $0.isEmpty ? nil : $0 }
+    do { respond(fd, 200, try wifiPassword(ssid: ssid, peer: peer)) }
+    catch let e as APIError { respond(fd, e.status, ["error": e.message]) }
+    catch { respond(fd, 500, ["error": "\(error)"]) }
   case ("GET", "/events"):
     hub.addClient(fd, peer: peer)
-  case ("POST", let p) where p.hasPrefix("/audio/"):
+  case ("POST", let p) where p.hasPrefix("/audio/") || p.hasPrefix("/display/"):
     guard let obj = (body.isEmpty ? [:] : try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
       respond(fd, 400, ["error": "body must be a JSON object"]); return
     }
     do {
-      log("\(p) from \(peer): \(try audioControl(p, obj))")
-      respond(fd, 200, hub.current("audio"))   // also pushes the change to /events clients
+      let audioPath = p.hasPrefix("/audio/")
+      log("\(p) from \(peer): \(try audioPath ? audioControl(p, obj) : displayControl(p, obj))")
+      respond(fd, 200, hub.current(audioPath ? "audio" : "display"))   // also pushes the change to /events clients
     } catch let e as APIError {
       log("\(p) from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
@@ -237,7 +245,7 @@ func handle(_ fd: Int32, peer: String) {
     }
   case ("POST", "/power"), ("POST", "/join"), ("POST", "/disconnect"):
     respond(fd, 501, ["error": "Wi-Fi control is not implemented yet (stage 2)"])
-  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/events"):
+  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/wifi/password"), (_, "/events"):
     respond(fd, 405, ["error": "method not allowed"])
   default:
     respond(fd, 404, ["error": "not found"])
