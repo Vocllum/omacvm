@@ -123,7 +123,17 @@ When it is done, once on the Mac:
 3. **UTM:** keep UTM in the foreground app list (started from the Dock or
    Spotlight); UTM launched in the background runs the VM several times slower.
 
-Put the VM in full screen for the trackpad gestures and media keys.
+Put the VM in full screen for the trackpad gestures and media keys. While it
+is full screen and in front, the Mac's trackpad gestures and ⌘ shortcuts go to
+Omarchy, and macOS's own Spaces swipe is off. **⌃⌥⌘ Esc** hands the trackpad
+back to macOS (Omarchy shows a notification), so you can swipe to your other
+Spaces; coming back to the full-screen VM captures it again. Volume and
+brightness keys always change the Mac, with Omarchy's popup while you are in
+the VM.
+
+<p align="center">
+  <img src="docs/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
+</p>
 
 ## Update
 
