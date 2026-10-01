@@ -1,0 +1,12 @@
+[Unit]
+Description=trackpad-bridge: Mac trackpad gestures on a virtual touchpad
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/trackpad-bridge
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

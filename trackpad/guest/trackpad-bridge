@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""trackpad-bridge (guest side): replays the Mac trackpad's multi-finger
+gestures on a virtual touchpad, so libinput/Hyprland see 3/4-finger swipes and
+pinch/rotate like on a real Apple touchpad.
+
+Connects to the Mac helper (tools/trackpad-bridge/mac) on the Parallels host
+address and reads lines:
+  F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
+  S <on|off|esc>                    capture state (esc = released by the escape combo)
+
+The helper only sends 3+-finger frames and 2-finger pinches; one-finger
+movement, clicks and two-finger scrolling keep coming from Parallels' own
+virtual mouse. Runs as root (uinput); posts a notification to the desktop user
+when the escape combo is used.
+"""
+import glob
+import os
+import pwd
+import socket
+import subprocess
+import sys
+import time
+
+from evdev import AbsInfo, UInput, ecodes as e
+
+HOST = os.environ.get("TRACKPAD_BRIDGE_HOST", "10.211.55.2")
+PORT = int(os.environ.get("TRACKPAD_BRIDGE_PORT", "47830"))
+USER = os.environ.get("TRACKPAD_BRIDGE_USER", "")   # default: whoever owns the Wayland session
+# Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm.
+W, H, RES = 15600, 9600, 100
+SLOTS = 10
+TOOLS = [e.BTN_TOOL_FINGER, e.BTN_TOOL_DOUBLETAP, e.BTN_TOOL_TRIPLETAP, e.BTN_TOOL_QUADTAP, e.BTN_TOOL_QUINTTAP]
+
+
+def make_device():
+    caps = {
+        e.EV_KEY: [e.BTN_LEFT, e.BTN_TOUCH] + TOOLS,
+        e.EV_ABS: [
+            (e.ABS_X, AbsInfo(0, 0, W, 0, 0, RES)),
+            (e.ABS_Y, AbsInfo(0, 0, H, 0, 0, RES)),
+            (e.ABS_MT_SLOT, AbsInfo(0, 0, SLOTS - 1, 0, 0, 0)),
+            (e.ABS_MT_TRACKING_ID, AbsInfo(0, 0, 65535, 0, 0, 0)),
+            (e.ABS_MT_POSITION_X, AbsInfo(0, 0, W, 0, 0, RES)),
+            (e.ABS_MT_POSITION_Y, AbsInfo(0, 0, H, 0, 0, RES)),
+        ],
+    }
+    # Apple vendor id, Magic Trackpad (USB-C) product id: libinput applies its
+    # Apple touchpad handling. INPUT_PROP_BUTTONPAD = clickpad.
+    return UInput(caps, name="Apple Inc. Magic Trackpad (trackpad-bridge)", vendor=0x05AC, product=0x0324,
+                  version=0x0111, bustype=e.BUS_USB, input_props=[e.INPUT_PROP_POINTER, e.INPUT_PROP_BUTTONPAD])
+
+
+class Touchpad:
+    def __init__(self, ui):
+        self.ui = ui
+        self.slots = {}          # mac contact id -> slot
+        self.next_tid = 1
+        self.tool = None
+
+    def frame(self, contacts):
+        ui = self.ui
+        ids = {c[0] for c in contacts}
+        for cid in [c for c in self.slots if c not in ids]:          # lifted fingers
+            ui.write(e.EV_ABS, e.ABS_MT_SLOT, self.slots.pop(cid))
+            ui.write(e.EV_ABS, e.ABS_MT_TRACKING_ID, -1)
+        free = [s for s in range(SLOTS) if s not in self.slots.values()]
+        for cid, x, y in contacts:
+            if cid not in self.slots:
+                if not free:
+                    continue
+                self.slots[cid] = free.pop(0)
+                ui.write(e.EV_ABS, e.ABS_MT_SLOT, self.slots[cid])
+                ui.write(e.EV_ABS, e.ABS_MT_TRACKING_ID, self.next_tid)
+                self.next_tid = self.next_tid % 65535 + 1
+            ui.write(e.EV_ABS, e.ABS_MT_SLOT, self.slots[cid])
+            ui.write(e.EV_ABS, e.ABS_MT_POSITION_X, x)
+            ui.write(e.EV_ABS, e.ABS_MT_POSITION_Y, y)
+        n = len(self.slots)
+        tool = TOOLS[min(n, 5) - 1] if n else None
+        if tool != self.tool:
+            if self.tool is not None:
+                ui.write(e.EV_KEY, self.tool, 0)
+            if tool is not None:
+                ui.write(e.EV_KEY, tool, 1)
+            if (self.tool is None) != (tool is None):
+                ui.write(e.EV_KEY, e.BTN_TOUCH, 1 if tool else 0)
+            self.tool = tool
+        if contacts:
+            ui.write(e.EV_ABS, e.ABS_X, contacts[0][1])
+            ui.write(e.EV_ABS, e.ABS_Y, contacts[0][2])
+        ui.syn()
+
+    def release(self):
+        if self.slots or self.tool:
+            self.frame([])
+
+
+def desktop_user():
+    """TRACKPAD_BRIDGE_USER, else the owner of the running Wayland session."""
+    if USER:
+        return USER
+    for sock in glob.glob("/run/user/*/wayland-*"):
+        if not sock.endswith(".lock"):
+            return pwd.getpwuid(os.stat(sock).st_uid).pw_name
+    return None
+
+
+def notify(text):
+    user = desktop_user()
+    if not user:
+        return
+    uid = subprocess.run(["id", "-u", user], capture_output=True, text=True).stdout.strip()
+    if not uid:
+        return
+    env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=f"unix:path=/run/user/{uid}/bus", XDG_RUNTIME_DIR=f"/run/user/{uid}")
+    subprocess.Popen(["runuser", "-u", user, "--", "notify-send", "-a", "Trackpad", "-t", "2500", text],
+                     env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def run(pad):
+    with socket.create_connection((HOST, PORT), timeout=5) as s:
+        s.settimeout(None)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        print(f"trackpad-bridge: connected to {HOST}:{PORT}", flush=True)
+        buf = b""
+        while True:
+            data = s.recv(65536)
+            if not data:
+                raise ConnectionError("helper closed the connection")
+            buf += data
+            *lines, buf = buf.split(b"\n")
+            for line in lines:
+                p = line.split()
+                if not p:
+                    continue
+                if p[0] == b"F":
+                    n = int(p[1])
+                    contacts = []
+                    for i in range(n):
+                        cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
+                        contacts.append((cid, round(min(max(x, 0.0), 1.0) * W), round(min(max(y, 0.0), 1.0) * H)))
+                    pad.frame(contacts)
+                elif p[0] == b"S":
+                    state = p[1].decode()
+                    print(f"trackpad-bridge: capture {state}", flush=True)
+                    if state != "on":
+                        pad.release()
+                    if state == "esc":
+                        notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
+
+
+def main():
+    ui = make_device()
+    pad = Touchpad(ui)
+    print(f"trackpad-bridge: virtual touchpad {ui.device.path}", flush=True)
+    while True:
+        try:
+            run(pad)
+        except (OSError, ConnectionError, ValueError, IndexError) as err:
+            pad.release()
+            print(f"trackpad-bridge: {err}; retrying", file=sys.stderr, flush=True)
+            time.sleep(2)
+
+
+if __name__ == "__main__":
+    main()
