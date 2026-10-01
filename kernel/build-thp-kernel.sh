@@ -20,7 +20,8 @@ for f in linux.preset linux-aarch64.install $(sed -n "/^source=(/,/)/p" PKGBUILD
 done
 python3 "$here/thp-pkgbuild.py" "$W"
 chown -R "$U:$U" "$W"
-sudo -u "$U" makepkg --noconfirm --cleanbuild
+# makepkg builds with one job unless told otherwise: use every vCPU.
+sudo -u "$U" env MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --cleanbuild
 pacman -U --noconfirm "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.*
 
 # GRUB: boot the THP kernel by default.
