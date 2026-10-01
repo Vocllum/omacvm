@@ -43,7 +43,7 @@ on every display. **UTM is free** and gets almost everything else.
 | Trackpad gestures (OmacVM Gestures) | ✓ | ✓ |
 | Bar beside the notch ([Omanotch](https://github.com/gillesgoetsch/omanotch)) | ✓ | ✓ |
 | Wallpaper follows the Omarchy theme | ✓ | ✓ |
-| Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE agent) |
+| Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE daemon + OmacVM's Wayland agent) |
 | THP kernel, memory tuning, snapshots in GRUB, keyboard, Cmd+V | ✓ | ✓ |
 | Smooth scrolling with macOS inertia | ✓ | UTM's own scrolling |
 | Omarchy Dock icon for the VM | ✓ | UTM's icon |
@@ -214,7 +214,8 @@ and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team,
 [omarchy-parallels](https://github.com/vincenzopalazzo/omarchy-parallels) by
 Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
 [omarchy-arm-utm](https://github.com/ggalancs/omarchy-arm-utm), whose UTM
-findings (virtio-gpu settings, UTM's scripting) shaped the UTM route. The bar
+findings (virtio-gpu settings, UTM's scripting) shaped the UTM route and
+whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The bar
 widgets are clones of Omarchy's own. OmacVM is a community project, not
 affiliated with the Omarchy team, Parallels, UTM or Apple.
 

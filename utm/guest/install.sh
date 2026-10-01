@@ -2,7 +2,9 @@
 # UTM specifics, guest side. Run as root inside the VM:
 #   ./install.sh <desktop-user> <WIDTHxHEIGHT@HZ>
 # (apply.sh passes the Mac's built-in display below the notch, display/mac-display.swift)
-#  * UTM's guest tools: SPICE agent (clipboard both ways) and the QEMU guest
+#  * UTM's guest tools: the SPICE daemon with OmacVM's Wayland session agent
+#    (clipboard both ways, pointer over the whole screen; the stock agent is
+#    X11-only and sizes the pointer wrong under Hyprland) and the QEMU guest
 #    agent (utmctl ip-address / exec / file push)
 #  * virtio-gpu workarounds for Hyprland
 #  * a fixed display mode from boot: UTM's GPU path goes blank when the mode
@@ -11,8 +13,18 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user> <WxH@Hz>}; MODE=${2:?display mode}
 H=$(getent passwd "$U" | cut -d: -f6)
-pacman -S --needed --noconfirm spice-vdagent qemu-guest-agent >/dev/null 2>&1
+pacman -S --needed --noconfirm spice-vdagent qemu-guest-agent wl-clipboard python >/dev/null 2>&1
 systemctl enable --now qemu-guest-agent spice-vdagentd >/dev/null 2>&1 || true
+install -m755 omacvm-vdagent /usr/local/bin/omacvm-vdagent
+install -m644 omacvm-vdagent.service /etc/systemd/user/omacvm-vdagent.service
+systemctl --global mask spice-vdagent.service >/dev/null 2>&1
+systemctl --global enable omacvm-vdagent.service >/dev/null 2>&1
+# swap agents in a running session too
+if R=/run/user/$(id -u "$U") && [[ -S $R/bus ]]; then
+  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user daemon-reload
+  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user stop spice-vdagent.service 2>/dev/null || true
+  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user restart omacvm-vdagent.service 2>/dev/null || true
+fi
 install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
 
 M=$H/.config/hypr/monitors.lua
