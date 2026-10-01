@@ -65,7 +65,13 @@ static const char *listenAddrs[] = { "10.211.55.2", "192.168.64.1" };
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
 
 static volatile int frontIsVM, escaped, capturing;
-static int clientFd = -1;
+// Every VM that runs the guest daemon stays connected (one per address);
+// frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
+// 1 = UTM, the index into listenAddrs). One connection per VM used to mean
+// two running VMs pushed each other off every two seconds.
+#define MAX_CLIENTS 8
+static struct { int fd, net; char ip[32]; } clients[MAX_CLIENTS];
+static volatile int frontNet = -1;
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
@@ -76,17 +82,33 @@ static void logf_(const char *fmt, ...) {
   fflush(stdout);
 }
 
-static void sendLine(const char *line, size_t len) {
+// net < 0: every client.
+static void sendTo(int net, const char *line, size_t len) {
   pthread_mutex_lock(&sendLock);
-  if (clientFd >= 0 && send(clientFd, line, len, MSG_NOSIGNAL) < 0) {
-    logf_("guest disconnected");
-    close(clientFd); clientFd = -1;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (clients[i].fd < 0 || (net >= 0 && clients[i].net != net)) continue;
+    if (send(clients[i].fd, line, len, MSG_NOSIGNAL) < 0) {
+      logf_("guest disconnected: %s", clients[i].ip);
+      close(clients[i].fd); clients[i].fd = -1;
+    }
   }
   pthread_mutex_unlock(&sendLock);
 }
 
+static int haveClient(int net) {
+  int found = 0;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].net == net) found = 1;
+  pthread_mutex_unlock(&sendLock);
+  return found;
+}
+
+static void sendLine(const char *line, size_t len) { sendTo(frontNet, line, len); }
+
+// "on"/"esc" concern the frontmost VM; "off" goes to every VM.
 static void sendState(const char *s) {
-  char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s); sendLine(b, (size_t)n);
+  char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s);
+  sendTo(strcmp(s, "off") ? frontNet : -1, b, (size_t)n);
 }
 
 // ---- touch forwarding ----
@@ -102,7 +124,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   for (int i = 0; i < n && k < 16; i++) if (touching(&touches[i])) c[k++] = &touches[i];
 
   int send = 0;
-  if (capturing && clientFd >= 0) {
+  if (capturing && haveClient(frontNet)) {
     if (k >= 3) send = 1;
     else if (k == 2) {
       float dx = c[0]->normalized.pos.x - c[1]->normalized.pos.x, dy = c[0]->normalized.pos.y - c[1]->normalized.pos.y;
@@ -163,7 +185,9 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   // Parallels' VM window, or UTM's.
-  int front = (!strcmp(name, "prl_client_app") || !strcmp(name, "UTM")) && vmFullScreen(pid);
+  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? 1 : -1;
+  int front = net >= 0 && vmFullScreen(pid);
+  if (front) frontNet = net;
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -202,7 +226,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
 
 // ---- server: one guest connection at a time ----
 static void *serverThread(void *arg) {
-  const char *addr = arg;
+  int net = (int)(intptr_t)arg;
+  const char *addr = listenAddrs[net];
   for (;;) {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -220,11 +245,18 @@ static void *serverThread(void *arg) {
       setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
       char ip[32]; inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip);
       pthread_mutex_lock(&sendLock);
-      if (clientFd >= 0) close(clientFd);
-      clientFd = c;
+      int slot = -1;
+      for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection
+        if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip)) { close(clients[i].fd); slot = i; break; }
+      for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
+      if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
+      clients[slot].fd = c; clients[slot].net = net;
+      snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
       pthread_mutex_unlock(&sendLock);
       logf_("guest connected: %s", ip);
-      sendState(capturing ? "on" : "off");
+      const char *st = capturing && net == frontNet ? "on\n" : "off\n";
+      char b[16]; int n = snprintf(b, sizeof b, "S %s", st);
+      send(c, b, (size_t)n, MSG_NOSIGNAL);
     }
     close(s);
   }
@@ -269,8 +301,9 @@ int main(int argc, char **argv) {
   CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
 
+  for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
-    pthread_t th; pthread_create(&th, NULL, serverThread, (void *)listenAddrs[i]);
+    pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
   logf_("running (escape: Ctrl+Option+Cmd+Esc)");
   CFRunLoopRun();

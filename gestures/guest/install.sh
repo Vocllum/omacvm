@@ -15,7 +15,8 @@ systemctl enable omacvm-gestures >/dev/null 2>&1
 systemctl restart omacvm-gestures
 
 I=$H/.config/hypr/input.lua
-if ! grep -q 'hl.gesture({ fingers = 3' "$I" 2>/dev/null; then
+# Omarchy ships the same line commented out as an example: only an active one counts.
+if ! grep -q '^hl.gesture({ fingers = 3' "$I" 2>/dev/null; then
   cat >> "$I" <<'LUA'
 
 -- OmacVM trackpad: the Mac's multi-finger gestures arrive on a virtual
