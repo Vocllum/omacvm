@@ -1,0 +1,63 @@
+#!/bin/bash
+# Omaparallels lock (guest): publish the current Omarchy theme's lock-screen look to
+# the Mac through the Parallels shared folder `theme` (/mnt/psf/theme):
+#   background-<hash>.png   the current background (PNG)
+#   font.ttf                the font hyprlock actually renders with
+#   theme.json              name, colours, layout; written last (the Mac watches it)
+# Run by omarchy-theme-export.path whenever the theme or background changes.
+set -euo pipefail
+OUT=${OMARCHY_LOCK_OUT:-/mnt/psf/theme}
+CUR=$HOME/.local/state/omarchy/current
+[[ -d $OUT && -w $OUT ]] || { echo "omarchy-theme-export: $OUT not available" >&2; exit 0; }
+
+bg=$(readlink -f "$CUR/background")
+name=$(cat "$CUR/theme.name" 2>/dev/null || echo unknown)
+hash=$(printf '%s %s %s' "$bg" "$(stat -c %Y "$bg")" "$name" | sha1sum | cut -c1-10)
+png=background-$hash.png
+if [[ ! -f $OUT/$png ]]; then
+  magick "$bg" -strip "$OUT/.$png.tmp.png" && mv -f "$OUT/.$png.tmp.png" "$OUT/$png"
+fi
+find "$OUT" -maxdepth 1 -name 'background-*.png' ! -name "$png" -delete
+
+# Omarchy 4 locks with its shell's lock plugin (plugins/lock/LockView.qml); its
+# look comes from the theme's shell.toml [lock], Hyprland's rounding and the
+# monospace font. (hyprlock.conf is only a fallback and is ignored here.)
+fontfile=$(fc-match -f '%{file}' monospace)
+family=$(fc-match -f '%{family[0]}' monospace)
+if ! cmp -s "$fontfile" "$OUT/font.ttf" 2>/dev/null; then cp -f "$fontfile" "$OUT/font.ttf"; fi
+rounding=$(hyprctl getoption decoration:rounding -j 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("int", 0))' 2>/dev/null || echo 0)
+
+python3 - "$CUR/theme" "$name" "$png" "$family" "$rounding" "$OUT/.theme.json.tmp" <<'PY2'
+import json, re, sys, tomllib
+theme, name, png, family, rounding, out = sys.argv[1:]
+shell = tomllib.load(open(f"{theme}/shell.toml", "rb"))
+colors = tomllib.load(open(f"{theme}/colors.toml", "rb"))
+def resolve(v):
+    # "hyprland.active-border" style references, gradients -> first colour
+    if isinstance(v, str) and re.fullmatch(r"[a-z-]+\.[a-z-]+", v):
+        sec, key = v.split(".")
+        v = shell.get(sec, {}).get(key, v)
+    m = re.search(r"#([0-9A-Fa-f]{6})|rgba?\(([0-9A-Fa-f]{6})", str(v))
+    return (m.group(1) or m.group(2)).lower() if m else None
+def rgba(hex6, alpha=1.0):
+    return f"{hex6}{round(alpha * 255):02x}"
+lock, font = shell.get("lock", {}), shell.get("font", {})
+fg = resolve(colors.get("foreground", "#ffffff")) or "ffffff"
+bgc = resolve(colors.get("background", "#000000")) or "000000"
+base = float(font.get("base-size", 12))
+heading = float(font.get("heading", round(base * 1.333)))
+ba = float(lock.get("border-alpha", 1.0))
+json.dump({
+    "name": name, "background": png, "font_file": "font.ttf", "font_family": family,
+    "color": rgba(bgc),
+    "field_color": rgba(resolve(lock.get("background", bgc)) or bgc, float(lock.get("background-alpha", 0.8))),
+    "border_color": rgba(resolve(lock.get("border-active", "hyprland.active-border")) or fg, ba),
+    "text_color": rgba(resolve(lock.get("text", fg)) or fg),
+    "placeholder_color": rgba(resolve(lock.get("placeholder")) or fg, 1.0 if lock.get("placeholder") else 0.66),
+    "size": [381, 67], "outline": 3, "rounding": int(float(rounding)),
+    "font_size": round(heading * 1.125), "placeholder": "Enter Password",
+    "blur": {"max": 128, "multiplier": 1.25, "contrast": -0.08},
+}, open(out, "w"), indent=2)
+PY2
+mv -f "$OUT/.theme.json.tmp" "$OUT/theme.json"
+echo "omarchy-theme-export: $name -> $OUT ($png)"

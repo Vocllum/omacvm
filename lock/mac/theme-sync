@@ -1,0 +1,30 @@
+#!/bin/bash
+# Omaparallels lock (Mac): apply the theme the VM published in the shared folder
+# ~/.local/share/omaparallels/theme: background -> wallpaper on all displays
+# (= macOS lock screen background), theme data -> OmarchyLock.saver.
+# Started by the LaunchAgent org.omaparallels.lock when theme.json changes.
+set -euo pipefail
+SRC=$HOME/.local/share/omaparallels/theme
+LIB=$HOME/Library/Application\ Support/OmarchyLock
+SAVER=$HOME/Library/Screen\ Savers/OmarchyLock.saver
+[[ -f $SRC/theme.json ]] || exit 0
+sleep 1   # let the guest finish writing
+bg=$(plutil -extract background raw "$SRC/theme.json")
+name=$(plutil -extract name raw "$SRC/theme.json")
+[[ -f $SRC/$bg ]] || { echo "theme-sync: $bg missing"; exit 1; }
+
+mkdir -p "$LIB"
+if [[ ! -f $LIB/$bg ]]; then
+  cp "$SRC/$bg" "$LIB/$bg"
+  "$LIB/set-wallpaper" "$LIB/$bg"
+  find "$LIB" -maxdepth 1 -name 'background-*.png' ! -name "$bg" -delete
+fi
+
+if [[ -d $SAVER ]]; then
+  T=$SAVER/Contents/Resources/theme
+  mkdir -p "$T"
+  find "$T" -maxdepth 1 -name 'background-*.png' ! -name "$bg" -delete
+  cp -f "$SRC/$bg" "$SRC/font.ttf" "$SRC/theme.json" "$T/"
+  codesign --force --sign - "$SAVER" >/dev/null 2>&1
+fi
+echo "$(date +%T) theme-sync: $name ($bg)"
