@@ -5,10 +5,10 @@
 # small zram, smooth reclaim, THP without allocation stalls, MGLRU protection.
 set -euo pipefail
 cd "$(dirname "$0")"
-install -m644 90-omaparallels.sysctl /etc/sysctl.d/90-omaparallels.conf
-install -Dm644 90-omaparallels-zram.conf /etc/systemd/zram-generator.conf.d/90-omaparallels.conf
-install -m644 90-omaparallels-mm.tmpfiles /etc/tmpfiles.d/90-omaparallels-mm.conf
+install -m644 90-omacvm.sysctl /etc/sysctl.d/90-omacvm.conf
+install -Dm644 90-omacvm-zram.conf /etc/systemd/zram-generator.conf.d/90-omacvm.conf
+install -m644 90-omacvm-mm.tmpfiles /etc/tmpfiles.d/90-omacvm-mm.conf
 install -m644 virtio-balloon.modules /etc/modules-load.d/virtio-balloon.conf
 sysctl -q --system
-systemd-tmpfiles --create /etc/tmpfiles.d/90-omaparallels-mm.conf 2>/dev/null || true
+systemd-tmpfiles --create /etc/tmpfiles.d/90-omacvm-mm.conf 2>/dev/null || true
 echo "memory tuning installed (zram size applies after a reboot)"

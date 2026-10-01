@@ -1,5 +1,5 @@
 #!/bin/bash
-# Omaparallels lock (guest): publish the current Omarchy theme's lock-screen look to
+# OmacVM lock (guest): publish the current Omarchy theme's lock-screen look to
 # the Mac through the Parallels shared folder `theme` (/mnt/psf/theme):
 #   background-<hash>.png   the current background (PNG)
 #   font.ttf                the font hyprlock actually renders with

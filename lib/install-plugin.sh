@@ -3,7 +3,7 @@
 #   lib/install-plugin.sh <desktop-user> <plugin-folder>
 # Copies it to ~/.config/omarchy/plugins/<id>/ and validates it. Enabling needs
 # the running Omarchy shell: if it runs, the plugin is enabled now; otherwise
-# (fresh build, nobody logged in yet) it is queued and omaparallels-plugins
+# (fresh build, nobody logged in yet) it is queued and omacvm-plugins
 # enables it at the next login. A plugin may ship placement.sh (run as the
 # user) to choose its spot in the bar.
 set -euo pipefail
@@ -23,25 +23,25 @@ install -d -o "$U" -g "$U" "$H/.config/omarchy/plugins"
 # A running shell keeps the plugin it loaded: note real changes so
 # guest/install.sh restarts the shell once at the end.
 if [[ -d $dest ]] && ! diff -rq "$dir" "$dest" >/dev/null 2>&1; then
-  install -d -o "$U" -g "$U" "$H/.local/state/omaparallels"
-  touch "$H/.local/state/omaparallels/restart-shell"
+  install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
+  touch "$H/.local/state/omacvm/restart-shell"
 fi
 rm -rf "$dest"
 cp -r "$dir" "$dest"
 chown -R "$U:$U" "$dest"
 as_user omarchy plugin validate "$dest" >/dev/null
 
-install -m755 "$here/omaparallels-plugins" /usr/local/bin/omaparallels-plugins
-install -m644 "$here/omaparallels-plugins.service" /etc/systemd/user/omaparallels-plugins.service
-Q=$H/.local/state/omaparallels/pending-plugins
+install -m755 "$here/omacvm-plugins" /usr/local/bin/omacvm-plugins
+install -m644 "$here/omacvm-plugins.service" /etc/systemd/user/omacvm-plugins.service
+Q=$H/.local/state/omacvm/pending-plugins
 install -d -o "$U" -g "$U" "$(dirname "$Q")"
 grep -qx "$id" "$Q" 2>/dev/null || echo "$id" >> "$Q"
 chown "$U:$U" "$Q"
 if as_user omarchy-shell shell ping >/dev/null 2>&1; then
-  as_user /usr/local/bin/omaparallels-plugins
+  as_user /usr/local/bin/omacvm-plugins
 else
-  systemctl --user -M "$U@" enable omaparallels-plugins.service >/dev/null 2>&1 ||
+  systemctl --user -M "$U@" enable omacvm-plugins.service >/dev/null 2>&1 ||
     { install -d -o "$U" -g "$U" "$H/.config/systemd/user/graphical-session.target.wants"
-      ln -sf /etc/systemd/user/omaparallels-plugins.service "$H/.config/systemd/user/graphical-session.target.wants/"; }
+      ln -sf /etc/systemd/user/omacvm-plugins.service "$H/.config/systemd/user/graphical-session.target.wants/"; }
   echo "plugin $id installed (enabled at the next login)"
 fi

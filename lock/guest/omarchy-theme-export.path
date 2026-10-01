@@ -1,5 +1,5 @@
 [Unit]
-Description=Omaparallels lock: watch for Omarchy theme/background changes
+Description=OmacVM lock: watch for Omarchy theme/background changes
 
 [Path]
 PathModified=%h/.local/state/omarchy/current

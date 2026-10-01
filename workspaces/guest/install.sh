@@ -10,5 +10,5 @@ H=$(getent passwd "$U" | cut -d: -f6)
 install -o "$U" -g "$U" -m644 monitor_workspaces.lua "$H/.config/hypr/monitor_workspaces.lua"
 B=$H/.config/hypr/bindings.lua
 grep -q 'require("hypr.monitor_workspaces")' "$B" 2>/dev/null || { cat workspace-bindings.lua >> "$B"; chown "$U:$U" "$B"; }
-../../lib/install-plugin.sh "$U" ../plugins/omaparallels.workspaces
+../../lib/install-plugin.sh "$U" ../plugins/omacvm.workspaces
 echo "per-display workspaces installed"

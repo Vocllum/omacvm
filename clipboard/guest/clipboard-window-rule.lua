@@ -1,5 +1,5 @@
 
--- Omaparallels: Parallels Tools briefly opens an invisible helper window to sync
+-- OmacVM: Parallels Tools briefly opens an invisible helper window to sync
 -- the clipboard whenever the VM gains focus. Keep it out of the tiling layout.
 o.window({ title = "^Parallels Shared Clipboard$" }, {
   float = true,

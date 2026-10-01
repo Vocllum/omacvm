@@ -1,5 +1,5 @@
 
--- >>> Omaparallels per-display workspaces
+-- >>> OmacVM per-display workspaces
 -- SUPER + 1..0 act on the focused display's own workspaces, like Spaces on the
 -- Mac (an external display uses IDs 11..20, shown as 1..0; see
 -- hypr/monitor_workspaces.lua). Keys by physical code (code:10..19 = the number
@@ -18,4 +18,4 @@ for workspace = 1, 10 do
   o.bind("SUPER + SHIFT + ALT + " .. key, "Move window silently to workspace " .. workspace,
     function() hl.dispatch(hl.dsp.window.move({ workspace = here(), follow = false })) end)
 end
--- <<< Omaparallels per-display workspaces
+-- <<< OmacVM per-display workspaces

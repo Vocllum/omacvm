@@ -3,13 +3,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 LIB=$HOME/Library/Application\ Support/OmarchyLock
-mkdir -p "$LIB" "$HOME/Library/Screen Savers" "$HOME/Library/LaunchAgents" "$HOME/.local/share/omaparallels/theme"
+mkdir -p "$LIB" "$HOME/Library/Screen Savers" "$HOME/Library/LaunchAgents" "$HOME/.local/share/omacvm/theme"
 swiftc -O -o "$LIB/set-wallpaper" set-wallpaper.swift
 install -m755 theme-sync "$LIB/theme-sync"
 ../saver/build.sh >/dev/null
 rm -rf "$HOME/Library/Screen Savers/OmarchyLock.saver"
 cp -R ../saver/build/OmarchyLock.saver "$HOME/Library/Screen Savers/"
-LABEL=org.omaparallels.lock
+LABEL=org.omacvm.lock
 PL=$HOME/Library/LaunchAgents/$LABEL.plist
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
 cat > "$PL" <<PL
@@ -18,11 +18,11 @@ cat > "$PL" <<PL
 <plist version="1.0"><dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key><array><string>$LIB/theme-sync</string></array>
-  <key>WatchPaths</key><array><string>$HOME/.local/share/omaparallels/theme/theme.json</string></array>
+  <key>WatchPaths</key><array><string>$HOME/.local/share/omacvm/theme/theme.json</string></array>
   <key>RunAtLoad</key><true/>
-  <key>StandardOutPath</key><string>$HOME/Library/Logs/omaparallels-lock.log</string>
-  <key>StandardErrorPath</key><string>$HOME/Library/Logs/omaparallels-lock.log</string>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/omacvm-lock.log</string>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/omacvm-lock.log</string>
 </dict></plist>
 PL
 launchctl bootstrap gui/$(id -u) "$PL"
-echo "installed; log ~/Library/Logs/omaparallels-lock.log"
+echo "installed; log ~/Library/Logs/omacvm-lock.log"

@@ -10,7 +10,7 @@ cat > "$B/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>org.omaparallels.lock.saver</string>
+  <key>CFBundleIdentifier</key><string>org.omacvm.lock.saver</string>
   <key>CFBundleName</key><string>Omarchy Lock</string>
   <key>CFBundleExecutable</key><string>OmarchyLock</string>
   <key>CFBundlePackageType</key><string>BNDL</string>
@@ -18,5 +18,5 @@ cat > "$B/Contents/Info.plist" <<PL
   <key>NSPrincipalClass</key><string>OmarchyLockView</string>
 </dict></plist>
 PL
-../../lib/sign.sh "$B" org.omaparallels.lock.saver
+../../lib/sign.sh "$B" org.omacvm.lock.saver
 echo "built $B"

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Clipboard, guest side. Run as root inside the VM: ./install.sh <desktop-user>
 # Mac -> VM is Parallels Tools. VM -> Mac: every copied text goes to the shared
-# folder "clip", where omaparallels-clip-in on the Mac puts it on the clipboard.
+# folder "clip", where omacvm-clip-in on the Mac puts it on the clipboard.
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}

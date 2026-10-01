@@ -1,4 +1,4 @@
-# Omaparallels lock
+# OmacVM lock
 
 Makes the Mac's lock look like Omarchy's: the current Omarchy theme follows to
 macOS.
@@ -19,8 +19,8 @@ Theme switches (and background switches) in the VM propagate automatically.
 
 | Part | Where |
 |---|---|
-| Guest exporter | `guest/omarchy-theme-export` → `/usr/local/bin`; user units `omarchy-theme-export.{service,path}` (path watches `~/.local/state/omarchy/current`). Writes `background-<hash>.png`, `font.ttf`, `theme.json` to the shared folder `theme` (`/mnt/psf/theme` = Mac `~/.local/share/omaparallels/theme`) |
-| Mac sync | `mac/theme-sync` + `mac/set-wallpaper.swift` → `~/Library/Application Support/OmarchyLock/`; LaunchAgent `org.omaparallels.lock` (WatchPaths on `theme.json`), log `~/Library/Logs/omaparallels-lock.log` |
+| Guest exporter | `guest/omarchy-theme-export` → `/usr/local/bin`; user units `omarchy-theme-export.{service,path}` (path watches `~/.local/state/omarchy/current`). Writes `background-<hash>.png`, `font.ttf`, `theme.json` to the shared folder `theme` (`/mnt/psf/theme` = Mac `~/.local/share/omacvm/theme`) |
+| Mac sync | `mac/theme-sync` + `mac/set-wallpaper.swift` → `~/Library/Application Support/OmarchyLock/`; LaunchAgent `org.omacvm.lock` (WatchPaths on `theme.json`), log `~/Library/Logs/omacvm-lock.log` |
 | Screen saver | `saver/OmarchyLockView.m` → `~/Library/Screen Savers/OmarchyLock.saver` (theme data copied into its Resources, re-signed ad-hoc; the saver runs sandboxed and only reads its bundle). `saver/render-test.m` renders it to a PNG for checks |
 
 Install: `mac/install.sh` (Mac), `guest/install.sh <user>` (VM, root).

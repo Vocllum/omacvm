@@ -1,0 +1,11 @@
+[Unit]
+Description=OmacVM: enable queued bar widgets once the Omarchy shell runs
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-plugins
+
+[Install]
+WantedBy=graphical-session.target

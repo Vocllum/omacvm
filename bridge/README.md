@@ -1,4 +1,4 @@
-# Omaparallels Bridge
+# OmacVM Bridge
 
 The Mac's Wi-Fi, audio, media keys and display, inside the Omarchy VM. The VM
 only has a virtual Ethernet card and a virtual sound card; the bridge is a
@@ -7,14 +7,14 @@ Parallels network and pushes every change as Server-Sent Events.
 
 | Part | Where |
 |---|---|
-| Mac app | `mac/*.swift` → `~/Applications/OmaparallelsBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omaparallels.bridge`, log `~/Library/Logs/omaparallels-bridge.log` |
+| Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
 | Listens on | `http://10.211.55.2:47831`, the Mac's address on Parallels' shared network, never `0.0.0.0`. Waits for that address while Parallels is not running and re-binds after wake |
-| Token | Mac `~/Library/Application Support/omaparallels-bridge/token` (0600, made on first start); VM `~/.config/omaparallels-bridge/token` (copied by `apply.sh`) |
-| Config | `~/Library/Application Support/omaparallels-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
-| VM client | `guest/omaparallels-bridge` (bash + curl; the token never shows in `ps`) |
-| VM popups | `guest/omaparallels-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
+| Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `apply.sh`) |
+| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
+| VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
+| VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Night light | `guest/omarchy-toggle-nightlight` in `/usr/local/bin`, ahead of Omarchy's: Super+Ctrl+N and the menu switch the Mac's Night Shift |
-| Bar widgets | `plugins/omaparallels.wifi`, `plugins/omaparallels.audio` (clones of Omarchy's network and audio widgets) |
+| Bar widgets | `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's network and audio widgets) |
 
 Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, AppKit, Security,
 and the private DisplayServices and CoreBrightness (brightness, Night Shift,
@@ -25,7 +25,7 @@ True Tone, keyboard light).
 | Permission | For | Grant / revoke |
 |---|---|---|
 | Location Services | macOS only shows Wi-Fi names to apps with it; no location is read | prompt on first start; System Settings › Privacy & Security › Location Services |
-| Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omaparallels.bridge` |
+| Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
 | Keychain (per request) | the Wi-Fi password for QR sharing | macOS asks for an administrator's approval every time |
 
 The menu-bar icon shows both grants and links to the settings. Permissions
@@ -37,14 +37,14 @@ Every request needs `Authorization: Bearer <token>`; JSON in and out, errors
 are `{"error": "…"}`. The client wraps all of it:
 
 ```bash
-omaparallels-bridge state | scan [--cached] | audio | display | events
-omaparallels-bridge volume +5 | mute | mic-volume 60 | output <uid>
-omaparallels-bridge brightness -5 | night-shift toggle | night-shift strength 70 | true-tone off
-omaparallels-bridge password [ssid]
+omacvm-bridge state | scan [--cached] | audio | display | events
+omacvm-bridge volume +5 | mute | mic-volume 60 | output <uid>
+omacvm-bridge brightness -5 | night-shift toggle | night-shift strength 70 | true-tone off
+omacvm-bridge password [ssid]
 ```
 
 ```bash
-T=$(cat ~/.config/omaparallels-bridge/token); B=http://10.211.55.2:47831
+T=$(cat ~/.config/omacvm-bridge/token); B=http://10.211.55.2:47831
 curl -H "Authorization: Bearer $T" $B/state
 ```
 

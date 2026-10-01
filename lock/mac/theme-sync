@@ -1,10 +1,10 @@
 #!/bin/bash
-# Omaparallels lock (Mac): apply the theme the VM published in the shared folder
-# ~/.local/share/omaparallels/theme: background -> wallpaper on all displays
+# OmacVM lock (Mac): apply the theme the VM published in the shared folder
+# ~/.local/share/omacvm/theme: background -> wallpaper on all displays
 # (= macOS lock screen background), theme data -> OmarchyLock.saver.
-# Started by the LaunchAgent org.omaparallels.lock when theme.json changes.
+# Started by the LaunchAgent org.omacvm.lock when theme.json changes.
 set -euo pipefail
-SRC=$HOME/.local/share/omaparallels/theme
+SRC=$HOME/.local/share/omacvm/theme
 LIB=$HOME/Library/Application\ Support/OmarchyLock
 SAVER=$HOME/Library/Screen\ Savers/OmarchyLock.saver
 [[ -f $SRC/theme.json ]] || exit 0
@@ -25,6 +25,6 @@ if [[ -d $SAVER ]]; then
   mkdir -p "$T"
   find "$T" -maxdepth 1 -name 'background-*.png' ! -name "$bg" -delete
   cp -f "$SRC/$bg" "$SRC/font.ttf" "$SRC/theme.json" "$T/"
-  codesign --force --sign - --identifier org.omaparallels.lock.saver -r="designated => identifier \"org.omaparallels.lock.saver\"" "$SAVER" >/dev/null 2>&1
+  codesign --force --sign - --identifier org.omacvm.lock.saver -r="designated => identifier \"org.omacvm.lock.saver\"" "$SAVER" >/dev/null 2>&1
 fi
 echo "$(date +%T) theme-sync: $name ($bg)"

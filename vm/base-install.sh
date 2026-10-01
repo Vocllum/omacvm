@@ -1,14 +1,14 @@
 #!/bin/bash
 # Install Arch Linux ARM onto the VM's NVMe disk. Runs as root in the live
-# installer (build.sh copies it there with /root/omaparallels.env):
+# installer (build.sh copies it there with /root/omacvm.env):
 #   OMA_USER OMA_FULLNAME OMA_HASH OMA_TZ OMA_LANG OMA_XKB_LAYOUT OMA_XKB_VARIANT OMA_HOSTNAME
-# plus /root/omaparallels.pub (SSH key for root, used by build.sh).
+# plus /root/omacvm.pub (SSH key for root, used by build.sh).
 #
 # Layout: GPT, 2 GiB EFI (/boot) + btrfs with @, @home, @log (omarchy-mac adds
 # @factory and snapper); zstd:1, noatime, async discard. GRUB, because
 # omarchy-mac's snapshot restore/reset tooling expects it.
 set -euo pipefail
-source /root/omaparallels.env
+source /root/omacvm.env
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 
 D=$(lsblk -dnpo NAME,TRAN | awk '$2 == "nvme" { print $1; exit }')
@@ -74,11 +74,11 @@ cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
 genfstab -U /mnt > /mnt/etc/fstab
 
 log "base system: $OMA_TZ, $OMA_LANG, keyboard $OMA_XKB_LAYOUT${OMA_XKB_VARIANT:+ ($OMA_XKB_VARIANT)}, user $OMA_USER"
-install -m600 /root/omaparallels.env /mnt/root/omaparallels.env
-install -m600 /root/omaparallels.pub /mnt/root/omaparallels.pub
+install -m600 /root/omacvm.env /mnt/root/omacvm.env
+install -m600 /root/omacvm.pub /mnt/root/omacvm.pub
 cat > /mnt/root/setup-base.sh <<'EOF'
 set -euo pipefail
-source /root/omaparallels.env
+source /root/omacvm.env
 ln -sf "/usr/share/zoneinfo/$OMA_TZ" /etc/localtime
 hwclock --systohc 2>/dev/null || true
 grep -q "^${OMA_LANG} " /usr/share/i18n/SUPPORTED || OMA_LANG=en_US.UTF-8
@@ -96,8 +96,8 @@ useradd -m -G wheel -s /bin/bash -c "$OMA_FULLNAME" "$OMA_USER"
 usermod -p "$OMA_HASH" "$OMA_USER"
 passwd -l root >/dev/null
 echo "%wheel ALL=(ALL:ALL) ALL" > /etc/sudoers.d/10-wheel; chmod 440 /etc/sudoers.d/10-wheel
-install -d -m700 /root/.ssh; install -m600 /root/omaparallels.pub /root/.ssh/authorized_keys
-cat > /etc/ssh/sshd_config.d/10-omaparallels.conf <<EOT
+install -d -m700 /root/.ssh; install -m600 /root/omacvm.pub /root/.ssh/authorized_keys
+cat > /etc/ssh/sshd_config.d/10-omacvm.conf <<EOT
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -107,7 +107,7 @@ sed -i 's/^GRUB_TIMEOUT=.*/GRUB_TIMEOUT=2/; s/^GRUB_CMDLINE_LINUX_DEFAULT=.*/GRU
 grub-install --target=arm64-efi --efi-directory=/boot --bootloader-id=GRUB 2>&1 | tail -1
 grub-install --target=arm64-efi --efi-directory=/boot --removable 2>&1 | tail -1
 grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -1
-rm /root/omaparallels.pub
+rm /root/omacvm.pub
 EOF
 arch-chroot /mnt bash /root/setup-base.sh
 rm -f /mnt/root/setup-base.sh

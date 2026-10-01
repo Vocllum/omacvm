@@ -7,6 +7,6 @@ the official [try-omarchy](https://github.com/omacom/try-omarchy) release into
 a disk that Parallels' ARM64 EFI boots, and inject an SSH key through the
 initramfs.
 
-Omaparallels' `build.sh` uses that only as a temporary live Linux: it boots it,
+OmacVM's `build.sh` uses that only as a temporary live Linux: it boots it,
 installs Arch Linux ARM and omarchy-mac onto the VM's real NVMe disk, and then
 removes the live disk again. Nothing from try-omarchy stays in the VM.

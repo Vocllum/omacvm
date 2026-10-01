@@ -86,7 +86,7 @@ final class Location: NSObject, CLLocationManagerDelegate {
       NSApp.activate(ignoringOtherApps: true)
       m.requestWhenInUseAuthorization()
     case .denied, .restricted:
-      log("Location Services: DENIED - SSID/BSSID will be null. Grant in System Settings > Privacy & Security > Location Services > Omaparallels Bridge")
+      log("Location Services: DENIED - SSID/BSSID will be null. Grant in System Settings > Privacy & Security > Location Services > OmacVM Bridge")
     default:
       log("Location Services: granted")
     }
@@ -191,7 +191,7 @@ func scanBody(_ nets: [[String: Any]], source: String, at: Date, locationOK: Boo
 }
 
 final class Scanner {
-  private let q = DispatchQueue(label: "omaparallels-bridge.scan")   // one radio scan at a time
+  private let q = DispatchQueue(label: "omacvm-bridge.scan")   // one radio scan at a time
   private var last: (Date, [[String: Any]])?
   private var lastCachePush = Date.distantPast
   let wifi: WiFi, hub: Hub, location: Location

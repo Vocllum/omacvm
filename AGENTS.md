@@ -1,10 +1,10 @@
 # AGENTS.md: operating manual for coding agents
 
-Read this before changing anything. It describes how the full Omaparallels
+Read this before changing anything. It describes how the full OmacVM
 setup is built, how the pieces talk to each other, how to verify it, and what
 has already been tried and does not work.
 
-Omaparallels = Omarchy (omarchy-mac, Arch Linux ARM) in Parallels Desktop on
+OmacVM = Omarchy (omarchy-mac, Arch Linux ARM) in Parallels Desktop on
 an Apple Silicon Mac, made to feel like a native Mac. Sibling project:
 [Omanotch](https://github.com/gillesgoetsch/omanotch) (Omarchy's bar beside
 the notch; separate repo, works with Parallels or UTM).
@@ -15,18 +15,18 @@ A build is done when all of this holds:
 
 1. `prlctl list -a` shows the VM; it boots to SDDM / the Omarchy desktop from
    the NVMe disk, GRUB default entry = `linux-aarch64-thp` (unless `--no-thp-kernel`).
-2. `ssh -i ~/.ssh/omaparallels root@<ip>` works (key only; ufw allows 22 from
+2. `ssh -i ~/.ssh/omacvm root@<ip>` works (key only; ufw allows 22 from
    10.211.55.0/24).
 3. `systemctl is-active prltoolsd` = active in the guest.
 4. Display: `hyprctl monitors` matches the Mac (native pixels, refresh rate,
    arrangement) within a few seconds of a window/full-screen/display change.
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN | grep 10.211.55.2` shows
-   47830 (Gestures) and 47831 (Bridge); `launchctl list | grep omaparallels`
+   47830 (Gestures) and 47831 (Bridge); `launchctl list | grep omacvm`
    shows bridge, gestures, clip-in, lock.
-6. In the guest as the desktop user: `omaparallels-bridge state` prints the
-   Mac's Wi-Fi with an SSID (Location Services granted), `omaparallels-bridge
-   audio` the Mac's devices, and the bar shows `omaparallels.wifi`,
-   `omaparallels.audio`, `omaparallels.workspaces` in the slots of the stock
+6. In the guest as the desktop user: `omacvm-bridge state` prints the
+   Mac's Wi-Fi with an SSID (Location Services granted), `omacvm-bridge
+   audio` the Mac's devices, and the bar shows `omacvm.wifi`,
+   `omacvm.audio`, `omacvm.workspaces` in the slots of the stock
    widgets.
 7. Copy in the VM → `pbpaste` on the Mac shows it.
 
@@ -44,8 +44,8 @@ A build is done when all of this holds:
 
 | Path | What |
 |---|---|
-| `build.sh` | One command, nothing → finished VM (sections 1–5 inside). Flags: `--vm-name --cpus --memory-gb --disk-gb --user --full-name --hostname --no-thp-kernel --autologin --omanotch --channel --yes`; `OMAPARALLELS_PASSWORD` for unattended runs |
-| `apply.sh` | Guest side onto a running VM: copies the bridge token and this repo to `/usr/local/share/omaparallels`, runs `guest/install.sh`, sets the Dock icon. Re-run after updating the repo |
+| `build.sh` | One command, nothing → finished VM (sections 1–5 inside). Flags: `--vm-name --cpus --memory-gb --disk-gb --user --full-name --hostname --no-thp-kernel --autologin --omanotch --channel --yes`; `OMACVM_PASSWORD` for unattended runs |
+| `apply.sh` | Guest side onto a running VM: copies the bridge token and this repo to `/usr/local/share/omacvm`, runs `guest/install.sh`, sets the Dock icon. Re-run after updating the repo |
 | `mac/install.sh`, `mac/uninstall.sh` | Mac side: bridge, gestures, clipboard, lock |
 | `guest/install.sh` | Guest side, root, idempotent: system extras + every feature's `guest/install.sh` |
 | `vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH |
@@ -53,13 +53,13 @@ A build is done when all of this holds:
 | `vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended |
 | `vm/pvs.py` | `config.pvs` editor (settings, NVMe disk, boot order, shares) |
 | `lib/mac.sh` | Mac helpers: `gssh`, `vm_ip` (DHCP lease by MAC), `vm_state`, `vm_start`, `wait_*` |
-| `lib/install-plugin.sh`, `lib/omaparallels-plugins` | Omarchy shell plugin install; queues until the shell runs (first login) |
+| `lib/install-plugin.sh`, `lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login) |
 | `lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"` so TCC grants survive rebuilds |
-| `bridge/` | Omaparallels Bridge: `mac/*.swift` (OmaparallelsBridge.app), `guest/` (client, OSD follower, nightlight toggle), `plugins/omaparallels.{wifi,audio}` |
-| `gestures/` | Omaparallels Gestures: `mac/omaparallels-gestures.c` (MultitouchSupport + event tap), `guest/omaparallels-gestures` (uinput touchpad) |
+| `bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, OSD follower, nightlight toggle), `plugins/omacvm.{wifi,audio}` |
+| `gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap), `guest/omacvm-gestures` (uinput touchpad) |
 | `display/` | `parallels-dynres` + `monitors.lua` |
-| `workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omaparallels.workspaces` |
-| `clipboard/` | VM → Mac copy (guest `parallels-clip-out`, Mac `omaparallels-clip-in`) |
+| `workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
+| `clipboard/` | VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
 | `lock/` | Theme export (guest) → wallpaper + `OmarchyLock.saver` (Mac) |
 | `memory/` | zram/sysctl/THP-defrag/MGLRU tuning |
@@ -72,11 +72,11 @@ A build is done when all of this holds:
 ```
 Mac (macOS)                                   VM (Arch Linux ARM + Omarchy)
 ───────────                                   ─────────────────────────────
-OmaparallelsBridge.app  10.211.55.2:47831 ◀── omaparallels-bridge (curl, SSE) ← bar widgets,
-  CoreWLAN, CoreAudio, CoreBrightness,  HTTP+    omaparallels-bridge-osd → omarchy-osd,
+OmacVMBridge.app  10.211.55.2:47831 ◀── omacvm-bridge (curl, SSE) ← bar widgets,
+  CoreWLAN, CoreAudio, CoreBrightness,  HTTP+    omacvm-bridge-osd → omarchy-osd,
   media-key event tap, keychain         token    omarchy-toggle-nightlight
-OmaparallelsGestures.app 10.211.55.2:47830 ◀── omaparallels-gestures (root, uinput touchpad)
-omaparallels-clip-in ◀── share "clip"  ◀────── parallels-clip-out (wl-paste --watch)
+OmacVMGestures.app 10.211.55.2:47830 ◀── omacvm-gestures (root, uinput touchpad)
+omacvm-clip-in ◀── share "clip"  ◀────── parallels-clip-out (wl-paste --watch)
 lock theme-sync      ◀── share "theme" ◀────── omarchy-theme-export (path unit)
 VM bundle (.pvm)     ──▶ share "vmlog" (ro) ──▶ parallels-dynres reads parallels.log [DYNRES]
 Omanotch.app (separate) 10.211.55.2:47811 ◀─── notchcast
@@ -85,8 +85,8 @@ Omanotch.app (separate) 10.211.55.2:47811 ◀─── notchcast
 - The Mac is **10.211.55.2** on Parallels' shared network (not .1). Guests get
   10.211.55.x by DHCP; leases in `/Library/Preferences/Parallels/parallels_dhcp_leases`.
 - Every Mac listener binds 10.211.55.2 only, never 0.0.0.0. The bridge needs
-  `Authorization: Bearer <token>` (`~/Library/Application Support/omaparallels-bridge/token`
-  → guest `~/.config/omaparallels-bridge/token`, 0600).
+  `Authorization: Bearer <token>` (`~/Library/Application Support/omacvm-bridge/token`
+  → guest `~/.config/omacvm-bridge/token`, 0600).
 - Bridge API, events and permissions: `bridge/README.md`.
 - Disk: GPT on NVMe (Parallels expanding disk, online compact): 2 GiB EFI at
   `/boot` + btrfs `@ @home @log` (+ `@factory` and snapper from omarchy-mac),
@@ -96,7 +96,7 @@ Omanotch.app (separate) 10.211.55.2:47811 ◀─── notchcast
   via `GRUB_TOP_LEVEL`), stock `linux-aarch64` (`/boot/Image`) as fallback in
   GRUB's advanced menu. Cmdline `loglevel=3 quiet mitigations=off nowatchdog`.
 
-### Parallels settings (vm/pvs.py `omaparallels`)
+### Parallels settings (vm/pvs.py `omacvm`)
 
 | config.pvs | Value | Why |
 |---|---|---|
@@ -129,35 +129,35 @@ macOS System Shortcuts > **Send macOS system shortcuts: Always** (Cmd+Space etc.
 
 ## 6. Standard procedures
 
-- **Build**: `./build.sh` (interactive) or `OMAPARALLELS_PASSWORD=… ./build.sh --yes …`.
+- **Build**: `./build.sh` (interactive) or `OMACVM_PASSWORD=… ./build.sh --yes …`.
 - **Update an existing VM**: `git pull && mac/install.sh && ./apply.sh --vm <name>`
   (`--no-thp-kernel` to skip the ~10 min kernel rebuild).
-- **SSH**: `ssh -i ~/.ssh/omaparallels root@$(grep -o '10\.211\.55\.[0-9]*' /Library/Preferences/Parallels/parallels_dhcp_leases | tail -1)`.
+- **SSH**: `ssh -i ~/.ssh/omacvm root@$(grep -o '10\.211\.55\.[0-9]*' /Library/Preferences/Parallels/parallels_dhcp_leases | tail -1)`.
 - **Run as the desktop user over SSH**: `sudo -u <user> env XDG_RUNTIME_DIR=/run/user/1000 bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap; <cmd>'`
   (Omarchy commands need `OMARCHY_PATH`; `hyprctl`/`grim` also need
   `WAYLAND_DISPLAY=wayland-1` and `HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr | head -1)`).
 - **Screenshot the guest**: `grim` as above (not `screencapture` on the Mac, which needs Screen Recording).
-- **Test the bridge from the guest**: `omaparallels-bridge state|audio|display|events`; from the Mac:
-  `curl -H "Authorization: Bearer $(cat ~/Library/Application\ Support/omaparallels-bridge/token)" http://10.211.55.2:47831/state`.
+- **Test the bridge from the guest**: `omacvm-bridge state|audio|display|events`; from the Mac:
+  `curl -H "Authorization: Bearer $(cat ~/Library/Application\ Support/omacvm-bridge/token)" http://10.211.55.2:47831/state`.
 - **Permissions**: Location Services (bridge: SSIDs), Accessibility (bridge: media keys; gestures), Input
-  Monitoring (gestures). Reset: `tccutil reset Accessibility org.omaparallels.bridge` (and
-  `org.omaparallels.gestures`, `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omaparallels.<app>`.
-- **Logs**: `~/Library/Logs/omaparallels-{bridge,gestures,lock}.log`; guest
-  `journalctl --user -u omaparallels-bridge-osd`, `journalctl -u omaparallels-gestures`.
+  Monitoring (gestures). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and
+  `org.omacvm.gestures`, `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
+- **Logs**: `~/Library/Logs/omacvm-{bridge,gestures,lock}.log`; guest
+  `journalctl --user -u omacvm-bridge-osd`, `journalctl -u omacvm-gestures`.
 - **Uninstall**: `mac/uninstall.sh [--purge]`; delete the VM in Parallels.
 
 ## 7. Failure modes
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Bar widgets missing after a fresh build | Omarchy shell was not running at install time | they are queued; `omaparallels-plugins.service` enables them at the first login (`~/.local/state/omaparallels/pending-plugins`) |
+| Bar widgets missing after a fresh build | Omarchy shell was not running at install time | they are queued; `omacvm-plugins.service` enables them at the first login (`~/.local/state/omacvm/pending-plugins`) |
 | `OMARCHY_PATH is not set` from omarchy commands run as root/sudo | no Omarchy env | `source /usr/share/omarchy/default/bash/env-bootstrap` first |
 | SSIDs null, `location_authorized: false` | Location Services not granted to the bridge | System Settings > Privacy & Security > Location Services |
 | Media keys still show the macOS popup | Accessibility missing, VM not full screen, or capture switched off in the bridge's menu | grant, check `media keys:` lines in the bridge log |
 | Permission prompts after every rebuild | app signed ad-hoc without lib/sign.sh's requirement | always build through the feature's `build.sh` |
 | VM resumes a dead state after a hard kill | suspend files | delete `<pvm>/*.mem*` and `vm.lock` before starting |
 | Display back at 1024x768 after a theme switch | `monitors.lua` without the saved layout | `display/guest/install.sh` (monitors.lua reads `~/.local/state/parallels-dynres/monitors`) |
-| omarchy-mac install stalls | interactive prompt or sudo password | runs with `< /dev/null`, NOPASSWD + `verifypw=any`; log `/var/log/omaparallels-omarchy-install.log` |
+| omarchy-mac install stalls | interactive prompt or sudo password | runs with `< /dev/null`, NOPASSWD + `verifypw=any`; log `/var/log/omacvm-omarchy-install.log` |
 | ALARM downloads time out | geo-DNS mirror far away | `vm/base-install.sh` ranks mirrors; edit `/etc/pacman.d/mirrorlist` |
 | `register` fails "name already taken" | ghost VM identity | `vm/live/build-live.sh` retries with new UUIDs |
 
@@ -199,10 +199,10 @@ macOS System Shortcuts > **Send macOS system shortcuts: Always** (Cmd+Space etc.
 
 ## 9. Conventions
 
-- Identifiers: Mac bundle IDs and LaunchAgent labels `org.omaparallels.*`;
-  Omarchy plugin IDs `omaparallels.*`; guest commands `omaparallels-*`.
+- Identifiers: Mac bundle IDs and LaunchAgent labels `org.omacvm.*`;
+  Omarchy plugin IDs `omacvm.*`; guest commands `omacvm-*`.
 - Every installer is idempotent and safe to re-run.
 - Ports: 47811 Omanotch, 47830 Gestures, 47831 Bridge.
 - One commit per change, message says what the user gets.
 - Verify on a real VM before committing behaviour changes (`apply.sh` against
-  a test VM; `build.sh --vm-name "Omaparallels Test"` for the full path).
+  a test VM; `build.sh --vm-name "OmacVM Test"` for the full path).

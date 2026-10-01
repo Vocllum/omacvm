@@ -173,7 +173,7 @@ func wifiQR(ssid: String, security: String, password: String, hidden: Bool) -> S
   return "WIFI:T:\(type);S:\(esc(ssid));" + (type == "nopass" ? "" : "P:\(esc(password));") + (hidden ? "H:true;" : "") + ";"
 }
 
-private let passwordQueue = DispatchQueue(label: "omaparallels-bridge.password")   // one prompt at a time
+private let passwordQueue = DispatchQueue(label: "omacvm-bridge.password")   // one prompt at a time
 
 /// The saved password of a network, read from the System keychain. macOS asks
 /// for an administrator's approval each time; nothing is cached or logged.

@@ -1,15 +1,15 @@
 #!/bin/bash
-# Apply Omaparallels' guest side to a running VM (build.sh ends with this; run
-# it again after pulling a newer Omaparallels):
+# Apply OmacVM's guest side to a running VM (build.sh ends with this; run
+# it again after pulling a newer OmacVM):
 #   ./apply.sh [--vm NAME | --ip IP] [--user NAME] [--key PRIVATE_KEY]
 #              [--keyboard "LAYOUT [VARIANT]"] [--no-thp-kernel] [--autologin]
-# Defaults: VM "Omarchy", user = your Mac login name, key ~/.ssh/omaparallels,
+# Defaults: VM "Omarchy", user = your Mac login name, key ~/.ssh/omacvm,
 # keyboard = the Mac's current layout. Copies the bridge token and this
-# repository into the VM (/usr/local/share/omaparallels), runs
+# repository into the VM (/usr/local/share/omacvm), runs
 # guest/install.sh there as root, and gives the VM its Omarchy Dock icon.
 set -euo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
-VM=Omarchy; IP=""; U=$(id -un); KEY=~/.ssh/omaparallels; KB=""; EXTRA=()
+VM=Omarchy; IP=""; U=$(id -un); KEY=~/.ssh/omacvm; KB=""; EXTRA=()
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -30,17 +30,17 @@ export OMA_KEY=$KEY
 wait_ssh "$IP"
 
 log "bridge token -> $IP"
-T=~/Library/Application\ Support/omaparallels-bridge/token
+T=~/Library/Application\ Support/omacvm-bridge/token
 [[ -f $T ]] || die "no bridge token yet: run mac/install.sh first"
 gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
-  install -d -m700 -o '$U' -g '$U' \"\$H/.config/omaparallels-bridge\"
-  install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omaparallels-bridge/token\"" < "$T"
+  install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
+  install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
 
-log "Omaparallels -> $IP:/usr/local/share/omaparallels"
+log "OmacVM -> $IP:/usr/local/share/omacvm"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$R" --exclude .git --exclude build --exclude docs -czf - . |
-  gssh "$IP" "rm -rf /usr/local/share/omaparallels && mkdir -p /usr/local/share/omaparallels &&
-              tar -C /usr/local/share/omaparallels -xzf - 2>/dev/null"
-gssh "$IP" "/usr/local/share/omaparallels/guest/install.sh --user '$U' --keyboard '$KB' ${EXTRA[*]:-}"
+  gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
+              tar -C /usr/local/share/omacvm -xzf - 2>/dev/null"
+gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' ${EXTRA[*]:-}"
 
 if [[ -d $PVM ]]; then
   log "Dock icon"

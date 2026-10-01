@@ -1,5 +1,5 @@
 
--- Omaparallels: Cmd+V pastes everywhere, like on the Mac. Terminals get
+-- OmacVM: Cmd+V pastes everywhere, like on the Mac. Terminals get
 -- Ctrl+Shift+V, other apps Ctrl+V (Shift+Insert does not get through reliably
 -- with a Mac keyboard in Parallels).
 hl.unbind("SUPER + V")

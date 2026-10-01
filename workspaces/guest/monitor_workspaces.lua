@@ -8,7 +8,7 @@
 -- Hyprland has one global list of workspace IDs, and each ID belongs to one
 -- monitor, so two "workspace 2"s cannot share an ID. The notebook keeps the
 -- real IDs 1..10; the external monitor uses 11..20 (offset 10). The keys and
--- the bar widget (plugin omaparallels.workspaces) subtract the offset again,
+-- the bar widget (plugin omacvm.workspaces) subtract the offset again,
 -- so 11..20 never show up anywhere you look.
 --
 -- Used by hypr/bindings.lua (monitor_workspaces.workspace(n)).

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# build-live.sh — Omaparallels' temporary live installer.
+# build-live.sh — OmacVM's temporary live installer.
 #
 # From vincenzopalazzo/omarchy-parallels (MIT, see LICENSE here), with two
-# fixes (work dir created before the key, sparse disk pour). Omaparallels only
+# fixes (work dir created before the key, sparse disk pour). OmacVM only
 # uses it to get a bootable ARM64 Linux with SSH into a fresh Parallels VM;
 # build.sh then installs Arch Linux ARM + omarchy-mac onto a second disk from
 # it and deletes this disk again.
@@ -21,7 +21,7 @@ set -euo pipefail
 VM_NAME="Omarchy ARM"
 RELEASE="v0.4.1"
 REPO="omacom/try-omarchy"
-WORKDIR="${HOME}/Library/Caches/omaparallels/live"
+WORKDIR="${HOME}/Library/Caches/omacvm/live"
 ESP_SIZE_MIB=1024          # 1 GiB ESP (kernel + initramfs + bootloader)
 ROOT_SIZE_GIB=16           # ext4 is grown to this before first boot
 VM_DIR="${HOME}/Parallels"
@@ -89,7 +89,7 @@ if [[ -z "${SSH_KEY:-}" ]]; then
   if [[ ! -f "$SSH_KEY" ]]; then
     log "no --ssh-key given — generating an ephemeral keypair in the workdir"
     mkdir -p "$WORKDIR"
-    ssh-keygen -t ed25519 -N "" -C "omaparallels-live" -f "${SSH_KEY%.pub}" -q
+    ssh-keygen -t ed25519 -N "" -C "omacvm-live" -f "${SSH_KEY%.pub}" -q
   else
     info "reusing previously generated key: $SSH_KEY"
   fi

@@ -6,11 +6,11 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
-# SSH into the guest as root with the Omaparallels key. VMs get rebuilt, so
+# SSH into the guest as root with the OmacVM key. VMs get rebuilt, so
 # their host keys are not remembered.
 gssh() {
   local ip=$1; shift
-  ssh -i "${OMA_KEY:-$HOME/.ssh/omaparallels}" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
+  ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
 }
 

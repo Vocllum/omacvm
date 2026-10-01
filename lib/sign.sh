@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sign an Omaparallels Mac app so macOS remembers its permissions across
+# Sign an OmacVM Mac app so macOS remembers its permissions across
 # rebuilds and updates: lib/sign.sh <bundle> <identifier>
 # Ad-hoc signatures are normally pinned to the binary's hash, so every rebuild
 # looked like a new app to Location Services / Accessibility / Input

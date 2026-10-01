@@ -1,11 +1,11 @@
 #!/bin/bash
-# Omaparallels, guest side: everything that makes Omarchy feel native in
+# OmacVM, guest side: everything that makes Omarchy feel native in
 # Parallels. Run as root inside the VM from a copy of this repository
-# (build.sh puts it in /usr/local/share/omaparallels):
+# (build.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--no-thp-kernel] [--autologin]
 # Idempotent: run it again after an update of this repository.
 # Needs Parallels Tools (build.sh installs them first) and, for the bridge, the
-# token from the Mac in ~/.config/omaparallels-bridge/token.
+# token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
 U=""; KB="us"; THP=1; AUTOLOGIN=0
@@ -25,16 +25,16 @@ read -r layout variant <<<"$KB"
 log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
 # network) may still reach SSH.
-ufw allow from 10.211.55.0/24 to any port 22 proto tcp comment "omaparallels: ssh from the Mac" >/dev/null 2>&1 || true
+ufw allow from 10.211.55.0/24 to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
 # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
 pacman -S --needed --noconfirm grub-btrfs inotify-tools jq >/dev/null 2>&1
 # Read-only snapshots picked in GRUB boot with a temporary writable overlay
 # (Omarchy does this with Limine on x86; omarchy-mac uses GRUB).
-cat > /etc/mkinitcpio.conf.d/zz-omaparallels.conf <<'EOF'
+cat > /etc/mkinitcpio.conf.d/zz-omacvm.conf <<'EOF'
 [[ " ${HOOKS[*]} " == *" grub-btrfs-overlayfs "* ]] || HOOKS+=(grub-btrfs-overlayfs)
 EOF
 systemctl enable --now grub-btrfsd >/dev/null 2>&1 || true
-install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omaparallels.conf <<'EOF'
+install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omacvm.conf <<'EOF'
 [Resolve]
 FallbackDNS=1.1.1.1 9.9.9.9 2606:4700:4700::1111 2620:fe::fe
 EOF
@@ -42,7 +42,7 @@ systemctl try-restart systemd-resolved 2>/dev/null || true
 if (( AUTOLOGIN )); then
   # The Mac is FileVault-encrypted and locked already; hyprlock still locks
   # the session after idle.
-  install -Dm644 /dev/stdin /etc/sddm.conf.d/20-omaparallels-autologin.conf <<EOF
+  install -Dm644 /dev/stdin /etc/sddm.conf.d/20-omacvm-autologin.conf <<EOF
 [Autologin]
 User=$U
 Session=hyprland-uwsm
@@ -63,7 +63,7 @@ if (( THP )); then
   "$R/kernel/build-thp-kernel.sh" "$U"
 fi
 # Updated bar widgets only load in a new shell: restart it once if any changed.
-F=$(getent passwd "$U" | cut -d: -f6)/.local/state/omaparallels/restart-shell
+F=$(getent passwd "$U" | cut -d: -f6)/.local/state/omacvm/restart-shell
 if [[ -f $F ]]; then
   rm -f "$F"
   sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" \
@@ -71,4 +71,4 @@ if [[ -f $F ]]; then
 fi
 mkinitcpio -P >/dev/null 2>&1 || true
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
-log "Omaparallels guest side installed for $U (reboot to apply everything)"
+log "OmacVM guest side installed for $U (reboot to apply everything)"

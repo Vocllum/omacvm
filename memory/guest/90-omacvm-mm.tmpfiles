@@ -1,0 +1,5 @@
+# OmacVM: THP stays "always" (compiled in) for memory-access speed, but
+# never stall an allocation to compact memory for it; khugepaged fills in later.
+w /sys/kernel/mm/transparent_hugepage/defrag - - - - defer+madvise
+# MGLRU: protect the working set for 1 s so reclaim does not thrash.
+w /sys/kernel/mm/lru_gen/min_ttl_ms - - - - 1000

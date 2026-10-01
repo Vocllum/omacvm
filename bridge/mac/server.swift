@@ -55,7 +55,7 @@ final class Feed {
 }
 
 final class Hub {
-  private let q = DispatchQueue(label: "omaparallels-bridge.hub")
+  private let q = DispatchQueue(label: "omacvm-bridge.hub")
   private let feeds: [Feed]
   private var clients: [Int32: String] = [:]
   private var lastSend = Date()
@@ -255,7 +255,7 @@ func handle(_ fd: Int32, peer: String) {
 // Listens on listenAddr only. The Parallels bridge (bridge100/101) appears when
 // Parallels starts and can be recreated, so the listener follows the address.
 final class Server {
-  private let q = DispatchQueue(label: "omaparallels-bridge.listen")
+  private let q = DispatchQueue(label: "omacvm-bridge.listen")
   private var source: DispatchSourceRead?
   private var boundInterface: String?
   private var waitingLogged = false

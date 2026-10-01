@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 THP_CONFIG = '''
-  # Omaparallels: memory-access speed (THP always) and reclaim (MGLRU)
+  # OmacVM: memory-access speed (THP always) and reclaim (MGLRU)
   scripts/config --enable TRANSPARENT_HUGEPAGE --enable TRANSPARENT_HUGEPAGE_ALWAYS \\
     --disable TRANSPARENT_HUGEPAGE_MADVISE --enable LRU_GEN --enable LRU_GEN_ENABLED \\
     --enable ZSWAP_COMPRESSOR_DEFAULT_ZSTD --disable ZSWAP_COMPRESSOR_DEFAULT_LZO \\
@@ -59,10 +59,10 @@ def main(d):
 
     p = pkgbuild
     p = sub(r"^# / AArch64 multi-platform.*$",
-            "# / AArch64 multi-platform, derived from ALARM linux-aarch64 by Omaparallels:\n"
+            "# / AArch64 multi-platform, derived from ALARM linux-aarch64 by OmacVM:\n"
             "#   THP always, MGLRU on, no dtbs/Chromebook image. Installs next to the stock kernel.", p, flags=re.M)
     p = sub(r"^pkgbase=linux-aarch64$", "pkgbase=linux-aarch64-thp", p, flags=re.M)
-    p = sub(r'^_desc="AArch64 multi-platform"$', '_desc="AArch64 multi-platform, THP always + MGLRU (Omaparallels)"', p, flags=re.M)
+    p = sub(r'^_desc="AArch64 multi-platform"$', '_desc="AArch64 multi-platform, THP always + MGLRU (OmacVM)"', p, flags=re.M)
     p = sub(r"'uboot-tools' 'vboot-utils' ", "", p)
     p = sub(r"(^makedepends=\([^)]*)\)", r"\1 'pahole' 'cpio')", p, flags=re.M)
 

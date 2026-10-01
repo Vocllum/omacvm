@@ -4,8 +4,8 @@
 Works on Parallels Desktop Standard: only `prlctl list/register` are needed
 elsewhere, everything else is this file. Usage:
 
-  pvs.py CONFIG omaparallels --cpus N --memsize MB [--description TEXT]
-      the Omaparallels settings: CPUs/RAM fixed, 3D + VSync, Retina (HiDPI in
+  pvs.py CONFIG omacvm --cpus N --memsize MB [--description TEXT]
+      the OmacVM settings: CPUs/RAM fixed, 3D + VSync, Retina (HiDPI in
       the guest, native resolution in full screen), all displays in full
       screen, smooth scrolling, no Mac volumes or iCloud in the guest
   pvs.py CONFIG add-nvme NAME SIZE_MB     add an existing .hdd bundle (in the .pvm) as NVMe disk
@@ -56,7 +56,7 @@ def child(parent, tag, text):
     return e
 
 
-def omaparallels(root, cpus, memsize, description):
+def omacvm(root, cpus, memsize, description):
     s = {
         "Hardware/Cpu/Number": cpus, "Hardware/Cpu/AutoCountEnabled": 0,
         "Hardware/Memory/RAM": memsize, "Hardware/Memory/RamAutoSizeEnabled": 0,
@@ -161,9 +161,9 @@ def main(argv):
     if cmd == "get":
         print(node(root, args[0]).text or "")
         return
-    if cmd == "omaparallels":
+    if cmd == "omacvm":
         opts = dict(zip(args[::2], args[1::2]))
-        omaparallels(root, int(opts["--cpus"]), int(opts["--memsize"]), opts.get("--description"))
+        omacvm(root, int(opts["--cpus"]), int(opts["--memsize"]), opts.get("--description"))
     elif cmd == "add-nvme":
         add_nvme(root, args[0], int(args[1]))
     elif cmd == "boot-from":

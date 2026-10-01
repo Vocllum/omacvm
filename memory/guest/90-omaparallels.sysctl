@@ -1,6 +1,0 @@
-# Omaparallels: memory tuning for a Parallels guest on a macOS host.
-# zram is the only swap; reading a whole cluster from it is pointless.
-vm.page-cluster = 0
-# Reclaim a little earlier and more smoothly instead of in bursts.
-vm.watermark_boost_factor = 0
-vm.watermark_scale_factor = 125

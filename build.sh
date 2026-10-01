@@ -1,5 +1,5 @@
 #!/bin/bash
-# Omaparallels: build an Omarchy VM in Parallels Desktop that feels like a
+# OmacVM: build an Omarchy VM in Parallels Desktop that feels like a
 # native Mac, from nothing, in one go (about an hour, mostly downloads and the
 # kernel build).
 #
@@ -11,7 +11,7 @@
 # the keyboard layout, timezone and language, and a CPU/RAM/disk size suggested
 # from what the Mac has. Your user name (default: your Mac login), full name and
 # password are asked for before anything is built (or --user/--full-name/--yes
-# and OMAPARALLELS_PASSWORD); nothing needs answering in the VM window. Needs Apple Silicon, Parallels Desktop
+# and OMACVM_PASSWORD); nothing needs answering in the VM window. Needs Apple Silicon, Parallels Desktop
 # 19+ (Standard is enough) and Homebrew's zstd + e2fsprogs for the temporary
 # live installer.
 set -euo pipefail
@@ -40,7 +40,7 @@ while (( $# )); do
 done
 
 # ---------- 1. this Mac ----------
-[[ $(uname -m) == arm64 ]] || die "Omaparallels needs an Apple Silicon Mac"
+[[ $(uname -m) == arm64 ]] || die "OmacVM needs an Apple Silicon Mac"
 [[ -x $PRLCTL ]] || die "Parallels Desktop is not installed"
 for b in zstd e2fsck; do
   command -v "$b" >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/$b ]] ||
@@ -80,7 +80,7 @@ fi
 
 cat <<EOF
 
-  Omaparallels will build this VM:
+  OmacVM will build this VM:
 
     VM name        $VM   (bundle ~/Parallels/$VM.pvm)
     CPUs / memory  $CPUS of $mac_cores cores / $MEM_GB of $mac_mem_gb GB
@@ -95,8 +95,8 @@ EOF
 if (( ! YES )); then
   read -r -p "  Go ahead? [Y/n] " a; [[ ${a:-y} =~ ^[Yy] ]] || exit 1
 fi
-if [[ -n ${OMAPARALLELS_PASSWORD:-} ]]; then
-  PW=$OMAPARALLELS_PASSWORD
+if [[ -n ${OMACVM_PASSWORD:-} ]]; then
+  PW=$OMACVM_PASSWORD
 else
   read -r -s -p "  Password for $U in the VM: " PW; echo
   read -r -s -p "  Again: " PW2; echo
@@ -105,8 +105,8 @@ fi
 HASH=$(printf '%s' "$PW" | openssl passwd -6 -stdin)
 unset PW PW2
 
-KEY=~/.ssh/omaparallels
-[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C "omaparallels" -f "$KEY" -q; }
+KEY=~/.ssh/omacvm
+[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
 export OMA_KEY=$KEY
 started=$(date +%s)
 
@@ -118,14 +118,14 @@ PVM="$HOME/Parallels/$VM.pvm"
 log "VM settings and a ${DISK_GB} GB NVMe disk"
 /usr/local/bin/prl_disk_tool create --hdd "$PVM/omarchy.hdd" --size "${DISK_GB}G" >/dev/null
 P="$R/vm/pvs.py"
-python3 "$P" "$PVM/config.pvs" omaparallels --cpus "$CPUS" --memsize $((MEM_GB * 1024)) \
-  --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by Omaparallels"
+python3 "$P" "$PVM/config.pvs" omacvm --cpus "$CPUS" --memsize $((MEM_GB * 1024)) \
+  --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM"
 python3 "$P" "$PVM/config.pvs" add-nvme omarchy.hdd $((DISK_GB * 1024)) >/dev/null
 python3 "$P" "$PVM/config.pvs" boot-from 0
-mkdir -p ~/.local/share/omaparallels/clip ~/.local/share/omaparallels/theme
+mkdir -p ~/.local/share/omacvm/clip ~/.local/share/omacvm/theme
 python3 "$P" "$PVM/config.pvs" add-share vmlog "$PVM" ro                       # display layout (parallels.log)
-python3 "$P" "$PVM/config.pvs" add-share clip ~/.local/share/omaparallels/clip rw     # clipboard VM -> Mac
-python3 "$P" "$PVM/config.pvs" add-share theme ~/.local/share/omaparallels/theme rw   # lock screen theme
+python3 "$P" "$PVM/config.pvs" add-share clip ~/.local/share/omacvm/clip rw     # clipboard VM -> Mac
+python3 "$P" "$PVM/config.pvs" add-share theme ~/.local/share/omacvm/theme rw   # lock screen theme
 cp "$PVM/config.pvs" "$PVM/config.pvs.backup"
 "$PRLCTL" register "$PVM" >/dev/null
 vm_start "$VM" "$PVM"
@@ -138,8 +138,8 @@ log "Arch Linux ARM onto the NVMe disk ($IP)"
   printf 'OMA_USER=%q\nOMA_FULLNAME=%q\nOMA_HASH=%q\nOMA_TZ=%q\nOMA_LANG=%q\nOMA_HOSTNAME=%q\n' \
     "$U" "$FULL" "$HASH" "$TZ_MAC" "$LANG_VM" "$HOST"
   read -r l v <<<"$KB"; printf 'OMA_XKB_LAYOUT=%q\nOMA_XKB_VARIANT=%q\n' "$l" "${v:-}"
-} | gssh "$IP" "umask 077; cat > /root/omaparallels.env"
-gssh "$IP" "cat > /root/omaparallels.pub" < "$KEY.pub"
+} | gssh "$IP" "umask 077; cat > /root/omacvm.env"
+gssh "$IP" "cat > /root/omacvm.pub" < "$KEY.pub"
 gssh "$IP" "bash -s" < "$R/vm/base-install.sh"
 gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 wait_stopped "$VM"
@@ -175,12 +175,12 @@ log "Parallels Tools"
 gssh "$IP" "cat > /root/prl-tools-lin-arm.iso" < "/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
 gssh "$IP" "set -e; mkdir -p /mnt/tools; mount -o loop,ro /root/prl-tools-lin-arm.iso /mnt/tools
   /mnt/tools/installer/install-cli.sh --install >/dev/null 2>&1 || /mnt/tools/installer/install-cli.sh --install
-  umount /mnt/tools; rm -f /root/prl-tools-lin-arm.iso /root/omaparallels.env"
+  umount /mnt/tools; rm -f /root/prl-tools-lin-arm.iso /root/omacvm.env"
 
-# ---------- 5. Omaparallels ----------
-log "Omaparallels on the Mac"
+# ---------- 5. OmacVM ----------
+log "OmacVM on the Mac"
 "$R/mac/install.sh"
-log "Omaparallels in the VM"
+log "OmacVM in the VM"
 args=(--vm "$VM" --ip "$IP" --user "$U" --keyboard "$KB")
 ((THP)) || args+=(--no-thp-kernel)
 ((AUTOLOGIN)) && args+=(--autologin)
@@ -199,9 +199,9 @@ cat <<EOF
   Done in $(( ($(date +%s) - started) / 60 )) minutes. VM '$VM' is rebooting into Omarchy.
 
   One-time steps on the Mac:
-    * Allow WiFi names: Location Services for Omaparallels Bridge (prompt).
-    * Allow media keys and gestures: Accessibility for Omaparallels Bridge and
-      Omaparallels Gestures, Input Monitoring for Omaparallels Gestures.
+    * Allow WiFi names: Location Services for OmacVM Bridge (prompt).
+    * Allow media keys and gestures: Accessibility for OmacVM Bridge and
+      OmacVM Gestures, Input Monitoring for OmacVM Gestures.
     * Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts >
       "Send macOS system shortcuts: Always" (Cmd+Space etc. reach Omarchy).
     * Optional: System Settings > Screen Saver > Omarchy Lock, and

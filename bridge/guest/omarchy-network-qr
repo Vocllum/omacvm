@@ -1,5 +1,5 @@
 #!/bin/bash
-# Omaparallels: Omarchy's Wi-Fi QR card (omarchy.wifiqr) for the Mac's Wi-Fi.
+# OmacVM: Omarchy's Wi-Fi QR card (omarchy.wifiqr) for the Mac's Wi-Fi.
 # The VM has no Wi-Fi of its own. When NetworkManager has no connected Wi-Fi
 # device (or the card asks for interface "mac"), this shares the Mac's current
 # network through the bridge; macOS asks for approval first. Otherwise it is
@@ -11,7 +11,7 @@ for a in "$@"; do case $a in --meta) meta=true ;; *) iface=$a ;; esac; done
 if [[ $iface != mac ]] && LC_ALL=C nmcli -t -f TYPE,STATE device status 2>/dev/null | grep -q '^wifi:connected'; then
   exec /usr/bin/omarchy-network-qr "$@"
 fi
-if ! json=$(omaparallels-bridge password 2>/dev/null); then
+if ! json=$(omacvm-bridge password 2>/dev/null); then
   case $(jq -r '.error // empty' <<<"$json" 2>/dev/null) in
     denied) echo "Sharing was declined on the Mac" >&2 ;;
     *802.1X*|*enterprise*) echo "Enterprise Wi-Fi cannot be shared with a password QR code" >&2 ;;

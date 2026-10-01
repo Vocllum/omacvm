@@ -75,7 +75,7 @@ func describeAudio(_ old: [String: Any], _ s: [String: Any]) -> String? {
 
 final class Audio {
   var onChange: ((String) -> Void)?
-  private let q = DispatchQueue(label: "omaparallels-bridge.audio")
+  private let q = DispatchQueue(label: "omacvm-bridge.audio")
   private var watched = Set<AudioObjectID>()
 
   func start() {

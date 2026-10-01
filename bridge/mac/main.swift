@@ -1,4 +1,4 @@
-// omaparallels-bridge (Mac side): exposes this Mac's Wi-Fi and audio state to the
+// omacvm-bridge (Mac side): exposes this Mac's Wi-Fi and audio state to the
 // Omarchy VM in Parallels, which only sees a virtual Ethernet NIC and a virtual
 // sound card. Wi-Fi is read-only (stage 1); audio can be controlled (stage 1b);
 // media keys go to the VM's own popup while it is full screen (stage 1c).
@@ -22,7 +22,7 @@
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
 //                          light changes (keys.swift), ": ping" every 15 s
-// Token: ~/Library/Application Support/omaparallels-bridge/token (created on first run).
+// Token: ~/Library/Application Support/omacvm-bridge/token (created on first run).
 // SSIDs/BSSIDs are only readable once Location Services is granted to the app.
 import AppKit
 import Foundation
@@ -31,8 +31,8 @@ import Security
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let env = ProcessInfo.processInfo.environment
-let listenAddr = env["OMAPARALLELS_BRIDGE_ADDR"] ?? "10.211.55.2"   // Parallels shared network, host side
-let listenPort = UInt16(env["OMAPARALLELS_BRIDGE_PORT"] ?? "") ?? 47831
+let listenAddr = env["OMACVM_BRIDGE_ADDR"] ?? "10.211.55.2"   // Parallels shared network, host side
+let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
 let recentScanSeconds = 10.0 // GET /scan reuses an active scan this young; scan-cache push throttle
@@ -41,11 +41,11 @@ let maxClients = 64     // dead connections are only noticed on the next write
 let logFormat: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
 let isoFormat = ISO8601DateFormatter()
 
-func log(_ s: String) { print("\(logFormat.string(from: Date())) omaparallels-bridge: \(s)") }
+func log(_ s: String) { print("\(logFormat.string(from: Date())) omacvm-bridge: \(s)") }
 
 // ---- token ----
 let supportDir = FileManager.default.homeDirectoryForCurrentUser
-  .appendingPathComponent("Library/Application Support/omaparallels-bridge").path
+  .appendingPathComponent("Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
 func loadToken() -> String {

@@ -5,7 +5,7 @@
 import AppKit
 import ApplicationServices
 
-// ---- config: ~/Library/Application Support/omaparallels-bridge/config.json ----
+// ---- config: ~/Library/Application Support/omacvm-bridge/config.json ----
 final class Config {
   let path = supportDir + "/config.json"
   var captureKeys = true       // media keys go to the VM while it is full screen
@@ -96,7 +96,7 @@ enum KeyboardLight {
 // source: "keys" (caught media key), "api" (POST from the VM), "external"
 // (anything else: menu bar, keys outside the VM, AirPods, auto-brightness).
 final class OSDEvents {
-  private let q = DispatchQueue(label: "omaparallels-bridge.osd")
+  private let q = DispatchQueue(label: "omacvm-bridge.osd")
   private var volume: VolumeSnap?
   private var brightness: Int?
   private var brightnessQuietUntil = Date.distantPast
@@ -173,7 +173,7 @@ enum MediaKey: Int {   // NX_KEYTYPE_* (IOKit/hidsystem/ev_keymap.h)
 final class MediaKeys {
   private var tap: CFMachPort?
   private var askedAX = false
-  private let work = DispatchQueue(label: "omaparallels-bridge.keys")
+  private let work = DispatchQueue(label: "omacvm-bridge.keys")
   private(set) var vmFullScreen = false
 
   var status: String {
@@ -193,7 +193,7 @@ final class MediaKeys {
     guard config.captureKeys else { return }
     if let tap { if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }; return }
     if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
-      if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > Omaparallels Bridge)") }
+      if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
     }
@@ -277,11 +277,11 @@ final class MediaKeys {
 // ---- menu bar ----
 final class MenuBar: NSObject, NSMenuDelegate {
   private var item: NSStatusItem?
-  let logPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/omaparallels-bridge.log").path
+  let logPath = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/omacvm-bridge.log").path
 
   func show() {
     let i = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    i.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Omaparallels Bridge")
+    i.button?.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "OmacVM Bridge")
     let menu = NSMenu()
     menu.delegate = self
     i.menu = menu
@@ -310,7 +310,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     info("VM event clients: \(hub.clientCount)")
     menu.addItem(.separator())
     info("Open Log", #selector(openLog))
-    info("Quit Omaparallels Bridge", #selector(quit))
+    info("Quit OmacVM Bridge", #selector(quit))
   }
 
   @objc private func toggleCapture() {

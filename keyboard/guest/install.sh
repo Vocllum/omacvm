@@ -9,9 +9,9 @@ U=${1:?usage: install.sh <desktop-user> <layout> [variant]}; L=${2:?layout}; V=$
 H=$(getent passwd "$U" | cut -d: -f6)
 
 I=$H/.config/hypr/input.lua
-sed -i '/^-- Omaparallels keyboard layout (from the Mac)/,/^})$/d' "$I" 2>/dev/null || true
+sed -i '/^-- OmacVM keyboard layout (from the Mac)/,/^})$/d' "$I" 2>/dev/null || true
 cat >> "$I" <<LUA
--- Omaparallels keyboard layout (from the Mac)
+-- OmacVM keyboard layout (from the Mac)
 hl.config({ input = { kb_layout = "$L", kb_variant = "$V" } })
 LUA
 localectl set-x11-keymap "$L" "" "$V" 2>/dev/null || true

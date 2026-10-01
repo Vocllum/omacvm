@@ -9,7 +9,7 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 U=${1:?usage: build-thp-kernel.sh <desktop-user>}
 ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux-aarch64
-W=$(getent passwd "$U" | cut -d: -f6)/.cache/omaparallels/linux-aarch64-thp
+W=$(getent passwd "$U" | cut -d: -f6)/.cache/omacvm/linux-aarch64-thp
 
 pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel >/dev/null 2>&1
 rm -rf "$W"; install -d -o "$U" -g "$U" "$W"

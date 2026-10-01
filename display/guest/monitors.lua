@@ -1,4 +1,4 @@
--- Omaparallels: Parallels (virtio-gpu) monitors, kept in sync by parallels-dynres.
+-- OmacVM: Parallels (virtio-gpu) monitors, kept in sync by parallels-dynres.
 -- "preferred" = the mode Parallels pushes for the current window / display size.
 local omarchy_gdk_scale = 2
 local omarchy_monitor_scale = 2

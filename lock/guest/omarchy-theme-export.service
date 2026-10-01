@@ -1,5 +1,5 @@
 [Unit]
-Description=Omaparallels lock: publish the Omarchy theme to the Mac
+Description=OmacVM lock: publish the Omarchy theme to the Mac
 
 [Service]
 Type=oneshot
