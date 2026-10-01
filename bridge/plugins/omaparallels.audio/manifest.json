@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "omaparallels.audio",
+  "name": "Mac Audio",
+  "version": "1.0.0",
+  "author": "Omaparallels (based on Omarchy's audio widget)",
+  "description": "The Mac host's volume, mute and audio devices in a Parallels VM, via omaparallels-bridge",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Mac Audio",
+    "description": "The Mac host's volume, mute and audio devices in a Parallels VM, via omaparallels-bridge",
+    "category": "Audio",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.audio"
+  }
+}

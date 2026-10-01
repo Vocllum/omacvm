@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "omaparallels.wifi",
+  "name": "Mac Wi-Fi",
+  "version": "1.0.0",
+  "author": "Omaparallels (based on Omarchy's network widget)",
+  "description": "The Mac host's Wi-Fi in a Parallels VM, via omaparallels-bridge",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Mac Wi-Fi",
+    "description": "The Mac host's Wi-Fi in a Parallels VM, via omaparallels-bridge",
+    "category": "Network",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.network"
+  }
+}

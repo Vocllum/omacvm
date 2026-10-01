@@ -6,6 +6,7 @@
 #   /usr/local/bin/omaparallels-bridge, /usr/local/bin/omaparallels-bridge-osd
 #   user service omaparallels-bridge-osd (Omarchy OSD for the Mac's media keys)
 #   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
+#   the bar widgets in ../plugins (omaparallels.wifi, omaparallels.audio)
 # The token (~/.config/omaparallels-bridge/token) comes from the Mac, see push-guest.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -31,5 +32,8 @@ sleep 1
 amixer -q -c0 sset Master 0dB unmute 2>/dev/null || true
 as_user wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0 2>/dev/null || true
 as_user wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || true
+
+# Bar widgets: the Mac's Wi-Fi and audio, in the slots of Omarchy's own.
+for p in ../plugins/*/; do ../../lib/install-plugin.sh "$U" "$p"; done
 
 echo "omaparallels-bridge guest side installed for $U"
