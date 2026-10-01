@@ -13,14 +13,22 @@
 </p>
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
-fast, but out of the box it feels like a guest: the bar shows a virtual
-Ethernet card, the volume keys open macOS's popup, the trackpad can't swipe
-between workspaces, the resolution is wrong after every change, an external
-display goes wherever it wants.
+fast, but out of the box it feels like a guest:
 
-**OmacVM** fixes that, and builds the VM for you: Arch Linux ARM,
-[omarchy-mac](https://github.com/omacom/omarchy-mac), a tuned kernel, and the
-glue on both sides of the VM.
+- **Full screen wastes the notch.** The VM sits below the camera housing and
+  leaves a black strip across the top of your MacBook's screen.
+- **The trackpad doesn't swipe.** Three- and four-finger swipes and pinch go to
+  macOS's Mission Control and Spaces, never to Omarchy's workspaces.
+- **The bar shows a virtual network card**, not your Wi-Fi, and none of the
+  Mac's audio devices.
+- **The Mac's keys aren't Omarchy's.** Volume and brightness open macOS's
+  popups, Cmd+Space opens Spotlight, and Parallels turns Cmd+C/V into Ctrl.
+- **External displays ignore your macOS arrangement.**
+
+**OmacVM** fixes all of that and builds the VM for you: Arch Linux ARM,
+[omarchy-mac](https://github.com/omacom/omarchy-mac) and the glue on both sides
+of the VM, with [Omanotch](https://github.com/gillesgoetsch/omanotch) putting
+Omarchy's bar beside the notch.
 
 > [!NOTE]
 > **Got an M1 or M2 Mac?** You can run Omarchy natively on
