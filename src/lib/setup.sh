@@ -114,16 +114,34 @@ wait_for_app() {
         fi ;;
       utm)
         if [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )); then return 0; fi
-        if [[ -x $UTMCTL ]]; then hd "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null) is too old: OmacVM needs UTM 5"
-        else hd "UTM is not installed"; fi
-        say "    OmacVM needs UTM 5, for now a beta (tested with 5.0.6): it is the first UTM"
-        say "    whose GPU acceleration draws Linux apps (on 4.7 they stay black)."
-        say "    https://github.com/utmapp/UTM/releases (the newest v5 release, UTM.dmg)"
-        say "    Install it into /Applications and open it once." ;;
+        utm_install_help ;;
     esac
     read -r -p "  Press Return to check again, or q to quit: " a < "$TTY" || die "no answer (no terminal?)"
     [[ $a == q ]] && exit 1
   done
+}
+
+# How to get UTM 5. It is still a beta: UTM's website, the App Store and
+# Homebrew's plain "utm" cask all give 4.7, whose GPU path leaves Linux apps
+# black (ggalancs/omarchy-arm-utm#7).
+utm_install_help() {
+  local v; v=$(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null || true)
+  if [[ -n $v ]]; then hd "UTM $v is installed, but OmacVM needs UTM 5"
+  else hd "UTM 5 is not installed"; fi
+  say "    UTM 5 is still a beta, and it is the first UTM whose GPU acceleration draws"
+  say "    Linux apps (on 4.7 they stay black). UTM's website, the App Store and"
+  say "    \"brew install --cask utm\" give 4.7. Install the beta (tested: 5.0.6):"
+  if [[ -n $v ]] && brew list --cask utm >/dev/null 2>&1; then
+    say "      brew uninstall --cask utm && brew install --cask utm@beta"
+  elif [[ -n $v ]]; then
+    say "      quit UTM, move /Applications/UTM.app to the Trash (your VMs stay), then"
+    say "      brew install --cask utm@beta"
+  else
+    say "      brew install --cask utm@beta"
+  fi
+  say "    or download UTM.dmg from the newest \"Beta\" release:"
+  say "      https://github.com/utmapp/UTM/releases"
+  say "    Then open UTM once."
 }
 
 # omarchy-mac's published package lane: stable once it exists, else rc.

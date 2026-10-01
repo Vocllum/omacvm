@@ -71,6 +71,7 @@ if [[ -z $TYPE ]]; then
   say "    1  Parallels Desktop  near-native speed, every display. Paid; Standard allows"
   say "                          4 CPUs / 8 GB per VM, Pro (and the trial) up to 18 / 128 GB."
   say "    2  UTM                free, no resource limits; one display, slower desktop."
+  say "                          Needs UTM 5, a beta for now (brew install --cask utm@beta)."
   say "    Comparison: $README_ROUTES"
   while :; do
     read -r -p "  Choose 1 or 2: " a < "$TTY" || die "no answer (no terminal?)"
@@ -85,7 +86,7 @@ case $TYPE in
     (( CAP_CPUS > mac_cores )) && CAP_CPUS=$mac_cores
     (( CAP_MEM_GB > mac_mem_gb )) && CAP_MEM_GB=$mac_mem_gb ;;
   utm)
-    if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || die "UTM 5 is not installed"
+    if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || { utm_install_help; die "UTM 5 is not installed"; }
     else wait_for_app utm; fi
     : ;;
   *) die "--vm-type parallels or utm" ;;
