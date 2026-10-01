@@ -26,7 +26,7 @@ systemctl --user -M "$U@" restart omaparallels-bridge-osd.service
 # (the bridge sets the Mac's volume), so the VM's own levels stay at full.
 if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack >/dev/null 2>&1; then
   pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
-  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack >/dev/null
+  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack >/dev/null 2>&1
 fi
 systemctl --user -M "$U@" restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 sleep 1

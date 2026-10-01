@@ -36,7 +36,7 @@ let listenPort = UInt16(env["OMAPARALLELS_BRIDGE_PORT"] ?? "") ?? 47831
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
 let recentScanSeconds = 10.0 // GET /scan reuses an active scan this young; scan-cache push throttle
-let maxClients = 16
+let maxClients = 64     // dead connections are only noticed on the next write
 
 let logFormat: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
 let isoFormat = ISO8601DateFormatter()

@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 
-pacman -S --needed --noconfirm python-evdev >/dev/null
+pacman -S --needed --noconfirm python-evdev >/dev/null 2>&1
 install -m755 omaparallels-gestures /usr/local/bin/omaparallels-gestures
 install -m644 omaparallels-gestures.service /etc/systemd/system/omaparallels-gestures.service
 systemctl daemon-reload

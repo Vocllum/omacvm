@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
-pacman -S --needed --noconfirm imagemagick >/dev/null
+pacman -S --needed --noconfirm imagemagick >/dev/null 2>&1
 install -m755 omarchy-theme-export /usr/local/bin/omarchy-theme-export
 install -m644 omarchy-theme-export.service omarchy-theme-export.path /etc/systemd/user/
 systemctl --user -M "$U@" daemon-reload

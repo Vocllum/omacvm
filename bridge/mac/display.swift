@@ -19,7 +19,7 @@ enum NightShift {
   private typealias SetBool = @convention(c) (AnyObject, Selector, Bool) -> Bool
   private typealias GetFloat = @convention(c) (AnyObject, Selector, UnsafeMutablePointer<Float>) -> Bool
   private typealias SetStrength = @convention(c) (AnyObject, Selector, Float, Bool) -> Bool
-  private typealias SetBlock = @convention(c) (AnyObject, Selector, @convention(block) (UnsafeRawPointer?) -> Void) -> Void
+  private typealias SetBlock = @convention(c) (AnyObject, Selector, @escaping @convention(block) (UnsafeRawPointer?) -> Void) -> Void
 
   private static let client: NSObject? = {
     guard dlopen("/System/Library/PrivateFrameworks/CoreBrightness.framework/CoreBrightness", RTLD_LAZY) != nil,

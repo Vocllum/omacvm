@@ -27,7 +27,7 @@ log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # network) may still reach SSH.
 ufw allow from 10.211.55.0/24 to any port 22 proto tcp comment "omaparallels: ssh from the Mac" >/dev/null 2>&1 || true
 # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
-pacman -S --needed --noconfirm grub-btrfs inotify-tools jq >/dev/null
+pacman -S --needed --noconfirm grub-btrfs inotify-tools jq >/dev/null 2>&1
 # Read-only snapshots picked in GRUB boot with a temporary writable overlay
 # (Omarchy does this with Limine on x86; omarchy-mac uses GRUB).
 cat > /etc/mkinitcpio.conf.d/zz-omaparallels.conf <<'EOF'

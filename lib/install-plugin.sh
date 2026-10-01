@@ -10,7 +10,12 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 U=${1:?usage: install-plugin.sh <desktop-user> <plugin-folder>}; dir=${2%/}
 H=$(getent passwd "$U" | cut -d: -f6)
-as_user() { sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" "$@"; }
+# Omarchy's commands need its environment (OMARCHY_PATH, ...), which a root
+# shell does not have: load Omarchy's own bootstrap first.
+as_user() {
+  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" \
+    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
+}
 
 id=$(jq -r .id "$dir/manifest.json")
 dest=$H/.config/omarchy/plugins/$id
