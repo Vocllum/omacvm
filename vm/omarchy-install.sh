@@ -42,6 +42,10 @@ done
 mv "$H/.omacvm-install.log" "$L"; rm -f "$H/.omacvm-install.sh"
 grep -q 'INSTALL-EXIT=0' "$L" || { tail -30 "$L"; echo "omarchy-mac install failed, full log: $L" >&2; exit 1; }
 # Omarchy turns on its firewall (deny inbound). This SSH session survives, the
-# next ones from the Mac would not: let the Mac's Parallels network reach SSH.
-ufw allow from 10.211.55.0/24 to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null
+# next ones from the Mac would not: let the Mac's VM network reach SSH. ufw may
+# fail to apply the rule live right after the install ("problem running"); it
+# is stored and active from the next boot, which is what counts.
+net="${SSH_CLIENT%% *}"; net="${net%.*}.0/24"
+ufw allow from "$net" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+ufw show added 2>/dev/null | grep -q "omacvm: ssh from the Mac" || { echo "could not add the SSH firewall rule" >&2; exit 1; }
 log "Omarchy installed ($(cat "$H/.local/share/omarchy/version" 2>/dev/null))"

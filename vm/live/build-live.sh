@@ -29,6 +29,7 @@ DISK_SIZE_MIB=""           # computed from layout if empty
 KEEP_DMGS=0
 SKIP_BOOT=0
 DMG_PATH=""
+RAW_IMAGE=""               # --raw-image PATH: write a plain disk image (UTM) instead of a Parallels VM
 
 log()  { printf '\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
@@ -56,6 +57,7 @@ while [[ $# -gt 0 ]]; do
     --skip-boot)      SKIP_BOOT=1; shift ;;
     --keep-dmgs)      KEEP_DMGS=1; shift ;;
     --ssh-key)        SSH_KEY="$2"; shift 2 ;;
+    --raw-image)      RAW_IMAGE="$2"; shift 2 ;;
     -h|--help)        usage ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -69,14 +71,18 @@ MACOS_VER="$(sw_vers -productVersion 2>/dev/null || echo 0)"
 MACOS_MAJOR="$(printf '%s' "$MACOS_VER" | cut -d. -f1)"
 [[ "$MACOS_MAJOR" -ge 14 ]] || die "macOS 14+ required (found $MACOS_VER); Parallels 19+ needs it"
 PARALLELS_APP="/Applications/Parallels Desktop.app"
-[[ -d "$PARALLELS_APP" ]] || die "Parallels Desktop not found at $PARALLELS_APP"
 PRLCTL="/usr/local/bin/prlctl"
 PRL_DISK_TOOL="/usr/local/bin/prl_disk_tool"
-[[ -x "$PRLCTL" ]] || die "prlctl not found — is Parallels Desktop installed?"
-PRL_VER="$("$PRLCTL" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
-PRL_MAJOR="$(printf '%s' "$PRL_VER" | cut -d. -f1)"
-[[ "${PRL_MAJOR:-0}" -ge 19 ]] || die "Parallels Desktop 19+ required (found ${PRL_VER:-unknown})"
-info "host: macOS $MACOS_VER, Parallels $PRL_VER"
+if [[ -z "$RAW_IMAGE" ]]; then
+  [[ -d "$PARALLELS_APP" ]] || die "Parallels Desktop not found at $PARALLELS_APP"
+  [[ -x "$PRLCTL" ]] || die "prlctl not found — is Parallels Desktop installed?"
+  PRL_VER="$("$PRLCTL" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+  PRL_MAJOR="$(printf '%s' "$PRL_VER" | cut -d. -f1)"
+  [[ "${PRL_MAJOR:-0}" -ge 19 ]] || die "Parallels Desktop 19+ required (found ${PRL_VER:-unknown})"
+  info "host: macOS $MACOS_VER, Parallels $PRL_VER"
+else
+  info "host: macOS $MACOS_VER, writing a raw disk image (UTM)"
+fi
 FREE_GB="$(df -g "$HOME" 2>/dev/null | tail -1 | awk '{print $4}')"
 if [[ -n "$FREE_GB" && "$FREE_GB" -lt 15 ]]; then
   die "need ~15 GB free (found ${FREE_GB} GB)"
@@ -238,12 +244,18 @@ DISK_NAME="${VM_NAME// /}-0.hdd"
 HDD="$PVM/$DISK_NAME"
 HDS="$HDD/$DISK_NAME.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds"
 
-[[ -e "$PVM" ]] && die "$PVM already exists — remove it or pick another --vm-name"
-
-log "creating Parallels plain disk (${DISK_SIZE_MIB} MiB, sparse)"
-mkdir -p "$PVM"
-"$PRL_DISK_TOOL" create --hdd "$HDD" --size "$DISK_SIZE_MIB" --alloc-policy sparse >/dev/null
-[[ -f "$HDS" ]] || die "prl_disk_tool did not produce the expected .hds"
+if [[ -n "$RAW_IMAGE" ]]; then
+  HDS="$RAW_IMAGE"
+  log "creating a raw disk image (${DISK_SIZE_MIB} MiB, sparse): $HDS"
+  mkdir -p "$(dirname "$HDS")"; rm -f "$HDS"
+  python3 -c 'import sys; open(sys.argv[1], "wb").truncate(int(sys.argv[2]) * 1048576)' "$HDS" "$DISK_SIZE_MIB"
+else
+  [[ -e "$PVM" ]] && die "$PVM already exists — remove it or pick another --vm-name"
+  log "creating Parallels plain disk (${DISK_SIZE_MIB} MiB, sparse)"
+  mkdir -p "$PVM"
+  "$PRL_DISK_TOOL" create --hdd "$HDD" --size "$DISK_SIZE_MIB" --alloc-policy sparse >/dev/null
+  [[ -f "$HDS" ]] || die "prl_disk_tool did not produce the expected .hds"
+fi
 
 log "pouring GPT + partitions into the disk"
 python3 - "$SCRIPT_DIR" "$HDS" "$TOTAL_LBAS" "$ESP_START" "$ESP_SECTORS" \
@@ -295,6 +307,16 @@ with open(hds, "r+b") as f:
 assert verify(hds, esp_start, root_start), "post-pour verification failed"
 print("    GPT + ESP + ext4 verified in place")
 PY
+
+if [[ -n "$RAW_IMAGE" ]]; then
+  rm -f "$WORKDIR/rootfs.ext4" "$WORKDIR/rootfs16.ext4" "$WORKDIR/esp.img" "$WORKDIR/rootfs.ext4.zst"
+  rm -rf "$WORKDIR/esp-root"
+  if [[ "$KEEP_DMGS" != "1" ]]; then rm -f "$WORKDIR/TryOmarchy-$RELEASE.dmg"; fi
+  cleanup_dmg
+  trap - EXIT
+  log "live installer image ready: $RAW_IMAGE"
+  exit 0
+fi
 
 # ---------- 4. scaffold the VM bundle ----------
 log "scaffolding the VM bundle"

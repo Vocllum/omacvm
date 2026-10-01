@@ -1,0 +1,50 @@
+# UTM route helpers for build.sh (sourced, Mac side). Everything goes through
+# UTM's own AppleScript interface and utmctl; nothing edits UTM's bundles.
+
+utm_osa() { osascript "$@" 2>&1; }
+
+# utm_create NAME CPUS MEMORY_MB LIVE_IMAGE DISK_MB
+# A QEMU VM like the one ggalancs/omarchy-arm-utm and OmacVM were tested with:
+# HVF, UEFI, virtio-gpu-gl (native resolution, dynamic resolution), virtio-net
+# on UTM's shared network, the live installer as a VirtIO disk and the system
+# disk as NVMe (the base install looks for the NVMe disk).
+utm_create() {
+  local name=$1 cpus=$2 mem=$3 live=$4 disk=$5 out
+  out=$(utm_osa \
+    -e 'on run argv' \
+    -e '  tell application "UTM"' \
+    -e '    set vm to make new virtual machine with properties {backend:qemu, configuration:{name:(item 1 of argv), architecture:"aarch64", memory:((item 3 of argv) as integer), cpu cores:((item 2 of argv) as integer), hypervisor:true, uefi:true, icon:"arch-linux", notes:"Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM", drives:{{interface:VirtIO, removable:false, source:(POSIX file (item 4 of argv))}, {interface:NVMe, guest size:((item 5 of argv) as integer)}}, network interfaces:{{hardware:"virtio-net-pci", mode:shared}}, displays:{{hardware:"virtio-gpu-gl-pci", dynamic resolution:true, native resolution:true}}}}' \
+    -e '    return id of vm' \
+    -e '  end tell' \
+    -e 'end run' "$name" "$cpus" "$mem" "$live" "$disk")
+  [[ $out =~ ^[0-9A-F-]{36}$ ]] || die "UTM could not create the VM: $out"
+  echo "$out"
+}
+
+# utm_drop_live NAME: keep only the NVMe system disk (the VM must be stopped).
+utm_drop_live() {
+  local out
+  out=$(utm_osa \
+    -e 'on run argv' \
+    -e '  tell application "UTM"' \
+    -e '    set vm to virtual machine named (item 1 of argv)' \
+    -e '    copy (configuration of vm) to c' \
+    -e '    set keep to {}' \
+    -e '    repeat with d in (drives of c)' \
+    -e '      if interface of d is NVMe then set end of keep to (contents of d)' \
+    -e '    end repeat' \
+    -e '    set drives of c to keep' \
+    -e '    update configuration of vm with c' \
+    -e '    return count of (drives of (configuration of vm))' \
+    -e '  end tell' \
+    -e 'end run' "$1")
+  [[ $out == 1 ]] || die "could not remove the live installer disk: $out"
+}
+
+# UTM-wide settings that make the guest faster (from the UTM measurements in
+# AGENTS.md): no Vulkan driver, so UTM stops forcing a 4K stage-2 page size
+# (2x slower on memory-heavy work); no App Nap for UTM.
+utm_tune_app() {
+  defaults write com.utmapp.UTM QEMUVulkanDriver -int 1
+  defaults write com.utmapp.UTM NSAppSleepDisabled -bool YES
+}

@@ -42,6 +42,6 @@ for dev in @DEFAULT_AUDIO_SINK@ @DEFAULT_AUDIO_SOURCE@; do
 done
 
 # Bar widgets: the Mac's Wi-Fi and audio, in the slots of Omarchy's own.
-for p in ../plugins/*/; do ../../lib/install-plugin.sh "$U" "$p"; done
+for p in ../plugins/*/; do [[ -f $p/manifest.json ]] && ../../lib/install-plugin.sh "$U" "$p"; done
 
 echo "omacvm-bridge guest side installed for $U"
