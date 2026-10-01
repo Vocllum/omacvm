@@ -86,7 +86,7 @@ show whatever the VM would have shown.
   <img src="docs/states.svg" alt="Animated loop: Omanotch bar beside the notch, a notification right under it, a theme switch, the bar hidden with the wallpaper running through the strip, full-screen video with a black strip, the lock screen with a black strip, 16/14/13-inch MacBooks with the notch gap staying aligned, and swiping Spaces with the strip travelling along" width="100%">
 </p>
 
-Notifications land right under the strip, theme switches don't make it jump,
+Notifications never cut into the strip, theme switches don't make it jump,
 hiding the bar lets the wallpaper run through behind the notch, full-screen
 video and the lock screen turn it black, and it follows you across Spaces and
 MacBook sizes.
