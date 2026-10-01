@@ -4,6 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+EnvironmentFile=-/etc/omacvm/env
 ExecStart=/usr/local/bin/omacvm-gestures
 Restart=always
 RestartSec=2

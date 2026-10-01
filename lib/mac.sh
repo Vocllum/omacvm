@@ -64,3 +64,53 @@ vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts
   for ((i = 0; i < 600; i += 3)); do [[ $(vm_state "$1") == running ]] && return 0; sleep 3; done
   die "VM '$1' did not start"
 }
+
+# ---- UTM ----
+UTMCTL=/Applications/UTM.app/Contents/MacOS/utmctl
+
+vm_type() {   # <vm name> -> parallels | utm; a name in both: the one that is running
+  local p="" u=""
+  [[ -x $PRLCTL ]] && "$PRLCTL" list -a -o name 2>/dev/null | sed 1d | grep -qxF "$1" && p=1
+  [[ -x $UTMCTL ]] && "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { $1 = ""; $2 = ""; sub(/^  /, ""); print }' | grep -qxF "$1" && u=1
+  if [[ -n $p && -n $u ]]; then
+    [[ $(utm_state "$1") == started ]] && echo utm || echo parallels
+  elif [[ -n $p ]]; then echo parallels
+  elif [[ -n $u ]]; then echo utm
+  else return 1; fi
+}
+
+utm_state() {   # <vm name> -> started|stopped|...
+  "$UTMCTL" status "$1" 2>/dev/null | tr -d '[:space:]'; echo
+}
+
+utm_ip() {   # <vm name> [seconds]: the guest's address on UTM's shared network
+  local i ip
+  for ((i = 0; i < ${2:-1}; i += 3)); do
+    # the QEMU guest agent knows; without it, UTM's DHCP server (bootpd) does
+    ip=$("$UTMCTL" ip-address "$1" 2>/dev/null | grep -m1 -E '^192\.168\.[0-9]+\.[0-9]+$') && { echo "$ip"; return 0; }
+    local mac
+    mac=$(osascript -e "tell application \"UTM\"" -e "copy (configuration of virtual machine named \"$1\") to c" \
+            -e "get address of item 1 of (network interfaces of c)" -e "end tell" 2>/dev/null |
+          tr 'A-F' 'a-f' | sed 's/:0/:/g; s/^0//')
+    if [[ -n $mac ]]; then
+      ip=$(awk -v m="1,$mac" '/ip_address=/ { split($0, a, "="); ip = a[2] } /hw_address=/ { split($0, b, "="); if (b[2] == m) print ip }' /var/db/dhcpd_leases 2>/dev/null | tail -1)
+      [[ -n $ip ]] && { echo "$ip"; return 0; }
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the VM ~8x slower)
+  pgrep -xq UTM || { open -a UTM; sleep 3; }
+  [[ $(utm_state "$1") == started ]] || "$UTMCTL" start "$1" >/dev/null
+  local i
+  for ((i = 0; i < 60; i += 3)); do [[ $(utm_state "$1") == started ]] && return 0; sleep 3; done
+  die "UTM VM '$1' did not start"
+}
+
+utm_wait_stopped() {   # <vm name>
+  local i
+  for ((i = 0; i < 180; i += 3)); do [[ $(utm_state "$1") == stopped ]] && return 0; sleep 3; done
+  die "UTM VM '$1' did not stop"
+}

@@ -10,10 +10,11 @@
 #   omacvm-bridge true-tone [on|off|toggle]
 #   omacvm-bridge password [ssid]            Wi-Fi password + QR string (the Mac asks first)
 #   omacvm-bridge wallpaper <image> [theme]  make it the Mac's wallpaper
-# Env: OMACVM_BRIDGE_URL (default http://10.211.55.2:47831),
+# Env: OMACVM_BRIDGE_URL (default: the Mac's address from /etc/omacvm/env, port 47831),
 #      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token)
 set -euo pipefail
-URL=${OMACVM_BRIDGE_URL:-http://10.211.55.2:47831}
+[[ -r /etc/omacvm/env ]] && source /etc/omacvm/env   # OMACVM_VM_TYPE, OMACVM_HOST (guest/install.sh)
+URL=${OMACVM_BRIDGE_URL:-http://${OMACVM_HOST:-10.211.55.2}:47831}
 TOKEN_FILE=${OMACVM_BRIDGE_TOKEN_FILE:-$HOME/.config/omacvm-bridge/token}
 
 # The token goes in via a header file, so it never shows up in `ps`.

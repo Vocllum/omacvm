@@ -3,8 +3,8 @@
 // sound card. Wi-Fi is read-only (stage 1); audio can be controlled (stage 1b);
 // media keys go to the VM's own popup while it is full screen (stage 1c).
 //
-// HTTP/1.1 on 10.211.55.2:47831 (Parallels shared network, host side; never
-// 0.0.0.0). Every request needs "Authorization: Bearer <token>":
+// HTTP/1.1 on port 47831 of the Mac's address on each VM network (10.211.55.2
+// for Parallels, 192.168.64.1 for UTM; never 0.0.0.0). Every request needs "Authorization: Bearer <token>":
 //   GET  /state            Wi-Fi state
 //   GET  /scan[?cached=1]  nearby networks, one entry per SSID; cached=1 = the
 //                          system's scan cache (instant, no radio scan)
@@ -32,7 +32,9 @@ import Security
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let env = ProcessInfo.processInfo.environment
-let listenAddr = env["OMACVM_BRIDGE_ADDR"] ?? "10.211.55.2"   // Parallels shared network, host side
+// The Mac's address on each VM network: Parallels' shared network and UTM's
+// shared network (vmnet). One listener per address; never 0.0.0.0.
+let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? "10.211.55.2,192.168.64.1").split(separator: ",").map(String.init)
 let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
@@ -92,7 +94,7 @@ let hub = Hub([
   Feed(event: "display", delay: 0.1, read: { displayState() }, describe: describeDisplay),
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
-let server = Server { fd, peer in handle(fd, peer: peer) }
+let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
 let osdEvents = OSDEvents()
 let mediaKeys = MediaKeys()
 let menuBar = MenuBar()
@@ -106,14 +108,14 @@ wifi.start()
 audio.start()
 location.start()
 hub.start()
-server.check()
+servers.forEach { $0.check() }
 osdEvents.start()
 mediaKeys.start()
 if config.menuBarIcon { menuBar.show() }
 log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon)")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds)
-listenerTimer.setEventHandler { server.check() }
+listenerTimer.setEventHandler { servers.forEach { $0.check() } }
 listenerTimer.resume()
 
 let ws = NSWorkspace.shared.notificationCenter
@@ -121,7 +123,7 @@ ws.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .
 ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
   log("system woke up: re-subscribing to CoreWLAN, re-binding listener")
   wifi.subscribe()
-  server.check(rebind: true)
+  servers.forEach { $0.check(rebind: true) }
   for delay in [2.0, 10.0] {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { hub.changed("wifi", why: "wake"); hub.changed("audio", why: "wake") }
   }

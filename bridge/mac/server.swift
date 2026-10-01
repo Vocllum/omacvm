@@ -267,21 +267,24 @@ func handle(_ fd: Int32, peer: String) {
   }
 }
 
-// Listens on listenAddr only. The Parallels bridge (bridge100/101) appears when
-// Parallels starts and can be recreated, so the listener follows the address.
+// Listens on one address only. The VM network's bridge interface appears when
+// Parallels or UTM starts and can be recreated, so the listener follows it.
 final class Server {
   private let q = DispatchQueue(label: "omacvm-bridge.listen")
   private var source: DispatchSourceRead?
   private var boundInterface: String?
   private var waitingLogged = false
   let onConnection: (Int32, String) -> Void
+  let listenAddr: String
 
-  init(onConnection: @escaping (Int32, String) -> Void) { self.onConnection = onConnection }
+  init(addr: String, onConnection: @escaping (Int32, String) -> Void) {
+    self.listenAddr = addr; self.onConnection = onConnection
+  }
 
   func check(rebind: Bool = false) { q.async { self.checkLocked(rebind: rebind) } }
 
   var status: String {
-    q.sync { boundInterface.map { "Listening on \(listenAddr):\(listenPort) (\($0))" } ?? "Waiting for \(listenAddr) (Parallels network)" }
+    q.sync { boundInterface.map { "Listening on \(listenAddr):\(listenPort) (\($0))" } ?? "Waiting for \(listenAddr) (VM network not up)" }
   }
 
   private func interfaceOwningAddress() -> String? {
@@ -307,7 +310,7 @@ final class Server {
     }
     guard source == nil else { return }
     guard let owner else {
-      if !waitingLogged { log("listener: waiting for \(listenAddr) to appear (is Parallels running?)"); waitingLogged = true }
+      if !waitingLogged { log("listener: waiting for \(listenAddr) to appear (VM network not up yet)"); waitingLogged = true }
       return
     }
     let fd = socket(AF_INET, SOCK_STREAM, 0)

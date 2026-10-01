@@ -1,0 +1,32 @@
+#!/bin/bash
+# UTM specifics, guest side. Run as root inside the VM:
+#   ./install.sh <desktop-user> <WIDTHxHEIGHT@HZ>
+# (apply.sh passes the Mac's built-in display below the notch, display/mac-display.swift)
+#  * UTM's guest tools: SPICE agent (clipboard both ways) and the QEMU guest
+#    agent (utmctl ip-address / exec / file push)
+#  * virtio-gpu workarounds for Hyprland
+#  * a fixed display mode from boot: UTM's GPU path goes blank when the mode
+#    changes while running, and "preferred" is only 1280x800
+set -euo pipefail
+cd "$(dirname "$0")"
+U=${1:?usage: install.sh <desktop-user> <WxH@Hz>}; MODE=${2:?display mode}
+H=$(getent passwd "$U" | cut -d: -f6)
+pacman -S --needed --noconfirm spice-vdagent qemu-guest-agent >/dev/null 2>&1
+systemctl enable --now qemu-guest-agent spice-vdagentd >/dev/null 2>&1 || true
+install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
+
+M=$H/.config/hypr/monitors.lua
+scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
+cat > "$M" <<LUA
+-- OmacVM, UTM: the Mac's built-in display below the notch, fixed from boot.
+-- UTM's virtio-gpu (virgl) goes blank when the mode changes while running, so
+-- do not switch modes live; edit and reboot instead. Omarchy's scaling menu
+-- writes omarchy_monitor_scale here.
+local omarchy_gdk_scale = 2
+local omarchy_monitor_scale = ${scale:-2}
+
+hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
+hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
+LUA
+chown "$U:$U" "$M"
+echo "UTM: guest tools, virtio-gpu settings, display $MODE"

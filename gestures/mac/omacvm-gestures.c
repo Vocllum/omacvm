@@ -1,7 +1,7 @@
 // omacvm-gestures (Mac side): gives the Omarchy VM in Parallels the Mac trackpad's
 // multi-finger gestures.
 //
-// While Parallels is the frontmost app and its VM window covers a whole display
+// While Parallels or UTM is the frontmost app and its VM window covers a whole display
 // ("capture mode"):
 //   * macOS trackpad gesture events (Spaces / Mission Control swipes, pinch,
 //     rotate, smart zoom) are dropped by an event tap, so macOS reacts to none
@@ -15,7 +15,8 @@
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
 //
-// Protocol (TCP, guest connects to 10.211.55.2:47830), one line per message:
+// Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
+// Parallels, 192.168.64.1 on UTM), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
 #include <ApplicationServices/ApplicationServices.h>
@@ -56,7 +57,9 @@ extern void MTDeviceStart(MTDeviceRef, int);
 extern bool MTDeviceIsBuiltIn(MTDeviceRef);
 
 #define PORT 47830
-#define LISTEN_ADDR "10.211.55.2"   // Parallels shared network, host side
+// The Mac's address on each VM network: Parallels' shared network, UTM's
+// shared network (vmnet). One listener per address; never 0.0.0.0.
+static const char *listenAddrs[] = { "10.211.55.2", "192.168.64.1" };
 #define ESC_KEYCODE 53
 #define PINCH_SPREAD 0.035f         // normalized change of finger distance that makes a pinch
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
@@ -159,7 +162,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  int front = !strcmp(name, "prl_client_app") && vmFullScreen(pid);
+  // Parallels' VM window, or UTM's.
+  int front = (!strcmp(name, "prl_client_app") || !strcmp(name, "UTM")) && vmFullScreen(pid);
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -198,16 +202,16 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
 
 // ---- server: one guest connection at a time ----
 static void *serverThread(void *arg) {
-  (void)arg;
+  const char *addr = arg;
   for (;;) {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(PORT) };
-    inet_pton(AF_INET, LISTEN_ADDR, &a.sin_addr);
+    inet_pton(AF_INET, addr, &a.sin_addr);
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0 || listen(s, 2) < 0) {
-      close(s); sleep(5); continue;   // Parallels' network not up yet
+      close(s); sleep(5); continue;   // that VM network is not up (yet)
     }
-    logf_("listening on %s:%d", LISTEN_ADDR, PORT);
+    logf_("listening on %s:%d", addr, PORT);
     for (;;) {
       struct sockaddr_in peer; socklen_t pl = sizeof peer;
       int c = accept(s, (struct sockaddr *)&peer, &pl);
@@ -265,7 +269,9 @@ int main(int argc, char **argv) {
   CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
 
-  pthread_t th; pthread_create(&th, NULL, serverThread, NULL);
+  for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
+    pthread_t th; pthread_create(&th, NULL, serverThread, (void *)listenAddrs[i]);
+  }
   logf_("running (escape: Ctrl+Option+Cmd+Esc)");
   CFRunLoopRun();
   return 0;
