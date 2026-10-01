@@ -60,4 +60,8 @@ if [[ $TYPE == parallels && -d $PVM ]]; then
   M=$(mktemp); gssh "$IP" cat /usr/share/omarchy/icon.txt > "$M"
   "$R/icon/set-vm-icon.sh" "$PVM" "$M" && rm -f "$M"
 fi
+if [[ $TYPE == parallels ]] && ! parallels_sends_shortcuts; then
+  info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
+  parallels_shortcuts_alert
+fi
 log "done: reboot the VM to apply everything (kernel, zram, keyboard${MODE:+, display})"

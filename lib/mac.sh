@@ -55,6 +55,37 @@ wait_stopped() {   # <vm name>
   die "VM '$1' did not stop"
 }
 
+# Parallels' "Send macOS system shortcuts" (Settings > Shortcuts > macOS System
+# Shortcuts) has no CLI, plist key or VM setting. With "Always", Parallels
+# writes ~/Library/Preferences/Parallels/sendtovmkeys.dat: a count, then one
+# 9-byte entry per macOS shortcut with a 4-byte flag of 1. Undocumented, so a
+# best guess, only used to decide whether to remind the user.
+parallels_sends_shortcuts() {
+  python3 - "$HOME/Library/Preferences/Parallels/sendtovmkeys.dat" 2>/dev/null <<'EOF'
+import struct, sys
+b = open(sys.argv[1], "rb").read()
+n = struct.unpack(">I", b[:4])[0]
+entries = [b[4 + 9 * i:13 + 9 * i] for i in range(n)]
+sys.exit(0 if n and len(b) == 4 + 9 * n and all(e[1:5] == b"\0\0\0\1" for e in entries) else 1)
+EOF
+}
+
+# Parallels' "Linux" keyboard profile emptied by mac/parallels-shortcuts.sh?
+parallels_profile_emptied() {
+  [[ $(xxd -p ~/Library/Preferences/Parallels/Linux.dat 2>/dev/null | tr -d '\n') == \
+     00030231000000010000000a004c0069006e00750078000000000000000000000000 ]]
+}
+
+# A macOS alert asking for that one setting (in the background: the script
+# goes on). Parallels keeps it to itself, so OmacVM cannot set it.
+parallels_shortcuts_alert() {
+  osascript >/dev/null 2>&1 <<'EOF' &
+set msg to "So Cmd+Space, Cmd+Tab and the other Cmd shortcuts reach Omarchy, set this once in Parallels Desktop:" & return & return & "Settings… (Cmd+,) › Shortcuts › macOS System Shortcuts › Send macOS system shortcuts: Always" & return & return & "Parallels keeps this setting to itself, so OmacVM cannot change it for you."
+set r to display alert "OmacVM: one setting in Parallels Desktop" message msg buttons {"Later", "Open Parallels Desktop"} default button 2
+if button returned of r is "Open Parallels Desktop" then tell application "Parallels Desktop" to activate
+EOF
+}
+
 vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts it
   local i
   open -a "Parallels Desktop" "$2"

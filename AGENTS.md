@@ -122,6 +122,11 @@ GUI-only (app-wide): Shortcuts › macOS System Shortcuts › **Send macOS syste
 shortcuts: Always**; the Linux keyboard profile's Cmd→Ctrl mappings
 (`mac/parallels-shortcuts.sh` empties it: `~/Library/Preferences/Parallels/Linux.dat`,
 a Qt data stream, Parallels must be quit).
+"Send macOS system shortcuts: Always" has no CLI, plist key or config.pvs
+setting; with Always, Parallels writes `sendtovmkeys.dat` (count + one 9-byte
+entry per macOS shortcut, flag 1). `lib/mac.sh` `parallels_sends_shortcuts`
+reads that as a best guess and `parallels_shortcuts_alert` reminds the user
+(build.sh, apply.sh); never write the file.
 
 ### UTM settings (vm/utm.sh)
 

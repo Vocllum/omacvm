@@ -236,9 +236,15 @@ fi
 gssh "$IP" "systemctl reboot" 2>/dev/null || true
 
 if [[ $TYPE == parallels ]]; then
-  vm_steps='    * Let Cmd reach Omarchy: quit Parallels Desktop, run mac/parallels-shortcuts.sh,
-      then Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts >
-      "Send macOS system shortcuts: Always" (Cmd+Space etc. reach Omarchy).'
+  vm_steps=""
+  parallels_profile_emptied || vm_steps+='    * Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run
+      mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels).
+'
+  parallels_sends_shortcuts || vm_steps+='    * Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts >
+      macOS System Shortcuts > "Send macOS system shortcuts: Always" (an alert
+      reminds you now).
+'
+  vm_steps=${vm_steps%$'\n'}
 else
   vm_steps='    * UTM: put the VM in full screen on the built-in display (gestures and media
       keys need it); keep UTM in the foreground, a backgrounded UTM runs slower.'
@@ -253,4 +259,6 @@ cat <<EOF
       OmacVM Gestures, Input Monitoring for OmacVM Gestures.
 $vm_steps
   SSH: ssh -i $KEY root@$IP
+  Check everything: ./check.sh --vm "$VM"
 EOF
+if [[ $TYPE == parallels ]] && ! parallels_sends_shortcuts; then parallels_shortcuts_alert; fi

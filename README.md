@@ -112,7 +112,9 @@ When it is done, once on the Mac:
    `mac/parallels-shortcuts.sh` (or remove the mappings in Parallels Desktop ›
    Settings › Shortcuts › Virtual Machines › Linux). Then set *macOS System
    Shortcuts › Send macOS system shortcuts* to **Always**, so Cmd+Space and
-   friends reach Omarchy.
+   friends reach Omarchy. Parallels keeps this setting to itself, so OmacVM
+   can't set it; the build shows a macOS alert until it is set, and
+   `check.sh` tells you whether both are done.
 3. **UTM:** keep UTM in the foreground app list (started from the Dock or
    Spotlight); UTM launched in the background runs the VM several times slower.
 
