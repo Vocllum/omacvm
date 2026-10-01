@@ -223,9 +223,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private func showFrame(force: Bool = false) {
         guard let view, let image = stream.makeImage() else { return }
         if !force, view.bounds.width > 0, view.bounds.height > 0, view.hasImage {
-            let want = view.bounds.width / view.bounds.height
-            let got = CGFloat(image.width) / CGFloat(max(image.height, 1))
-            if abs(got / want - 1) > 0.03 {
+            // In guest logical px: the strip's height at this image's width,
+            // against the image's height. A few px off is whole-pixel rounding
+            // of the hidden output (fractional scales), not a resize.
+            let w = CGFloat(image.width) / stream.scale, h = CGFloat(image.height) / stream.scale
+            let expected = view.bounds.height * w / view.bounds.width
+            if abs(h - expected) > max(4, expected * 0.03) {
                 let since = misfitSince ?? Date()
                 if misfitSince == nil {
                     misfitSince = since

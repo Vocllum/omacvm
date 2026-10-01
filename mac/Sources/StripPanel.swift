@@ -142,7 +142,11 @@ final class StripView: NSView {
         // Full width, the height following the image's aspect (it equals the
         // strip once the guest has sized NOTCH to it), centred. A bar taller
         // than the strip (its minimum height) is shrunk to fit instead.
-        drawScale = bounds.height > 0 ? max(k, barHeight / bounds.height) : k
+        // A few guest px too tall only means the hidden output was rounded up
+        // to whole pixels (fractional scales): keep the full width and trim
+        // that padding top and bottom. Only a really taller bar is shrunk.
+        let excess = barHeight - bounds.height * k
+        drawScale = bounds.height > 0 && excess > 4 ? max(k, barHeight / bounds.height) : k
         let w = barWidth > 0 ? barWidth / drawScale : bounds.width
         let h = barHeight / drawScale
         drawLeft = ((bounds.width - w) / 2).rounded(.down)
