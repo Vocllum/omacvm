@@ -17,7 +17,7 @@
 # Parallels when it is installed, else UTM.
 set -euo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
-source "$R/lib/mac.sh"
+source "$R/src/lib/mac.sh"
 
 TYPE=""; VM="Omarchy"; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(id -un); FULL=""; HOST="omarchy"
 THP=1; AUTOLOGIN=0; OMANOTCH=0; CHANNEL=rc; YES=0
@@ -43,7 +43,7 @@ done
 
 # ---------- 1. this Mac ----------
 [[ $(uname -m) == arm64 ]] || die "OmacVM needs an Apple Silicon Mac"
-source "$R/vm/utm.sh"
+source "$R/src/vm/utm.sh"
 if [[ -z $TYPE ]]; then
   if [[ -x $PRLCTL ]]; then TYPE=parallels; elif [[ -x $UTMCTL ]]; then TYPE=utm
   else die "install Parallels Desktop (recommended) or UTM first"; fi
@@ -73,7 +73,7 @@ mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
 : "${MEM_GB:=$(( mac_mem_gb / 2 ))}"
 : "${DISK_GB:=$(( free_gb >= 400 ? 200 : 128 ))}"
 : "${FULL:=$(id -F 2>/dev/null || echo "$U")}"
-KB=$("$R/keyboard/mac-layout.sh")
+KB=$("$R/src/keyboard/mac-layout.sh")
 TZ_MAC=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 lang=$(defaults read -g AppleLanguages 2>/dev/null | sed -n '2s/[^A-Za-z-]//gp')   # e.g. de-CH
 region=$(defaults read -g AppleLocale 2>/dev/null | sed 's/@.*//')                 # e.g. de_CH
@@ -126,12 +126,12 @@ started=$(date +%s)
 # ---------- 2. temporary live installer + the real disk ----------
 log "temporary live installer (try-omarchy, about 1.4 GB download)"
 if [[ $TYPE == parallels ]]; then
-  "$R/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
+  "$R/src/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
   PVM="$HOME/Parallels/$VM.pvm"
   "$PRLCTL" unregister "$VM" >/dev/null
   log "VM settings and a ${DISK_GB} GB NVMe disk"
   /usr/local/bin/prl_disk_tool create --hdd "$PVM/omarchy.hdd" --size "${DISK_GB}G" >/dev/null
-  P="$R/vm/pvs.py"
+  P="$R/src/vm/pvs.py"
   python3 "$P" "$PVM/config.pvs" omacvm --cpus "$CPUS" --memsize $((MEM_GB * 1024)) \
     --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM"
   python3 "$P" "$PVM/config.pvs" add-nvme omarchy.hdd $((DISK_GB * 1024)) >/dev/null
@@ -145,7 +145,7 @@ if [[ $TYPE == parallels ]]; then
   IP=$(vm_ip "$PVM" 300) || die "the live installer got no IP address"
 else
   LIVE="$HOME/Library/Caches/omacvm/live/$VM-live.img"
-  "$R/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
+  "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
   utm_tune_app
   log "UTM VM with a ${DISK_GB} GB NVMe disk"
   pgrep -xq UTM || { open -a UTM; sleep 3; }
@@ -164,7 +164,7 @@ log "Arch Linux ARM onto the NVMe disk ($IP)"
   read -r l v <<<"$KB"; printf 'OMA_XKB_LAYOUT=%q\nOMA_XKB_VARIANT=%q\n' "$l" "${v:-}"
 } | gssh "$IP" "umask 077; cat > /root/omacvm.env"
 gssh "$IP" "cat > /root/omacvm.pub" < "$KEY.pub"
-gssh "$IP" "bash -s" < "$R/vm/base-install.sh"
+gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh"
 gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 
 log "boot from the NVMe disk, drop the live installer"
@@ -203,7 +203,7 @@ wait_ssh "$IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------
 log "Omarchy from omarchy-mac (the longest step)"
-gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/vm/omarchy-install.sh"
+gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh"
 if [[ $TYPE == parallels ]]; then
   log "Parallels Tools"
   gssh "$IP" "cat > /root/prl-tools-lin-arm.iso" < "/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
@@ -215,7 +215,7 @@ gssh "$IP" "rm -f /root/omacvm.env"   # it holds the password hash
 
 # ---------- 5. OmacVM ----------
 log "OmacVM on the Mac"
-"$R/mac/install.sh"
+"$R/src/mac/install.sh"
 log "OmacVM in the VM"
 args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
 ((THP)) || args+=(--no-thp-kernel)

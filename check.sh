@@ -20,7 +20,7 @@ while (( $# )); do
     *) echo "check.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-source "$R/lib/mac.sh"
+source "$R/src/lib/mac.sh"
 [[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels or UTM VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
@@ -86,7 +86,7 @@ pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "no
 echo
 echo "VM '$VM' at $IP"
 (wait_ssh "$IP" 30) >/dev/null 2>&1 || { echo "  FAIL  SSH to $IP with $KEY"; exit 1; }
-gssh "$IP" "bash -s -- --user '$U'" < "$R/guest/check.sh"
+gssh "$IP" "bash -s -- --user '$U'" < "$R/src/guest/check.sh"
 guest=$?
 (( mac_failed )) && echo "(and $fails check(s) failed on the Mac)"
 (( guest == 0 && ! mac_failed ))

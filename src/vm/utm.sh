@@ -50,7 +50,7 @@ utm_drop_live() {
 utm_set_icon() {
   local b="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm"
   [[ -f $b/config.plist ]] || { info "UTM VM bundle not in UTM's default folder: icon unchanged"; return 0; }
-  "$R/icon/make-icns.sh" "$b/Data/omacvm.png" 512
+  "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/icon/make-icns.sh" "$b/Data/omacvm.png" 512
   plutil -replace Information.Icon -string omacvm.png "$b/config.plist"
   plutil -replace Information.IconCustom -bool true "$b/config.plist"
 }

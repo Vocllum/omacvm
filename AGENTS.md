@@ -20,7 +20,7 @@ A build is done when all of this holds:
 3. `/etc/omacvm/env` names the VM type and the Mac's address.
 4. Display: Parallels: `hyprctl monitors` matches the Mac (native pixels,
    refresh rate, arrangement) within seconds of a change. UTM: Virtual-1 runs
-   the mode from `display/mac-display.swift` (e.g. 3456x2160@120).
+   the mode from `src/display/mac-display.swift` (e.g. 3456x2160@120).
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN` shows 47830 (Gestures) and 47831
    (Bridge) on 10.211.55.2 and/or 192.168.64.1; `launchctl list | grep omacvm`
    shows bridge, gestures, clip-in.
@@ -44,32 +44,37 @@ A build is done when all of this holds:
 
 ## 3. Repository map
 
+The root holds only the three commands (`build.sh`, `apply.sh`, `check.sh`),
+the docs and `docs/` (README graphics); everything else lives in `src/`, one
+folder per feature plus the install plumbing (`guest/`, `mac/`, `lib/`, `vm/`).
+Keep it that way: a short root keeps the README near the top on GitHub.
+
 | Path | What |
 |---|---|
 | `build.sh` | Nothing → finished VM. `--vm-type parallels\|utm` (default Parallels if installed) `--vm-name --cpus --memory-gb --disk-gb --user --full-name --hostname --no-thp-kernel --autologin --omanotch --channel --yes`; `OMACVM_PASSWORD` for unattended runs |
-| `check.sh` + `guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL. Add a line here for every new feature |
-| `apply.sh` | Guest side onto a running VM (either type, found by name): bridge token + this repo to `/usr/local/share/omacvm`, `guest/install.sh`, Dock icon (Parallels). Re-run after updating the repo |
-| `mac/install.sh`, `mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper. `mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
-| `guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
-| `vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH; a Parallels VM, or `--raw-image` for UTM |
-| `vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
-| `vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |
-| `vm/pvs.py` | Parallels `config.pvs` editor (settings, NVMe disk, boot order, shares) |
-| `vm/utm.sh` | UTM: create the VM (AppleScript `make new virtual machine`), drop the live disk, app-wide speed settings |
-| `lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`) and UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) |
-| `guest/omacvm-omanotch.service` | `build.sh --omanotch`: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
-| `lib/install-plugin.sh`, `lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login); restarts the shell once when a plugin's files changed |
-| `lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
-| `bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr}` |
-| `gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap), `guest/omacvm-gestures` (uinput touchpad) |
-| `display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
-| `utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
-| `workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
-| `clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
-| `wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
-| `keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
-| `memory/`, `kernel/` | zram/sysctl/THP-defrag/MGLRU; THP kernel from ALARM's PKGBUILD |
-| `icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
+| `check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL. Add a line here for every new feature |
+| `apply.sh` | Guest side onto a running VM (either type, found by name): bridge token + `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), `src/guest/install.sh`, Dock icon (Parallels). Re-run after updating the repo |
+| `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper. `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
+| `src/guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
+| `src/vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH; a Parallels VM, or `--raw-image` for UTM |
+| `src/vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
+| `src/vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |
+| `src/vm/pvs.py` | Parallels `config.pvs` editor (settings, NVMe disk, boot order, shares) |
+| `src/vm/utm.sh` | UTM: create the VM (AppleScript `make new virtual machine`), drop the live disk, app-wide speed settings |
+| `src/lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`) and UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) |
+| `src/guest/omacvm-omanotch.service` | `build.sh --omanotch`: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
+| `src/lib/install-plugin.sh`, `src/lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login); restarts the shell once when a plugin's files changed |
+| `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
+| `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr}` |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap), `guest/omacvm-gestures` (uinput touchpad) |
+| `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
+| `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
+| `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
+| `src/clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
+| `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
+| `src/keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
+| `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; THP kernel from ALARM's PKGBUILD |
+| `src/icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`src/vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
 | `docs/` | README graphics (hand-written SVG + SMIL) |
 
 ## 4. Architecture
@@ -95,7 +100,7 @@ Omanotch.app (separate) :47811          ◀────────── notchc
 - Mac listeners bind those addresses only, never 0.0.0.0; one listener per
   address, re-bound when the bridge interface comes and goes. The bridge needs
   `Authorization: Bearer <token>` (`~/Library/Application Support/omacvm-bridge/token`
-  → guest `~/.config/omacvm-bridge/token`, 0600). API: `bridge/README.md`.
+  → guest `~/.config/omacvm-bridge/token`, 0600). API: `src/bridge/README.md`.
 - Full-screen capture (media keys, gestures): frontmost app `prl_client_app`
   (Parallels) or `UTM`, and its window covers a display (the strip beside the
   notch excepted).
@@ -121,11 +126,11 @@ Omanotch.app (separate) :47811          ◀────────── notchc
 
 GUI-only (app-wide): Shortcuts › macOS System Shortcuts › **Send macOS system
 shortcuts: Always**; the Linux keyboard profile's Cmd→Ctrl mappings
-(`mac/parallels-shortcuts.sh` empties it: `~/Library/Preferences/Parallels/Linux.dat`,
+(`src/mac/parallels-shortcuts.sh` empties it: `~/Library/Preferences/Parallels/Linux.dat`,
 a Qt data stream, Parallels must be quit).
 "Send macOS system shortcuts: Always" has no CLI, plist key or config.pvs
 setting; with Always, Parallels writes `sendtovmkeys.dat` (count + one 9-byte
-entry per macOS shortcut, flag 1). `lib/mac.sh` `parallels_sends_shortcuts`
+entry per macOS shortcut, flag 1). `src/lib/mac.sh` `parallels_sends_shortcuts`
 reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 (build.sh, apply.sh); never write the file.
 
@@ -148,12 +153,12 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 2. Live installer: Parallels: `build-live.sh --skip-boot` → registered VM;
    unregister, NVMe disk via `prl_disk_tool`, `pvs.py` settings/shares/boot,
    register, start. UTM: `build-live.sh --raw-image`, `utm_create`, start.
-3. Over SSH (key injected by the live initramfs): `vm/base-install.sh`. Poweroff.
+3. Over SSH (key injected by the live initramfs): `src/vm/base-install.sh`. Poweroff.
 4. Drop the live disk, boot from NVMe (pvs.py / `utm_drop_live`).
-5. `vm/omarchy-install.sh` (temporary NOPASSWD + `verifypw=any` sudo, removed by
+5. `src/vm/omarchy-install.sh` (temporary NOPASSWD + `verifypw=any` sudo, removed by
    trap; SSH firewall rule kept even if ufw cannot apply it live). Parallels Tools
    on Parallels.
-6. `mac/install.sh`, `apply.sh` (token, repo, `guest/install.sh`, icon),
+6. `src/mac/install.sh`, `apply.sh` (token, repo, `src/guest/install.sh`, icon),
    optional Omanotch, reboot.
 
 ## 6. Standard procedures
@@ -174,7 +179,7 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd`, `journalctl -u omacvm-gestures`,
   Omarchy shell `/run/user/1000/quickshell/by-id/*/log.log`.
-- **Uninstall**: `mac/uninstall.sh [--purge]`; delete the VM in Parallels/UTM.
+- **Uninstall**: `src/mac/uninstall.sh [--purge]`; delete the VM in Parallels/UTM.
 
 ## 7. Failure modes
 
@@ -185,16 +190,16 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | `OMARCHY_PATH is not set` from omarchy commands run as root/sudo | no Omarchy env | `source /usr/share/omarchy/default/bash/env-bootstrap` first |
 | A command replacement in `/usr/local/bin` is ignored by the bar | the Omarchy shell runs with `/usr/share/omarchy/bin` (symlinks to /usr/bin) first on PATH; Hyprland does not | call `/usr/local/bin/...` by full path from QML (see `omacvm.wifiqr`) |
 | `Target not found` / "handler will not be used" for a widget's IPC | a clone kept the stock widget's IPC target | give clones their own target (`omacvm.wifi`) |
-| Updated widget does not change | a running shell keeps loaded plugins | `lib/install-plugin.sh` flags changes; `guest/install.sh` runs `omarchy-restart-shell` |
+| Updated widget does not change | a running shell keeps loaded plugins | `src/lib/install-plugin.sh` flags changes; `src/guest/install.sh` runs `omarchy-restart-shell` |
 | Disabling an old clone brings the stock widget back next to the new one | `clonedFrom` hand-back | rename ids in `shell.json` instead, or disable the stock widget |
 | SSIDs null, `location_authorized: false` | Location Services not granted (new bundle id or reset) | Privacy & Security › Location Services |
 | Media keys still show the macOS popup | Accessibility missing, VM not full screen, or capture switched off in the bridge menu | `media keys:` lines in the bridge log |
-| Build stops right after the Omarchy install | Omarchy enables ufw; new SSH connections from the Mac are refused | `vm/omarchy-install.sh` adds the rule while its own session is open |
+| Build stops right after the Omarchy install | Omarchy enables ufw; new SSH connections from the Mac are refused | `src/vm/omarchy-install.sh` adds the rule while its own session is open |
 | `ERROR: problem running` from ufw | rule stored but not applicable live right after the install | ignored on purpose; verified with `ufw show added` |
 | UTM desktop blank after a resolution change | virgl under UTM cannot switch modes live | fixed mode in `monitors.lua`, reboot to change it |
 | UTM VM very slow | UTM started with `open -g` (background priority) or Vulkan driver on | start UTM normally; `QEMUVulkanDriver` 1 |
 | VM resumes a dead state after a hard kill (Parallels) | suspend files | delete `<pvm>/*.mem*` and `vm.lock` |
-| ALARM downloads time out | geo-DNS mirror far away | `vm/base-install.sh` ranks mirrors |
+| ALARM downloads time out | geo-DNS mirror far away | `src/vm/base-install.sh` ranks mirrors |
 
 ## 8. Hard-won rules (do NOT)
 

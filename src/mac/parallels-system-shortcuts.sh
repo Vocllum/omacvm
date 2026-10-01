@@ -37,9 +37,9 @@ Parallels does not let other apps change it, so this is the one step you do by h
 defaults write "com.parallels.Parallels Desktop" "Application preferences.Last selected page" -int 1
 defaults write "com.parallels.Parallels Desktop" "Application preferences.ShortcutPageLastSelectedItem" -int 6
 open -a "Parallels Desktop"
-# The visual guide (docs/parallels-shortcuts.svg) beside it, in Quick Look.
+# The visual guide (docs/parallels-shortcuts.svg in the repository) beside it, in Quick Look.
 sleep 1.5
-qlmanage -p "$R/docs/parallels-shortcuts.svg" >/dev/null 2>&1 &
+qlmanage -p "$R/../docs/parallels-shortcuts.svg" >/dev/null 2>&1 &
 QL=$!
 trap 'kill $QL 2>/dev/null' EXIT
 

@@ -25,8 +25,8 @@ while (( $# )); do
     *) echo "apply.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-source "$R/lib/mac.sh"
-[[ -n $KB ]] || KB=$("$R/keyboard/mac-layout.sh")
+source "$R/src/lib/mac.sh"
+[[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
 [[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels or UTM VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels)
@@ -35,7 +35,7 @@ case $TYPE in
   utm)
     PVM=""
     [[ -n $IP ]] || IP=$(utm_ip "$VM" 30) || die "no IP for UTM VM '$VM' (is it running?)"
-    [[ -n $MODE ]] || MODE=$(swift "$R/display/mac-display.swift") ;;
+    [[ -n $MODE ]] || MODE=$(swift "$R/src/display/mac-display.swift") ;;
   *) die "--vm-type parallels or utm" ;;
 esac
 export OMA_KEY=$KEY
@@ -50,14 +50,14 @@ gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
   install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
 
 log "OmacVM -> $IP:/usr/local/share/omacvm"
-COPYFILE_DISABLE=1 tar --no-xattrs -C "$R" --exclude .git --exclude build --exclude docs -czf - . |
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build -czf - . |
   gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
               tar -C /usr/local/share/omacvm -xzf - 2>/dev/null"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE} ${EXTRA[*]:-}"
 
 if [[ $TYPE == parallels && -d $PVM ]]; then
   log "Dock icon"
-  "$R/icon/set-vm-icon.sh" "$PVM"
+  "$R/src/icon/set-vm-icon.sh" "$PVM"
 fi
 if [[ $TYPE == parallels ]] && ! parallels_sends_shortcuts; then
   info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"

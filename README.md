@@ -109,12 +109,12 @@ When it is done, once on the Mac:
    Input Monitoring for *OmacVM Gestures*.
 2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
    Cmd+C/V/X into Ctrl before the VM sees them. Quit Parallels Desktop and run
-   `mac/parallels-shortcuts.sh` (or remove the mappings in Parallels Desktop ›
+   `src/mac/parallels-shortcuts.sh` (or remove the mappings in Parallels Desktop ›
    Settings › Shortcuts › Virtual Machines › Linux). Then set *macOS System
    Shortcuts › Send macOS system shortcuts* to **Always**, so Cmd+Space and
    friends reach Omarchy. Parallels keeps this setting to itself, so OmacVM
    can't set it; the build shows a macOS alert with this guide until it is
-   set (`mac/parallels-system-shortcuts.sh` brings it back), and `check.sh`
+   set (`src/mac/parallels-system-shortcuts.sh` brings it back), and `check.sh`
    tells you whether both are done.
 
    <p align="center">
@@ -139,7 +139,7 @@ the VM.
 
 ```bash
 git pull
-mac/install.sh
+src/mac/install.sh
 ./apply.sh --vm Omarchy          # --no-thp-kernel skips the kernel rebuild
 ```
 
@@ -167,12 +167,12 @@ The VM and the Mac talk over the VM's private network: the Mac is `10.211.55.2`
 for Parallels and `192.168.64.1` for UTM. Nothing listens anywhere else, and
 the VM needs a token.
 
-- **OmacVM Bridge** (`bridge/`) is a small menu-bar app. It reads the Mac's
+- **OmacVM Bridge** (`src/bridge/`) is a small menu-bar app. It reads the Mac's
   Wi-Fi (CoreWLAN), audio (CoreAudio) and display (brightness, Night Shift, True
   Tone) and pushes every change to the VM; Omarchy's bar widgets and popups
   listen. While the VM is full screen it takes the media keys. It also sets the
-  wallpaper the VM sends. [API and details](bridge/README.md).
-- **OmacVM Gestures** (`gestures/`) reads the trackpad's raw touches and
+  wallpaper the VM sends. [API and details](src/bridge/README.md).
+- **OmacVM Gestures** (`src/gestures/`) reads the trackpad's raw touches and
   replays multi-finger frames on a virtual Apple touchpad in the VM, where
   Hyprland turns them into real gestures.
 
@@ -180,13 +180,13 @@ the VM needs a token.
   <img src="docs/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
 </p>
 
-- **Displays** (`display/`, Parallels): Parallels tells the guest the size,
+- **Displays** (`src/display/`, Parallels): Parallels tells the guest the size,
   refresh rate and position of every display, but Hyprland never applies it;
-  `parallels-dynres` does. On UTM (`utm/`) the display mode is the Mac's
+  `parallels-dynres` does. On UTM (`src/utm/`) the display mode is the Mac's
   built-in display below the notch, set from boot.
-- **The kernel** (`kernel/`) is Arch Linux ARM's own `linux-aarch64`, rebuilt
+- **The kernel** (`src/kernel/`) is Arch Linux ARM's own `linux-aarch64`, rebuilt
   with transparent huge pages always on and MGLRU; the stock kernel stays in
-  GRUB as a fallback. **Memory** (`memory/`): the VM never hands back memory it
+  GRUB as a fallback. **Memory** (`src/memory/`): the VM never hands back memory it
   touched while it runs, so the guest keeps a small zram and reclaims smoothly
   instead of hoarding.
 
@@ -228,7 +228,7 @@ the build.
 ## Uninstall
 
 ```bash
-mac/uninstall.sh            # --purge also removes the bridge token and settings
+src/mac/uninstall.sh            # --purge also removes the bridge token and settings
 ```
 
 Then delete the VM in Parallels Desktop or UTM. In System Settings › Privacy &
