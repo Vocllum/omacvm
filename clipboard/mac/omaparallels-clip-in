@@ -1,0 +1,16 @@
+#!/bin/zsh
+# omaparallels-clip-in: put text copied inside the Omarchy VM on the Mac clipboard.
+# Parallels Tools syncs Mac -> guest on Hyprland but not guest -> Mac, so the
+# guest writes each copied text to the Parallels shared folder "clip" and this
+# picks it up.
+export LC_CTYPE=UTF-8
+f="$HOME/.local/share/omaparallels/clip/guest-clipboard"
+last="$(stat -f '%Fm %z' "$f" 2>/dev/null)"   # ignore whatever is there at start
+while true; do
+  sleep 0.3
+  cur="$(stat -f '%Fm %z' "$f" 2>/dev/null)" || continue
+  [[ "$cur" == "$last" ]] && continue
+  last="$cur"
+  new="$(<"$f")"
+  [[ -n "$new" && "$new" != "$(pbpaste)" ]] && pbcopy < "$f"
+done
