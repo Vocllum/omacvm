@@ -391,7 +391,8 @@ mac_steps=""
     * Allow media keys: Accessibility for OmacVM Bridge.
 "
 if (( GESTURES )) || [[ $TYPE == utm ]]; then
-  what="the trackpad"; [[ $TYPE == utm ]] && what="the trackpad and Cmd keys"
+  what="the trackpad"
+  [[ $TYPE == utm ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
   mac_steps+="    * Allow $what: Accessibility and Input Monitoring for OmacVM Gestures.
 "
 fi
