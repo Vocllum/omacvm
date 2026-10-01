@@ -13,11 +13,13 @@ made to feel native. Sibling project: [Omanotch](https://github.com/gillesgoetsc
 A build is done when all of this holds:
 
 1. The VM is registered (`prlctl list -a` or `utmctl list`) and boots to SDDM /
-   the Omarchy desktop from its NVMe disk; GRUB default entry =
-   `linux-aarch64-thp` (unless `--no-thp-kernel`).
+   the Omarchy desktop from its NVMe disk; GRUB default entry = stock
+   `linux-aarch64`, or `linux-aarch64-thp` when the memory-optimized kernel
+   was chosen (`--thp-kernel`).
 2. `ssh -i ~/.ssh/omacvm root@<ip>` works (key only; ufw allows 22 from the VM
    network's /24).
-3. `/etc/omacvm/env` names the VM type and the Mac's address.
+3. `/etc/omacvm/env` names the VM type, the Mac's address and the feature
+   choices (`OMACVM_FEATURE_<name>=on|off`); `./check.sh --vm <name>` passes.
 4. Display: Parallels: `hyprctl monitors` matches the Mac (native pixels,
    refresh rate, arrangement) within seconds of a change. UTM: Virtual-1 runs
    the mode from `src/display/mac-display.swift` (e.g. 3456x2160@120).
@@ -36,7 +38,7 @@ A build is done when all of this holds:
 | Requirement | Value |
 |---|---|
 | Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
-| Parallels route | Parallels Desktop 19+; **Standard is enough** (verified 27.0.2). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
+| Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12). VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
 | Tools | Xcode Command Line Tools (swiftc, clang, swift), Homebrew `zstd` + `e2fsprogs` (live installer), python3, openssl |
 | Network | ~1.4 GB try-omarchy download (live installer) + Arch Linux ARM and Omarchy packages |
@@ -51,7 +53,7 @@ Keep it that way: a short root keeps the README near the top on GitHub.
 
 | Path | What |
 |---|---|
-| `build.sh` | Nothing → finished VM. `--vm-type parallels\|utm` (default Parallels if installed) `--vm-name --cpus --memory-gb --disk-gb --user --full-name --hostname --no-thp-kernel --autologin --omanotch --channel --yes`; `OMACVM_PASSWORD` for unattended runs |
+| `build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels or UTM (waits until installed; UTM ≥ 5), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence), recommended settings or one question each, user/full name, summary, password. Options: `--vm-type --vm-name --resources --cpus --memory-gb --disk-gb --user --full-name --hostname --no-bridge --no-mac-wallpaper --no-gestures --no-omanotch --no-idle-lock --autologin --thp-kernel --yes --dry-run`, hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes` |
 | `check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL. Add a line here for every new feature |
 | `apply.sh` | Guest side onto a running VM (either type, found by name): bridge token + `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), `src/guest/install.sh`, Dock icon (Parallels). Re-run after updating the repo |
 | `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper. `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
@@ -73,7 +75,8 @@ Keep it that way: a short root keeps the README near the top on GitHub.
 | `src/clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
 | `src/keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
-| `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; THP kernel from ALARM's PKGBUILD |
+| `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; opt-in memory-optimized kernel (THP always + MGLRU) from ALARM's PKGBUILD, built only with `--thp-kernel` |
+| Feature switches | `src/guest/install.sh --feature bridge\|wallpaper\|gestures\|idle-lock\|thp-kernel\|autologin=on\|off`, kept in `/etc/omacvm/env`; `apply.sh` maps `--[no-]bridge --[no-]mac-wallpaper --[no-]gestures --[no-]idle-lock --[no-]autologin --[no-]thp-kernel` onto it. idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). Gestures off: Mac app `--keys-only` on UTM (it still types Cmd as Super), not installed on Parallels |
 | `src/icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`src/vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
 | `docs/` | README graphics (hand-written SVG + SMIL) |
 
@@ -107,8 +110,8 @@ Omanotch.app (separate) :47811          ◀────────── notchc
 - Disk: GPT on NVMe: 2 GiB EFI at `/boot` + btrfs `@ @home @log` (+ `@factory`
   and snapper from omarchy-mac), `noatime,compress=zstd:1,space_cache=v2,discard=async`.
   GRUB (omarchy-mac's restore tooling expects it), normal and `--removable`.
-- Kernel: `linux-aarch64-thp` (`/boot/vmlinuz-linux-aarch64-thp`, GRUB default
-  via `GRUB_TOP_LEVEL`), stock `linux-aarch64` as fallback. Cmdline
+- Kernel: stock `linux-aarch64`; with `--thp-kernel` also `linux-aarch64-thp`
+  (`/boot/vmlinuz-linux-aarch64-thp`, GRUB default via `GRUB_TOP_LEVEL`), stock as fallback. Cmdline
   `loglevel=3 quiet mitigations=off nowatchdog`.
 
 ### Parallels settings (vm/pvs.py `omacvm`)
@@ -148,8 +151,10 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 
 ## 5. Build pipeline (build.sh)
 
-1. Detect keyboard, timezone, language, cores/RAM/disk; ask user name, full
-   name, password (SHA-512 hash) up front; confirm.
+1. Questionnaire (see `build.sh` above); keyboard, timezone, language from the
+   Mac; password hashed (SHA-512) after the summary. Cmd as Super: Parallels'
+   Linux keyboard profile emptied right away when no VM runs (quits the idle
+   Parallels app first).
 2. Live installer: Parallels: `build-live.sh --skip-boot` → registered VM;
    unregister, NVMe disk via `prl_disk_tool`, `pvs.py` settings/shares/boot,
    register, start. UTM: `build-live.sh --raw-image`, `utm_create`, start.
@@ -164,7 +169,8 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 ## 6. Standard procedures
 
 - **Build**: `./build.sh [--vm-type utm]` or unattended with `OMACVM_PASSWORD=… ./build.sh --yes …`.
-- **Update an existing VM**: `git pull && mac/install.sh && ./apply.sh --vm <name>`.
+- **Update an existing VM**: `git pull && src/mac/install.sh && ./apply.sh --vm <name>` (keeps the VM's feature choices).
+- **Try the questionnaire**: `./build.sh --dry-run`; scripted with `expect` for tests (it reads `/dev/tty`).
 - **SSH**: `ssh -i ~/.ssh/omacvm root@<ip>` (Parallels: DHCP lease file
   `/Library/Preferences/Parallels/parallels_dhcp_leases`; UTM: `utmctl ip-address <name>`
   or `/var/db/dhcpd_leases`).
