@@ -35,7 +35,9 @@ utm_drop_live() {
     -e '    end repeat' \
     -e '    set drives of c to keep' \
     -e '    update configuration of vm with c' \
-    -e '    return count of (drives of (configuration of vm))' \
+    -e '    copy (configuration of vm) to c2' \
+    -e '    set ds to drives of c2' \
+    -e '    return length of ds' \
     -e '  end tell' \
     -e 'end run' "$1")
   [[ $out == 1 ]] || die "could not remove the live installer disk: $out"
