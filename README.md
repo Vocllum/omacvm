@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Animated overview of a MacBook running Omarchy full screen, with the macOS host shown above it and Omaparallels Bridge linking the two over Parallels' private network: Omarchy's bar moves beside the notch; the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through Omaparallels Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift, with strength and True Tone in Omarchy's monitor settings; an external display joins in the macOS arrangement." width="100%">
+  <img src="docs/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; Parallels leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and Omaparallels Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through Omaparallels Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift, with strength and True Tone in Omarchy's monitor settings; an external display joins in the macOS arrangement." width="100%">
 </p>
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in Parallels
