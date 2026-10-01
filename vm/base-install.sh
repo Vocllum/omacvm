@@ -22,9 +22,10 @@ log "fastest Arch Linux ARM mirrors from here"
 # The geo-DNS default can send you across the world and time out; rank a few
 # mirrors by how fast they serve the core database, keep the default last.
 ranked=$(for m in de3 de4 dk hu nl fl.us ca.us nj.us il.us tx.us sg tw au br za; do
-  t=$(curl -o /dev/null -s -w '%{time_total}' --max-time 6 "https://$m.mirror.archlinuxarm.org/aarch64/core/core.db") &&
+  if t=$(curl -fo /dev/null -s -w '%{time_total}' --max-time 6 "https://$m.mirror.archlinuxarm.org/aarch64/core/core.db"); then
     printf '%s %s\n' "$t" "$m"
-done | sort -n | head -4 | awk '{ print $2 }')
+  fi
+done | sort -n | head -4 | awk '{ print $2 }' || true)
 {
   for m in $ranked; do echo "Server = https://$m.mirror.archlinuxarm.org/\$arch/\$repo"; done
   echo 'Server = http://mirror.archlinuxarm.org/$arch/$repo'
