@@ -18,5 +18,5 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>LSUIElement</key><true/>
 </dict></plist>
 PL
-codesign --force --sign - --identifier org.omaparallels.gestures "$APP"
+../../lib/sign.sh "$APP" org.omaparallels.gestures
 echo "built $APP"

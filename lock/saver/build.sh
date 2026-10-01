@@ -18,5 +18,5 @@ cat > "$B/Contents/Info.plist" <<PL
   <key>NSPrincipalClass</key><string>OmarchyLockView</string>
 </dict></plist>
 PL
-codesign --force --sign - "$B"
+../../lib/sign.sh "$B" org.omaparallels.lock.saver
 echo "built $B"

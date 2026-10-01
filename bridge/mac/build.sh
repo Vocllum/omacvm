@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build OmaparallelsBridge.app (agent app, no Dock icon) into ./build and sign it.
-# SIGN_IDENTITY="Developer ID Application: ..." signs with a real identity
-# (Location permission then survives rebuilds); default is ad-hoc ("-").
+# Signed by ../../lib/sign.sh (permissions survive rebuilds; SIGN_IDENTITY for a
+# real certificate).
 set -euo pipefail
 cd "$(dirname "$0")"
 APP=build/OmaparallelsBridge.app
@@ -27,6 +27,5 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>NSLocationWhenInUseUsageDescription</key><string>$WHY</string>
 </dict></plist>
 PL
-codesign --force --sign "${SIGN_IDENTITY:--}" --identifier "$ID" "$APP"
-codesign --verify --strict "$APP"
+../../lib/sign.sh "$APP" "$ID"
 echo "built $APP"
