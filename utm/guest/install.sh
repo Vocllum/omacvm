@@ -20,10 +20,9 @@ install -m644 omacvm-vdagent.service /etc/systemd/user/omacvm-vdagent.service
 systemctl --global mask spice-vdagent.service >/dev/null 2>&1
 systemctl --global enable omacvm-vdagent.service >/dev/null 2>&1
 # swap agents in a running session too
-if R=/run/user/$(id -u "$U") && [[ -S $R/bus ]]; then
-  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user daemon-reload
-  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user stop spice-vdagent.service 2>/dev/null || true
-  sudo -u "$U" XDG_RUNTIME_DIR=$R systemctl --user restart omacvm-vdagent.service 2>/dev/null || true
+if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
+  systemctl --user -M "$U@" stop spice-vdagent.service 2>/dev/null || true
+  systemctl --user -M "$U@" restart omacvm-vdagent.service 2>/dev/null || true
 fi
 install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
 

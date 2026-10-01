@@ -47,6 +47,7 @@ A build is done when all of this holds:
 | Path | What |
 |---|---|
 | `build.sh` | Nothing → finished VM. `--vm-type parallels\|utm` (default Parallels if installed) `--vm-name --cpus --memory-gb --disk-gb --user --full-name --hostname --no-thp-kernel --autologin --omanotch --channel --yes`; `OMACVM_PASSWORD` for unattended runs |
+| `check.sh` + `guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL. Add a line here for every new feature |
 | `apply.sh` | Guest side onto a running VM (either type, found by name): bridge token + this repo to `/usr/local/share/omacvm`, `guest/install.sh`, Dock icon (Parallels). Re-run after updating the repo |
 | `mac/install.sh`, `mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper. `mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
 | `guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
@@ -226,4 +227,5 @@ a Qt data stream, Parallels must be quit).
 - Ports: 47811 Omanotch, 47830 Gestures, 47831 Bridge.
 - One commit per change, message says what the user gets.
 - Verify on real VMs before committing behaviour changes: `apply.sh` against a
-  test VM, `build.sh --vm-name "OmacVM Test"` (and `--vm-type utm`) for the full path.
+  test VM, `build.sh --vm-name "OmacVM Test"` (and `--vm-type utm`) for the full path,
+  then `./check.sh --vm <name>` must pass.

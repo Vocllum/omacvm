@@ -129,6 +129,17 @@ mac/install.sh
 `apply.sh` brings any running VM, Parallels or UTM, up to the current OmacVM,
 including one you installed by hand from omarchy-mac.
 
+## Check
+
+```bash
+./check.sh --vm Omarchy
+```
+
+Goes through every feature on the Mac and in the running VM (permissions, the
+Bridge, the bar widgets, gestures, clipboard and pointer, kernel, memory,
+Omanotch) and prints `ok` / `FAIL` with what to do about each failure. It only
+reads; nothing is changed.
+
 ## How it works
 
 <p align="center">
