@@ -3,12 +3,12 @@
 The Mac's Wi-Fi, audio, media keys and display, inside the Omarchy VM. The VM
 only has a virtual Ethernet card and a virtual sound card; the bridge is a
 small Mac menu-bar app that serves the real thing as JSON over the private
-Parallels network and pushes every change as Server-Sent Events.
+VM network (Parallels or UTM) and pushes every change as Server-Sent Events.
 
 | Part | Where |
 |---|---|
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
-| Listens on | `http://10.211.55.2:47831`, the Mac's address on Parallels' shared network, never `0.0.0.0`. Waits for that address while Parallels is not running and re-binds after wake |
+| Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network) and `192.168.64.1` (UTM's), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `apply.sh`) |
 | Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
@@ -44,7 +44,7 @@ omacvm-bridge password [ssid]
 ```
 
 ```bash
-T=$(cat ~/.config/omacvm-bridge/token); B=http://10.211.55.2:47831
+T=$(cat ~/.config/omacvm-bridge/token); B=http://10.211.55.2:47831   # UTM: http://192.168.64.1:47831
 curl -H "Authorization: Bearer $T" $B/state
 ```
 
@@ -129,17 +129,25 @@ set in macOS.
 request from the VM, `external` = anything else (macOS slider, AirPods, keys
 outside the VM). `: ping` every 15 s; `retry: 3000`.
 
+### Wallpaper
+
+`POST /wallpaper` with an image body (PNG or JPEG, up to 48 MB, read only after
+the token checked out; optional header `X-Omarchy-Theme`): the Mac's wallpaper
+on every display, which macOS also shows behind its own lock screen. The guest
+sends it from `omacvm-wallpaper` whenever Omarchy's theme or background changes
+(`omacvm-bridge wallpaper <image> [theme]`).
+
 ### Not built: Wi-Fi control
 
 `POST /power`, `/join`, `/disconnect` answer `501`. Design: CoreWLAN
 `setPower`, `associate(to:password:)` (saved networks via the keychain,
 `networksetup -setairportnetwork` as fallback), `disassociate()`. The VM's
-internet runs over this Wi-Fi, but the Parallels link is local: switching Wi-Fi
+internet runs over this Wi-Fi, but the VM link is local: switching Wi-Fi
 off from the VM keeps the API reachable (tested), so it can switch it back on.
 
 ## Media keys
 
-While **Parallels is frontmost with the VM covering a whole display**, volume
+While **Parallels or UTM is frontmost with the VM covering a whole display**, volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
 and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
