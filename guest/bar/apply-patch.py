@@ -21,11 +21,10 @@ What the patch adds:
     when the helper stops sending heartbeats.
 """
 import os
-import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 11
+VERSION = 12
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -69,8 +68,9 @@ def main():
         if not os.path.exists(backup) or MARK in open(backup).read():
             sys.exit(f"apply-patch: {path} carries an older patch and no clean backup exists; "
                      "re-clone the bar (omarchy plugin clone omarchy.bar) and run install.sh again")
-        shutil.copyfile(backup, path)
-        text = open(path).read()
+        # Patch the clean copy in memory; the file is only written once the
+        # whole patch applied, so a failure leaves the old patch in place.
+        text = open(backup).read()
         print("replacing an older patch version")
 
     text = compat(text)
@@ -316,8 +316,11 @@ def main():
     // appear right below the notch strip instead of a bar height lower.
     // The NOTCH copy fills the whole strip (notchHeight) and centres its
     // content in it.
+    // It fills the whole NOTCH output, whose height notchcast rounds up to
+    // whole pixels at fractional scales: nothing may show below the bar.
     readonly property int parkedSize: notchRole === "parked" ? 1
-      : notchRole === "notch" ? Math.max(root.barSize, Math.round(root.notchHeight)) : root.barSize
+      : notchRole === "notch" ? Math.max(root.barSize, Math.round(root.notchHeight),
+                                         screen ? Math.ceil(screen.height) : 0) : root.barSize
     readonly property int notchPadTop: notchRole === "notch" ? Math.floor((parkedSize - root.barSize) / 2) : 0
     readonly property int notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
@@ -330,11 +333,22 @@ def main():
       left: barWindow.parked && root.position === "left" ? -barWindow.parkedSize : 0
       right: barWindow.parked && root.position === "right" ? -barWindow.parkedSize : 0''')
 
-    text = replace_once(text, '''    implicitWidth: root.vertical ? root.barSize : 0
-    implicitHeight: root.vertical ? 0 : root.barSize
-''', '''    implicitWidth: root.vertical ? root.barSize : 0
-    implicitHeight: root.vertical ? 0 : barWindow.parkedSize
-''')
+    # Omarchy from about October 2026 raises the bar to the camera cutout on
+    # Asahi MacBooks (notchFloor); older versions use the bar size alone.
+    # Ordinary bars keep Omarchy's height, the notch roles get parkedSize.
+    stock_heights = [
+        "    implicitHeight: root.vertical ? 0 : Math.max(root.barSize, notchFloor)\n",
+        "    implicitHeight: root.vertical ? 0 : root.barSize\n",
+    ]
+    for stock in stock_heights:
+        if text.count("    implicitWidth: root.vertical ? root.barSize : 0\n" + stock) == 1:
+            expr = stock.split("root.vertical ? 0 : ", 1)[1].rstrip("\n")
+            text = text.replace("    implicitWidth: root.vertical ? root.barSize : 0\n" + stock,
+                                "    implicitWidth: root.vertical ? root.barSize : 0\n"
+                                f"    implicitHeight: root.vertical ? 0 : (barWindow.notchRole === \"\" ? {expr} : barWindow.parkedSize)\n")
+            break
+    else:
+        sys.exit("apply-patch: could not find the bar's implicitHeight line (Omarchy changed it?)")
 
     text = replace_once(text, '''    Loader {
       anchors.fill: parent

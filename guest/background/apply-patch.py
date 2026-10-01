@@ -19,7 +19,6 @@ The patch is versioned like the bar patch; an older version is restored from
 <Background.qml>.before-notchbar (kept by install.sh) and patched again.
 """
 import os
-import shutil
 import sys
 
 MARK = "omarchy-notch-bar"
@@ -45,8 +44,9 @@ def main():
         if not os.path.exists(backup) or MARK in open(backup).read():
             sys.exit(f"apply-patch: {path} carries an older patch and no clean backup exists; "
                      "re-clone the background (omarchy plugin clone omarchy.background) and run install.sh again")
-        shutil.copyfile(backup, path)
-        text = open(path).read()
+        # Patch the clean copy in memory; the file is only written once the
+        # whole patch applied, so a failure leaves the old patch in place.
+        text = open(backup).read()
         print("replacing an older patch version")
 
     # 1. Helpers that pair the NOTCH output with the built-in display.
