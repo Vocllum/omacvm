@@ -1,78 +1,202 @@
 #!/bin/bash
 # OmacVM: build an Omarchy VM that feels like a native Mac, in Parallels
-# Desktop (recommended) or UTM, from nothing, in one go (about an hour, mostly
-# downloads and the kernel build).
+# Desktop or UTM, from nothing, in one go (30-70 minutes, mostly downloads).
 #
-#   ./build.sh [--vm-type parallels|utm] [--vm-name NAME] [--cpus N] [--memory-gb N] [--disk-gb N]
-#              [--user NAME] [--full-name "NAME"] [--hostname NAME]
-#              [--no-thp-kernel] [--autologin] [--omanotch] [--channel rc|stable] [--yes]
+#   ./build.sh            asks a few questions, shows a summary, then builds
+#   ./build.sh --dry-run  asks the questions and shows the summary only
 #
-# Everything not given is taken from this Mac and shown for confirmation:
-# the keyboard layout, timezone and language, and a CPU/RAM/disk size suggested
-# from what the Mac has. Your user name (default: your Mac login), full name and
-# password are asked for before anything is built (or --user/--full-name/--yes
-# and OMACVM_PASSWORD); nothing needs answering in the VM window. Needs Apple
-# Silicon, Parallels Desktop 19+ (Standard is enough) or UTM 5, and Homebrew's
-# zstd + e2fsprogs for the temporary live installer. --vm-type defaults to
-# Parallels when it is installed, else UTM.
+# Everything can also be given up front (--yes skips the questions; the
+# password then comes from OMACVM_PASSWORD):
+#   --vm-type parallels|utm   --vm-name NAME   --hostname NAME
+#   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
+#   --user NAME   --full-name "NAME"
+#   --no-bridge   --no-mac-wallpaper   --no-gestures   --no-omanotch
+#   --no-idle-lock   --autologin   --thp-kernel
+# The keyboard layout, timezone and language come from this Mac. Needs Apple
+# Silicon, Parallels Desktop 19+ or UTM 5, and Homebrew's zstd + e2fsprogs.
 set -euo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
 source "$R/src/lib/mac.sh"
+source "$R/src/vm/utm.sh"
+source "$R/src/lib/setup.sh"
 
-TYPE=""; VM="Omarchy"; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(id -un); FULL=""; HOST="omarchy"
-THP=1; AUTOLOGIN=0; OMANOTCH=0; CHANNEL=rc; YES=0
+TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(id -un); FULL=""; HOST="omarchy"
+BRIDGE=1; WALLPAPER=1; GESTURES=1; OMANOTCH=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+CHANNEL=""; YES=0; DRY=0
 while (( $# )); do
   case $1 in
     --vm-type) TYPE=$2; shift 2 ;;
     --vm-name) VM=$2; shift 2 ;;
+    --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
     --disk-gb) DISK_GB=$2; shift 2 ;;
     --user) U=$2; shift 2 ;;
     --full-name) FULL=$2; shift 2 ;;
     --hostname) HOST=$2; shift 2 ;;
-    --no-thp-kernel) THP=0; shift ;;
-    --autologin) AUTOLOGIN=1; shift ;;
+    --no-bridge) BRIDGE=0; WALLPAPER=0; shift ;;
+    --no-mac-wallpaper) WALLPAPER=0; shift ;;
+    --no-gestures) GESTURES=0; shift ;;
     --omanotch) OMANOTCH=1; shift ;;
-    --channel) CHANNEL=$2; shift 2 ;;
+    --no-omanotch) OMANOTCH=0; shift ;;
+    --no-idle-lock) IDLE_LOCK=0; shift ;;
+    --autologin) AUTOLOGIN=1; shift ;;
+    --thp-kernel) THP=1; shift ;;
+    --no-thp-kernel) THP=0; shift ;;
+    --channel) CHANNEL=$2; shift 2 ;;          # rc|stable|edge, for testing omarchy-mac
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,19s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --dry-run) DRY=1; shift ;;
+    -h|--help) sed -n '2,17s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) die "unknown option $1 (see --help)" ;;
   esac
 done
-
-# ---------- 1. this Mac ----------
 [[ $(uname -m) == arm64 ]] || die "OmacVM needs an Apple Silicon Mac"
-source "$R/src/vm/utm.sh"
+(( YES )) || [[ -r $TTY ]] || die "the setup questions need a terminal (or pass --yes and the answers as options)"
+onoff() { (( $1 )) && echo on || echo off; }
+
+mac_cores=$(sysctl -n hw.ncpu)
+mac_perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$mac_cores")
+mac_eff=$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || echo 0)
+mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
+NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
+[[ -n $OMANOTCH ]] || { [[ $NOTCH == notch ]] && OMANOTCH=1 || OMANOTCH=0; }
+
+printf '\n\033[1mOmacVM\033[0m: Omarchy in a VM on your Mac, feeling native.\n'
+
+# ---------- 1. Parallels or UTM ----------
 if [[ -z $TYPE ]]; then
-  if [[ -x $PRLCTL ]]; then TYPE=parallels; elif [[ -x $UTMCTL ]]; then TYPE=utm
-  else die "install Parallels Desktop (recommended) or UTM first"; fi
+  (( YES )) && die "--yes needs --vm-type parallels or utm"
+  hd "Where should Omarchy run?"
+  say "    1  Parallels Desktop  near-native speed, every display. Paid; Standard allows"
+  say "                          4 CPUs / 8 GB per VM, Pro (and the trial) up to 18 / 128 GB."
+  say "    2  UTM                free, no resource limits; one display, slower desktop."
+  say "    Comparison: $README_ROUTES"
+  while :; do
+    read -r -p "  Choose 1 or 2: " a < "$TTY" || die "no answer (no terminal?)"
+    case $a in 1) TYPE=parallels; break ;; 2) TYPE=utm; break ;; esac
+  done
 fi
+CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; P_EDITION=""; P_TRIAL=""
 case $TYPE in
-  parallels) [[ -x $PRLCTL ]] || die "Parallels Desktop is not installed"
-             [[ -e "$HOME/Parallels/$VM.pvm" ]] && die "a VM bundle $HOME/Parallels/$VM.pvm already exists (choose --vm-name)" ;;
-  utm) [[ -x $UTMCTL ]] || die "UTM is not installed (brew install --cask utm)"
-       "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { $1 = ""; $2 = ""; sub(/^  /, ""); print }' | grep -qxF "$VM" &&
-         die "UTM already has a VM named '$VM' (choose --vm-name)" ;;
+  parallels)
+    if (( YES )); then [[ -x $PRLCTL ]] && parallels_limits || die "Parallels Desktop is not installed and set up"
+    else wait_for_app parallels; fi
+    (( CAP_CPUS > mac_cores )) && CAP_CPUS=$mac_cores
+    (( CAP_MEM_GB > mac_mem_gb )) && CAP_MEM_GB=$mac_mem_gb ;;
+  utm)
+    if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || die "UTM 5 is not installed"
+    else wait_for_app utm; fi
+    : ;;
   *) die "--vm-type parallels or utm" ;;
 esac
+vm_taken() {
+  if [[ $TYPE == parallels ]]; then [[ -e "$HOME/Parallels/$1.pvm" ]]
+  else "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { $1 = ""; $2 = ""; sub(/^  /, ""); print }' | grep -qxF "$1"; fi
+}
+if vm_taken "$VM"; then
+  (( YES )) && die "a VM named '$VM' already exists (choose --vm-name)"
+  n=2; while vm_taken "$VM $n"; do n=$((n + 1)); done
+  hd "You already have a VM named '$VM'"
+  while :; do
+    VM=$(ask_value "name for the new VM" "$VM $n" '^[A-Za-z0-9][A-Za-z0-9 ._-]*$')
+    vm_taken "$VM" || break
+    say "    '$VM' exists too"
+  done
+fi
 for b in zstd e2fsck; do
   command -v "$b" >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/$b ]] ||
     die "missing $b: brew install zstd e2fsprogs"
 done
 command -v swiftc >/dev/null || die "missing the Swift compiler: xcode-select --install"
-free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
 (( free_gb >= 60 )) || die "need ~60 GB free disk space (have $free_gb GB)"
 
-mac_cores=$(sysctl -n hw.ncpu); mac_perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$mac_cores")
-mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
-# Suggestion: every performance core (vCPUs cannot be pinned, so more than
-# that only adds contention with macOS), half the memory (the VM does not hand
-# touched memory back while it runs), 128 GB of disk that grows as it fills.
-: "${CPUS:=$mac_perf}"
-: "${MEM_GB:=$(( mac_mem_gb / 2 ))}"
+# ---------- 2. resources ----------
+LIMITED=""
+if [[ $TYPE == parallels && $CAP_CPUS -le 4 ]]; then
+  LIMITED="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1} allows $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
+fi
+case ${RES:-balanced} in low) tier=0 ;; balanced) tier=1 ;; high) tier=2 ;; best) tier=3 ;; *) die "--resources low|balanced|high|best" ;; esac
+tier_values 0; low="$T_CPUS/$T_MEM"; tier_values 3
+if [[ $low == "$T_CPUS/$T_MEM" && -n $LIMITED ]]; then
+  (( YES )) || { hd "Resources"; say "    $LIMITED"; say "    The VM gets that: $T_CPUS CPUs, $T_MEM GB memory."; }
+  tier=3
+elif (( ! YES )) && [[ -z $CPUS && -z $MEM_GB && -z $RES ]]; then
+  hd "How much of this Mac should the VM get?  ($mac_cores CPUs, $mac_mem_gb GB memory)"
+  say "    The VM keeps memory it has touched until it stops; Best leaves macOS and the"
+  say "    GPU a buffer of $(( mac_mem_gb / 4 > 8 ? mac_mem_gb / 4 : 8 )) GB.${LIMITED:+ $LIMITED}"
+  say "    ←/→ to choose, Return to confirm"
+  tier=$(pick 1 tier_info "${TIERS[@]}")
+  [[ -n $tier ]] || exit 1
+fi
+tier_values "$tier"
+: "${CPUS:=$T_CPUS}"; : "${MEM_GB:=$T_MEM}"
 : "${DISK_GB:=$(( free_gb >= 400 ? 200 : 128 ))}"
+if (( ! YES )) && ask_yn "${TIERS[$tier]}: $CPUS CPUs, $MEM_GB GB memory, a $DISK_GB GB disk (grows as it fills). Change any?" n; then
+  CPUS=$(ask_value "CPUs (1-$CAP_CPUS)" "$CPUS" '^[0-9]+$')
+  MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$MEM_GB" '^[0-9]+$')
+  DISK_GB=$(ask_value "disk in GB (64-$(( free_gb - 20 )))" "$DISK_GB" '^[0-9]+$')
+fi
+(( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
+(( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
+(( DISK_GB >= 64 )) || die "disk: at least 64 GB"
+
+# ---------- 3. features ----------
+row() { printf '    %-68s %s\n' "$1" "$2"; }
+explain_features() {
+  row "Bridge: the Mac's Wi-Fi, audio, Night Shift, media keys in Omarchy" "$(onoff "$BRIDGE")"
+  (( BRIDGE )) && row "Omarchy's wallpaper on the Mac too" "$(onoff "$WALLPAPER")"
+  row "Trackpad gestures in Omarchy (macOS swipes off in full screen)" "$(onoff "$GESTURES")"
+  if [[ $NOTCH == notch ]]; then row "Omanotch: Omarchy's bar beside the notch" "$(onoff "$OMANOTCH")"
+  else row "Omanotch (needs a MacBook with a notch)" off; fi
+  row "Omarchy's own screensaver and lock after idle" "$( (( IDLE_LOCK )) && echo kept || echo "off, the Mac's lock")"
+  row "Autologin into Omarchy" "$(onoff "$AUTOLOGIN")"
+  row "Memory-optimized kernel" "$(onoff "$THP")"
+}
+if (( ! YES )); then
+  hd "Recommended settings"
+  explain_features
+  if ! ask_yn "Use these?" y; then
+    hd "Bridge"
+    say "    Omarchy's bar shows the Mac's real Wi-Fi and audio, Super+Ctrl+N switches the"
+    say "    Mac's Night Shift, and volume and brightness keys change the Mac."
+    ask_yn "Use OmacVM Bridge? (recommended)" y && BRIDGE=1 || BRIDGE=0
+    if (( BRIDGE )); then
+      ask_yn "Show Omarchy's wallpaper on your Mac too (follows the Omarchy theme)?" y && WALLPAPER=1 || WALLPAPER=0
+    else WALLPAPER=0; fi
+    hd "Trackpad gestures"
+    say "    3/4-finger swipes and pinch go to Omarchy while the VM is full screen; macOS's"
+    say "    Mission Control and Spaces swipes are off then. ⌃⌥⌘ Esc hands the trackpad back"
+    say "    to macOS."
+    ask_yn "Pass trackpad gestures to Omarchy? (recommended)" y && GESTURES=1 || GESTURES=0
+    if [[ $NOTCH == notch ]]; then
+      hd "Omanotch"
+      say "    Omarchy's bar beside the MacBook notch, in the strip a full-screen VM leaves black."
+      ask_yn "Use Omanotch? (recommended)" y && OMANOTCH=1 || OMANOTCH=0
+    fi
+    hd "Screensaver and lock"
+    say "    Omarchy starts its own screensaver after 2½ minutes and locks itself after 5"
+    say "    minutes without input in the VM, independently of your Mac."
+    ask_yn "Turn both off and rely on your Mac's lock?" n && IDLE_LOCK=0 || IDLE_LOCK=1
+    hd "Autologin"
+    ask_yn "Start straight into Omarchy without its login screen?" n && AUTOLOGIN=1 || AUTOLOGIN=0
+    hd "Memory-optimized kernel"
+    say "    Rebuilds Arch Linux ARM's kernel with transparent huge pages and MGLRU, for"
+    say "    maximum memory performance in memory-heavy work. Adds about 10 minutes to the"
+    say "    build and to every update, and follows kernel updates only when rebuilt."
+    ask_yn "Build the memory-optimized kernel?" n && THP=1 || THP=0
+  fi
+fi
+
+# ---------- 4. you ----------
 : "${FULL:=$(id -F 2>/dev/null || echo "$U")}"
+if (( ! YES )); then
+  hd "Your user in Omarchy"
+  U=$(ask_value "user name" "$U" '^[a-z_][a-z0-9_-]{0,31}$')
+  FULL=$(ask_value "full name" "$FULL" '.')
+fi
+[[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "user name '$U': lower-case letters, digits, - and _ only"
+
 KB=$("$R/src/keyboard/mac-layout.sh")
 TZ_MAC=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 lang=$(defaults read -g AppleLanguages 2>/dev/null | sed -n '2s/[^A-Za-z-]//gp')   # e.g. de-CH
@@ -82,41 +206,48 @@ case $lang in
   *-*) LANG_VM="${lang%%-*}_${lang##*-}.UTF-8" ;;
   *) LANG_VM="${lang}_${region##*_}.UTF-8" ;;
 esac
-
-if (( ! YES )); then
-  echo
-  echo "  Your user in Omarchy (Omarchy's own first-boot setup is not used):"
-  read -r -p "    user name [$U]: " a; U=${a:-$U}
-  read -r -p "    full name [$FULL]: " a; FULL=${a:-$FULL}
-fi
-[[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "user name '$U': lower-case letters, digits, - and _ only"
+[[ -n $CHANNEL ]] || CHANNEL=$(omarchy_channel)
 
 cat <<EOF
 
   OmacVM will build this VM:
 
-    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop (~/Parallels/$VM.pvm)" || echo "UTM" )
-    CPUs / memory  $CPUS of $mac_cores cores / $MEM_GB of $mac_mem_gb GB
-    disk           $DISK_GB GB, expanding (uses only what the VM stores)
+    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ $P_TRIAL == yes ]] && echo " (trial)" ) (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
+    resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
     user           $U ($FULL), hostname $HOST
     keyboard       $KB   (from the Mac)
     timezone       $TZ_MAC, language $LANG_VM
-    Omarchy        omarchy-mac, channel $CHANNEL
-    extras         THP kernel: $( ((THP)) && echo yes || echo no ), autologin: $( ((AUTOLOGIN)) && echo yes || echo no ), Omanotch: $( ((OMANOTCH)) && echo yes || echo no )
-
+    Omarchy        omarchy-mac, $CHANNEL packages
 EOF
+explain_features
+echo
+if (( DRY )); then echo "  Dry run: nothing was built."; exit 0; fi
 if (( ! YES )); then
-  read -r -p "  Go ahead? [Y/n] " a; [[ ${a:-y} =~ ^[Yy] ]] || exit 1
+  ask_yn "Go ahead?" y || exit 1
 fi
 if [[ -n ${OMACVM_PASSWORD:-} ]]; then
   PW=$OMACVM_PASSWORD
 else
-  read -r -s -p "  Password for $U in the VM: " PW; echo
-  read -r -s -p "  Again: " PW2; echo
+  read -r -s -p "  Password for $U in Omarchy: " PW < "$TTY"; echo
+  read -r -s -p "  Again: " PW2 < "$TTY"; echo
   [[ $PW == "$PW2" && -n $PW ]] || die "passwords differ or are empty"
 fi
 HASH=$(printf '%s' "$PW" | openssl passwd -6 -stdin)
 unset PW PW2
+
+# Cmd as Super in Parallels: its Linux keyboard profile turns Cmd+C/V/X into
+# Ctrl. Emptying it needs Parallels Desktop closed: done now when no VM runs.
+if [[ $TYPE == parallels ]] && ! parallels_profile_emptied; then
+  if ! "$PRLCTL" list -o status 2>/dev/null | grep -q running; then
+    if pgrep -xq prl_client_app; then
+      osascript -e 'quit app "Parallels Desktop"' >/dev/null 2>&1 || true
+      for _ in $(seq 20); do pgrep -xq prl_client_app || break; sleep 1; done
+    fi
+    if ! pgrep -xq prl_client_app && "$R/src/mac/parallels-shortcuts.sh" >/dev/null; then
+      log "Cmd reaches Omarchy as Super (Parallels' Linux keyboard profile emptied)"
+    fi
+  fi
+fi
 
 KEY=~/.ssh/omacvm
 [[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
@@ -215,11 +346,14 @@ gssh "$IP" "rm -f /root/omacvm.env"   # it holds the password hash
 
 # ---------- 5. OmacVM ----------
 log "OmacVM on the Mac"
-"$R/src/mac/install.sh"
+mac_args=(); (( BRIDGE )) || mac_args+=(--no-bridge)
+if (( ! GESTURES )); then [[ $TYPE == utm ]] && mac_args+=(--no-gestures) || mac_args+=(--skip-gestures); fi
+"$R/src/mac/install.sh" ${mac_args[@]+"${mac_args[@]}"}
 log "OmacVM in the VM"
 args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
-((THP)) || args+=(--no-thp-kernel)
-((AUTOLOGIN)) && args+=(--autologin)
+args+=("--$( ((BRIDGE)) || echo no- )bridge" "--$( ((WALLPAPER)) || echo no- )mac-wallpaper"
+       "--$( ((GESTURES)) || echo no- )gestures" "--$( ((IDLE_LOCK)) || echo no- )idle-lock"
+       "--$( ((AUTOLOGIN)) || echo no- )autologin" "--$( ((THP)) || echo no- )thp-kernel")
 "$R/apply.sh" "${args[@]}"
 if (( OMANOTCH )); then
   log "Omanotch (the bar beside the notch)"
@@ -239,7 +373,7 @@ gssh "$IP" "systemctl reboot" 2>/dev/null || true
 if [[ $TYPE == parallels ]]; then
   vm_steps=""
   parallels_profile_emptied || vm_steps+='    * Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run
-      mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels).
+      src/mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels).
 '
   parallels_sends_shortcuts || vm_steps+='    * Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts >
       macOS System Shortcuts > "Send macOS system shortcuts: Always" (an alert
@@ -250,15 +384,21 @@ else
   vm_steps='    * UTM: put the VM in full screen on the built-in display (gestures and media
       keys need it); keep UTM in the foreground, a backgrounded UTM runs slower.'
 fi
+mac_steps=""
+(( BRIDGE )) && mac_steps+="    * Allow Wi-Fi names: Location Services for OmacVM Bridge (prompt).
+    * Allow media keys: Accessibility for OmacVM Bridge.
+"
+if (( GESTURES )) || [[ $TYPE == utm ]]; then
+  mac_steps+="    * Allow the trackpad$( [[ $TYPE == utm ]] && echo " and Cmd keys" ): Accessibility and Input Monitoring for OmacVM Gestures.
+"
+fi
+mac_steps+=$vm_steps
 cat <<EOF
 
   Done in $(( ($(date +%s) - started) / 60 )) minutes. VM '$VM' ($TYPE) is rebooting into Omarchy.
 
   One-time steps on the Mac:
-    * Allow Wi-Fi names: Location Services for OmacVM Bridge (prompt).
-    * Allow media keys and gestures: Accessibility for OmacVM Bridge and
-      OmacVM Gestures, Input Monitoring for OmacVM Gestures.
-$vm_steps
+${mac_steps%$'\n'}
   SSH: ssh -i $KEY root@$IP
   Check everything: ./check.sh --vm "$VM"
 EOF
