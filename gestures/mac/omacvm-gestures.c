@@ -20,6 +20,7 @@
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
 #include <ApplicationServices/ApplicationServices.h>
+#include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <arpa/inet.h>
 #include <libproc.h>
@@ -199,6 +200,46 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
 }
 
+// ---- Cmd as Super on UTM ----
+// UTM does not grab the keyboard (Omanotch needs a free pointer), so macOS keeps
+// Cmd+Space, Cmd+Tab & co. While a UTM VM is full screen and capturing, every
+// Cmd+key goes to the guest daemon instead, which types it as Super+key on a
+// virtual keyboard: "K <linux keycode> <0 up|1 down|2 repeat>". Parallels has
+// its own setting for this ("Send macOS system shortcuts: Always").
+static unsigned short macToLinux[128];
+static unsigned char forwarded[128];
+
+static void initKeymap(void) {
+  // Physical keys (kVK_* -> KEY_*); the guest's own layout gives them meaning.
+  static const unsigned short pairs[][2] = {
+    {0,30},{1,31},{2,32},{3,33},{4,35},{5,34},{6,44},{7,45},{8,46},{9,47},{11,48},{12,16},{13,17},{14,18},
+    {15,19},{16,21},{17,20},{18,2},{19,3},{20,4},{21,5},{22,7},{23,6},{24,13},{25,10},{26,8},{27,12},{28,9},
+    {29,11},{30,27},{31,24},{32,22},{33,26},{34,23},{35,25},{36,28},{37,38},{38,36},{39,40},{40,37},{41,39},
+    {42,43},{43,51},{44,53},{45,49},{46,50},{47,52},{48,15},{49,57},{51,14},{53,1},{76,96},
+    {96,63},{97,64},{98,65},{99,61},{100,66},{101,67},{103,87},{109,68},{111,88},{118,62},{120,60},{122,59},
+    {115,102},{116,104},{117,111},{119,107},{121,109},{123,105},{124,106},{125,108},{126,103}};
+  for (size_t i = 0; i < sizeof pairs / sizeof *pairs; i++) macToLinux[pairs[i][0]] = pairs[i][1];
+  // The key left of 1 and the extra key beside left Shift swap places on ISO keyboards.
+  int iso = KBGetLayoutType(LMGetKbdType()) == kKeyboardISO;
+  macToLinux[10] = iso ? 41 : 86;   // kVK_ISO_Section
+  macToLinux[50] = iso ? 86 : 41;   // kVK_ANSI_Grave
+}
+
+static void sendKey(int code, int val) {
+  char b[24]; int n = snprintf(b, sizeof b, "K %d %d\n", code, val); sendLine(b, (size_t)n);
+}
+
+static void forwardKey(int kc, CGEventFlags f, int val) {
+  if (val == 1) {
+    sendKey(125, 1);                                         // Super
+    if (f & kCGEventFlagMaskShift) sendKey(42, 1);
+    if (f & kCGEventFlagMaskControl) sendKey(29, 1);
+    if (f & kCGEventFlagMaskAlternate) sendKey(56, 1);
+  }
+  sendKey(macToLinux[kc], val);
+  if (val == 0) { sendKey(56, 0); sendKey(29, 0); sendKey(42, 0); sendKey(125, 0); }
+}
+
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
 static int swallowEscUp;
 
@@ -208,11 +249,22 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     CGEventTapEnable(tapPort, true); return e;
   }
   if (type == kCGEventKeyDown || type == kCGEventKeyUp) {
-    if (CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode) != ESC_KEYCODE) return e;
+    int kc = (int)CGEventGetIntegerValueField(e, kCGKeyboardEventKeycode);
     CGEventFlags f = CGEventGetFlags(e);
     int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
-    if (type == kCGEventKeyUp) { if (swallowEscUp) { swallowEscUp = 0; return NULL; } return e; }
-    if (!combo || !frontIsVM) return e;
+    if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
+    if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
+      if (kc >= 0 && kc < 128 && macToLinux[kc]) {
+        if (type == kCGEventKeyDown && capturing && frontNet == 1 && (f & kCGEventFlagMaskCommand)) {
+          forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
+          forwarded[kc] = 1;
+          return NULL;
+        }
+        if (type == kCGEventKeyUp && forwarded[kc]) { forwarded[kc] = 0; forwardKey(kc, f, 0); return NULL; }
+      }
+      return e;
+    }
+    if (type == kCGEventKeyUp) return e;
     if (CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat)) return NULL;
     escaped = !escaped;
     capturing = frontIsVM && !escaped;
@@ -302,6 +354,7 @@ int main(int argc, char **argv) {
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
+  initKeymap();
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
