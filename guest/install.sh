@@ -62,6 +62,13 @@ if (( THP )); then
   log "THP kernel (about 10 minutes)"
   "$R/kernel/build-thp-kernel.sh" "$U"
 fi
+# Updated bar widgets only load in a new shell: restart it once if any changed.
+F=$(getent passwd "$U" | cut -d: -f6)/.local/state/omaparallels/restart-shell
+if [[ -f $F ]]; then
+  rm -f "$F"
+  sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" \
+    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; omarchy-shell shell ping >/dev/null 2>&1 && omarchy-restart-shell >/dev/null 2>&1' || true
+fi
 mkinitcpio -P >/dev/null 2>&1 || true
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
 log "Omaparallels guest side installed for $U (reboot to apply everything)"

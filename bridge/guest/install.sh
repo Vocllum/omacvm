@@ -5,6 +5,7 @@
 # Idempotent. Installs:
 #   /usr/local/bin/omaparallels-bridge, /usr/local/bin/omaparallels-bridge-osd
 #   /usr/local/bin/omarchy-toggle-nightlight (Super+Ctrl+N drives the Mac's Night Shift)
+#   /usr/local/bin/omarchy-network-{qr,password} (Omarchy's Wi-Fi QR card shares the Mac's network)
 #   user service omaparallels-bridge-osd (Omarchy OSD for the Mac's media keys)
 #   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
 #   the bar widgets in ../plugins (omaparallels.wifi, omaparallels.audio)
@@ -15,7 +16,8 @@ U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 as_user() { sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" "$@"; }
 
-install -m755 omaparallels-bridge omaparallels-bridge-osd omarchy-toggle-nightlight /usr/local/bin/
+install -m755 omaparallels-bridge omaparallels-bridge-osd omarchy-toggle-nightlight \
+  omarchy-network-qr omarchy-network-password /usr/local/bin/
 install -m644 omaparallels-bridge-osd.service /etc/systemd/user/omaparallels-bridge-osd.service
 systemctl --user -M "$U@" daemon-reload
 systemctl --user -M "$U@" enable omaparallels-bridge-osd.service >/dev/null 2>&1
@@ -30,9 +32,14 @@ if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack >/dev/null 2>&1; then
 fi
 systemctl --user -M "$U@" restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 sleep 1
+# Microphone likewise: Parallels hands the Mac's input over at the Mac's level,
+# so the VM's source stays at 100 % (it starts out far lower).
 amixer -q -c0 sset Master 0dB unmute 2>/dev/null || true
-as_user wpctl set-volume @DEFAULT_AUDIO_SINK@ 1.0 2>/dev/null || true
-as_user wpctl set-mute @DEFAULT_AUDIO_SINK@ 0 2>/dev/null || true
+amixer -q -c0 sset Capture 0dB cap 2>/dev/null || true
+for dev in @DEFAULT_AUDIO_SINK@ @DEFAULT_AUDIO_SOURCE@; do
+  as_user wpctl set-volume "$dev" 1.0 2>/dev/null || true
+  as_user wpctl set-mute "$dev" 0 2>/dev/null || true
+done
 
 # Bar widgets: the Mac's Wi-Fi and audio, in the slots of Omarchy's own.
 for p in ../plugins/*/; do ../../lib/install-plugin.sh "$U" "$p"; done

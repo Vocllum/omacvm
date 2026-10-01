@@ -20,6 +20,12 @@ as_user() {
 id=$(jq -r .id "$dir/manifest.json")
 dest=$H/.config/omarchy/plugins/$id
 install -d -o "$U" -g "$U" "$H/.config/omarchy/plugins"
+# A running shell keeps the plugin it loaded: note real changes so
+# guest/install.sh restarts the shell once at the end.
+if [[ -d $dest ]] && ! diff -rq "$dir" "$dest" >/dev/null 2>&1; then
+  install -d -o "$U" -g "$U" "$H/.local/state/omaparallels"
+  touch "$H/.local/state/omaparallels/restart-shell"
+fi
 rm -rf "$dest"
 cp -r "$dir" "$dest"
 chown -R "$U:$U" "$dest"

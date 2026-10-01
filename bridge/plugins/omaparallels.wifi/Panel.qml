@@ -64,9 +64,15 @@ Panel {
   readonly property bool powerSupported: false
   readonly property bool joinSupported: false
   readonly property bool canRunSpeedTest: kind === "wifi"
-  readonly property int speedHeaderIndex: canRunSpeedTest ? 0 : -1
-  readonly property int toggleHeaderIndex: canRunSpeedTest ? 1 : 0
-  readonly property int headerActionCount: (canRunSpeedTest ? 1 : 0) + 1
+  // Share the Mac's network as a QR code (Omarchy's own omarchy.wifiqr card;
+  // Omaparallels' omarchy-network-qr feeds it the Mac's network). Personal,
+  // WEP, open and OWE networks only, as the bridge reports in can_share.
+  readonly property bool canShareWifi: kind === "wifi" && wifi.can_share === true
+  readonly property int qrHeaderIndex: canShareWifi ? 0 : -1
+  readonly property int speedHeaderIndex: canRunSpeedTest ? (canShareWifi ? 1 : 0) : -1
+  readonly property int toggleHeaderIndex: (canShareWifi ? 1 : 0) + (canRunSpeedTest ? 1 : 0)
+  readonly property int headerActionCount: (canShareWifi ? 1 : 0) + (canRunSpeedTest ? 1 : 0) + 1
+  readonly property bool qrHeaderHasCursor: cursorActive && focusSection === "header" && headerIndex === qrHeaderIndex
   readonly property bool speedHeaderHasCursor: cursorActive && focusSection === "header" && headerIndex === speedHeaderIndex
   readonly property bool toggleHeaderHasCursor: cursorActive && focusSection === "header" && headerIndex === toggleHeaderIndex
   readonly property string toggleHint: "Turn Wi-Fi " + (wifi.power === false ? "on" : "off") + " on the Mac (not supported yet)"
@@ -91,7 +97,7 @@ Panel {
   }
 
   IpcHandler {
-    target: "omarchy.network"
+    target: "omaparallels.wifi"
 
     function open() { root.open() }
     function close() { root.close() }
@@ -100,10 +106,12 @@ Panel {
     function toggle() { root.toggle() }
     function toggleNetwork() { root.toggleNetwork() }
     function speedTest() { root.summonSpeedTest() }
+    function showQr() { root.summonWifiQr() }
   }
 
   function activateHeader() {
-    if (headerIndex === speedHeaderIndex) summonSpeedTest()
+    if (headerIndex === qrHeaderIndex) summonWifiQr()
+    else if (headerIndex === speedHeaderIndex) summonSpeedTest()
     else if (headerIndex === toggleHeaderIndex) toggleNetwork()
   }
 
@@ -182,6 +190,14 @@ Panel {
       return
     }
     if (parsed && Array.isArray(parsed.networks)) bridge.scan = parsed
+  }
+
+  // The share card is Omarchy's own panel plugin (omarchy.wifiqr). Interface
+  // "mac" tells omarchy-network-qr/-password to read the Mac's network through
+  // the bridge; macOS asks for approval before it hands out the password.
+  function summonWifiQr() {
+    controller.hide()
+    bar.shell.summon("omarchy.wifiqr", JSON.stringify({ iface: "mac", ssid: ssid || "" }))
   }
 
   // The speed test is its own panel plugin (omarchy.speedtest). It measures
@@ -332,6 +348,22 @@ Panel {
           spacing: Style.space(8)
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
+
+          Button {
+            id: qrAction
+            visible: root.canShareWifi
+            iconText: "󰐲"
+            tooltipText: "Show QR code"
+            foreground: root.bar.foreground
+            fontFamily: root.bar.fontFamily
+            iconSize: Style.font.subtitle * 1.5
+            horizontalPadding: Style.space(5)
+            verticalPadding: Style.space(2)
+            hasCursor: root.qrHeaderHasCursor
+            Layout.alignment: Qt.AlignVCenter
+            onHovered: function(on) { if (on) root.setHeaderCursor(root.qrHeaderIndex) }
+            onClicked: root.summonWifiQr()
+          }
 
           Button {
             id: speedAction
