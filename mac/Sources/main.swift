@@ -247,7 +247,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         lastBackground = bg
     }
 
-    private var cursorImages: [String: (CGImage, CGPoint)] = [:]
+    private var cursorImages: [String: (CGImage, CGPoint, Int)] = [:]
+    /// The guest cursor's size in logical px ("cursorsize"), nil if not sent.
+    private var cursorLogicalSize: Int?
     /// The guest is on its lock screen (see StripView.locked).
     private var guestLocked = false
     /// The app whose VM the connected guest runs in, from its "hello"
@@ -258,16 +260,24 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
 
     /// Guest cursors are sized for its display (e.g. 48 px for 24 pt at 2x).
     private func setCursor(name: String, image: CGImage, hotSpot: CGPoint, nominal: Int) {
-        Log.info("guest cursor \(name): \(image.width)x\(image.height) px")
-        cursorImages[name] = (image, hotSpot)
+        Log.info("guest cursor \(name): \(image.width)x\(image.height) px (nominal \(nominal))")
+        cursorImages[name] = (image, hotSpot, nominal)
         buildCursor(name)
     }
 
     /// The guest cursor as it looks in the VM window: N px at guest scale S
     /// are N/S guest logical px, which are N/(S*k) strip points.
     private func buildCursor(_ name: String) {
-        guard let (image, hotSpot) = cursorImages[name] else { return }
-        let d = stream.scale * (view?.guestPerPoint ?? 1)
+        guard let (image, hotSpot, nominal) = cursorImages[name] else { return }
+        let k = view?.guestPerPoint ?? 1
+        // px per strip point. With the guest's cursor size known: the image is
+        // `nominal` px for `cursorLogicalSize` logical px (Hyprland scales the
+        // theme image it picks to exactly that size), which are /k points.
+        // Older guests: assume the image matches the output scale.
+        var d = stream.scale * k
+        if let size = cursorLogicalSize, size > 0, nominal > 0 {
+            d = CGFloat(nominal) / CGFloat(size) * k
+        }
         let cursor = NSCursor(image: NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / d,
                                                                           height: CGFloat(image.height) / d)),
                               hotSpot: NSPoint(x: hotSpot.x / d, y: hotSpot.y / d))
@@ -279,7 +289,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private func handleText(_ text: String) {
-        if text == "lock 1" || text == "lock 0" {
+        if text.hasPrefix("cursorsize "), let size = Int(text.dropFirst("cursorsize ".count)) {
+            cursorLogicalSize = size
+            for name in cursorImages.keys { buildCursor(name) }
+        } else if text == "lock 1" || text == "lock 0" {
             guestLocked = text == "lock 1"
             view?.locked = guestLocked
             Log.info(guestLocked ? "guest session locked: strip blank" : "guest session unlocked")

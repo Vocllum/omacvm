@@ -364,6 +364,11 @@ static void send_cursors(void) {
     int nominal = (int)(size * (scale100 / 100.0) + 0.5);
     const char *arrow[] = {"default", "left_ptr", "arrow", NULL};
     const char *hand[] = {"pointer", "hand2", "hand1", NULL};
+    // The cursor's size in logical px: Hyprland scales whichever theme image
+    // it picks to exactly this, so the helper sizes the image by it too.
+    char msg[32];
+    snprintf(msg, sizeof msg, "cursorsize %d", size);
+    send_text(msg);
     send_cursor("arrow", arrow, nominal);
     send_cursor("pointer", hand, nominal);
 }
@@ -1134,6 +1139,15 @@ static void *keeper_thread(void *unused) {
             free(j);
         }
         refresh_output_geometry();
+        {
+            // A new scale wants other cursor images (nominal size = size x scale).
+            static int sent_scale100;
+            pthread_mutex_lock(&lock);
+            int sc = scale100;
+            pthread_mutex_unlock(&lock);
+            if (sent_scale100 && sc != sent_scale100) send_cursors();
+            sent_scale100 = sc;
+        }
         {
             int locked_now = query_session_locked();
             pthread_mutex_lock(&lock);
