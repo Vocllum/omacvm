@@ -1,12 +1,24 @@
 #!/bin/bash
-# OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display), Gestures,
-# clipboard (VM -> Mac). The wallpaper comes through the Bridge. Idempotent; build.sh runs it.
+# OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display, wallpaper),
+# Gestures, clipboard (VM -> Mac). Idempotent; build.sh runs it.
+#   src/mac/install.sh [--no-bridge] [--no-gestures]
+# --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
+# may use it). --no-gestures installs OmacVM Gestures keys-only: macOS keeps
+# its trackpad gestures, and on UTM Cmd still reaches Omarchy as Super.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
+BRIDGE=1; GESTURES=1
+for a in "$@"; do
+  case $a in
+    --no-bridge) BRIDGE=0 ;;
+    --no-gestures) GESTURES=0 ;;
+    *) echo "src/mac/install.sh: unknown option $a" >&2; exit 2 ;;
+  esac
+done
 mkdir -p ~/.local/share/omacvm/clip
-"$R/bridge/mac/install.sh"
-"$R/gestures/mac/install.sh"
+(( BRIDGE )) && "$R/bridge/mac/install.sh"
+if (( GESTURES )); then "$R/gestures/mac/install.sh"; else "$R/gestures/mac/install.sh" --keys-only; fi
 "$R/clipboard/mac/install.sh"
 echo "OmacVM Mac side installed"

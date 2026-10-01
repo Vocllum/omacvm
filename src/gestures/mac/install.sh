@@ -1,7 +1,12 @@
 #!/bin/bash
 # Install OmacVMGestures.app to ~/Applications and start it at login (LaunchAgent).
+#   ./install.sh [--keys-only]
+# --keys-only: trackpad gestures stay with macOS; on UTM, Cmd still reaches
+# Omarchy as Super.
 set -euo pipefail
 cd "$(dirname "$0")"
+ARGS=""
+[[ ${1:-} == --keys-only ]] && ARGS="<string>--keys-only</string>"
 ./build.sh
 LABEL=org.omacvm.gestures
 PL=~/Library/LaunchAgents/$LABEL.plist
@@ -14,7 +19,7 @@ cat > "$PL" <<PL
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>$LABEL</string>
-  <key>ProgramArguments</key><array><string>$HOME/Applications/OmacVMGestures.app/Contents/MacOS/omacvm-gestures</string></array>
+  <key>ProgramArguments</key><array><string>$HOME/Applications/OmacVMGestures.app/Contents/MacOS/omacvm-gestures</string>$ARGS</array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Interactive</string>
@@ -23,4 +28,4 @@ cat > "$PL" <<PL
 </dict></plist>
 PL
 launchctl bootstrap gui/$(id -u) "$PL"
-echo "installed; log: ~/Library/Logs/omacvm-gestures.log"
+echo "installed${ARGS:+ (keys only)}; log: ~/Library/Logs/omacvm-gestures.log"

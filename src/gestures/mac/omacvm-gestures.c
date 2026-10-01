@@ -14,6 +14,9 @@
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
+// --keys-only (trackpad gestures turned off at setup): macOS keeps every
+// gesture and nothing is sent from the trackpad; on UTM, Cmd still reaches the
+// guest as Super (below).
 //
 // Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
 // Parallels, 192.168.64.1 on UTM), one line per message:
@@ -76,6 +79,7 @@ static volatile int frontNet = -1;
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
+static int trackpad = 1;          // 0 with --keys-only
 
 static void logf_(const char *fmt, ...) {
   time_t t = time(NULL); char ts[16]; strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
@@ -125,7 +129,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   for (int i = 0; i < n && k < 16; i++) if (touching(&touches[i])) c[k++] = &touches[i];
 
   int send = 0;
-  if (capturing && haveClient(frontNet)) {
+  if (trackpad && capturing && haveClient(frontNet)) {
     if (k >= 3) send = 1;
     else if (k == 2) {
       float dx = c[0]->normalized.pos.x - c[1]->normalized.pos.x, dy = c[0]->normalized.pos.y - c[1]->normalized.pos.y;
@@ -273,7 +277,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     swallowEscUp = 1;
     return NULL;
   }
-  return capturing ? NULL : e;   // a gesture event type
+  return capturing && trackpad ? NULL : e;   // a gesture event type
 }
 
 // ---- server: one guest connection at a time ----
@@ -316,17 +320,20 @@ static void *serverThread(void *arg) {
 }
 
 int main(int argc, char **argv) {
-  verbose = argc > 1 && !strcmp(argv[1], "-v");
+  for (int i = 1; i < argc; i++) {
+    if (!strcmp(argv[i], "-v")) verbose = 1;
+    else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
+  }
   signal(SIGPIPE, SIG_IGN);
 
-  CFArrayRef list = MTDeviceCreateList();
+  CFArrayRef list = trackpad ? MTDeviceCreateList() : NULL;
   int started = 0;
   for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
     MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
     if (!MTDeviceIsBuiltIn(d)) continue;   // built-in trackpad only
     MTRegisterContactFrameCallback(d, frameCb); MTDeviceStart(d, 0); started++;
   }
-  if (!started) { logf_("no built-in trackpad found"); return 1; }
+  if (trackpad && !started) { logf_("no built-in trackpad found"); return 1; }
 
   CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
@@ -358,7 +365,7 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_("running (escape: Ctrl+Option+Cmd+Esc)");
+  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
   CFRunLoopRun();
   return 0;
 }
