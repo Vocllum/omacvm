@@ -113,8 +113,13 @@ When it is done, once on the Mac:
    Settings › Shortcuts › Virtual Machines › Linux). Then set *macOS System
    Shortcuts › Send macOS system shortcuts* to **Always**, so Cmd+Space and
    friends reach Omarchy. Parallels keeps this setting to itself, so OmacVM
-   can't set it; the build shows a macOS alert until it is set, and
-   `check.sh` tells you whether both are done.
+   can't set it; the build shows a macOS alert with this guide until it is
+   set (`mac/parallels-system-shortcuts.sh` brings it back), and `check.sh`
+   tells you whether both are done.
+
+   <p align="center">
+     <img src="docs/parallels-shortcuts.svg" alt="Where to click in Parallels Desktop: press Cmd+comma, click Shortcuts, then macOS System Shortcuts, then set Send macOS system shortcuts to Always. Afterwards Cmd+Space in the VM opens Omarchy's launcher." width="100%">
+   </p>
 3. **UTM:** keep UTM in the foreground app list (started from the Dock or
    Spotlight); UTM launched in the background runs the VM several times slower.
 

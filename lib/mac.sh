@@ -76,14 +76,10 @@ parallels_profile_emptied() {
      00030231000000010000000a004c0069006e00750078000000000000000000000000 ]]
 }
 
-# A macOS alert asking for that one setting (in the background: the script
-# goes on). Parallels keeps it to itself, so OmacVM cannot set it.
+# Ask for that one setting with mac/parallels-system-shortcuts.sh (alerts, in
+# the background: the calling script goes on and may end first).
 parallels_shortcuts_alert() {
-  osascript >/dev/null 2>&1 <<'EOF' &
-set msg to "So Cmd+Space, Cmd+Tab and the other Cmd shortcuts reach Omarchy, set this once in Parallels Desktop:" & return & return & "Settings… (Cmd+,) › Shortcuts › macOS System Shortcuts › Send macOS system shortcuts: Always" & return & return & "Parallels keeps this setting to itself, so OmacVM cannot change it for you."
-set r to display alert "OmacVM: one setting in Parallels Desktop" message msg buttons {"Later", "Open Parallels Desktop"} default button 2
-if button returned of r is "Open Parallels Desktop" then tell application "Parallels Desktop" to activate
-EOF
+  nohup "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/mac/parallels-system-shortcuts.sh" >/dev/null 2>&1 &
 }
 
 vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts it
