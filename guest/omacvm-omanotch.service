@@ -1,0 +1,15 @@
+[Unit]
+Description=OmacVM: install Omanotch's VM side at the first login (build.sh --omanotch)
+After=graphical-session.target omacvm-plugins.service
+PartOf=graphical-session.target
+ConditionPathExists=%h/.local/share/omanotch/guest/install.sh
+ConditionPathExists=!%h/.local/bin/notchcast
+
+[Service]
+Type=oneshot
+# Omanotch's installer needs the running session and Omarchy's commands.
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap; exec bash "$HOME/.local/share/omanotch/guest/install.sh"'
+
+[Install]
+WantedBy=graphical-session.target

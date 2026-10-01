@@ -222,8 +222,14 @@ args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
 "$R/apply.sh" "${args[@]}"
 if (( OMANOTCH )); then
   log "Omanotch (the bar beside the notch)"
-  gssh "$IP" "sudo -u '$U' git clone -q https://github.com/gillesgoetsch/omanotch.git /home/'$U'/.local/share/omanotch"
-  info "Omanotch's VM side installs at your first login: run ~/.local/share/omanotch/guest/install.sh in the VM"
+  # Its VM side builds and installs in the desktop session: once, at the first login.
+  gssh "$IP" "set -e
+    pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols >/dev/null 2>&1
+    H=\$(getent passwd '$U' | cut -d: -f6)
+    [[ -d \$H/.local/share/omanotch ]] || sudo -u '$U' git clone -q https://github.com/gillesgoetsch/omanotch.git \"\$H/.local/share/omanotch\"
+    install -m644 /usr/local/share/omacvm/guest/omacvm-omanotch.service /etc/systemd/user/
+    systemctl --global enable omacvm-omanotch.service >/dev/null 2>&1"
+  info "Omanotch's VM side installs by itself at the first login"
   [[ -d ~/omanotch ]] || git clone -q https://github.com/gillesgoetsch/omanotch.git ~/omanotch
   ~/omanotch/mac/install.sh
 fi

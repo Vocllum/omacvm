@@ -145,7 +145,7 @@ else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 section "Omanotch"
 if systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
-  else bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac?)"; fi
+  else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
 else skip "Omanotch" "not installed (build.sh --omanotch or the Omanotch repository)"; fi
 
 echo
