@@ -35,6 +35,11 @@ ev_device() { grep -q "^N: Name=\"$1\"" /proc/bus/input/devices; }
 [[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run apply.sh on the Mac)"; exit 1; }
 source /etc/omacvm/env
 HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
+# Features chosen at setup (VMs set up before the choices existed: the defaults
+# they were built with).
+BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
+GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
+THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -46,51 +51,59 @@ elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode 
 else ok "display" "$mon"; fi
 
 section "The Mac in the bar (Bridge)"
-if [[ -s $H/.config/omacvm-bridge/token ]]; then ok "token" "~/.config/omacvm-bridge/token"
-else bad "token" "missing: run apply.sh on the Mac"; fi
-state=$(as_user omacvm-bridge state 2>/dev/null)
-if jq -e .power >/dev/null 2>&1 <<<"$state"; then
-  if jq -e .location_authorized <<<"$state" >/dev/null; then
-    ok "Wi-Fi" "$(jq -r 'if .connected then "\(.ssid), \(.rssi) dBm" elif .power then "on, not connected" else "off" end' <<<"$state")"
-  else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)"; fi
-  if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
-  else skip "Wi-Fi password sharing" "not on a shareable network"; fi
-else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831"; fi
-audio=$(as_user omacvm-bridge audio 2>/dev/null)
-if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
-  ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"
-else bad "audio" "no answer from the Bridge"; fi
-disp=$(as_user omacvm-bridge display 2>/dev/null)
-if jq -e .night_shift >/dev/null 2>&1 <<<"$disp"; then
-  ok "Night Shift / True Tone" "$(jq -r '"night shift \(if .night_shift.enabled then "on" else "off" end), true tone \(if .true_tone.enabled then "on" else "off" end)"' <<<"$disp")"
-else bad "Night Shift / True Tone" "no answer from the Bridge"; fi
-if as_user bash -c 'timeout 4 omacvm-bridge events 2>/dev/null | grep -m1 -q "^event:"'; then ok "live updates" "event stream"
-else bad "live updates" "no events from the Bridge"; fi
-if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
-else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
-layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
-for w in omacvm.wifi omacvm.audio; do
-  if [[ " $layout " == *" $w "* ]]; then ok "bar: $w" "in the bar"
-  elif [[ -s $H/.local/state/omacvm/pending-plugins ]]; then bad "bar: $w" "queued, not enabled yet (log out and in)"
-  else bad "bar: $w" "not in the bar"; fi
-done
-for w in omarchy.network omarchy.audio; do
-  [[ " $layout " == *" $w "* ]] && bad "bar: $w" "the stock widget is back next to OmacVM's"
-done
-if jq -e '.plugins[]? | select(.id == "omacvm.wifiqr")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then ok "Wi-Fi QR card" "omacvm.wifiqr"
-else bad "Wi-Fi QR card" "omacvm.wifiqr not enabled"; fi
-check "Night Shift toggle" "Super+Ctrl+N drives the Mac" test -x /usr/local/bin/omarchy-toggle-nightlight
-if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
-else bad "wallpaper" "omacvm-wallpaper.path not active"; fi
+if [[ $BRIDGE == on ]]; then
+  if [[ -s $H/.config/omacvm-bridge/token ]]; then ok "token" "~/.config/omacvm-bridge/token"
+  else bad "token" "missing: run apply.sh on the Mac"; fi
+  state=$(as_user omacvm-bridge state 2>/dev/null)
+  if jq -e .power >/dev/null 2>&1 <<<"$state"; then
+    if jq -e .location_authorized <<<"$state" >/dev/null; then
+      ok "Wi-Fi" "$(jq -r 'if .connected then "\(.ssid), \(.rssi) dBm" elif .power then "on, not connected" else "off" end' <<<"$state")"
+    else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)"; fi
+    if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
+    else skip "Wi-Fi password sharing" "not on a shareable network"; fi
+  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831"; fi
+  audio=$(as_user omacvm-bridge audio 2>/dev/null)
+  if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
+    ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"
+  else bad "audio" "no answer from the Bridge"; fi
+  disp=$(as_user omacvm-bridge display 2>/dev/null)
+  if jq -e .night_shift >/dev/null 2>&1 <<<"$disp"; then
+    ok "Night Shift / True Tone" "$(jq -r '"night shift \(if .night_shift.enabled then "on" else "off" end), true tone \(if .true_tone.enabled then "on" else "off" end)"' <<<"$disp")"
+  else bad "Night Shift / True Tone" "no answer from the Bridge"; fi
+  if as_user bash -c 'timeout 4 omacvm-bridge events 2>/dev/null | grep -m1 -q "^event:"'; then ok "live updates" "event stream"
+  else bad "live updates" "no events from the Bridge"; fi
+  if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
+  else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
+  layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
+  for w in omacvm.wifi omacvm.audio; do
+    if [[ " $layout " == *" $w "* ]]; then ok "bar: $w" "in the bar"
+    elif [[ -s $H/.local/state/omacvm/pending-plugins ]]; then bad "bar: $w" "queued, not enabled yet (log out and in)"
+    else bad "bar: $w" "not in the bar"; fi
+  done
+  for w in omarchy.network omarchy.audio; do
+    [[ " $layout " == *" $w "* ]] && bad "bar: $w" "the stock widget is back next to OmacVM's"
+  done
+  if jq -e '.plugins[]? | select(.id == "omacvm.wifiqr")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then ok "Wi-Fi QR card" "omacvm.wifiqr"
+  else bad "Wi-Fi QR card" "omacvm.wifiqr not enabled"; fi
+  check "Night Shift toggle" "Super+Ctrl+N drives the Mac" test -x /usr/local/bin/omarchy-toggle-nightlight
+  if [[ $WALLPAPER == on ]]; then
+    if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
+    else bad "wallpaper" "omacvm-wallpaper.path not active"; fi
+  else skip "wallpaper" "off (chosen at setup)"; fi
+else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Trackpad and keyboard"
-if systemctl is-active -q omacvm-gestures; then
-  if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
-  else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
-else bad "gestures" "omacvm-gestures.service not running"; fi
-check "virtual trackpad" "Magic Trackpad (OmacVM)" ev_device "Apple Inc. Magic Trackpad (OmacVM)"
-if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
-else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
+if [[ $GESTURES == on || $TYPE == utm ]]; then   # on UTM the daemon also types Cmd as Super
+  if systemctl is-active -q omacvm-gestures; then
+    if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
+    else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
+  else bad "gestures" "omacvm-gestures.service not running"; fi
+fi
+if [[ $GESTURES == on ]]; then
+  check "virtual trackpad" "Magic Trackpad (OmacVM)" ev_device "Apple Inc. Magic Trackpad (OmacVM)"
+  if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
+  else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
+else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
 if [[ $TYPE == utm ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
@@ -127,13 +140,17 @@ fi
 
 section "Speed and safety"
 k=$(uname -r)
-if [[ $k == *thp* ]]; then ok "kernel" "$k (THP + MGLRU)"
-elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (THP kernel needs GRUB)"
-else bad "kernel" "$k: not the THP kernel (reboot after apply.sh?)"; fi
+[[ -n $THP_KERNEL ]] || { [[ $k == *thp* ]] && THP_KERNEL=on || THP_KERNEL=off; }
+if [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
+elif [[ $THP_KERNEL == off ]]; then ok "kernel" "$k (Arch Linux ARM's own; memory-optimized kernel not chosen)"
+elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (the memory-optimized kernel needs GRUB)"
+else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after apply.sh?)"; fi
 thp=$(sed -n 's/.*\[\(.*\)\].*/\1/p' /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null)
 [[ $thp == always || $thp == madvise ]] && ok "transparent huge pages" "$thp" || bad "transparent huge pages" "${thp:-unavailable}"
 lru=$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null)
-[[ -n $lru && $lru != 0x0000 ]] && ok "MGLRU" "$lru" || bad "MGLRU" "${lru:-unavailable}"
+if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
+elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"
+else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kernel)"; fi
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after apply.sh?)"
 if command -v grub-mkconfig >/dev/null; then
@@ -141,6 +158,13 @@ if command -v grub-mkconfig >/dev/null; then
 fi
 if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH from the Mac" "firewall rule"
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
+
+section "Choices"
+if [[ $IDLE_LOCK == off ]]; then
+  if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
+  else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
+else ok "screensaver and lock" "Omarchy's own, after idle"; fi
+[[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
 
 section "Omanotch"
 if systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then

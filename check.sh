@@ -47,35 +47,51 @@ if ! ifconfig | grep -q "inet $HOST "; then
   bad "VM network" "$HOST is not up on this Mac: start the VM, then run check.sh again"
   exit 1
 fi
-if running org.omacvm.bridge; then
-  a=$(listeners 47831)
-  if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
-  elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
-  else bad "Bridge" "not listening on $HOST (only: ${a:-nothing})"; fi
-else bad "Bridge" "OmacVM Bridge is not running (mac/install.sh)"; fi
-T=~/Library/Application\ Support/omacvm-bridge/token
-if [[ -s $T ]]; then
-  [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
-  st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
-  if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
-  else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)"; fi
-else bad "token" "missing (mac/install.sh)"; fi
-m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
-[[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
-if running org.omacvm.gestures; then
-  a=$(listeners 47830)
-  [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
-  p=$(last_line "$L/omacvm-gestures.log" 'permission')
-  [[ $p == *granted* ]] && ok "trackpad permissions" "Accessibility + Input Monitoring" \
-    || bad "trackpad permissions" "${p:-unknown}: System Settings > Privacy & Security"
-else bad "Gestures" "OmacVM Gestures is not running (mac/install.sh)"; fi
+(wait_ssh "$IP" 30) >/dev/null 2>&1 || { bad "SSH" "no SSH to $IP with $KEY"; exit 1; }
+# What was chosen at setup for this VM (defaults for VMs from before the choices).
+envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
+feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-on}"; }
+BRIDGE=$(feat bridge); GESTURES=$(feat gestures)
+
+if [[ $BRIDGE == on ]]; then
+  if running org.omacvm.bridge; then
+    a=$(listeners 47831)
+    if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"
+    elif [[ " $a " == *" $HOST "* ]]; then ok "Bridge" "listening on $a"
+    else bad "Bridge" "not listening on $HOST (only: ${a:-nothing})"; fi
+  else bad "Bridge" "OmacVM Bridge is not running (src/mac/install.sh)"; fi
+  T=~/Library/Application\ Support/omacvm-bridge/token
+  if [[ -s $T ]]; then
+    [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
+    st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
+    if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
+    else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)"; fi
+  else bad "token" "missing (src/mac/install.sh)"; fi
+  m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
+  [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+else skip "Bridge" "off (chosen at setup)"; fi
+# Gestures runs keys-only when trackpad gestures were turned off; on UTM it
+# also types Cmd as Super, so it is needed there either way.
+if [[ $GESTURES == on || $TYPE == utm ]]; then
+  if running org.omacvm.gestures; then
+    a=$(listeners 47830)
+    [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
+    keysonly=$(launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -c -- '--keys-only')
+    if [[ $GESTURES == on && $keysonly != 0 ]]; then
+      bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
+    fi
+    p=$(last_line "$L/omacvm-gestures.log" 'permission')
+    [[ $p == *granted* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+      || bad "keyboard/trackpad access" "${p:-unknown}: System Settings > Privacy & Security"
+  else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
+else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 if [[ $TYPE == parallels ]]; then
   running org.omacvm.clip-in && ok "clipboard VM -> Mac" "org.omacvm.clip-in" || bad "clipboard VM -> Mac" "org.omacvm.clip-in not running"
   # Parallels keeps both settings in undocumented files: hints, not failures.
   parallels_sends_shortcuts && ok "Cmd+Space etc. to the VM" "Send macOS system shortcuts: Always" \
     || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
-    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run mac/parallels-shortcuts.sh"
+    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh"
 else
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
     || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
@@ -85,7 +101,6 @@ pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "no
 
 echo
 echo "VM '$VM' at $IP"
-(wait_ssh "$IP" 30) >/dev/null 2>&1 || { echo "  FAIL  SSH to $IP with $KEY"; exit 1; }
 gssh "$IP" "bash -s -- --user '$U'" < "$R/src/guest/check.sh"
 guest=$?
 (( mac_failed )) && echo "(and $fails check(s) failed on the Mac)"

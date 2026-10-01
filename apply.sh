@@ -2,15 +2,19 @@
 # Apply OmacVM's guest side to a running VM, Parallels or UTM (build.sh ends
 # with this; run it again after pulling a newer OmacVM):
 #   ./apply.sh [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME] [--key PRIVATE_KEY]
-#              [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--no-thp-kernel] [--autologin]
+#              [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz]
+#              [--thp-kernel | --no-thp-kernel] [--autologin | --no-autologin]
+#              [--no-bridge | --bridge] [--no-mac-wallpaper | --mac-wallpaper]
+#              [--no-gestures | --gestures] [--no-idle-lock | --idle-lock]
 # Defaults: VM "Omarchy", its type from Parallels/UTM, user = your Mac login
 # name, key ~/.ssh/omacvm, keyboard = the Mac's current layout, display (UTM)
-# = the Mac's built-in display below the notch. Copies the bridge token and
-# this repository into the VM (/usr/local/share/omacvm), runs guest/install.sh
-# there as root, and (Parallels) gives the VM its Omarchy Dock icon.
+# = the Mac's built-in display below the notch. Feature switches not given
+# keep what the VM had (see src/guest/install.sh). Copies the bridge token and
+# src/ into the VM (/usr/local/share/omacvm), runs guest/install.sh there as
+# root, and (Parallels) gives the VM its OmacVM Dock icon.
 set -euo pipefail
 R=$(cd "$(dirname "$0")" && pwd)
-VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm; KB=""; MODE=""; EXTRA=()
+VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm; KB=""; MODE=""; EXTRA=(); NOBRIDGE=0
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -20,8 +24,12 @@ while (( $# )); do
     --key) KEY=$2; shift 2 ;;
     --keyboard) KB=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
-    --no-thp-kernel|--autologin) EXTRA+=("$1"); shift ;;
-    -h|--help) sed -n '2,11s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --thp-kernel|--no-thp-kernel|--autologin|--no-autologin|--bridge|--no-bridge|--mac-wallpaper|--no-mac-wallpaper|--gestures|--no-gestures|--idle-lock|--no-idle-lock)
+      f=${1#--}; v=on; [[ $f == no-* ]] && { f=${f#no-}; v=off; }
+      [[ $f == mac-wallpaper ]] && f=wallpaper
+      [[ $f == bridge && $v == off ]] && NOBRIDGE=1
+      EXTRA+=(--feature "$f=$v"); shift ;;
+    -h|--help) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "apply.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -44,10 +52,13 @@ log "$TYPE VM '$VM' at $IP"
 
 log "bridge token -> $IP"
 T=~/Library/Application\ Support/omacvm-bridge/token
-[[ -f $T ]] || die "no bridge token yet: run mac/install.sh first"
+if [[ ! -f $T ]]; then
+  (( NOBRIDGE )) || die "no bridge token yet: run src/mac/install.sh first (or pass --no-bridge)"
+else
 gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
   install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
   install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
+fi
 
 log "OmacVM -> $IP:/usr/local/share/omacvm"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build -czf - . |

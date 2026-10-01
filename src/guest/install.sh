@@ -1,30 +1,58 @@
 #!/bin/bash
 # OmacVM, guest side: everything that makes Omarchy feel native in a VM on a
 # Mac, in Parallels or UTM. Run as root inside the VM from a copy of this
-# repository (apply.sh puts it in /usr/local/share/omacvm):
+# repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm]
-#                    [--display WxH@Hz] [--no-thp-kernel] [--autologin]
+#                    [--display WxH@Hz] [--feature NAME=on|off]...
+# Features (default first): bridge=on, wallpaper=on (needs bridge), gestures=on,
+# idle-lock=on (Omarchy's own screensaver and lock; off relies on the Mac's
+# lock), thp-kernel=off, autologin=off. Choices are kept in /etc/omacvm/env,
+# so a later run without --feature keeps them. Old flags --no-thp-kernel,
+# --thp-kernel and --autologin still work.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
 # --display (UTM: the fixed mode, from display/mac-display.swift) is required on UTM.
 # Idempotent: run it again after an update of this repository.
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; THP=1; AUTOLOGIN=0; TYPE=""; MODE=""
+U=""; KB="us"; TYPE=""; MODE=""
+FEATURES=(bridge wallpaper gestures idle-lock thp-kernel autologin)
+declare -A F=([bridge]=on [wallpaper]=on [gestures]=on [idle-lock]=on [thp-kernel]=off [autologin]=off)
+declare -A SET=()
 while (( $# )); do
   case $1 in
     --user) U=$2; shift 2 ;;
     --keyboard) KB=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
-    --no-thp-kernel) THP=0; shift ;;
-    --autologin) AUTOLOGIN=1; shift ;;
+    --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
+    --no-thp-kernel) SET[thp-kernel]=off; shift ;;
+    --thp-kernel) SET[thp-kernel]=on; shift ;;
+    --autologin) SET[autologin]=on; shift ;;
     *) sed -n '5,6s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
 [[ -n $U ]] && id "$U" >/dev/null || { echo "guest/install.sh: --user must be the desktop user" >&2; exit 2; }
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 read -r layout variant <<<"$KB"
+H=$(getent passwd "$U" | cut -d: -f6)
+user_ctl() { systemctl --user -M "$U@" "$@"; }
+
+# Earlier choices, then this run's.
+ENV=/etc/omacvm/env
+AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
+[[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on   # set up before choices were kept
+if [[ -r $ENV ]]; then
+  for f in "${FEATURES[@]}"; do
+    v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
+    [[ -n $v ]] && F[$f]=$v
+  done
+fi
+for f in "${!SET[@]}"; do
+  [[ -n ${F[$f]+x} && ${SET[$f]} =~ ^(on|off)$ ]] || { echo "guest/install.sh: --feature $f=${SET[$f]}: unknown" >&2; exit 2; }
+  F[$f]=${SET[$f]}
+done
+[[ ${F[bridge]} == on ]] || F[wallpaper]=off
 
 # Which VM, and where its Mac is: Parallels' Mac is 10.211.55.2 on its shared
 # network; on UTM's shared network the Mac is the default gateway.
@@ -41,8 +69,12 @@ case $TYPE in
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
   *) echo "guest/install.sh: --vm-type parallels or utm" >&2; exit 2 ;;
 esac
-printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\n' "$TYPE" "$HOST" | install -Dm644 /dev/stdin /etc/omacvm/env
+{
+  printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\n' "$TYPE" "$HOST"
+  for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
+} | install -Dm644 /dev/stdin "$ENV"
 log "$TYPE VM, the Mac is $HOST"
+log "features: $(for f in "${FEATURES[@]}"; do printf '%s=%s ' "$f" "${F[$f]}"; done)"
 
 log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
@@ -63,15 +95,30 @@ install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omacvm.conf <<'EOF'
 FallbackDNS=1.1.1.1 9.9.9.9 2606:4700:4700::1111 2620:fe::fe
 EOF
 systemctl try-restart systemd-resolved 2>/dev/null || true
-if (( AUTOLOGIN )); then
+if [[ ${F[autologin]} == on ]]; then
   # The Mac is FileVault-encrypted and locked already; hyprlock still locks
-  # the session after idle.
-  install -Dm644 /dev/stdin /etc/sddm.conf.d/20-omacvm-autologin.conf <<EOF
+  # the session after idle (unless idle-lock is off).
+  install -Dm644 /dev/stdin "$AUTOLOGIN_CONF" <<EOF
 [Autologin]
 User=$U
 Session=hyprland-uwsm
 Relogin=false
 EOF
+else
+  rm -f "$AUTOLOGIN_CONF"
+fi
+
+# Omarchy's idle screensaver and lock: its own "Stay Awake" switch turns both
+# off (the shell watches the file). The marker remembers that OmacVM set it, so
+# turning the feature back on never undoes a Stay Awake the user chose.
+STAY=$H/.local/state/omarchy/indicators/stay-awake
+MARK=$H/.local/state/omacvm/stay-awake-by-omacvm
+if [[ ${F[idle-lock]} == off ]]; then
+  log "idle screensaver and lock: off (the Mac's lock protects the VM)"
+  install -d -o "$U" -g "$U" "$(dirname "$STAY")" "$(dirname "$MARK")"
+  sudo -u "$U" touch "$STAY" "$MARK"
+elif [[ -f $MARK ]]; then
+  rm -f "$STAY" "$MARK"
 fi
 
 if [[ $TYPE == parallels ]]; then
@@ -82,20 +129,41 @@ else
 fi
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-log "gestures";   "$R/gestures/guest/install.sh" "$U"
+# On UTM the gestures daemon also types Cmd shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm ]]; then
+  log "gestures";   "$R/gestures/guest/install.sh" "$U"
+elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
+  log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
+fi
 log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
-log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
-log "bridge";     "$R/bridge/guest/install.sh" "$U"
-if (( THP )) && ! command -v grub-mkconfig >/dev/null; then
-  log "THP kernel skipped: this VM does not boot with GRUB"
-elif (( THP )); then
-  log "THP kernel (about 10 minutes)"
-  "$R/kernel/build-thp-kernel.sh" "$U"
+if [[ ${F[bridge]} == on ]]; then
+  log "bridge";     "$R/bridge/guest/install.sh" "$U"
+elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
+  # Disabling the clones brings Omarchy's own Wi-Fi and audio widgets back.
+  log "bridge: off"
+  user_ctl disable --now omacvm-bridge-osd.service >/dev/null 2>&1 || true
+  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
+    'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
+     for p in omacvm.wifi omacvm.audio omacvm.wifiqr; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
+  rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
+fi
+if [[ ${F[wallpaper]} == on ]]; then
+  log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
+elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
+  log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
+fi
+if [[ ${F[thp-kernel]} == on ]]; then
+  if command -v grub-mkconfig >/dev/null; then
+    log "memory-optimized kernel (about 10 minutes)"
+    "$R/kernel/build-thp-kernel.sh" "$U"
+  else
+    log "memory-optimized kernel skipped: this VM does not boot with GRUB"
+  fi
 fi
 # Updated bar widgets only load in a new shell: restart it once if any changed.
-F=$(getent passwd "$U" | cut -d: -f6)/.local/state/omacvm/restart-shell
-if [[ -f $F ]]; then
-  rm -f "$F"
+RS=$H/.local/state/omacvm/restart-shell
+if [[ -f $RS ]]; then
+  rm -f "$RS"
   sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" \
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; omarchy-shell shell ping >/dev/null 2>&1 && omarchy-restart-shell >/dev/null 2>&1' || true
 fi
