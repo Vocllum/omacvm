@@ -90,6 +90,8 @@ final class StripView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override var isFlipped: Bool { true }
 
+    var hasImage: Bool { barLayer.contents != nil }
+
     /// Shows a new bar image. `scale` is the guest output scale.
     func show(image: CGImage, scale: CGFloat, background: CGColor?) {
         CATransaction.begin()

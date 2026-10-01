@@ -494,6 +494,39 @@ static double bar_beat_ms;
 static char want_notch_l[32], want_notch_r[32], want_strip[32];
 static char sent_notch_l[32], sent_notch_r[32], sent_strip[32];
 
+// The helper's geometry in Mac points (`geom L R H W`, W = strip width).
+// Converted here with the built-in display's own logical width, which stays
+// put while the hidden output is being resized: a transitional frame on the
+// Mac can no longer turn into a wrong strip height. Older helpers send
+// `notch`/`strip` already converted; those are ignored once `geom` arrived.
+static double mac_l, mac_r, mac_h, mac_w;
+static int have_geom;
+
+static double screen_logical_width(void) {
+    char *j = hypr_request("j/monitors all");
+    double w = 0, sc = 0;
+    if (j && !monitor_field(j, cfg_screen, "width", &w) && !monitor_field(j, cfg_screen, "scale", &sc) && sc > 0)
+        w /= sc;
+    else
+        w = 0;
+    free(j);
+    return w;
+}
+
+static void sync_geometry(int always);
+
+static void apply_mac_geometry(void) {
+    double lw = screen_logical_width();
+    if (!have_geom || lw <= 0 || mac_w <= 0) return;
+    double k = lw / mac_w;
+    snprintf(want_notch_l, sizeof want_notch_l, "%.0f", mac_l * k);
+    snprintf(want_notch_r, sizeof want_notch_r, "%.0f", mac_r * k);
+    snprintf(want_strip, sizeof want_strip, "%.0f", mac_h * k);
+    int h = (int)(mac_h * k + 0.5);
+    if (h >= 10 && h <= 200) atomic_store(&strip_height, h);
+    sync_geometry(0);
+}
+
 // Passes the notch geometry on to the bar when it changed (or always).
 static void sync_geometry(int always) {
     if (*want_notch_l && (always || strcmp(want_notch_l, sent_notch_l) || strcmp(want_notch_r, sent_notch_r))) {
@@ -553,6 +586,18 @@ static void handle_command(char *line) {
         }
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
+    } else if (!strcmp(c, "geom") && argc == 5 && is_number(argv[1]) && is_number(argv[2]) &&
+               is_number(argv[3]) && is_number(argv[4])) {
+        mac_l = strtod(argv[1], NULL);
+        mac_r = strtod(argv[2], NULL);
+        mac_h = strtod(argv[3], NULL);
+        mac_w = strtod(argv[4], NULL);
+        have_geom = mac_w > 0 && mac_h >= 10 && mac_h <= 200;
+        apply_mac_geometry();
+    } else if (!strcmp(c, "regeom") && argc == 1) {
+        apply_mac_geometry();  // the built-in display changed size
+    } else if (have_geom && (!strcmp(c, "notch") || !strcmp(c, "strip"))) {
+        // superseded by geom
     } else if (!strcmp(c, "notch") && argc == 3 && is_number(argv[1]) && is_number(argv[2])) {
         snprintf(want_notch_l, sizeof want_notch_l, "%s", argv[1]);
         snprintf(want_notch_r, sizeof want_notch_r, "%s", argv[2]);
@@ -1022,6 +1067,11 @@ static void *keeper_thread(void *unused) {
                 created_attempts++;
             } else if (have_notch && have_screen) {
                 created_attempts = 0;
+                static double last_lw;
+                if (ss > 0 && fabs(sw / ss - last_lw) > 0.5) {
+                    if (last_lw > 0) enqueue_command("regeom");
+                    last_lw = sw / ss;
+                }
                 double bs = bar_size();
                 int sh = atomic_load(&strip_height);
                 if (sh > bs) bs = sh;

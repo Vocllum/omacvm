@@ -161,6 +161,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private func sendGeometry(_ g: StripGeometry) {
         // In guest logical px, which differ from points when the guest display
         // does not match the Mac point for point.
+        // Points and the strip's width: notchcast converts with the guest
+        // display's own width (robust while its hidden output is resized).
+        link.send(String(format: "geom %.1f %.1f %.1f %.1f", g.notchLeft, g.notchRight, g.frame.height, g.frame.width))
+        // Older notchcast builds only know these, converted here.
         let k = view?.guestPerPoint ?? 1
         link.send("notch \(Int((g.notchLeft * k).rounded())) \(Int((g.notchRight * k).rounded()))")
         link.send("strip \(Int((g.frame.height * k).rounded()))")
@@ -203,11 +207,39 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
         if gotFrame {
             if panel == nil || geometry == nil { evaluate() }
-            guard let view, let image = stream.makeImage() else { return }
-            let bg = stream.backgroundColor()
-            view.show(image: image, scale: stream.scale, background: bg == lastBackground ? nil : bg)
-            lastBackground = bg
+            showFrame()
         }
+    }
+
+    /// Since when frames have had a shape that does not fit the strip.
+    private var misfitSince: Date?
+
+    /// Shows the latest frame. While the guest's hidden output is being
+    /// resized (a display change, a Hyprland reload), frames can briefly have
+    /// a shape that does not fit the strip; the last good frame stays up for
+    /// up to two seconds instead, so the strip does not visibly jump.
+    private func showFrame(force: Bool = false) {
+        guard let view, let image = stream.makeImage() else { return }
+        if !force, view.bounds.width > 0, view.bounds.height > 0, view.hasImage {
+            let want = view.bounds.width / view.bounds.height
+            let got = CGFloat(image.width) / CGFloat(max(image.height, 1))
+            if abs(got / want - 1) > 0.03 {
+                let since = misfitSince ?? Date()
+                if misfitSince == nil {
+                    misfitSince = since
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.05) { [weak self] in
+                        guard let self, self.misfitSince == since else { return }
+                        self.showFrame(force: true)  // it is how the guest looks now
+                    }
+                }
+                if Date().timeIntervalSince(since) < 2 { return }
+            } else {
+                misfitSince = nil
+            }
+        }
+        let bg = stream.backgroundColor()
+        view.show(image: image, scale: stream.scale, background: bg == lastBackground ? nil : bg)
+        lastBackground = bg
     }
 
     private var cursorImages: [String: (CGImage, CGPoint)] = [:]
