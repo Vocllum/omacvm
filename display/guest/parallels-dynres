@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""parallels-dynres: make Hyprland follow the display layout Parallels pushes.
+
+Parallels tells the guest the size of every host display (or of the VM window)
+but Hyprland never applies it. The authoritative layout -- size, refresh rate
+AND position, i.e. the macOS display arrangement -- is in the VM's parallels.log, shared
+read-only into the guest at /mnt/psf/vmlog. Mirroring it exactly also keeps
+Parallels' absolute mouse pointer lined up with the guest's monitors.
+
+Fallback when the log is unreadable: sizes from the virtio-gpu connectors,
+extra heads placed automatically.
+"""
+import glob
+import json
+import os
+import re
+import subprocess
+import time
+
+LOG = "/mnt/psf/vmlog/parallels.log"
+DISPLAY_RE = re.compile(r"\[DYNRES\]\s+Display \[(\d+)\]: Pos=\[(-?\d+);(-?\d+)\] W=(\d+); H=(\d+)(?: DPI=\d+)?(?: Refresh=(\d+))?")
+
+
+MONITORS_LUA = os.path.expanduser("~/.config/hypr/monitors.lua")
+SCALE_RE = re.compile(r"^local omarchy_monitor_scale = ([0-9.]+)", re.M)
+
+
+def preferred_scale():
+    """The built-in display's scale as chosen in Omarchy's scaling menu
+    (omarchy-hyprland-monitor-scaling keeps it in monitors.lua); 2 if unset."""
+    try:
+        m = SCALE_RE.search(open(MONITORS_LUA).read())
+        v = float(m.group(1)) if m else 2.0
+        return v if 0.5 <= v <= 4 else 2.0
+    except (OSError, ValueError):
+        return 2.0
+
+
+def scale_for(index, width):
+    """The VM window / Retina panel uses the scale chosen in Omarchy. Other
+    displays follow macOS: Parallels pushes native pixels, so a display macOS
+    runs as HiDPI ("looks like" half its pixel width) arrives >= 3000 px wide."""
+    if index == 0:
+        return preferred_scale()
+    return 2 if width >= 3000 else 1
+
+
+def connected_heads():
+    heads = {}
+    for path in glob.glob("/sys/class/drm/card*-Virtual-*"):
+        try:
+            if open(path + "/status").read().strip() != "connected":
+                continue
+            w, h = open(path + "/modes").readline().strip().split("x")
+            heads[int(path.rsplit("-", 1)[1]) - 1] = (int(w), int(h))
+        except (OSError, ValueError):
+            pass
+    return heads
+
+
+def layout_from_log():
+    """Last display configuration Parallels pushed: {index: (x, y, w, h, hz)} in pixels."""
+    try:
+        with open(LOG, "rb") as f:
+            f.seek(max(0, os.path.getsize(LOG) - 512 * 1024))
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    start = None
+    for i, line in enumerate(lines):
+        if "[DYNRES] Initiate guest display configuration changing" in line:
+            start = i
+    if start is None:
+        return None
+    layout = {}
+    for line in lines[start + 1:]:
+        m = DISPLAY_RE.search(line)
+        if not m:
+            break
+        idx, x, y, w, h = map(int, m.groups()[:5])
+        layout[idx] = (x, y, w, h, int(m.group(6) or 60))
+    return layout or None
+
+
+def to_logical(pos, size, scale, psize, pscale):
+    """Convert one axis of a pixel position (relative to the primary display)
+    to Hyprland's scaled coordinates, keeping the displays adjacent."""
+    if pos >= psize:                      # right of / below the primary
+        return psize / pscale + (pos - psize) / scale
+    if pos + size <= 0:                   # left of / above the primary
+        return pos / scale
+    return pos / pscale                   # alongside it
+
+
+def wanted():
+    heads = connected_heads()
+    layout = layout_from_log()
+    if not layout or set(layout) != set(heads) or 0 not in layout:
+        return {f"Virtual-{i + 1}": (w, h, scale_for(i, w), (0, 0) if i == 0 else None, 60)
+                for i, (w, h) in heads.items()}
+    px, py, pw, ph, _ = layout[0]
+    ps = scale_for(0, pw)
+    want = {}
+    for i, (x, y, w, h, hz) in layout.items():
+        s = scale_for(i, w)
+        pos = (0, 0) if i == 0 else (
+            int(to_logical(x - px, w, s, pw, ps)), int(to_logical(y - py, h, s, ph, ps)))
+        want[f"Virtual-{i + 1}"] = (w, h, s, pos, hz)
+    return want
+
+
+def current():
+    out = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True).stdout
+    # Only the Parallels displays: other outputs (e.g. Omanotch's
+    # hidden NOTCH output) are managed elsewhere.
+    return {m["name"]: (m["width"], m["height"], m["scale"], (m["x"], m["y"]), m["refreshRate"])
+            for m in json.loads(out) if m["name"].startswith("Virtual-")}
+
+
+def matches(want, have):
+    if set(want) != set(have):
+        return False
+    for name, (w, h, s, pos, hz) in want.items():
+        hw, hh, hs, hpos, hhz = have[name]
+        if ((w, h) != (hw, hh) or abs(s - hs) > 0.01 or abs(hz - hhz) > 1
+                or (pos is not None and pos != hpos)):
+            return False
+    return True
+
+
+STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
+                     "parallels-dynres", "monitors")
+
+
+def save_layout(want):
+    """Remember the layout for ~/.config/hypr/monitors.lua: a Hyprland config
+    reload (every theme switch) then re-applies these exact modes instead of
+    "preferred", which is 1024x768 until this watcher catches up."""
+    lines = []
+    for name, (w, h, s, pos, hz) in sorted(want.items()):
+        position = "auto" if pos is None else f"{pos[0]}x{pos[1]}"
+        lines.append(f"{name} {w}x{h}@{hz} {position} {s}\n")
+    text = "".join(lines)
+    try:
+        if open(STATE).read() == text:
+            return
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, STATE)
+
+
+def main():
+    refused = None
+    while True:
+        time.sleep(1)
+        try:
+            want, have = wanted(), current()
+        except (OSError, ValueError, KeyError):
+            continue
+        if want and matches(want, have):
+            save_layout(want)
+        if not want or matches(want, have):
+            refused = None
+            continue
+        # Do not hammer Hyprland with a layout it refused, but try again after
+        # a few seconds: a config reload (theme switch) resets the displays to
+        # exactly the state seen before, which is not a refusal.
+        if refused and refused[0] == (want, have) and time.monotonic() - refused[1] < 5:
+            continue
+        refused = ((want, have), time.monotonic())
+        for name, (w, h, s, pos, hz) in sorted(want.items()):
+            position = "auto" if pos is None else f"{pos[0]}x{pos[1]}"
+            subprocess.run(["hyprctl", "eval",
+                            f'hl.monitor({{ output = "{name}", mode = "{w}x{h}@{hz}", '
+                            f'position = "{position}", scale = {s} }})'],
+                           capture_output=True)
+
+
+if __name__ == "__main__":
+    main()
