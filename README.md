@@ -1,26 +1,26 @@
 <h1 align="center">OmacVM</h1>
 
-<h3 align="center">Omarchy in Parallels Desktop, feeling like a native Mac</h3>
+<h3 align="center">Omarchy in a VM on your Mac, feeling native</h3>
 
-<p align="center">One command builds it. Then your Mac's Wi-Fi, sound, keys, trackpad, displays and lock screen all just work in Omarchy.</p>
+<p align="center">One command builds the VM, in Parallels Desktop or UTM. Then your Mac's Wi-Fi, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
-  <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where Parallels leaves a black strip.
+  <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; Parallels leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift, with strength and True Tone in Omarchy's monitor settings; an external display joins in the macOS arrangement." width="100%">
+  <img src="docs/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift, with strength and True Tone in Omarchy's monitor settings; an external display joins in the macOS arrangement." width="100%">
 </p>
 
-You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in Parallels
-Desktop. It is fast, but out of the box it feels like a guest: the bar shows a
-virtual Ethernet card, the volume keys open macOS's popup, the trackpad can't
-swipe between workspaces, the resolution is wrong after every change, an
-external display goes wherever it wants, copy and paste only works one way.
+You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
+fast, but out of the box it feels like a guest: the bar shows a virtual
+Ethernet card, the volume keys open macOS's popup, the trackpad can't swipe
+between workspaces, the resolution is wrong after every change, an external
+display goes wherever it wants.
 
-**OmacVM** fixes all of that, and builds the VM for you: Arch Linux ARM,
-[omarchy-mac](https://github.com/omacom/omarchy-mac), Parallels Tools, a
-tuned kernel, and the glue on both sides.
+**OmacVM** fixes that, and builds the VM for you: Arch Linux ARM,
+[omarchy-mac](https://github.com/omacom/omarchy-mac), a tuned kernel, and the
+glue on both sides of the VM.
 
 > [!NOTE]
 > **Got an M1 or M2 Mac?** You can run Omarchy natively on
@@ -28,27 +28,46 @@ tuned kernel, and the glue on both sides.
 > newer** Macs, which Asahi does not support yet (and for anyone who wants macOS
 > and Omarchy side by side).
 
+## Two routes: Parallels or UTM
+
+**Parallels Desktop is the recommended route**: Omarchy runs at native speed,
+on every display. **UTM is free** and gets almost everything else.
+
+| | Parallels Desktop | UTM |
+|---|---|---|
+| **Speed: Speedometer 3.1, Chrome** (Mac native: 46.3) | **46.1**, native | **36.7** headless, about **30** on the desktop |
+| Why | | UTM's QEMU emulates the interrupt controller in software, so waking a thread on another CPU costs about twice as long (47 µs vs 25 µs) |
+| Displays | every display, in the macOS arrangement, native Retina, 120 Hz, follows window and display changes live | one display, native Retina, 120 Hz, fixed from boot (UTM's GPU path goes blank on live mode changes) |
+| Per-display workspaces | ✓ | (one display) |
+| Wi-Fi, audio, media keys, Night Shift, True Tone, Wi-Fi QR (OmacVM Bridge) | ✓ | ✓ |
+| Trackpad gestures (OmacVM Gestures) | ✓ | ✓ |
+| Bar beside the notch ([Omanotch](https://github.com/gillesgoetsch/omanotch)) | ✓ | ✓ |
+| Wallpaper follows the Omarchy theme | ✓ | ✓ |
+| Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE agent) |
+| THP kernel, memory tuning, snapshots in GRUB, keyboard, Cmd+V | ✓ | ✓ |
+| Smooth scrolling with macOS inertia | ✓ | UTM's own scrolling |
+| Omarchy Dock icon for the VM | ✓ | UTM's icon |
+| Cost | paid; **Standard is enough** | free |
+
 ## What you get
 
 | | |
 |---|---|
-| **Displays that follow the Mac** | Native Retina resolution, 120 Hz ProMotion, every external display, and the VM's monitors in exactly the arrangement you set in macOS. Omarchy's scaling menu is kept |
-| **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and the workspaces park on the Mac's screen; plug back in and they return |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces, pinch zooms, while the VM is full screen. ⌃⌥⌘Esc hands them back to macOS |
-| **Smooth scrolling** | Pixel-precise, with macOS's inertia |
-| **The Mac's Wi-Fi in the bar** | Real SSID and signal, nearby networks, and a QR code to share the password |
+| **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
+| **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS |
+| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
-| **Media keys, Omarchy's popup** | Volume, mute and brightness keys work on the Mac and show Omarchy's own on-screen display instead of macOS's |
-| **Night Shift and True Tone** | Omarchy's nightlight toggle (Super+Ctrl+N) switches the Mac's Night Shift; strength and True Tone in the monitor settings |
+| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
+| **Night Shift and True Tone** | Omarchy's nightlight toggle (Super+Ctrl+N) switches the Mac's Night Shift; strength and True Tone too |
+| **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows (macOS also shows it behind its own lock screen) |
 | **Clipboard both ways, Cmd+V** | Copy in Omarchy, paste on the Mac and back; Cmd+V pastes everywhere, terminals included |
 | **Your keyboard layout** | Taken from the Mac |
-| **The lock screen follows the theme** | Switch Omarchy's theme and the Mac's wallpaper and lock screen follow, drawn like Omarchy's lock |
-| **An Omarchy Dock icon** | For the VM, rendered from Omarchy's own mark |
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's bar moves into the strip beside the MacBook's notch |
-| **Fast** | A THP + MGLRU kernel built from Arch Linux ARM's own, memory tuning so the VM doesn't hoard the Mac's RAM, btrfs snapshots you can boot from GRUB |
+| **Fast** | A THP + MGLRU kernel built from Arch Linux ARM's own, memory tuning so the VM does not hoard the Mac's RAM, btrfs snapshots you can boot from GRUB |
 
 <p align="center">
-  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's lock screen following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and ./build.sh." width="100%">
+  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and ./build.sh." width="100%">
 </p>
 
 <p align="center">
@@ -58,9 +77,8 @@ tuned kernel, and the glue on both sides.
 ## Requirements
 
 - An Apple Silicon Mac with macOS 14 or newer.
-- [Parallels Desktop](https://www.parallels.com) 19 or newer. **Standard is
-  enough**: OmacVM writes the VM's settings itself and needs no Pro-only
-  command-line tools.
+- [Parallels Desktop](https://www.parallels.com) 19 or newer (**Standard is
+  enough**: OmacVM writes the VM's settings itself), or [UTM](https://mac.getutm.app) 5.
 - Xcode Command Line Tools (`xcode-select --install`) and Homebrew's `zstd` and
   `e2fsprogs` (`brew install zstd e2fsprogs`).
 - About 60 GB of free disk space and a decent connection.
@@ -69,36 +87,36 @@ tuned kernel, and the glue on both sides.
 
 ```bash
 git clone https://github.com/gillesgoetsch/omacvm && cd omacvm
-./build.sh
+./build.sh                    # Parallels when it is installed
+./build.sh --vm-type utm      # UTM
 ```
 
 <p align="center">
-  <img src="docs/build.svg" alt="A terminal running build.sh: live installer, Arch Linux ARM, Omarchy from omarchy-mac, Parallels Tools, OmacVM on the Mac and in the VM, the THP kernel, then the Omarchy desktop." width="100%">
+  <img src="docs/build.svg" alt="A terminal running build.sh: live installer, Arch Linux ARM, Omarchy from omarchy-mac, OmacVM on the Mac and in the VM, the THP kernel, then the Omarchy desktop." width="100%">
 </p>
 
-`build.sh` reads your login name, keyboard layout, timezone and language from
-the Mac, suggests CPUs, memory and disk from what the Mac has, shows it all,
-and asks for the password of your user in the VM. Then it takes about an hour,
-mostly downloads, Omarchy's install and the kernel build. A Parallels window
-opens on the way: that is the temporary installer, leave it alone. Options:
-`./build.sh --help` (VM name, CPUs, memory, disk, `--autologin`,
-`--no-thp-kernel`, `--omanotch`, …).
+`build.sh` reads your keyboard layout, timezone and language from the Mac,
+suggests CPUs, memory and disk from what the Mac has, asks for your user name
+and password, shows it all, and only then starts. It takes about an hour, mostly
+downloads, Omarchy's install and the kernel build. A VM window opens on the way:
+that is the temporary installer, leave it alone. Options: `./build.sh --help`
+(VM name, CPUs, memory, disk, `--autologin`, `--no-thp-kernel`, `--omanotch`, …).
 
 When it is done, once on the Mac:
 
 1. **Allow the prompts**: Location Services for *OmacVM Bridge* (Wi-Fi
    names), Accessibility for *OmacVM Bridge* and *OmacVM Gestures*,
    Input Monitoring for *OmacVM Gestures*.
-2. **Let Cmd reach Omarchy**: Parallels' Linux keyboard profile turns Cmd+C/V/X
-   into Ctrl before the VM sees them. Quit Parallels Desktop and run
+2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
+   Cmd+C/V/X into Ctrl before the VM sees them. Quit Parallels Desktop and run
    `mac/parallels-shortcuts.sh` (or remove the mappings in Parallels Desktop ›
-   Settings › Shortcuts › Virtual Machines › Linux). Then also set *macOS System
+   Settings › Shortcuts › Virtual Machines › Linux). Then set *macOS System
    Shortcuts › Send macOS system shortcuts* to **Always**, so Cmd+Space and
    friends reach Omarchy.
-3. Optional: System Settings › Screen Saver › **Omarchy Lock**, and Lock Screen ›
-   require password immediately.
+3. **UTM:** keep UTM in the foreground app list (started from the Dock or
+   Spotlight); UTM launched in the background runs the VM several times slower.
 
-Put the VM in full screen (⌃⌘F) for the trackpad gestures and media keys.
+Put the VM in full screen for the trackpad gestures and media keys.
 
 ## Update
 
@@ -108,23 +126,24 @@ mac/install.sh
 ./apply.sh --vm Omarchy          # --no-thp-kernel skips the kernel rebuild
 ```
 
-`apply.sh` brings any running VM up to the current OmacVM, including one
-you built by hand from omarchy-mac.
+`apply.sh` brings any running VM, Parallels or UTM, up to the current OmacVM,
+including one you installed by hand from omarchy-mac.
 
 ## How it works
 
 <p align="center">
-  <img src="docs/bridge.svg" alt="The Mac's menu bar and Omarchy's bar connected over Parallels' private network: Wi-Fi signal, AirPods connecting and Night Shift travel across as events." width="100%">
+  <img src="docs/bridge.svg" alt="The Mac's menu bar and Omarchy's bar connected over the VM network: Wi-Fi signal, AirPods connecting and Night Shift travel across as events." width="100%">
 </p>
 
-The VM and the Mac talk over Parallels' private network (the Mac is
-`10.211.55.2`), nothing listens anywhere else.
+The VM and the Mac talk over the VM's private network: the Mac is `10.211.55.2`
+for Parallels and `192.168.64.1` for UTM. Nothing listens anywhere else, and
+the VM needs a token.
 
-- **OmacVM Bridge** (`bridge/`) is a small menu-bar app. It reads the
-  Mac's Wi-Fi (CoreWLAN), audio (CoreAudio) and display (brightness, Night
-  Shift, True Tone) and pushes every change to the VM as events; Omarchy's bar
-  widgets and popups listen. While the VM is full screen it takes the media
-  keys. [API and details](bridge/README.md).
+- **OmacVM Bridge** (`bridge/`) is a small menu-bar app. It reads the Mac's
+  Wi-Fi (CoreWLAN), audio (CoreAudio) and display (brightness, Night Shift, True
+  Tone) and pushes every change to the VM; Omarchy's bar widgets and popups
+  listen. While the VM is full screen it takes the media keys. It also sets the
+  wallpaper the VM sends. [API and details](bridge/README.md).
 - **OmacVM Gestures** (`gestures/`) reads the trackpad's raw touches and
   replays multi-finger frames on a virtual Apple touchpad in the VM, where
   Hyprland turns them into real gestures.
@@ -133,46 +152,50 @@ The VM and the Mac talk over Parallels' private network (the Mac is
   <img src="docs/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
 </p>
 
-- **Displays** (`display/`): Parallels tells the guest the size, refresh rate
-  and position of every display, but Hyprland never applies it.
-  `parallels-dynres` reads what Parallels pushes and applies exactly that.
-- **Clipboard** (`clipboard/`), **lock screen** (`lock/`) and the display
-  layout use Parallels shared folders.
+- **Displays** (`display/`, Parallels): Parallels tells the guest the size,
+  refresh rate and position of every display, but Hyprland never applies it;
+  `parallels-dynres` does. On UTM (`utm/`) the display mode is the Mac's
+  built-in display below the notch, set from boot.
 - **The kernel** (`kernel/`) is Arch Linux ARM's own `linux-aarch64`, rebuilt
   with transparent huge pages always on and MGLRU; the stock kernel stays in
-  GRUB as a fallback. **Memory** (`memory/`): Parallels never takes back memory
-  the guest touched while it runs, so the guest keeps a small zram and reclaims
-  smoothly instead of hoarding.
+  GRUB as a fallback. **Memory** (`memory/`): the VM never hands back memory it
+  touched while it runs, so the guest keeps a small zram and reclaims smoothly
+  instead of hoarding.
 
 <p align="center">
-  <img src="docs/lock.svg" alt="Switching Omarchy's theme in the VM changes the Mac's wallpaper and lock screen to match." width="100%">
+  <img src="docs/wallpaper.svg" alt="Switching Omarchy's theme in the VM changes the Mac's desktop wallpaper to match." width="100%">
 </p>
 
-The whole build, every Parallels setting and the dead ends we hit are in
+With two VMs running, the wallpaper follows whichever changed its theme last.
+
+The whole build, every VM setting and the dead ends we hit are in
 [AGENTS.md](AGENTS.md), written so a coding agent can build and maintain the
 setup on its own.
 
 ## How fast
 
-Measured on a MacBook Pro M4 Max, VM with 16 vCPUs, the THP kernel:
+Measured on a MacBook Pro M4 Max, 16 vCPUs, the THP kernel:
 
-| | Mac (macOS) | Omarchy VM |
-|---|---|---|
-| Geekbench multi-core | 26999 | 27201 |
-| Geekbench single-core | 3286 | 3270 |
-| Speedometer 3.1, Google Chrome | 46.3 | 46.1 |
-| Random reads over 1 GiB | 0.186 s | 0.22 s |
+| | Mac (macOS) | Parallels | UTM |
+|---|---|---|---|
+| Geekbench multi-core | 26999 | 27201 | |
+| Geekbench single-core | 3286 | 3270 | |
+| Speedometer 3.1, Chrome, headless | 46.3 | 46.1 | 36.7 |
+| Speedometer 3.1, Chrome on the desktop | | 42.7 | 29.5–31.6 |
+| Random reads over 1 GiB | 0.186 s | 0.22 s | |
+| Cross-CPU thread wake-up | | 24.8 µs | 46.6 µs |
 
-Chrome renders on the GPU in the VM (virgl).
+UTM numbers are with OmacVM's UTM setting (UTM's Vulkan driver off); out of the
+box UTM scored 24.8.
 
 ## With Omanotch: the bar beside the notch
 
-On a notched MacBook, Parallels puts the full-screen VM *below* the camera
-housing and leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
+On a notched MacBook, the full-screen VM sits *below* the camera housing and
+leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
 streams Omarchy's real bar into that strip and gives the space back to your
-windows: the graphics on this page show the two together. It is a separate
-project (it also works with UTM and without OmacVM);
-`./build.sh --omanotch` sets it up as part of the build.
+windows; the graphics on this page show the two together. It is a separate
+project for Parallels and UTM; `./build.sh --omanotch` sets it up as part of
+the build.
 
 ## Uninstall
 
@@ -180,18 +203,20 @@ project (it also works with UTM and without OmacVM);
 mac/uninstall.sh            # --purge also removes the bridge token and settings
 ```
 
-Then delete the VM in Parallels Desktop. In System Settings › Privacy &
+Then delete the VM in Parallels Desktop or UTM. In System Settings › Privacy &
 Security, remove the OmacVM apps from Location Services if still listed.
 
 ## Credits
 
 [Omarchy](https://omarchy.org) (MIT), [omarchy-mac](https://github.com/omacom/omarchy-mac)
 and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team,
-[Arch Linux ARM](https://archlinuxarm.org), and
+[Arch Linux ARM](https://archlinuxarm.org),
 [omarchy-parallels](https://github.com/vincenzopalazzo/omarchy-parallels) by
-Vincenzo Palazzo (MIT), whose image builder is the temporary installer here.
-The bar widgets are clones of Omarchy's own. OmacVM is not affiliated
-with Parallels or Apple; Parallels Desktop is their commercial product.
+Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
+[omarchy-arm-utm](https://github.com/ggalancs/omarchy-arm-utm), whose UTM
+findings (virtio-gpu settings, UTM's scripting) shaped the UTM route. The bar
+widgets are clones of Omarchy's own. OmacVM is a community project, not
+affiliated with the Omarchy team, Parallels, UTM or Apple.
 
 ## License
 
