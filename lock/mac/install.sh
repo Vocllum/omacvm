@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 LIB=$HOME/Library/Application\ Support/OmarchyLock
-mkdir -p "$LIB" "$HOME/Library/Screen Savers" "$HOME/Library/LaunchAgents"
+mkdir -p "$LIB" "$HOME/Library/Screen Savers" "$HOME/Library/LaunchAgents" "$HOME/.local/share/omaparallels/theme"
 swiftc -O -o "$LIB/set-wallpaper" set-wallpaper.swift
 install -m755 theme-sync "$LIB/theme-sync"
 ../saver/build.sh >/dev/null

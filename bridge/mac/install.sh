@@ -25,4 +25,4 @@ cat > "$PL" <<PL
 PL
 launchctl bootstrap gui/$(id -u) "$PL"
 echo "installed; log: ~/Library/Logs/omaparallels-bridge.log"
-echo "token: ~/Library/Application Support/omaparallels-bridge/token (copy it to the VM with ./push-guest.sh)"
+echo "token: ~/Library/Application Support/omaparallels-bridge/token (apply.sh copies it into the VM)"
