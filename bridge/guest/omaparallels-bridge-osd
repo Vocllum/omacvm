@@ -1,0 +1,33 @@
+#!/bin/bash
+# omaparallels-bridge-osd (guest side): shows Omarchy's own OSD (omarchy-osd) for the
+# Mac's volume, mute, brightness and keyboard-light changes. While the VM is
+# full screen the Mac helper swallows those keys, so the VM never sees them
+# itself; this follows the helper's "osd" events instead.
+# Env: OMAPARALLELS_BRIDGE_OSD_SOURCES = which changes to show (default "keys api";
+#      add "external" to also show changes made on the Mac outside the VM).
+set -uo pipefail
+SOURCES=" ${OMAPARALLELS_BRIDGE_OSD_SOURCES:-keys api} "
+
+show() {
+  local kind value muted source icon
+  read -r kind value muted source < <(jq -r '[.kind, (.value // 0), .muted, .source] | @tsv' <<<"$1") || return
+  [[ $SOURCES == *" $source "* ]] || return
+  case $kind in
+    volume|mute) [[ $muted == true || $value == 0 ]] && icon=volume-muted || icon=volume-high ;;
+    brightness) icon=brightness ;;
+    keyboard) icon=keyboard ;;
+    *) return ;;
+  esac
+  omarchy-osd -i "$icon" -p "$value" || true
+}
+
+while true; do
+  event=""
+  while IFS= read -r line; do
+    case $line in
+      "event: "*) event=${line#event: } ;;
+      "data: "*) [[ $event == osd ]] && show "${line#data: }" ;;
+    esac
+  done < <(omaparallels-bridge events 2>/dev/null)
+  sleep 3   # Mac asleep, helper restarting, or Parallels network down: reconnect
+done

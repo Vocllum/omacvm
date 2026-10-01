@@ -1,0 +1,32 @@
+#!/bin/bash
+# Build OmaparallelsBridge.app (agent app, no Dock icon) into ./build and sign it.
+# SIGN_IDENTITY="Developer ID Application: ..." signs with a real identity
+# (Location permission then survives rebuilds); default is ad-hoc ("-").
+set -euo pipefail
+cd "$(dirname "$0")"
+APP=build/OmaparallelsBridge.app
+ID=org.omaparallels.bridge
+rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS"
+swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$APP/Contents/MacOS/omaparallels-bridge" main.swift wifi.swift audio.swift server.swift keys.swift \
+  -framework AppKit -framework CoreWLAN -framework CoreLocation -framework CoreAudio -framework AudioToolbox -framework ApplicationServices -framework Security
+WHY="Omaparallels Bridge reads the name of the Wi-Fi network this Mac is on, and of nearby networks, to show them in your Linux VM's status bar. macOS only reveals Wi-Fi network names to apps with Location Services access. No location is ever read or stored."
+cat > "$APP/Contents/Info.plist" <<PL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>$ID</string>
+  <key>CFBundleName</key><string>Omaparallels Bridge</string>
+  <key>CFBundleDisplayName</key><string>Omaparallels Bridge</string>
+  <key>CFBundleExecutable</key><string>omaparallels-bridge</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>13.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSLocationUsageDescription</key><string>$WHY</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>$WHY</string>
+</dict></plist>
+PL
+codesign --force --sign "${SIGN_IDENTITY:--}" --identifier "$ID" "$APP"
+codesign --verify --strict "$APP"
+echo "built $APP"
