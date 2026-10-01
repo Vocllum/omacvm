@@ -130,10 +130,21 @@ utm_ip() {   # <vm name> [seconds]: the guest's address on UTM's shared network
 
 utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the VM ~8x slower)
   pgrep -xq UTM || { open -a UTM; sleep 3; }
-  [[ $(utm_state "$1") == started ]] || "$UTMCTL" start "$1" >/dev/null
-  local i
-  for ((i = 0; i < 60; i += 3)); do [[ $(utm_state "$1") == started ]] && return 0; sleep 3; done
-  die "UTM VM '$1' did not start"
+  local try i
+  for try in 1 2; do
+    [[ $(utm_state "$1") == started ]] || "$UTMCTL" start "$1" >/dev/null 2>&1 || true
+    for ((i = 0; i < 60; i += 3)); do [[ $(utm_state "$1") == started ]] && return 0; sleep 3; done
+    # After a long session UTM can stop answering start requests (they time out
+    # with OSStatus -1712); restarting the app clears it. Never while another
+    # UTM VM runs.
+    (( try == 1 )) || break
+    "$UTMCTL" list 2>/dev/null | awk 'NR > 1 && $2 == "started"' | grep -q . && break
+    log "UTM did not start the VM: restarting UTM once"
+    osascript -e 'quit app "UTM"' >/dev/null 2>&1 || true
+    for ((i = 0; i < 30; i++)); do pgrep -xq UTM || break; sleep 1; done
+    open -a UTM; sleep 5
+  done
+  die "UTM VM '$1' did not start (try quitting and reopening UTM, then run build.sh again)"
 }
 
 utm_wait_stopped() {   # <vm name>
