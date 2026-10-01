@@ -186,6 +186,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private func connectionChanged(_ connected: Bool) {
         parked = false
         guestOwner = nil
+        guestLocked = false
+        view?.locked = false
         if connected {
             link.send("targets")
             if let g = geometry { sendGeometry(g) }
@@ -243,6 +245,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private var cursorImages: [String: (CGImage, CGPoint)] = [:]
+    /// The guest is on its lock screen (see StripView.locked).
+    private var guestLocked = false
     /// The app whose VM the connected guest runs in, from its "hello"
     /// (nil: not said, any VM app).
     private var guestOwner: String?
@@ -272,7 +276,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private func handleText(_ text: String) {
-        if text.hasPrefix("hello ") {
+        if text == "lock 1" || text == "lock 0" {
+            guestLocked = text == "lock 1"
+            view?.locked = guestLocked
+            Log.info(guestLocked ? "guest session locked: strip blank" : "guest session unlocked")
+        } else if text.hasPrefix("hello ") {
             let hv = text.dropFirst("hello ".count)
             guestOwner = hv == "parallels" ? "Parallels Desktop" : hv == "qemu" ? "UTM" : nil
             Log.info("guest runs in \(hv) (\(guestOwner ?? "any VM app"))")
@@ -294,6 +302,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             v.autoresizingMask = [.width, .height]
             v.input = self
             v.vmOwners = settings.vmOwners
+            v.locked = guestLocked
             v.onGuestScaleChange = { [weak self] in
                 guard let self else { return }
                 Log.info(String(format: "guest bar: %.3f logical px per strip point", self.view?.guestPerPoint ?? 1))

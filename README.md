@@ -158,6 +158,9 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 
 ## Good to know
 
+- The lock screen turns the strip black too: Omarchy draws its lock screen,
+  password field included, on every output, and nothing is streamed while the
+  session is locked.
 - Full-screen video (or anything in real fullscreen, Super+F) turns the strip
   black, like macOS does. Maximized and tiled-fullscreen windows keep the bar.
 - Omarchy's notification popups keep their usual distance below where the

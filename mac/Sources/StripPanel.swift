@@ -82,6 +82,10 @@ final class StripView: NSView {
         barLayer.minificationFilter = .linear
         barLayer.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
         layer?.addSublayer(barLayer)
+        lockLayer.backgroundColor = NSColor.black.cgColor
+        lockLayer.isHidden = true
+        lockLayer.actions = ["bounds": NSNull(), "position": NSNull(), "hidden": NSNull()]
+        layer?.addSublayer(lockLayer)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }
@@ -91,6 +95,21 @@ final class StripView: NSView {
     override var isFlipped: Bool { true }
 
     var hasImage: Bool { barLayer.contents != nil }
+
+    /// The guest's session is locked: a plain black strip, no input. (The
+    /// guest sends no frames meanwhile: its lock screen covers every output,
+    /// the hidden one too, password field included.)
+    private let lockLayer = CALayer()
+    var locked = false {
+        didSet {
+            guard locked != oldValue else { return }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            lockLayer.isHidden = !locked
+            CATransaction.commit()
+            if locked { arrowCursor.set() }
+        }
+    }
 
     /// Shows a new bar image. `scale` is the guest output scale.
     func show(image: CGImage, scale: CGFloat, background: CGColor?) {
@@ -130,6 +149,7 @@ final class StripView: NSView {
         drawTop = ((bounds.height - h) / 2).rounded(.down)
         // Layer geometry is bottom-left based even in a flipped view.
         barLayer.frame = CGRect(x: drawLeft, y: bounds.height - drawTop - h, width: w, height: h)
+        lockLayer.frame = bounds
         // Pixel-exact when the guest renders at the Mac's backing scale,
         // smooth when the image has to be resampled.
         let backing = window?.backingScaleFactor ?? 2
@@ -158,6 +178,7 @@ final class StripView: NSView {
     }
 
     private func updateCursor(_ event: NSEvent) {
+        guard !locked else { arrowCursor.set(); return }
         let p = barPoint(event)
         if targets.contains(where: { $0.contains(p) }) {
             pointerCursor.set()
@@ -231,11 +252,13 @@ final class StripView: NSView {
     }
 
     private func click(_ event: NSEvent, button: Int) {
+        guard !locked else { return }
         let p = barPoint(event)
         input?.stripClicked(x: p.x, y: p.y, button: button)
     }
 
     override func scrollWheel(with event: NSEvent) {
+        guard !locked else { return }
         // Convert to physical wheel direction (positive = away from the user),
         // which is what Qt's angleDelta uses, regardless of natural scrolling.
         var dy = event.scrollingDeltaY

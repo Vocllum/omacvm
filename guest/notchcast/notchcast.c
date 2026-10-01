@@ -171,12 +171,33 @@ static void send_rect_locked(const uint8_t *src, uint32_t x, uint32_t y, uint32_
     free(packed);
 }
 
-static void send_text(const char *s) {
+// Caller holds `lock`.
+static void send_text_locked(const char *s) {
     struct text_header th = {.magic = TEXT_MAGIC, .len = (uint32_t)strlen(s)};
-    pthread_mutex_lock(&lock);
     if (sock_fd >= 0 && (write_all(sock_fd, &th, sizeof th) || write_all(sock_fd, s, th.len)))
         drop_socket_locked();
+}
+
+static void send_text(const char *s) {
+    pthread_mutex_lock(&lock);
+    send_text_locked(s);
     pthread_mutex_unlock(&lock);
+}
+
+// Session lock. Omarchy's lock screen puts a lock surface (with the password
+// field) on every output, the hidden NOTCH one too, and lock surfaces sit above
+// everything. While the session is locked nothing is streamed and the helper
+// shows a black strip instead ("lock 1"). Hyprland has no lock query, but
+// every monitor lists LOCK in solitaryBlockedBy while a session lock is active
+// (Omarchy's omarchy-hyprland-session-locked relies on the same).
+static int session_locked;  // as last told to the helper; under `lock`
+static char *hypr_request(const char *req);
+
+static int query_session_locked(void) {
+    char *j = hypr_request("j/monitors all");
+    int locked = j && strstr(j, "\"LOCK\"") != NULL;
+    free(j);
+    return locked;
 }
 
 // Runs `qs ipc call -- notchbar <fn> <args...>`; returns its stdout (malloc'd)
@@ -635,7 +656,7 @@ static void handle_command(char *line) {
         // Helper asks for a full frame (e.g. after it re-created its buffer).
         pthread_mutex_lock(&lock);
         int had = have_frame;
-        if (had) send_rect_locked(prev, 0, 0, W, H);
+        if (had && !session_locked) send_rect_locked(prev, 0, 0, W, H);
         pthread_mutex_unlock(&lock);
         if (!had) free(ipc_call(0, "poke", NULL, NULL, NULL));
     } else {
@@ -786,7 +807,8 @@ static void *net_thread(void *unused) {
 
         pthread_mutex_lock(&lock);
         sock_fd = fd;
-        if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
+        if (session_locked) send_text_locked("lock 1");
+        else if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
         pthread_mutex_unlock(&lock);
         send_hello();
         send_cursors();
@@ -1105,6 +1127,16 @@ static void *keeper_thread(void *unused) {
             free(j);
         }
         refresh_output_geometry();
+        {
+            int locked_now = query_session_locked();
+            pthread_mutex_lock(&lock);
+            if (locked_now != session_locked) {
+                session_locked = locked_now;
+                send_text_locked(locked_now ? "lock 1" : "lock 0");
+                if (!locked_now && have_frame) send_rect_locked(prev, 0, 0, W, H);
+            }
+            pthread_mutex_unlock(&lock);
+        }
         sleep(2);
     }
     return NULL;
@@ -1326,7 +1358,13 @@ static void capture_session(struct wl_output *out) {
         }
         double t0 = now_ms();
         double cx, cy;
+        int locked_now = query_session_locked();
         pthread_mutex_lock(&lock);
+        int unlocked_now = session_locked && !locked_now;
+        if (locked_now != session_locked) {
+            session_locked = locked_now;
+            send_text_locked(locked_now ? "lock 1" : "lock 0");
+        }
         if (!cursor_pos(&cx, &cy)) {
             if (have_frame) {
                 mask_cursor(px, cx, cy);
@@ -1360,9 +1398,13 @@ static void capture_session(struct wl_output *out) {
                 memcpy(prev + (size_t)r * stride + (size_t)x0 * 4, px + (size_t)r * stride + (size_t)x0 * 4,
                        (size_t)(x1 - x0 + 1) * 4);
             have_frame = 1;
-            send_rect_locked(prev, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0 + 1), (uint32_t)(y1 - y0 + 1));
-            DBG("sent %d,%d %dx%d in %.2f ms", x0, y0, x1 - x0 + 1, y1 - y0 + 1, now_ms() - t0);
+            if (!session_locked && !unlocked_now) {
+                send_rect_locked(prev, (uint32_t)x0, (uint32_t)y0, (uint32_t)(x1 - x0 + 1), (uint32_t)(y1 - y0 + 1));
+                DBG("sent %d,%d %dx%d in %.2f ms", x0, y0, x1 - x0 + 1, y1 - y0 + 1, now_ms() - t0);
+            }
         }
+        // Back from the lock screen: the helper's picture is stale, send all.
+        if (unlocked_now && have_frame) send_rect_locked(prev, 0, 0, W, H);
         pthread_mutex_unlock(&lock);
     }
 
