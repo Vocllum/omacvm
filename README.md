@@ -130,7 +130,7 @@ git clone https://github.com/gillesgoetsch/omacvm && cd omacvm
    | Omanotch, on a MacBook with a notch | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | kept |
    | Autologin | off |
-   | Memory-optimized kernel: transparent huge pages and MGLRU for memory-heavy work; adds about 10 minutes to the build and every update | off |
+   | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build and every update | off |
 
 4. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.

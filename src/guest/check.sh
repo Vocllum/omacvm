@@ -146,7 +146,9 @@ elif [[ $THP_KERNEL == off ]]; then ok "kernel" "$k (Arch Linux ARM's own; memor
 elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (the memory-optimized kernel needs GRUB)"
 else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after apply.sh?)"; fi
 thp=$(sed -n 's/.*\[\(.*\)\].*/\1/p' /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null)
-[[ $thp == always || $thp == madvise ]] && ok "transparent huge pages" "$thp" || bad "transparent huge pages" "${thp:-unavailable}"
+if [[ $thp == always || $thp == madvise ]]; then ok "transparent huge pages" "$thp"
+elif [[ $k == *thp* ]]; then bad "transparent huge pages" "${thp:-unavailable}"
+else skip "transparent huge pages" "${thp:-not in this kernel} (part of the memory-optimized kernel)"; fi
 lru=$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null)
 if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
 elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"

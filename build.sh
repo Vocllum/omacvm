@@ -182,9 +182,10 @@ if (( ! YES )); then
     hd "Autologin"
     ask_yn "Start straight into Omarchy without its login screen?" n && AUTOLOGIN=1 || AUTOLOGIN=0
     hd "Memory-optimized kernel"
-    say "    Rebuilds Arch Linux ARM's kernel with transparent huge pages and MGLRU, for"
-    say "    maximum memory performance in memory-heavy work. Adds about 10 minutes to the"
-    say "    build and to every update, and follows kernel updates only when rebuilt."
+    say "    Arch Linux ARM's kernel has neither transparent huge pages nor MGLRU; this"
+    say "    rebuilds it with both, for maximum memory performance in memory-heavy work."
+    say "    Adds about 10 minutes to the build and to every update, and follows kernel"
+    say "    updates only when rebuilt."
     ask_yn "Build the memory-optimized kernel?" n && THP=1 || THP=0
   fi
 fi
