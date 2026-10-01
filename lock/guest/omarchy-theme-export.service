@@ -1,9 +1,0 @@
-[Unit]
-Description=OmacVM lock: publish the Omarchy theme to the Mac
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/omarchy-theme-export
-
-[Install]
-WantedBy=default.target

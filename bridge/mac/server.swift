@@ -132,7 +132,7 @@ final class Hub {
 
 // ---- HTTP ----
 let reasons = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 405: "Method Not Allowed",
-               409: "Conflict", 500: "Internal Server Error", 501: "Not Implemented", 503: "Service Unavailable"]
+               409: "Conflict", 413: "Payload Too Large", 500: "Internal Server Error", 501: "Not Implemented", 503: "Service Unavailable"]
 
 func httpHead(_ code: Int, _ type: String, length: Int?, extra: String = "") -> Data {
   var h = "HTTP/1.1 \(code) \(reasons[code] ?? "Error")\r\nContent-Type: \(type)\r\nCache-Control: no-store\r\n"
@@ -200,9 +200,6 @@ func handle(_ fd: Int32, peer: String) {
       headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
     }
   }
-  let length = min(Int(headers["content-length"] ?? "") ?? 0, 65536)
-  while buf.count - headEnd.upperBound < length, readMore() {}
-  let body = buf[headEnd.upperBound...].prefix(length)
   let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
   let path = url?.path ?? "", query = url?.queryItems ?? []
 
@@ -211,6 +208,13 @@ func handle(_ fd: Int32, peer: String) {
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")
     return
   }
+  // Bodies are small JSON, except a wallpaper image (read only after the token checked out).
+  let wanted = Int(headers["content-length"] ?? "") ?? 0
+  let limit = path == "/wallpaper" ? 48 << 20 : 65536
+  guard wanted <= limit else { respond(fd, 413, ["error": "body too large"]); return }
+  if path == "/wallpaper" { setTimeout(fd, SO_RCVTIMEO, 30) }
+  while buf.count - headEnd.upperBound < wanted, readMore() {}
+  let body = buf[headEnd.upperBound...].prefix(wanted)
   switch (method, path) {
   case ("GET", "/state"):
     respond(fd, 200, hub.current("wifi"))
@@ -239,6 +243,17 @@ func handle(_ fd: Int32, peer: String) {
       respond(fd, 200, hub.current(audioPath ? "audio" : "display"))   // also pushes the change to /events clients
     } catch let e as APIError {
       log("\(p) from \(peer) failed: \(e.message)")
+      respond(fd, e.status, ["error": e.message])
+    } catch {
+      respond(fd, 500, ["error": "\(error)"])
+    }
+  case ("POST", "/wallpaper"):
+    do {
+      let theme = headers["x-omarchy-theme"] ?? ""
+      log("/wallpaper from \(peer): \(try setWallpaper(Data(body), theme: theme))")
+      respond(fd, 200, ["ok": true])
+    } catch let e as APIError {
+      log("/wallpaper from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
     } catch {
       respond(fd, 500, ["error": "\(error)"])

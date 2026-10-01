@@ -1,0 +1,22 @@
+#!/bin/bash
+# omacvm-wallpaper: send the current Omarchy background to the Mac, where
+# OmacVM Bridge makes it the wallpaper on every display (and so the lock
+# screen's background). Run by omacvm-wallpaper.path whenever the theme or
+# background changes, and once at login. Sends a picture only once.
+set -euo pipefail
+CUR=$HOME/.local/state/omarchy/current
+bg=$(readlink -f "$CUR/background" 2>/dev/null) || exit 0
+[[ -f $bg ]] || exit 0
+name=$(cat "$CUR/theme.name" 2>/dev/null || true)
+state=${XDG_STATE_HOME:-$HOME/.local/state}/omacvm/wallpaper-sent
+key="$bg $(stat -c %Y "$bg")"
+[[ -f $state && $(<"$state") == "$key" ]] && exit 0
+src=$bg
+case $(file -b --mime-type "$bg") in
+  image/png|image/jpeg) ;;
+  *) src=$(mktemp --suffix .png); trap 'rm -f "$src"' EXIT; magick "$bg" -strip "$src" ;;
+esac
+omacvm-bridge wallpaper "$src" "$name" >/dev/null
+mkdir -p "$(dirname "$state")"
+printf '%s' "$key" > "$state"
+echo "omacvm-wallpaper: ${name:-?} -> the Mac"

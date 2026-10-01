@@ -9,6 +9,7 @@
 #   omacvm-bridge night-shift [on|off|toggle] [strength 0-100]
 #   omacvm-bridge true-tone [on|off|toggle]
 #   omacvm-bridge password [ssid]            Wi-Fi password + QR string (the Mac asks first)
+#   omacvm-bridge wallpaper <image> [theme]  make it the Mac's wallpaper
 # Env: OMACVM_BRIDGE_URL (default http://10.211.55.2:47831),
 #      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token)
 set -euo pipefail
@@ -54,6 +55,10 @@ case ${1:-} in
     fi
     post /display/night-shift "$body}" ;;
   true-tone) check_switch true-tone "${2:-}"; post /display/true-tone "{\"enabled\": $(switch_json "${2:-}")}" ;;
+  wallpaper)
+    [[ -f ${2:-} ]] || { echo "wallpaper: an image file" >&2; exit 2; }
+    req -X POST -H 'Content-Type: application/octet-stream' -H "X-Omarchy-Theme: ${3:-}" \
+      --data-binary "@$2" "$URL/wallpaper" ;;
   password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
-  *) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

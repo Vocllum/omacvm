@@ -18,6 +18,7 @@
 //   POST /display/night-shift  {"enabled": true|false|"toggle", "strength": 0..1}
 //   POST /display/true-tone    {"enabled": true|false|"toggle"}
 //   GET  /wifi/password[?ssid=]  saved password + QR string (macOS asks first)
+//   POST /wallpaper        image body: the Mac's wallpaper (and lock-screen background)
 //   GET  /events           Server-Sent Events: "wifi", "audio" and "display" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard

@@ -1,0 +1,9 @@
+[Unit]
+Description=OmacVM: watch for Omarchy theme and background changes
+
+[Path]
+PathModified=%h/.local/state/omarchy/current
+Unit=omacvm-wallpaper.service
+
+[Install]
+WantedBy=default.target

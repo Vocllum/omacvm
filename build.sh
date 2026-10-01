@@ -122,10 +122,9 @@ python3 "$P" "$PVM/config.pvs" omacvm --cpus "$CPUS" --memsize $((MEM_GB * 1024)
   --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM"
 python3 "$P" "$PVM/config.pvs" add-nvme omarchy.hdd $((DISK_GB * 1024)) >/dev/null
 python3 "$P" "$PVM/config.pvs" boot-from 0
-mkdir -p ~/.local/share/omacvm/clip ~/.local/share/omacvm/theme
+mkdir -p ~/.local/share/omacvm/clip
 python3 "$P" "$PVM/config.pvs" add-share vmlog "$PVM" ro                       # display layout (parallels.log)
 python3 "$P" "$PVM/config.pvs" add-share clip ~/.local/share/omacvm/clip rw     # clipboard VM -> Mac
-python3 "$P" "$PVM/config.pvs" add-share theme ~/.local/share/omacvm/theme rw   # lock screen theme
 cp "$PVM/config.pvs" "$PVM/config.pvs.backup"
 "$PRLCTL" register "$PVM" >/dev/null
 vm_start "$VM" "$PVM"
@@ -204,7 +203,5 @@ cat <<EOF
       OmacVM Gestures, Input Monitoring for OmacVM Gestures.
     * Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts >
       "Send macOS system shortcuts: Always" (Cmd+Space etc. reach Omarchy).
-    * Optional: System Settings > Screen Saver > Omarchy Lock, and
-      Lock Screen > require password immediately.
   SSH: ssh -i $KEY root@$IP
 EOF

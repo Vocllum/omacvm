@@ -56,7 +56,7 @@ log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
 log "gestures";   "$R/gestures/guest/install.sh" "$U"
 log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
-log "lock screen"; "$R/lock/guest/install.sh" "$U"
+log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
 log "bridge";     "$R/bridge/guest/install.sh" "$U"
 if (( THP )); then
   log "THP kernel (about 10 minutes)"

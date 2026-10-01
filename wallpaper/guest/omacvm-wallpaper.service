@@ -1,0 +1,9 @@
+[Unit]
+Description=OmacVM: the Omarchy background as the Mac's wallpaper
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-wallpaper
+
+[Install]
+WantedBy=default.target
