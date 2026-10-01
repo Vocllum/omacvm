@@ -42,6 +42,11 @@ last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*:
 
 echo "Mac"
 L=~/Library/Logs
+# The VM network's Mac address exists only while a VM of that type runs.
+if ! ifconfig | grep -q "inet $HOST "; then
+  bad "VM network" "$HOST is not up on this Mac: start the VM, then run check.sh again"
+  exit 1
+fi
 if running org.omacvm.bridge; then
   a=$(listeners 47831)
   if [[ " $a " == *" * "* || $a == *0.0.0.0* ]]; then bad "Bridge" "listens on every interface: $a"

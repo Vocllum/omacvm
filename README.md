@@ -46,7 +46,7 @@ on every display. **UTM is free** and gets almost everything else.
 | Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE daemon + OmacVM's Wayland agent) |
 | THP kernel, memory tuning, snapshots in GRUB, keyboard, Cmd+V | ✓ | ✓ |
 | Smooth scrolling with macOS inertia | ✓ | UTM's own scrolling |
-| Omarchy Dock icon for the VM | ✓ | UTM's icon |
+| OmacVM icon for the VM | ✓ (Dock) | ✓ (UTM's library) |
 | Cost | paid; **Standard is enough** | free |
 
 ## What you get

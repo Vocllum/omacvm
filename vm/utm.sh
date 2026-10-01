@@ -1,5 +1,6 @@
 # UTM route helpers for build.sh (sourced, Mac side). Everything goes through
-# UTM's own AppleScript interface and utmctl; nothing edits UTM's bundles.
+# UTM's own AppleScript interface and utmctl; the only edit to a UTM bundle is
+# the custom icon (utm_set_icon), which UTM's scripting cannot set.
 
 utm_osa() { osascript "$@" 2>&1; }
 
@@ -41,6 +42,17 @@ utm_drop_live() {
     -e '  end tell' \
     -e 'end run' "$1")
   [[ $out == 1 ]] || die "could not remove the live installer disk: $out"
+}
+
+# utm_set_icon NAME: OmacVM's icon in UTM's library (the VM must be stopped).
+# UTM's scripting only takes its built-in icon names; a custom icon is a PNG in
+# the VM's bundle plus two keys in its config.plist, which UTM reloads.
+utm_set_icon() {
+  local b="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm"
+  [[ -f $b/config.plist ]] || { info "UTM VM bundle not in UTM's default folder: icon unchanged"; return 0; }
+  "$R/icon/make-icns.sh" "$b/Data/omacvm.png" 512
+  plutil -replace Information.Icon -string omacvm.png "$b/config.plist"
+  plutil -replace Information.IconCustom -bool true "$b/config.plist"
 }
 
 # UTM-wide settings that make the guest faster (from the UTM measurements in

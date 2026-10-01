@@ -171,6 +171,7 @@ log "boot from the NVMe disk, drop the live installer"
 if [[ $TYPE == utm ]]; then
   utm_wait_stopped "$VM"
   utm_drop_live "$VM"
+  utm_set_icon "$VM"
   utm_start "$VM"
   sleep 20
   IP=$(utm_ip "$VM" 300) || die "the new system got no IP address"

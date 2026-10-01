@@ -68,7 +68,8 @@ A build is done when all of this holds:
 | `clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
 | `keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
-| `memory/`, `kernel/`, `icon/` | zram/sysctl/THP-defrag/MGLRU; THP kernel from ALARM's PKGBUILD; Parallels Dock icon |
+| `memory/`, `kernel/` | zram/sysctl/THP-defrag/MGLRU; THP kernel from ALARM's PKGBUILD |
+| `icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
 | `docs/` | README graphics (hand-written SVG + SMIL) |
 
 ## 4. Architecture

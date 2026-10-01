@@ -57,8 +57,7 @@ gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB
 
 if [[ $TYPE == parallels && -d $PVM ]]; then
   log "Dock icon"
-  M=$(mktemp); gssh "$IP" cat /usr/share/omarchy/icon.txt > "$M"
-  "$R/icon/set-vm-icon.sh" "$PVM" "$M" && rm -f "$M"
+  "$R/icon/set-vm-icon.sh" "$PVM"
 fi
 if [[ $TYPE == parallels ]] && ! parallels_sends_shortcuts; then
   info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
