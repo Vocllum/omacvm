@@ -390,16 +390,18 @@ mac_steps=""
     * Allow media keys: Accessibility for OmacVM Bridge.
 "
 if (( GESTURES )) || [[ $TYPE == utm ]]; then
-  mac_steps+="    * Allow the trackpad$( [[ $TYPE == utm ]] && echo " and Cmd keys" ): Accessibility and Input Monitoring for OmacVM Gestures.
+  what="the trackpad"; [[ $TYPE == utm ]] && what="the trackpad and Cmd keys"
+  mac_steps+="    * Allow $what: Accessibility and Input Monitoring for OmacVM Gestures.
 "
 fi
 mac_steps+=$vm_steps
+mac_steps=${mac_steps%$'\n'}
 cat <<EOF
 
   Done in $(( ($(date +%s) - started) / 60 )) minutes. VM '$VM' ($TYPE) is rebooting into Omarchy.
 
   One-time steps on the Mac:
-${mac_steps%$'\n'}
+$mac_steps
   SSH: ssh -i $KEY root@$IP
   Check everything: ./check.sh --vm "$VM"
 EOF
