@@ -8,9 +8,10 @@
 #              [--no-thp-kernel] [--autologin] [--omanotch] [--channel rc|stable] [--yes]
 #
 # Everything not given is taken from this Mac and shown for confirmation:
-# your login name, the keyboard layout, timezone and language, and a CPU/RAM/
-# disk size suggested from what the Mac has. The password for the VM user is
-# asked for (or OMAPARALLELS_PASSWORD). Needs Apple Silicon, Parallels Desktop
+# the keyboard layout, timezone and language, and a CPU/RAM/disk size suggested
+# from what the Mac has. Your user name (default: your Mac login), full name and
+# password are asked for before anything is built (or --user/--full-name/--yes
+# and OMAPARALLELS_PASSWORD); nothing needs answering in the VM window. Needs Apple Silicon, Parallels Desktop
 # 19+ (Standard is enough) and Homebrew's zstd + e2fsprogs for the temporary
 # live installer.
 set -euo pipefail
@@ -68,6 +69,14 @@ case $lang in
   *-*) LANG_VM="${lang%%-*}_${lang##*-}.UTF-8" ;;
   *) LANG_VM="${lang}_${region##*_}.UTF-8" ;;
 esac
+
+if (( ! YES )); then
+  echo
+  echo "  Your user in Omarchy (Omarchy's own first-boot setup is not used):"
+  read -r -p "    user name [$U]: " a; U=${a:-$U}
+  read -r -p "    full name [$FULL]: " a; FULL=${a:-$FULL}
+fi
+[[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "user name '$U': lower-case letters, digits, - and _ only"
 
 cat <<EOF
 

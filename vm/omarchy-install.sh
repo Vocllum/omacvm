@@ -41,4 +41,7 @@ while systemctl is-active -q omaparallels-omarchy-install; do
 done
 mv "$H/.omaparallels-install.log" "$L"; rm -f "$H/.omaparallels-install.sh"
 grep -q 'INSTALL-EXIT=0' "$L" || { tail -30 "$L"; echo "omarchy-mac install failed, full log: $L" >&2; exit 1; }
+# Omarchy turns on its firewall (deny inbound). This SSH session survives, the
+# next ones from the Mac would not: let the Mac's Parallels network reach SSH.
+ufw allow from 10.211.55.0/24 to any port 22 proto tcp comment "omaparallels: ssh from the Mac" >/dev/null
 log "Omarchy installed ($(cat "$H/.local/share/omarchy/version" 2>/dev/null))"
