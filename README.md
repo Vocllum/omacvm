@@ -5,6 +5,10 @@
 <p align="center">One command builds it. Then your Mac's Wi-Fi, sound, keys, trackpad, displays and lock screen all just work in Omarchy.</p>
 
 <p align="center">
+  <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where Parallels leaves a black strip.
+</p>
+
+<p align="center">
   <img src="docs/hero.svg" alt="Animated overview: Omarchy full screen on a MacBook. The Mac's Wi-Fi and volume appear in Omarchy's bar, a volume key shows Omarchy's own popup, a three-finger swipe slides to the next workspace, and an external display joins in the same arrangement as on the Mac." width="100%">
 </p>
 
@@ -40,6 +44,7 @@ tuned kernel, and the glue on both sides.
 | **Your keyboard layout** | Taken from the Mac |
 | **The lock screen follows the theme** | Switch Omarchy's theme and the Mac's wallpaper and lock screen follow, drawn like Omarchy's lock |
 | **An Omarchy Dock icon** | For the VM, rendered from Omarchy's own mark |
+| **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's bar moves into the strip beside the MacBook's notch |
 | **Fast** | A THP + MGLRU kernel built from Arch Linux ARM's own, memory tuning so the VM doesn't hoard the Mac's RAM, btrfs snapshots you can boot from GRUB |
 
 <p align="center">
@@ -156,12 +161,14 @@ Measured on a MacBook Pro M4 Max, VM with 16 vCPUs, the THP kernel:
 
 Chrome renders on the GPU in the VM (virgl).
 
-## With Omanotch
+## With Omanotch: the bar beside the notch
 
-[Omanotch](https://github.com/gillesgoetsch/omanotch) puts Omarchy's real bar
-beside the MacBook's notch, where Parallels leaves a black strip. It is a
-separate project (it also works with UTM); `./build.sh --omanotch` sets it up
-too.
+On a notched MacBook, Parallels puts the full-screen VM *below* the camera
+housing and leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
+streams Omarchy's real bar into that strip and gives the space back to your
+windows: the graphics on this page show the two together. It is a separate
+project (it also works with UTM and without Omaparallels);
+`./build.sh --omanotch` sets it up as part of the build.
 
 ## Uninstall
 

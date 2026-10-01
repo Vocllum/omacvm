@@ -64,7 +64,7 @@ Panel {
   readonly property bool powerSupported: false
   readonly property bool joinSupported: false
   readonly property bool canRunSpeedTest: kind === "wifi"
-  // Share the Mac's network as a QR code (Omarchy's own omarchy.wifiqr card;
+  // Share the Mac's network as a QR code (omaparallels.wifiqr, Omarchy's card;
   // Omaparallels' omarchy-network-qr feeds it the Mac's network). Personal,
   // WEP, open and OWE networks only, as the bridge reports in can_share.
   readonly property bool canShareWifi: kind === "wifi" && wifi.can_share === true
@@ -192,12 +192,12 @@ Panel {
     if (parsed && Array.isArray(parsed.networks)) bridge.scan = parsed
   }
 
-  // The share card is Omarchy's own panel plugin (omarchy.wifiqr). Interface
+  // The share card is omaparallels.wifiqr, a clone of Omarchy's wifiqr card. Interface
   // "mac" tells omarchy-network-qr/-password to read the Mac's network through
   // the bridge; macOS asks for approval before it hands out the password.
   function summonWifiQr() {
     controller.hide()
-    bar.shell.summon("omarchy.wifiqr", JSON.stringify({ iface: "mac", ssid: ssid || "" }))
+    bar.shell.summon("omaparallels.wifiqr", JSON.stringify({ iface: "mac", ssid: ssid || "" }))
   }
 
   // The speed test is its own panel plugin (omarchy.speedtest). It measures
