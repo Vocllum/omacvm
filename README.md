@@ -48,7 +48,7 @@ on every display. **UTM is free** and gets almost everything else.
 | Memory tuning, snapshots in GRUB, keyboard, Cmd+V, optional memory-optimized kernel | ✓ | ✓ |
 | Smooth scrolling with macOS inertia | ✓ | UTM's own scrolling |
 | OmacVM icon for the VM | ✓ (Dock) | ✓ (UTM's library) |
-| Cost | paid: Standard works; **Pro** for more than 4 CPUs / 8 GB | free (UTM 5, a beta for now) |
+| Cost | paid: Standard works; **Pro** for more than 4 CPUs / 8 GB | free (UTM 5, a beta for now, needed for the GPU) |
 
 ## What you get
 
@@ -81,8 +81,11 @@ on every display. **UTM is free** and gets almost everything else.
 - [Parallels Desktop](https://www.parallels.com) 19 or newer: Standard gives a VM
   at most 4 CPUs and 8 GB, Pro (or the trial) up to 18 CPUs and 128 GB. Or
   [UTM 5](https://github.com/utmapp/UTM/releases), a beta for now (tested
-  with 5.0.6); OmacVM uses its OpenGL GPU path (VirGL), which renders Linux
-  desktops, unlike its new Vulkan one.
+  with 5.0.6). UTM 5 is what makes the GPU work: on UTM 4.7 GPU-accelerated
+  apps open as black windows and only software rendering works
+  ([omarchy-arm-utm#7](https://github.com/ggalancs/omarchy-arm-utm/issues/7)).
+  OmacVM uses UTM 5's OpenGL path (VirGL), which renders Linux desktops,
+  unlike its new Vulkan one.
 - Xcode Command Line Tools (`xcode-select --install`) and Homebrew's `zstd` and
   `e2fsprogs` (`brew install zstd e2fsprogs`).
 - About 60 GB of free disk space and a decent connection.

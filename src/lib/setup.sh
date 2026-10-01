@@ -116,7 +116,8 @@ wait_for_app() {
         if [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )); then return 0; fi
         if [[ -x $UTMCTL ]]; then hd "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null) is too old: OmacVM needs UTM 5"
         else hd "UTM is not installed"; fi
-        say "    OmacVM needs UTM 5, for now a beta (tested with 5.0.6):"
+        say "    OmacVM needs UTM 5, for now a beta (tested with 5.0.6): it is the first UTM"
+        say "    whose GPU acceleration draws Linux apps (on 4.7 they stay black)."
         say "    https://github.com/utmapp/UTM/releases (the newest v5 release, UTM.dmg)"
         say "    Install it into /Applications and open it once." ;;
     esac
