@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""trackpad-bridge (guest side): replays the Mac trackpad's multi-finger
+"""omaparallels-gestures (guest side): replays the Mac trackpad's multi-finger
 gestures on a virtual touchpad, so libinput/Hyprland see 3/4-finger swipes and
 pinch/rotate like on a real Apple touchpad.
 
-Connects to the Mac helper (tools/trackpad-bridge/mac) on the Parallels host
+Connects to the Mac helper (tools/omaparallels-gestures/mac) on the Parallels host
 address and reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
@@ -23,9 +23,9 @@ import time
 
 from evdev import AbsInfo, UInput, ecodes as e
 
-HOST = os.environ.get("TRACKPAD_BRIDGE_HOST", "10.211.55.2")
-PORT = int(os.environ.get("TRACKPAD_BRIDGE_PORT", "47830"))
-USER = os.environ.get("TRACKPAD_BRIDGE_USER", "")   # default: whoever owns the Wayland session
+HOST = os.environ.get("OMAPARALLELS_GESTURES_HOST", "10.211.55.2")
+PORT = int(os.environ.get("OMAPARALLELS_GESTURES_PORT", "47830"))
+USER = os.environ.get("OMAPARALLELS_GESTURES_USER", "")   # default: whoever owns the Wayland session
 # Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm.
 W, H, RES = 15600, 9600, 100
 SLOTS = 10
@@ -46,7 +46,7 @@ def make_device():
     }
     # Apple vendor id, Magic Trackpad (USB-C) product id: libinput applies its
     # Apple touchpad handling. INPUT_PROP_BUTTONPAD = clickpad.
-    return UInput(caps, name="Apple Inc. Magic Trackpad (trackpad-bridge)", vendor=0x05AC, product=0x0324,
+    return UInput(caps, name="Apple Inc. Magic Trackpad (Omaparallels)", vendor=0x05AC, product=0x0324,
                   version=0x0111, bustype=e.BUS_USB, input_props=[e.INPUT_PROP_POINTER, e.INPUT_PROP_BUTTONPAD])
 
 
@@ -96,7 +96,7 @@ class Touchpad:
 
 
 def desktop_user():
-    """TRACKPAD_BRIDGE_USER, else the owner of the running Wayland session."""
+    """OMAPARALLELS_GESTURES_USER, else the owner of the running Wayland session."""
     if USER:
         return USER
     for sock in glob.glob("/run/user/*/wayland-*"):
@@ -121,7 +121,7 @@ def run(pad):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
         s.settimeout(None)
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        print(f"trackpad-bridge: connected to {HOST}:{PORT}", flush=True)
+        print(f"omaparallels-gestures: connected to {HOST}:{PORT}", flush=True)
         buf = b""
         while True:
             data = s.recv(65536)
@@ -142,7 +142,7 @@ def run(pad):
                     pad.frame(contacts)
                 elif p[0] == b"S":
                     state = p[1].decode()
-                    print(f"trackpad-bridge: capture {state}", flush=True)
+                    print(f"omaparallels-gestures: capture {state}", flush=True)
                     if state != "on":
                         pad.release()
                     if state == "esc":
@@ -152,13 +152,13 @@ def run(pad):
 def main():
     ui = make_device()
     pad = Touchpad(ui)
-    print(f"trackpad-bridge: virtual touchpad {ui.device.path}", flush=True)
+    print(f"omaparallels-gestures: virtual touchpad {ui.device.path}", flush=True)
     while True:
         try:
             run(pad)
         except (OSError, ConnectionError, ValueError, IndexError) as err:
             pad.release()
-            print(f"trackpad-bridge: {err}; retrying", file=sys.stderr, flush=True)
+            print(f"omaparallels-gestures: {err}; retrying", file=sys.stderr, flush=True)
             time.sleep(2)
 
 

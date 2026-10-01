@@ -1,4 +1,4 @@
-// trackpad-bridge (Mac side): gives the Omarchy VM in Parallels the Mac trackpad's
+// omaparallels-gestures (Mac side): gives the Omarchy VM in Parallels the Mac trackpad's
 // multi-finger gestures.
 //
 // While Parallels is the frontmost app and its VM window covers a whole display
@@ -69,7 +69,7 @@ static int verbose;
 
 static void logf_(const char *fmt, ...) {
   time_t t = time(NULL); char ts[16]; strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
-  va_list ap; va_start(ap, fmt); printf("%s trackpad-bridge: ", ts); vprintf(fmt, ap); printf("\n"); va_end(ap);
+  va_list ap; va_start(ap, fmt); printf("%s omaparallels-gestures: ", ts); vprintf(fmt, ap); printf("\n"); va_end(ap);
   fflush(stdout);
 }
 

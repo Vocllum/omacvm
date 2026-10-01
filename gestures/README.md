@@ -1,4 +1,4 @@
-# trackpad-bridge
+# Omaparallels Gestures
 
 Mac trackpad gestures for the Omarchy VM in Parallels. Parallels gives a Linux
 guest only a mouse (pointer, clicks, smooth wheel), so pinch and 3/4-finger
@@ -22,8 +22,8 @@ If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
 | Part | Where |
 |---|---|
-| Mac helper | `mac/trackpad-bridge.c` → `~/Applications/TrackpadBridge.app` (ad-hoc signed, `org.omaparallels.trackpad-bridge`), LaunchAgent `org.omaparallels.trackpad-bridge`, log `~/Library/Logs/trackpad-bridge.log`. Listens on `10.211.55.2:47830`. Needs Accessibility + Input Monitoring (re-grant after every rebuild, the ad-hoc signature changes) |
-| Guest daemon | `guest/trackpad-bridge` → `/usr/local/bin/trackpad-bridge` (python-evdev, root), `guest/trackpad-bridge.service` (systemd). Creates "Apple Inc. Magic Trackpad (trackpad-bridge)" (Apple vendor id, 156x96 mm) and connects to the Mac |
+| Mac helper | `mac/omaparallels-gestures.c` → `~/Applications/OmaparallelsGestures.app` (ad-hoc signed, `org.omaparallels.gestures`), LaunchAgent `org.omaparallels.gestures`, log `~/Library/Logs/omaparallels-gestures.log`. Listens on `10.211.55.2:47830`. Needs Accessibility + Input Monitoring (re-grant after every rebuild, the ad-hoc signature changes) |
+| Guest daemon | `guest/omaparallels-gestures` → `/usr/local/bin/omaparallels-gestures` (python-evdev, root), `guest/omaparallels-gestures.service` (systemd). Creates "Apple Inc. Magic Trackpad (Omaparallels)" (Apple vendor id, 156x96 mm) and connects to the Mac |
 | Hyprland | `~/.config/hypr/input.lua`: `hl.gesture({ fingers = 3/4, direction = "horizontal", action = "workspace" })` |
 | Probe | `probe/probe.c`: raw frame + event-tap feasibility probe (`./probe 30` observe, `./probe 30 block` drop gestures) |
 
