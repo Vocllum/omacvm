@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Animated overview: Omarchy full screen on a MacBook. The Mac's Wi-Fi and volume appear in Omarchy's bar, a volume key shows Omarchy's own popup, a three-finger swipe slides to the next workspace, and an external display joins in the same arrangement as on the Mac." width="100%">
+  <img src="docs/hero.svg" alt="Animated overview of a MacBook running Omarchy full screen, with the macOS host shown above it and Omaparallels Bridge linking the two over Parallels' private network: Omarchy's bar moves beside the notch; the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through Omaparallels Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift, with strength and True Tone in Omarchy's monitor settings; an external display joins in the macOS arrangement." width="100%">
 </p>
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in Parallels
@@ -46,6 +46,10 @@ tuned kernel, and the glue on both sides.
 | **An Omarchy Dock icon** | For the VM, rendered from Omarchy's own mark |
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's bar moves into the strip beside the MacBook's notch |
 | **Fast** | A THP + MGLRU kernel built from Arch Linux ARM's own, memory tuning so the VM doesn't hoard the Mac's RAM, btrfs snapshots you can boot from GRUB |
+
+<p align="center">
+  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's lock screen following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and ./build.sh." width="100%">
+</p>
 
 <p align="center">
   <img src="docs/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
