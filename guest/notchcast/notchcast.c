@@ -1096,6 +1096,13 @@ static void *keeper_thread(void *unused) {
                 }
                 double bs = bar_size();
                 int sh = atomic_load(&strip_height);
+                // With the helper's geometry in points, convert with the
+                // display's current width right here: a scale change then
+                // resizes NOTCH once, not via an intermediate height.
+                if (have_geom && mac_w > 0 && ss > 0) {
+                    int conv = (int)(mac_h * (sw / ss) / mac_w + 0.5);
+                    if (conv >= 10 && conv <= 200) sh = conv;
+                }
                 if (sh > bs) bs = sh;
                 // A whole number of logical px that is also a whole number of
                 // pixels at this scale (fractional scales such as 1.6 or 5/3).
