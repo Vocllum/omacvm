@@ -61,7 +61,7 @@ feature_flag() {   # NAME on|off
 while (( $# )); do
   case $1 in
     --vm-type) TYPE=$2; shift 2 ;;
-    --vm-name) VM=$2; shift 2 ;;
+    --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
     --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
@@ -77,7 +77,7 @@ while (( $# )); do
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --no-*) feature_flag "${1#--no-}" off; shift ;;
     --*) feature_flag "${1#--}" on; shift ;;
     *) usage "unknown option $1 (see --help)" ;;
@@ -152,13 +152,18 @@ case $TYPE in
     : ;;
   *) usage "--vm-type parallels or utm" ;;
 esac
+# A name is taken in either app: omacvm --vm NAME has to find one VM.
 vm_taken() {
-  if [[ $TYPE == parallels ]]; then [[ -e "$HOME/Parallels/$1.pvm" ]]
-  else vms_list | awk -F'\t' -v n="$1" '$1 == n && $2 == "utm" { f = 1 } END { exit !f }'; fi
+  [[ -e "$HOME/Parallels/$1.pvm" ]] || vms_list | awk -F'\t' -v n="$1" '$1 == n { f = 1 } END { exit !f }'
 }
 if vm_taken "$VM"; then
-  (( YES )) && usage "a VM named '$VM' already exists (choose --vm-name)"
   n=2; while vm_taken "$VM $n"; do n=$((n + 1)); done
+  if (( YES )); then
+    [[ -n ${NAME_GIVEN:-} ]] && usage "a VM named '$VM' already exists (choose another --vm-name, e.g. '$VM $n')"
+    VM="$VM $n"   # the default name, taken: the next free one
+  fi
+fi
+if vm_taken "$VM"; then
   hd "You already have a VM named '$VM'"
   while :; do
     VM=$(ask_value "name for the new VM" "$VM $n" '^[A-Za-z0-9][A-Za-z0-9 ._-]*$')
@@ -291,6 +296,13 @@ if (( PLAN && JSON )); then
     "$(json_str "$VM")" "$TYPE" "$(json_str "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)")")" \
     "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
+  printf '  "resource_tiers": {'   # what --resources gives on this Mac
+  for t in 0 1 2 3; do
+    tier_values "$t"
+    printf '%s"%s": {"cpus": %s, "memory_gb": %s}' "$( ((t)) && echo ', ')" "$(tr '[:upper:]' '[:lower:]' <<<"${TIERS[$t]}")" "$T_CPUS" "$T_MEM"
+  done
+  printf '},\n'
+
   printf '  "user": {"name": %s, "full_name": %s},\n' "$(json_str "$U")" "$(json_str "$FULL")"
   printf '  "from_the_mac": {"keyboard": %s, "timezone": %s, "language": %s, "notch": %s},\n' \
     "$(json_str "$KB")" "$(json_str "$TZ_MAC")" "$(json_str "$LANG_VM")" "$( [[ $NOTCH == notch ]] && echo true || echo false)"
