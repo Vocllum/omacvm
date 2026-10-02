@@ -224,6 +224,18 @@ the centre has moved) switches the touch to raw fingers: a pinch.
 - Scroll factor for the virtual trackpad 0.18 (was 0.25); the glide follows,
   being matched to the finger speed.
 
+- Speed: 0.18 still too fast; 0.12 very close; 20 % slower is right: 0.096.
+- Pinch still did not work. The Mac log showed why: during a pinch macOS
+  delivers generic gesture events (CGEvent type 29) at the event tap, not the
+  magnify type 30 the helper waited for (that had appeared only once, by
+  chance). The guest never got `P`; libinput saw only scrolling.
+
+### 15. macOS's pinch via NSEvent (in progress)
+
+The helper asks NSEvent for each gesture event's type (`ns_event_type` in
+`scroll_ns.m`); NSEventTypeMagnify (30) means macOS recognized a pinch, and
+then it sends `P`. Scroll factor 0.096.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page

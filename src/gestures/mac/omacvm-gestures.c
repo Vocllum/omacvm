@@ -90,6 +90,7 @@ static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
 void ns_scroll_delta(CGEventRef e, double *dx, double *dy);   // scroll_ns.m
+int ns_event_type(CGEventRef e);                               // scroll_ns.m
 static int trackpad = 1;          // 0 with --keys-only
 static int scroll2;               // 1 with --scroll
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
@@ -318,9 +319,19 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     }
     return NULL;
   }
+  if (verbose && capturing && type != kCGEventScrollWheel) {
+    static int lastType = -1; static double lastLog;
+    double now = CFAbsoluteTimeGetCurrent();
+    if ((int)type != lastType || now - lastLog > 0.5) {
+      logf_("gesture event type %d, NSEvent type %d (fingers %d, pinchSent %d)", (int)type,
+            ns_event_type(e), fingers, pinchSent);
+      lastType = (int)type; lastLog = now;
+    }
+  }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if (type == 30 && scroll2 && capturing && trackpad && !pinchSent && haveClient(frontNet)) {
+  if ((type == 29 || type == 30) && scroll2 && capturing && trackpad && !pinchSent &&
+      haveClient(frontNet) && ns_event_type(e) == 30) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");

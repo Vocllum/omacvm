@@ -318,6 +318,8 @@ class Hybrid:
                 t["pinch"] = True
         if t["pinch"]:
             if t.pop("restart", False):
+                if SCROLL_DEBUG:
+                    print(f"restart {time.monotonic():.3f}", flush=True)
                 self.pad.frame([])   # lift; the raw fingers below begin a new touch
             return contacts
         fx = t["fx"](cx / RES, now) * RES
@@ -327,6 +329,9 @@ class Hybrid:
     def pinch(self):
         """macOS recognized a pinch: the current two-finger touch goes raw. libinput
         never turns a running scroll into a pinch, so the touch starts afresh."""
+        if SCROLL_DEBUG:
+            print(f"P {time.monotonic():.3f} two={'yes' if self.two else 'no'} "
+                  f"pinch={self.two and self.two['pinch']}", flush=True)
         if self.two is not None and not self.two["pinch"]:
             self.two["pinch"] = True
             self.two["restart"] = True
