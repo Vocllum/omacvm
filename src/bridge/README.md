@@ -133,9 +133,16 @@ outside the VM). `: ping` every 15 s; `retry: 3000`.
 
 `POST /wallpaper` with an image body (PNG or JPEG, up to 48 MB, read only after
 the token checked out; optional header `X-Omarchy-Theme`): the Mac's wallpaper
-on every display, which macOS also shows behind its own lock screen. The guest
-sends it from `omacvm-wallpaper` whenever Omarchy's theme or background changes
-(`omacvm-bridge wallpaper <image> [theme]`).
+on every display and every Space, which macOS also shows behind its own lock
+screen. The guest sends it from `omacvm-wallpaper` whenever Omarchy's theme or
+background changes (`omacvm-bridge wallpaper <image> [theme]`).
+
+macOS keeps a wallpaper per Space, and its API only sets the Space each screen
+shows right now, which is the VM's own Space when the theme changes in full
+screen. So the Bridge also writes the picture into every Space in macOS's
+wallpaper store (`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`,
+macOS 14 and later) and restarts `WallpaperAgent` to apply it, so the desktop
+may redraw once.
 
 ### Not built: Wi-Fi control
 
