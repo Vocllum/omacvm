@@ -30,7 +30,7 @@ if [[ $ON == on ]]; then
     grep -qxF "$f" "$MARK" 2>/dev/null || echo "$f" >> "$MARK"
   done
   [[ -f $MARK ]] && chown "$U:$U" "$MARK"
-  echo "Glide: on (restart Chromium-based apps once)"
+  echo "scroll momentum: on (restart Chromium-based apps once)"
 else
   sed -i '/^-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.$/d' "$HY/hyprland.lua" 2>/dev/null || true
   sed -i "/^require(\"hypr.omacvm_glide\")$/d" "$HY/hyprland.lua" 2>/dev/null || true
@@ -41,9 +41,10 @@ else
     done < "$MARK"
     rm -f "$MARK"
   fi
-  echo "Glide: off"
+  echo "scroll momentum: off"
 fi
 # A running Hyprland picks the change up now.
 RUN=/run/user/$(id -u "$U")
-sig=$(ls -t "$RUN/hypr" 2>/dev/null | head -1)
+# (No session yet, e.g. during a build: no hypr folder, nothing to reload.)
+sig=$(ls -t "$RUN/hypr" 2>/dev/null | head -1 || true)
 [[ -n $sig ]] && sudo -u "$U" env XDG_RUNTIME_DIR="$RUN" HYPRLAND_INSTANCE_SIGNATURE="$sig" hyprctl reload >/dev/null 2>&1 || true
