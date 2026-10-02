@@ -95,7 +95,10 @@ mac_cores=$(sysctl -n hw.ncpu)
 mac_perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$mac_cores")
 mac_eff=$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || echo 0)
 mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
-free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
+# Free space as Finder counts it (macOS frees caches and purgeable files when
+# needed; df leaves those out), else df's.
+free_gb=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' 2>/dev/null)
+[[ $free_gb =~ ^[0-9]+$ && $free_gb -gt 0 ]] || free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 [[ -n $OMANOTCH ]] || { [[ $NOTCH == notch ]] && OMANOTCH=1 || OMANOTCH=0; }
 
@@ -112,7 +115,10 @@ else
   ensure_xcode_tools
   ensure_brew_tools
 fi
-(( free_gb >= 60 )) || needs_person "need ~60 GB free disk space (have $free_gb GB)"
+# A build peaks at about 25 GB (download, temporary installer, new disk); a
+# finished VM takes 10-12 GB and grows as it is used.
+(( free_gb >= 30 )) || needs_person "OmacVM needs about 30 GB free disk space to build (this Mac has $free_gb GB free)"
+(( free_gb >= 50 )) || info "$free_gb GB free: enough to build; the VM grows as you use it, so keep some room."
 
 
 # ---------- 1. Parallels or UTM ----------
@@ -189,7 +195,7 @@ tier_values "$tier"
 if (( ${custom:-0} )); then
   CPUS=$(ask_value "CPUs (1-$CAP_CPUS)" "$CPUS" '^[0-9]+$')
   MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$MEM_GB" '^[0-9]+$')
-  DISK_GB=$(ask_value "disk in GB, grows as it fills (64-$(( free_gb - 20 )))" "$DISK_GB" '^[0-9]+$')
+  DISK_GB=$(ask_value "disk size limit in GB (64 or more; it only takes what it holds)" "$DISK_GB" '^[0-9]+$')
 fi
 (( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
 (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"

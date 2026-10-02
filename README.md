@@ -151,7 +151,8 @@ on every display. **UTM is free** and gets almost everything else.
   Linux desktops, unlike its new Vulkan one.
 - Xcode Command Line Tools (`xcode-select --install`), [Homebrew](https://brew.sh)
   and its `zstd` and `e2fsprogs` (`brew install zstd e2fsprogs`).
-- About 60 GB of free disk space and a decent connection.
+- About 30 GB of free disk space for the build (a finished VM takes 10–12 GB and
+  grows as you use it), and a decent connection.
 
 `omacvm` tells you about anything missing before it starts and waits while you
 install Parallels or UTM.
