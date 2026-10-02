@@ -38,6 +38,8 @@ if [[ -z $here ]]; then
     /usr/bin/git --version >/dev/null 2>&1 ||
       { echo "Xcode's command line tools did not finish: run xcode-select --install, then this again." >&2; exit 3; }
   fi
+  # A clone that failed half-way (no .git) is OmacVM's own leftover: start over.
+  [[ -d $here && ! -d $here/.git ]] && rm -rf "$here"
   if [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
   else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
 fi
