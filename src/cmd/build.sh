@@ -11,6 +11,8 @@
 #   --vm-type parallels|utm   --vm-name NAME   --hostname NAME
 #   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
 #   --user NAME   --full-name "NAME"
+#   --parallels-edition standard|pro   only while Parallels has no licence yet
+#                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
 #   them: bridge wallpaper gestures glide omanotch idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
@@ -58,6 +60,8 @@ while (( $# )); do
     --full-name) FULL=$2; shift 2 ;;
     --hostname) HOST=$2; shift 2 ;;
     --feature) feature_flag "${2%%=*}" "${2#*=}"; shift 2 ;;
+    --parallels-edition) P_PLAN=$2; shift 2
+      [[ $P_PLAN == standard || $P_PLAN == pro ]] || usage "--parallels-edition standard or pro" ;;
     --channel) CHANNEL=$2; shift 2 ;;          # rc|stable|edge, for testing omarchy-mac
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
@@ -104,8 +108,8 @@ case $TYPE in
   parallels)
     if (( YES )); then
       rc=1; [[ -x $PRLCTL ]] && { parallels_limits && rc=0 || rc=$?; }
-      # A fresh install starts its trial when the VM starts: Standard's limits.
-      (( rc == 3 )) && { parallels_standard_limits; P_EDITION="no licence yet"; rc=0; }
+      # A fresh install starts its trial when the VM starts: the planned edition.
+      (( rc == 3 )) && { parallels_planned_limits "${P_PLAN:-standard}"; rc=0; }
       (( rc != 2 )) || needs_person "Parallels Desktop reports no active licence yet (${P_STATUS:-no status}): start the trial or sign in, then run this again"
       (( rc == 0 )) || needs_person "Parallels Desktop is not installed and set up: install it (https://www.parallels.com/products/desktop/ or brew install --cask parallels), open it once and sign in or start the trial"
     else wait_for_app parallels; fi
@@ -141,8 +145,8 @@ command -v swiftc >/dev/null || needs_person "missing the Swift compiler: xcode-
 # ---------- 2. resources ----------
 LIMITED=""
 if [[ $TYPE == parallels && $CAP_CPUS -le 4 ]]; then
-  if [[ $P_EDITION == "no licence yet" ]]; then
-    LIMITED="Parallels has no licence yet, so the VM gets what every edition allows: $CAP_CPUS CPUs / $CAP_MEM_GB GB (more later in its settings, within your licence)."
+  if [[ -n ${P_PLANNED:-} ]]; then
+    LIMITED="You plan on Parallels Desktop Standard: $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
   else
     LIMITED="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1} allows $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
   fi
@@ -265,6 +269,7 @@ human_steps() {
     echo "Allow $what: Accessibility and Input Monitoring for OmacVM Gestures."
   fi
   if [[ $TYPE == parallels ]]; then
+    [[ -n ${P_PLANNED:-} ]] && echo "Parallels has no licence yet: when the build starts the VM, start the free trial or sign in in the window Parallels shows."
     parallels_profile_emptied || echo "Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels)."
     parallels_sends_shortcuts || echo "Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > \"Send macOS system shortcuts: Always\" (an alert shows where)."
   else
@@ -275,7 +280,7 @@ if (( PLAN && JSON )); then
   cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $HOST"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
   printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s},\n' \
-    "$(json_str "$VM")" "$TYPE" "$(json_str "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)")")" \
+    "$(json_str "$VM")" "$TYPE" "$(json_str "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)")")" \
     "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
   printf '  "user": {"name": %s, "full_name": %s},\n' "$(json_str "$U")" "$(json_str "$FULL")"
@@ -298,7 +303,7 @@ cat <<EOF
 
   OmacVM will build this VM:
 
-    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop$( [[ $P_EDITION == "no licence yet" ]] && echo " (no licence yet: the trial starts with the VM)" || echo " $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ $P_TRIAL == yes ]] && echo " (trial)" )") (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
+    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ -n ${P_PLANNED:-} ]] && echo " (planned; no licence yet, the trial starts with the VM)" || { [[ $P_TRIAL == yes ]] && echo " (trial)"; })") (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
     resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
     user           $U ($FULL), hostname $HOST
     keyboard       $KB   (from the Mac)

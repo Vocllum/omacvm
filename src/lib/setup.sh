@@ -102,6 +102,14 @@ parallels_limits() {
 # Standard's per-VM limits: always within what any edition allows.
 parallels_standard_limits() { P_EDITION=standard; P_TRIAL=""; CAP_CPUS=4; CAP_MEM_GB=8; }
 
+# No licence yet (a fresh install): the edition the user plans on, standard or
+# pro (the trial is Pro). P_PLANNED=1 marks the limits as planned, not read.
+parallels_planned_limits() {
+  if [[ $1 == pro ]]; then P_EDITION=pro; P_TRIAL=""; CAP_CPUS=32; CAP_MEM_GB=128
+  else parallels_standard_limits; fi
+  P_PLANNED=1
+}
+
 utm_major() { defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null | cut -d. -f1; }
 
 # wait_for_app parallels|utm: until the app is there (and usable), or the user quits.
@@ -114,18 +122,20 @@ wait_for_app() {
         if [[ -x $PRLCTL ]]; then parallels_limits && return 0; rc=$?; fi
         if [[ -x $PRLCTL && $rc == 3 ]]; then
           hd "Parallels Desktop has no licence yet"
-          say "    That is fine: it starts its free trial (or asks you to sign in) when the"
-          say "    build starts the VM; click through it then. Until a licence is active,"
-          say "    Parallels does not say how much a VM may use, so the VM gets what every"
-          say "    edition allows: 4 CPUs and 8 GB (change it later in the VM's settings)."
-          say "    To size it by your licence instead, start the trial or sign in first and"
-          say "    press r."
-          read -r -p "  Return to go on, r to check again, q to quit: " a < "$TTY" || die "no answer (no terminal?)"
-          case $a in
+          say "    That is fine: it starts its free trial (Pro) or asks you to sign in when the"
+          say "    build starts the VM; click through it then. Until a licence is active it does"
+          say "    not say how much a VM may use, so: which edition will you use?"
+          say "      1  Standard        4 CPUs, 8 GB per VM"
+          say "      2  Pro or the trial  up to 32 CPUs, 128 GB per VM (after a trial that ends in"
+          say "                           Standard, lower the VM to 4 CPUs / 8 GB in its settings)"
+          read -r -p "  1, 2, r to check the licence again, q to quit [1]: " a < "$TTY" || die "no answer (no terminal?)"
+          case ${a:-1} in
             q) exit 1 ;;
             r) continue ;;
+            2) parallels_planned_limits pro; return 0 ;;
+            1) parallels_planned_limits standard; return 0 ;;
           esac
-          parallels_standard_limits; P_EDITION="no licence yet"; return 0
+          continue
         elif [[ -x $PRLCTL && $rc == 2 ]]; then
           hd "Parallels Desktop has no active licence yet (it reports: ${P_STATUS:-no status}${P_EDITION:+, $P_EDITION})"
           say "    In Parallels Desktop, start the trial or sign in with your Parallels account,"
