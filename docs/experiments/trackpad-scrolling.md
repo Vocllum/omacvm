@@ -329,6 +329,26 @@ at 8 Hz instead of 1 Hz.
   responding properly, the 1.5 glide factor (added while the filter still held
   fast scrolling back) carries too far. Glide back to 1.0, macOS's own
   (`OMACVM_SCROLL_GLIDE=1.0`).
+- More natural, but a fast scroll covers only half the page that macOS does.
+  So the touch phase is too slow at speed, not the glide.
+
+macOS points per millimetre by finger speed (the `accel:` logs, medians):
+under 10 mm/s 1.2, 10-30 0.5, 30-80 0.5, 80-160 7.4, 160-300 11.4, over 300
+13.1. macOS accelerates about tenfold between slow and fast; test 18's base
+calibration had been thrown off by macOS's whole points at slow speeds.
+
+### 22. Slow: raw fingers; fast: macOS's own scroll; blended (in progress)
+
+- The virtual centre moves by `(1 - w) * raw + w * macOS * POINT_UNITS`, `w` a
+  smoothstep of the filter's finger speed between 30 and 80 mm/s
+  (`OMACVM_SCROLL_BLEND`): pixel-fine raw fingers when slow, macOS's
+  accelerated steps (its whole curve and how quickly it reacts) when fast.
+- `OMACVM_SCROLL_POINT_UNITS` = 20 touchpad units per macOS point (test 6's
+  scale, which felt right, at today's 0.082), also for the glide (fixed now,
+  no velocity matching), so distances match macOS's.
+- Debug: `blend:` lines.
+
+Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
 

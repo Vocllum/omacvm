@@ -295,6 +295,15 @@ ACCEL_SLOW = 20.0            # mm/s: below this a window calibrates the base rat
 GLIDE = float(os.environ.get("OMACVM_SCROLL_GLIDE", "1.5"))
 
 
+# Fast scrolling follows macOS's own accelerated scroll (the "A" lines), slow
+# scrolling the raw fingers: below BLEND_V0 mm/s raw, above BLEND_V1 macOS's,
+# smoothly blended in between. POINT_UNITS converts macOS points into virtual
+# touchpad units (also for the glide), so distances match macOS.
+_b = (os.environ.get("OMACVM_SCROLL_BLEND", "") or "30 80").split()
+BLEND_V0, BLEND_V1 = float(_b[0]), float(_b[1])
+POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "20"))
+
+
 # Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
 # gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
 PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
@@ -319,6 +328,7 @@ class Hybrid:
         self.tick = 0.0
         self.two = None      # current two-finger touch: ids, offsets, start, mode, filters
         self.apts = []       # (time, macOS points) while the fingers touch
+        self.adelta = [0.0, 0.0]   # macOS's scroll since the last frame (points)
         self.amm = []        # (time, finger millimetres)
         self.base = float(os.environ["OMACVM_SCROLL_BASE"]) if os.environ.get("OMACVM_SCROLL_BASE") else None
         self.logged = 0.0
@@ -387,24 +397,33 @@ class Hybrid:
             return contacts
         fx = t["fx"](cx / RES, now) * RES
         fy = t["fy"](cy / RES, now) * RES
+        ad, self.adelta = self.adelta, [0.0, 0.0]        # macOS's scroll since the last frame
         if "vx" not in t:
             t.update(vx=fx, vy=fy, px=fx, py=fy, pt=now, speed=0.0)
         else:
             # The virtual centre moves by the filtered movement times the gain
             # for the current finger speed (mm/s, smoothed).
-            dx, dy, dt = fx - t["px"], fy - t["py"], max(now - t["pt"], 1e-3)
-            target = self.macos_gain(now, math.hypot(dx, dy) / RES)
-            t["gain"] = t.get("gain", 1.0) + (target - t.get("gain", 1.0)) * 0.25
-            t["vx"] += dx * t["gain"]
-            t["vy"] += dy * t["gain"]
+            dx, dy = fx - t["px"], fy - t["py"]
+            # Finger speed (mm/s) from the filter's own speed estimate.
+            v = math.hypot(t["fx"].dx or 0.0, t["fy"].dx or 0.0)
+            x = min(1.0, max(0.0, (v - BLEND_V0) / (BLEND_V1 - BLEND_V0)))
+            w = x * x * (3 - 2 * x)
+            ax, ay = ad[0] * POINT_UNITS, ad[1] * POINT_UNITS
+            t["vx"] += (1 - w) * dx + w * ax
+            t["vy"] += (1 - w) * dy + w * ay
+            if SCROLL_DEBUG and now - self.logged > 0.3:
+                print(f"blend: {v:.0f} mm/s, macOS share {w:.2f}", flush=True)
+                self.logged = now
             t.update(px=fx, py=fy, pt=now)
         vx = min(max(t["vx"], 2000), PAD_W - 2000)
         vy = min(max(t["vy"], 2000), PAD_H - 2000)
         return [(c[0], round(vx + o[0]), round(vy + o[1])) for c, o in zip(contacts, t["off"])]
 
     def macos(self, dx, dy):
-        """macOS's scroll for the current touch (points): only its amount is used."""
+        """macOS's scroll for the current touch (points, with its acceleration)."""
         self.apts.append((time.monotonic(), math.hypot(dx, dy)))
+        self.adelta[0] += dx
+        self.adelta[1] += dy
 
     def macos_gain(self, now, mm):
         self.amm.append((now, mm))
@@ -448,7 +467,7 @@ class Hybrid:
             self.scale = min(max(vf / vw, 1.0), 60.0) if vw > 0 else TOUCH_UNITS_PER_POINT
             if SCROLL_DEBUG:
                 print(f"hand-over: fingers {vf:.0f} units/s, momentum {vw:.0f} pt/s, scale {self.scale:.1f}", flush=True)
-        s = (self.scale or TOUCH_UNITS_PER_POINT) * GLIDE
+        s = POINT_UNITS * GLIDE      # the same scale as fast scrolling: macOS's distances
         self.wprev = now
         self.pending[0] += dx * s
         self.pending[1] += dy * s
