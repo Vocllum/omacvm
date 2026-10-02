@@ -9,7 +9,10 @@ pacman -S --needed --noconfirm imagemagick file >/dev/null 2>&1
 install -m755 omacvm-wallpaper /usr/local/bin/omacvm-wallpaper
 install -m644 omacvm-wallpaper.service omacvm-wallpaper.path /etc/systemd/user/
 systemctl --user -M "$U@" daemon-reload
-systemctl --user -M "$U@" enable --now omacvm-wallpaper.path >/dev/null 2>&1
+# A watcher stopped by an older version's start limit comes back.
+systemctl --user -M "$U@" reset-failed omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" enable omacvm-wallpaper.path >/dev/null 2>&1
+systemctl --user -M "$U@" restart omacvm-wallpaper.path >/dev/null 2>&1 || true
 systemctl --user -M "$U@" enable omacvm-wallpaper.service >/dev/null 2>&1
 systemctl --user -M "$U@" start omacvm-wallpaper.service 2>/dev/null || true
 echo "wallpaper follows to the Mac"

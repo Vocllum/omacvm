@@ -1,8 +1,14 @@
 [Unit]
 Description=OmacVM: the Omarchy background as the Mac's wallpaper
+# A theme switch rewrites many files at once, and each one triggers the path
+# unit: without this, systemd's start limit (5 in 10 s) stopped the service
+# and its path unit for good until the next login.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
+# Let the theme switch finish, so a burst of changes sends one picture.
+ExecStartPre=/bin/sleep 1
 ExecStart=/usr/local/bin/omacvm-wallpaper
 
 [Install]

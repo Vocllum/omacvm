@@ -103,7 +103,7 @@ if [[ $BRIDGE == on ]]; then
   else bad "one night light" "Omarchy's night light (hyprsunset) is still reachable or running: omacvm apply"; fi
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
-    else bad "wallpaper" "omacvm-wallpaper.path not active"; fi
+    else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
   else skip "wallpaper" "off (chosen at setup)"; fi
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
