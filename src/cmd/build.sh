@@ -361,7 +361,7 @@ UI_LOG=$BUILD_LOG
 build_end() {
   local rc=$?
   (( rc == 0 )) && return
-  printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log: %s\n' "$STEP" "$STEPS" "$BUILD_LOG"
+  printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
   printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \
     "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop" || echo UTM)"
 }
