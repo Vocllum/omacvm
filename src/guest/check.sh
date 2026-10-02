@@ -2,25 +2,32 @@
 # OmacVM, guest side check: is every feature in place and working right now?
 # Run as root inside the VM while the desktop user is logged in (check.sh on
 # the Mac does that over SSH):
-#   guest/check.sh --user NAME
-# One line per feature (ok / FAIL / skip); exits 1 if anything failed.
+#   guest/check.sh --user NAME [--tsv]
+# One line per feature (ok / FAIL / skip); exits 1 if anything failed. --tsv:
+# "status<TAB>name<TAB>detail<TAB>human" lines (human = 1: only a person can fix
+# it) and "section<TAB>title", for omacvm check --json.
 set -uo pipefail
-U=""
+U=""; TSV=0
 while (( $# )); do
   case $1 in
     --user) U=$2; shift 2 ;;
-    *) echo "usage: guest/check.sh --user NAME" >&2; exit 2 ;;
+    --tsv) TSV=1; shift ;;
+    *) echo "usage: guest/check.sh --user NAME [--tsv]" >&2; exit 2 ;;
   esac
 done
 id "$U" >/dev/null 2>&1 || { echo "guest/check.sh: --user must be the desktop user" >&2; exit 2; }
 H=$(getent passwd "$U" | cut -d: -f6); RUN=/run/user/$(id -u "$U")
 fails=0
-ok()   { printf '  ok    %-24s %s\n' "$1" "${2:-}"; }
-bad()  { printf '  FAIL  %-24s %s\n' "$1" "${2:-}"; fails=$((fails + 1)); }
-skip() { printf '  skip  %-24s %s\n' "$1" "${2:-}"; }
+line() {   # STATUS LABEL NAME DETAIL [human]
+  if (( TSV )); then printf '%s\t%s\t%s\t%s\n' "$1" "$3" "$4" "${5:+1}"
+  else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
+}
+ok()   { line ok ok "$1" "${2:-}"; }
+bad()  { line fail FAIL "$1" "${2:-}" "${3:-}"; fails=$((fails + 1)); }
+skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
 # check NAME DETAIL COMMAND...: ok if the command succeeds
 check() { local n=$1 d=$2; shift 2; if "$@" >/dev/null 2>&1; then ok "$n" "$d"; else bad "$n" "$d"; fi; }
-section() { printf '%s\n' "$1"; }
+section() { if (( TSV )); then printf 'section\t%s\n' "$1"; else printf '%s\n' "$1"; fi; }
 # In the desktop user's session, with Omarchy's and Hyprland's environment.
 as_user() {
   local sig; sig=$(ls -t "$RUN/hypr" 2>/dev/null | head -1)
@@ -40,6 +47,7 @@ HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
+GLIDE=${OMACVM_FEATURE_glide:-off}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -58,7 +66,7 @@ if [[ $BRIDGE == on ]]; then
   if jq -e .power >/dev/null 2>&1 <<<"$state"; then
     if jq -e .location_authorized <<<"$state" >/dev/null; then
       ok "Wi-Fi" "$(jq -r 'if .connected then "\(.ssid), \(.rssi) dBm" elif .power then "on, not connected" else "off" end' <<<"$state")"
-    else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)"; fi
+    else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)" human; fi
     if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
     else skip "Wi-Fi password sharing" "not on a shareable network"; fi
   else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831"; fi
@@ -104,6 +112,15 @@ if [[ $GESTURES == on ]]; then
   if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
   else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
 else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
+if [[ $GLIDE == on && $GESTURES == on ]]; then
+  pid=$(systemctl show -p MainPID --value omacvm-gestures 2>/dev/null)
+  if [[ -n $pid && $pid != 0 ]] && tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'OMACVM_FEATURE_glide=on'; then
+    ok "Glide" "two-finger scrolling from the Mac (experimental)"
+  else bad "Glide" "chosen, but the daemon runs without it: systemctl restart omacvm-gestures"; fi
+  if [[ -f $H/.config/hypr/omacvm_glide.lua ]] && grep -qxF 'require("hypr.omacvm_glide")' "$H/.config/hypr/hyprland.lua"; then
+    ok "Glide scroll settings" "omacvm_glide.lua"
+  else bad "Glide scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable glide)"; fi
+else skip "Glide" "off (experimental, opt-in: omacvm enable glide)"; fi
 if [[ $TYPE == utm ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
@@ -169,11 +186,15 @@ else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
 
 section "Omanotch"
-if systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
+if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+  if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
+  else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
+elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
-else skip "Omanotch" "not installed (build.sh --omanotch or the Omanotch repository)"; fi
+else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 
+(( TSV )) && exit $(( fails ? 1 : 0 ))
 echo
 (( fails )) && { echo "$fails check(s) failed"; exit 1; }
 echo "all checks passed"

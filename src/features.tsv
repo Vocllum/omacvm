@@ -1,0 +1,13 @@
+# OmacVM features: the one list that the setup questions, `omacvm features`,
+# `omacvm enable/disable`, the VM installer (guest/install.sh) and the checks
+# follow. One feature per line, tab-separated:
+#   name  default (on|off|notch: on with a notch)  sides (mac,vm)  tags  needs  title  summary
+# Tags: experimental, slow (adds build/update time), notch (needs a MacBook with a notch).
+bridge	on	mac,vm	-	-	OmacVM Bridge	the Mac's Wi-Fi, audio, Night Shift and media keys in Omarchy's bar
+wallpaper	on	vm	-	bridge	Wallpaper on the Mac	Omarchy's wallpaper becomes the Mac's, following the theme
+gestures	on	mac,vm	-	-	Trackpad gestures	3/4-finger swipes and pinch in Omarchy while it is full screen (⌃⌥⌘ Esc hands them back to macOS)
+glide	off	mac,vm	experimental	gestures	Glide	macOS-native scrolling, passed through: two-finger scrolling with your Mac's own acceleration and momentum
+omanotch	notch	mac,vm	notch	-	Omanotch	Omarchy's bar beside the MacBook's notch
+idle-lock	on	vm	-	-	Screensaver and lock	Omarchy's own, after idle in the VM (off: the Mac's lock protects the VM)
+autologin	off	vm	-	-	Autologin	straight into Omarchy, without its login screen
+thp-kernel	off	vm	slow	-	Memory-optimized kernel	Arch Linux ARM's kernel with transparent huge pages and MGLRU, for memory-heavy work (about 10 minutes per build and update)

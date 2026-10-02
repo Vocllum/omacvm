@@ -4,9 +4,9 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm]
 #                    [--display WxH@Hz] [--feature NAME=on|off]...
-# Features (default first): bridge=on, wallpaper=on (needs bridge), gestures=on,
-# idle-lock=on (Omarchy's own screensaver and lock; off relies on the Mac's
-# lock), thp-kernel=off, autologin=off. Choices are kept in /etc/omacvm/env,
+# Features: the list in ../features.tsv (bridge, wallpaper, gestures, glide,
+# omanotch, idle-lock, autologin, thp-kernel) with its defaults; a feature
+# needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
 # --thp-kernel and --autologin still work.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -16,9 +16,12 @@
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
 U=""; KB="us"; TYPE=""; MODE=""
-FEATURES=(bridge wallpaper gestures idle-lock thp-kernel autologin)
-declare -A F=([bridge]=on [wallpaper]=on [gestures]=on [idle-lock]=on [thp-kernel]=off [autologin]=off)
-declare -A SET=()
+FEATURES=(); declare -A F=() NEEDS=() SET=()
+while IFS=$'\t' read -r name def _ _ needs _; do
+  [[ -z $name || $name == \#* ]] && continue
+  FEATURES+=("$name"); NEEDS[$name]=$needs
+  [[ $def == on ]] && F[$name]=on || F[$name]=off   # "notch": the Mac decides (build.sh, omacvm)
+done < "$R/features.tsv"
 while (( $# )); do
   case $1 in
     --user) U=$2; shift 2 ;;
@@ -41,7 +44,9 @@ user_ctl() { systemctl --user -M "$U@" "$@"; }
 # Earlier choices, then this run's.
 ENV=/etc/omacvm/env
 AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
-[[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on   # set up before choices were kept
+# Set up before choices were kept:
+[[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on
+[[ -x $H/.local/bin/notchcast ]] && F[omanotch]=on
 if [[ -r $ENV ]]; then
   for f in "${FEATURES[@]}"; do
     v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
@@ -52,7 +57,10 @@ for f in "${!SET[@]}"; do
   [[ -n ${F[$f]+x} && ${SET[$f]} =~ ^(on|off)$ ]] || { echo "guest/install.sh: --feature $f=${SET[$f]}: unknown" >&2; exit 2; }
   F[$f]=${SET[$f]}
 done
-[[ ${F[bridge]} == on ]] || F[wallpaper]=off
+for f in "${FEATURES[@]}"; do
+  n=${NEEDS[$f]}; [[ $n == - || -z $n ]] && continue
+  [[ ${F[$n]} == on ]] || F[$f]=off
+done
 
 # Which VM, and where its Mac is: Parallels' Mac is 10.211.55.2 on its shared
 # network; on UTM's shared network the Mac is the default gateway.
@@ -135,6 +143,11 @@ if [[ ${F[gestures]} == on || $TYPE == utm ]]; then
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
 fi
+if [[ ${F[glide]} == on ]]; then
+  log "Glide (experimental)"; "$R/gestures/guest/glide.sh" "$U" on
+elif [[ -f $H/.config/hypr/omacvm_glide.lua ]]; then
+  log "Glide: off"; "$R/gestures/guest/glide.sh" "$U" off
+fi
 log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
 if [[ ${F[bridge]} == on ]]; then
   log "bridge";     "$R/bridge/guest/install.sh" "$U"
@@ -151,6 +164,39 @@ if [[ ${F[wallpaper]} == on ]]; then
   log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
 elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
   log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
+fi
+# Omanotch's VM side (github.com/gillesgoetsch/omanotch) builds and installs in
+# the desktop session: omacvm-omanotch.service runs it at the next login, or
+# right away when the session is running.
+in_session() {
+  local run; run=/run/user/$(id -u "$U")
+  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
+    HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
+    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
+}
+if [[ ${F[omanotch]} == on ]]; then
+  if [[ ! -x $H/.local/bin/notchcast ]]; then
+    log "Omanotch (the bar beside the notch)"
+    pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
+    [[ -d $H/.local/share/omanotch ]] ||
+      sudo -u "$U" git clone -q https://github.com/gillesgoetsch/omanotch.git "$H/.local/share/omanotch"
+    install -m644 "$R/guest/omacvm-omanotch.service" /etc/systemd/user/
+    systemctl --global enable omacvm-omanotch.service >/dev/null 2>&1
+    if pgrep -u "$U" -x Hyprland >/dev/null; then
+      user_ctl daemon-reload 2>/dev/null || true
+      user_ctl start omacvm-omanotch.service 2>/dev/null || log "Omanotch: installs at the next login"
+    else
+      log "Omanotch: installs at the first login"
+    fi
+  fi
+elif [[ -x $H/.local/bin/notchcast ]]; then
+  log "Omanotch: off"
+  systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
+  if [[ -f $H/.local/share/omanotch/guest/uninstall.sh ]]; then
+    in_session bash "$H/.local/share/omanotch/guest/uninstall.sh" >/dev/null 2>&1 || true
+  else
+    user_ctl disable --now notchcast.service >/dev/null 2>&1 || true
+  fi
 fi
 if [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
