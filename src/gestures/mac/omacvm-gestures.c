@@ -10,35 +10,43 @@
 //     sent to the guest daemon, which replays them on a virtual touchpad:
 //     every frame with 3+ fingers, and 2-finger frames once they are a pinch;
 //   * one-finger movement, clicks and two-finger scrolling stay on Parallels'
-//     own path (absolute pointer, native smooth scrolling).
+//     own path (absolute pointer, native smooth scrolling), unless the VM
+//     uses Glide (below).
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
-// --scroll: two-finger scrolling goes to the guest too. While fingers touch the
-// built-in trackpad, their raw positions do (every two-finger frame, precise to
-// hundredths of a millimetre); after they lift, macOS's momentum goes as point
-// deltas, "W <dx> <dy>", which the guest continues the touch with. macOS's own
-// scroll events are not passed to Parallels then. Other continuous scrolling
-// (Magic Mouse) goes as W deltas as a whole; a wheel mouse (discrete steps)
-// still scrolls through Parallels; one-finger movement and clicks stay with
-// Parallels.
-// --keys-only (trackpad gestures turned off at setup): macOS keeps every
-// gesture and nothing is sent from the trackpad; on UTM, Cmd still reaches the
-// guest as Super (below).
+// Each VM says on connect what it wants ("H <gestures> <glide>"); a VM's
+// daemon from before that message counts as gestures on, Glide off. Capture
+// only covers a full-screen VM whose connected daemon wants the trackpad, so a
+// VM with gestures off (or not connected yet) leaves macOS its gestures.
+// Glide (experimental, per VM): two-finger scrolling goes to the guest too.
+// While fingers touch the built-in trackpad, their raw positions do (every
+// two-finger frame, precise to hundredths of a millimetre) along with macOS's
+// own scroll for them ("A", macOS's acceleration); after they lift, macOS's
+// momentum goes as point deltas ("W"), which the guest continues the touch
+// with. macOS's own scroll events then do not reach the VM app. Other
+// continuous scrolling (Magic Mouse) goes as W deltas as a whole; a wheel
+// mouse (discrete steps) still scrolls through the VM app.
+// --keys-only: no trackpad for any VM (macOS keeps every gesture); on UTM, Cmd
+// still reaches the guest as Super (below). --record: the built-in trackpad's
+// frames and macOS's scroll events to ~/Library/Logs/omacvm-input.tsv (Glide
+// diagnostics, see docs/experiments/scroll-analysis).
 //
 // Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
 // Parallels, 192.168.64.1 on UTM), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
-//   W <dx> <dy>                       --scroll: macOS scroll deltas in points
-//   P                                 --scroll: macOS recognized a pinch (magnify)
 //   O <natural> <w> <h>               on connect: macOS's natural scrolling (1/0) and the
 //                                     trackpad's size in 1/100 mm
-//   A <dx> <dy>                       --scroll: macOS's scroll while the fingers touch
-//                                     (points; the guest reads macOS's acceleration from it)
+//   A <dx> <dy>                       Glide: macOS's scroll while the fingers touch (points)
+//   W <dx> <dy>                       Glide: macOS's momentum (and Magic Mouse) in points
+//   P                                 Glide: macOS recognized a pinch (magnify)
+//   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
+// and from the guest, once after connecting:
+//   H <gestures 0|1> <glide 0|1>      what this VM wants
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -96,20 +104,17 @@ static pid_t frontPid;   // the full-screen VM app in front, else 0
 // 1 = UTM, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
-static struct { int fd, net; char ip[32]; } clients[MAX_CLIENTS];
+static struct { int fd, net, gestures, glide; char ip[32]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
-void ns_scroll_delta(CGEventRef e, double *dx, double *dy);   // scroll_ns.m
-int ns_event_type(CGEventRef e);                               // scroll_ns.m
+int ns_event_type(CGEventRef e);  // scroll_ns.m
 static int trackpad = 1;          // 0 with --keys-only
-static int scroll2;               // 1 with --scroll
 static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
 static double unixNow(void) { return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970; }
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
-static volatile double lastTwo;   // when it last had two or more fingers
 static int pinchSent;             // P sent for the current two-finger touch
 
 static void logf_(const char *fmt, ...) {
@@ -139,6 +144,23 @@ static int haveClient(int net) {
   return found;
 }
 
+// What the VMs on a network want: every connected one must agree (two VMs in
+// Parallels share its network, and either may be the one in front), so a VM
+// that does not use a feature never loses macOS's own handling to it.
+static int wants(int net, int glide) {
+  int any = 0, all = 1;
+  pthread_mutex_lock(&sendLock);
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (clients[i].fd < 0 || clients[i].net != net) continue;
+    any = 1;
+    if (!(glide ? clients[i].glide && clients[i].gestures : clients[i].gestures)) all = 0;
+  }
+  pthread_mutex_unlock(&sendLock);
+  return trackpad && any && all;
+}
+static int gesturesOn(int net) { return net >= 0 && wants(net, 0); }
+static int glideOn(int net) { return net >= 0 && wants(net, 1); }
+
 static void sendLine(const char *line, size_t len) { sendTo(frontNet, line, len); }
 
 // "on"/"esc" concern the frontmost VM; "off" goes to every VM.
@@ -167,9 +189,8 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
     for (int i = 0; i < k; i++) { sx += c[i]->normalized.pos.x; sy += 1.0f - c[i]->normalized.pos.y; }
     fprintf(rec, "F\t%.4f\t%d\t%.5f\t%.5f\t%d\n", unixNow(), k, sx / k, sy / k, capturing);
   }
-  if (k >= 2) lastTwo = CFAbsoluteTimeGetCurrent();
-  if (trackpad && capturing && haveClient(frontNet)) {
-    if (k >= 3 || (k == 2 && scroll2)) send = 1;
+  if (capturing && gesturesOn(frontNet)) {
+    if (k >= 3 || (k == 2 && glideOn(frontNet))) send = 1;
     else if (k == 2) {
       float dx = c[0]->normalized.pos.x - c[1]->normalized.pos.x, dy = c[0]->normalized.pos.y - c[1]->normalized.pos.y;
       float d = sqrtf(dx * dx + dy * dy);
@@ -385,7 +406,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
-        if (type == kCGEventKeyDown && capturing && frontNet == 1 && (f & kCGEventFlagMaskCommand)) {
+        if (type == kCGEventKeyDown && capturing && frontNet == 1 && (f & kCGEventFlagMaskCommand) && haveClient(1)) {
           forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
           forwarded[kc] = 1;
           return NULL;
@@ -411,55 +432,29 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
             CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1),
             CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous), capturing);
   if (type == kCGEventScrollWheel) {
-    // Continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it, goes to
-    // the guest; a wheel mouse's discrete steps pass to Parallels.
-    if (!(scroll2 && trackpad && capturing && haveClient(frontNet))) return e;
+    // Glide: continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it,
+    // goes to the guest; a wheel mouse's discrete steps pass to the VM app.
+    if (!(capturing && glideOn(frontNet))) return e;
     if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
-    // Fingers on the built-in trackpad: their raw frames carry this scroll; the
-    // guest only learns from it how much macOS accelerates right now.
-    if (fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase)) {
-      double ay = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
-      double ax = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
-      if (ax != 0 || ay != 0) {
-        char b[64]; int n = snprintf(b, sizeof b, "A %.2f %.2f\n", ax, ay);
-        sendLine(b, (size_t)n);
-      }
-      return NULL;
-    }
     double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
     double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
-    double nx = 0, ny = 0;
-    if (verbose) ns_scroll_delta(e, &nx, &ny);
-    if (verbose)
-      logf_("scroll pt %.3f %.3f ns %.4f %.4f fixed %.4f %.4f phase %lld momentum %lld", dx, dy, nx, ny,
-            CGEventGetDoubleValueField(e, kCGScrollWheelEventFixedPtDeltaAxis2),
-            CGEventGetDoubleValueField(e, kCGScrollWheelEventFixedPtDeltaAxis1),
-            CGEventGetIntegerValueField(e, kCGScrollWheelEventScrollPhase),
-            CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase));
     if (dx != 0 || dy != 0) {
-      char b[64]; int n = snprintf(b, sizeof b, "W %.2f %.2f\n", dx, dy);
+      // Fingers on the built-in trackpad: their raw frames carry this scroll;
+      // the guest only learns from it how much macOS accelerates right now.
+      int touch = fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase);
+      char b[64]; int n = snprintf(b, sizeof b, "%c %.2f %.2f\n", touch ? 'A' : 'W', dx, dy);
       sendLine(b, (size_t)n);
     }
     return NULL;
   }
-  if (verbose && capturing && type != kCGEventScrollWheel) {
-    static int lastType = -1; static double lastLog;
-    double now = CFAbsoluteTimeGetCurrent();
-    if ((int)type != lastType || now - lastLog > 0.5) {
-      logf_("gesture event type %d, NSEvent type %d (fingers %d, pinchSent %d)", (int)type,
-            ns_event_type(e), fingers, pinchSent);
-      lastType = (int)type; lastLog = now;
-    }
-  }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && scroll2 && capturing && trackpad && !pinchSent &&
-      haveClient(frontNet) && ns_event_type(e) == 30) {
+  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn(frontNet) && ns_event_type(e) == 30) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
   }
-  return capturing && trackpad ? NULL : e;   // a gesture event type
+  return capturing && gesturesOn(frontNet) ? NULL : e;   // a gesture event type
 }
 
 // ---- server: one guest connection at a time ----
@@ -482,6 +477,13 @@ static void *serverThread(void *arg) {
       setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
       setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
       char ip[32]; inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip);
+      // The guest's hello: what this VM wants. Daemons from before it send
+      // nothing (gestures on, Glide off).
+      int gestures = 1, glide = 0;
+      struct timeval tv = { .tv_sec = 1 };
+      setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+      char hello[64]; ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
+      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d", &gestures, &glide); }
       pthread_mutex_lock(&sendLock);
       int slot = -1;
       for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection
@@ -489,9 +491,10 @@ static void *serverThread(void *arg) {
       for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
       if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
       clients[slot].fd = c; clients[slot].net = net;
+      clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
       snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
       pthread_mutex_unlock(&sendLock);
-      logf_("guest connected: %s", ip);
+      logf_("guest connected: %s (gestures %s, Glide %s)", ip, gestures ? "on" : "off", glide ? "on" : "off");
       const char *st = capturing && net == frontNet ? "on\n" : "off\n";
       char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
       send(c, b, (size_t)n, MSG_NOSIGNAL);
@@ -513,7 +516,7 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
     else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
-    else if (!strcmp(argv[i], "--scroll")) scroll2 = 1;
+    else if (!strcmp(argv[i], "--scroll")) ;   // test flag of the Glide experiment: Glide is per VM now
     else if (!strcmp(argv[i], "--record")) {
       char path[1024]; snprintf(path, sizeof path, "%s/Library/Logs/omacvm-input.tsv", getenv("HOME"));
       rec = fopen(path, "a");
@@ -564,8 +567,7 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_(!trackpad ? "running, keys only: trackpad gestures stay with macOS"
-        : scroll2 ? "running with two-finger scrolling (escape: Ctrl+Option+Cmd+Esc)" : "running (escape: Ctrl+Option+Cmd+Esc)");
+  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
   CFRunLoopRun();
   return 0;
 }
