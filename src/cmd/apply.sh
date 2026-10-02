@@ -9,7 +9,8 @@
 # VM has (new to OmacVM: the defaults). --no-mac leaves the Mac side alone.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
 # started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
-# Mac's current layout. Display (UTM): the Mac's built-in display below the notch.
+# Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
+# the notch (no built-in display: the main one).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (see the message).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -64,7 +65,7 @@ if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
   printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
   exit 3
 fi
-[[ $TYPE == utm && -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
 [[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
 probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")

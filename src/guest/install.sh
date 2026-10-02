@@ -81,7 +81,8 @@ case $TYPE in
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
   fusion) HOST=$(ip route show default | awk '{ print $3; exit }')
           [[ -n $HOST ]] || { echo "guest/install.sh: no default route, cannot find the Mac" >&2; exit 1; }
-          HOST=${HOST%.*}.1 ;;
+          HOST=${HOST%.*}.1
+          [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
   *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
 esac
 {
@@ -143,7 +144,7 @@ case $TYPE in
   utm)
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
   fusion)
-    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" ;;
+    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
