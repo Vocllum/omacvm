@@ -30,11 +30,16 @@ if [[ -z $here ]]; then
   if ! xcode-select -p >/dev/null 2>&1 || ! /usr/bin/git --version >/dev/null 2>&1; then
     say "Xcode's command line tools first (git, Swift): macOS shows its installer, click Install"
     xcode-select --install >/dev/null 2>&1 || true
-    for ((i = 0; i < 720; i++)); do
-      xcode-select -p >/dev/null 2>&1 && /usr/bin/git --version >/dev/null 2>&1 && break
-      (( i % 12 == 0 )) && echo "    waiting for the command line tools to finish installing..."
-      sleep 5
+    # A spinner with the elapsed time while macOS installs them (5-15 minutes).
+    frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'; t0=$SECONDS; i=0
+    until xcode-select -p >/dev/null 2>&1 && /usr/bin/git --version >/dev/null 2>&1; do
+      e=$(( SECONDS - t0 ))
+      (( e > 3600 )) && break
+      printf '\r  %s Installing Xcode'"'"'s command line tools (click Install in macOS'"'"'s window) %dm %02ds ' \
+        "${frames:i % 10:1}" $(( e / 60 )) $(( e % 60 )) > /dev/tty 2>/dev/null
+      i=$(( i + 1 )); sleep 0.2
     done
+    printf '\r\033[2K' > /dev/tty 2>/dev/null
     /usr/bin/git --version >/dev/null 2>&1 ||
       { echo "Xcode's command line tools did not finish: run xcode-select --install, then this again." >&2; exit 3; }
   fi
