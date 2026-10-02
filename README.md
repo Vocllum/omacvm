@@ -38,6 +38,17 @@ Omarchy's bar beside the notch.
 > newer** Macs, which Asahi does not support yet (and for anyone who wants macOS
 > and Omarchy side by side).
 
+> [!IMPORTANT]
+> **A full Omarchy, not a demo.** OmacVM installs
+> [omarchy-mac](https://github.com/omacom/omarchy-mac), the Arch Linux ARM port
+> of Omarchy, onto the VM's own disk: the real system, with your user, `omarchy
+> update` and everything Omarchy ships. It uses omarchy-mac's **release
+> candidate** (`rc`) packages for now, and its `stable` lane automatically once
+> omarchy-mac publishes one.
+> [try-omarchy](https://github.com/omacom/try-omarchy) is something else: a
+> pinned, try-it-out image. OmacVM only boots it once, as the temporary
+> installer that puts Arch Linux ARM onto the disk, and then removes it.
+
 ## Get started
 
 ```bash
