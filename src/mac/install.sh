@@ -33,7 +33,8 @@ mkdir -p ~/.local/share/omacvm/clip "$STAMPS"
 install_app() {
   local name=$1 label=$2 dir=$3; shift 3
   local sum
-  sum=$( { find "$R/$dir" "$R/icon" "$R/lib/sign.sh" -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
+  # Paths relative to src/, so another copy of the same OmacVM matches too.
+  sum=$( { cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
            sort -z | xargs -0 shasum; echo "args: $*"; } | shasum | cut -c1-16)
   if (( ! FORCE )) && [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] &&
      launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
