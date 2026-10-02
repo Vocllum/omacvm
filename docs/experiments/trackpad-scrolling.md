@@ -1,8 +1,9 @@
 # Experiment: two-finger scrolling through OmacVM Gestures
 
-**Outcome: shipped in OmacVM 2.0 as Glide** ("macOS-native scrolling, passed
-through"), experimental and off by default: `omacvm enable glide`. The state
-of test 29 is what Glide does; the code is `src/gestures/guest/omacvm-gestures`
+**Outcome: shipped in OmacVM 2.0 as "macOS-native scroll momentum"**
+(feature `scroll-momentum`, called Glide in the code), experimental and off by
+default: `omacvm enable scroll-momentum`. The state
+of test 29 is what it does; the code is `src/gestures/guest/omacvm-gestures`
 (`Glide`), `src/gestures/guest/omacvm_glide.lua` and the Mac helper. The test
 switches below (`--scroll`, `OMACVM_SCROLL_*`) became the per-VM feature and
 `OMACVM_GLIDE_*` (FILTER, BLEND, RAW_SCALE, POINT_UNITS, DISTANCE, TAU,

@@ -2,9 +2,9 @@
 # Install OmacVMGestures.app to ~/Applications and start it at login (LaunchAgent).
 #   ./install.sh [--keys-only] [-v] [--record]
 # --keys-only: trackpad gestures stay with macOS for every VM; on UTM, Cmd
-# still reaches Omarchy as Super. Otherwise each VM chooses gestures and Glide
+# still reaches Omarchy as Super. Otherwise each VM chooses gestures and scroll momentum
 # for itself. Diagnostics: -v logs more, --record writes the trackpad's frames
-# and macOS's scroll events to ~/Library/Logs/omacvm-input.tsv (Glide analysis,
+# and macOS's scroll events to ~/Library/Logs/omacvm-input.tsv (scroll momentum analysis,
 # docs/experiments/scroll-analysis).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -12,7 +12,7 @@ ARGS=""
 for a in "$@"; do
   case $a in
     --keys-only|-v|--record) ARGS+="<string>$a</string>" ;;
-    --scroll) ;;   # the Glide experiment's switch: Glide is a VM feature now
+    --scroll) ;;   # the scrolling experiment's switch: scroll momentum is a VM feature now
     *) echo "install.sh: unknown option $a" >&2; exit 2 ;;
   esac
 done

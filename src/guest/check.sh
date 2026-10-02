@@ -47,7 +47,7 @@ HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
-GLIDE=${OMACVM_FEATURE_glide:-off}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
+GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -117,13 +117,13 @@ if [[ $GESTURES == on ]]; then
 else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
 if [[ $GLIDE == on && $GESTURES == on ]]; then
   pid=$(systemctl show -p MainPID --value omacvm-gestures 2>/dev/null)
-  if [[ -n $pid && $pid != 0 ]] && tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'OMACVM_FEATURE_glide=on'; then
-    ok "Glide" "two-finger scrolling from the Mac (experimental)"
-  else bad "Glide" "chosen, but the daemon runs without it: systemctl restart omacvm-gestures"; fi
+  if [[ -n $pid && $pid != 0 ]] && tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'OMACVM_FEATURE_scroll_momentum=on'; then
+    ok "scroll momentum" "two-finger scrolling from the Mac (experimental)"
+  else bad "scroll momentum" "chosen, but the daemon runs without it: systemctl restart omacvm-gestures"; fi
   if [[ -f $H/.config/hypr/omacvm_glide.lua ]] && grep -qxF 'require("hypr.omacvm_glide")' "$H/.config/hypr/hyprland.lua"; then
-    ok "Glide scroll settings" "omacvm_glide.lua"
-  else bad "Glide scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable glide)"; fi
-else skip "Glide" "off (experimental, opt-in: omacvm enable glide)"; fi
+    ok "scroll settings" "omacvm_glide.lua"
+  else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
+else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
 if [[ $TYPE == utm ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi

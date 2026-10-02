@@ -494,7 +494,7 @@ static void *serverThread(void *arg) {
       clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
       snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
       pthread_mutex_unlock(&sendLock);
-      logf_("guest connected: %s (gestures %s, Glide %s)", ip, gestures ? "on" : "off", glide ? "on" : "off");
+      logf_("guest connected: %s (gestures %s, scroll momentum %s)", ip, gestures ? "on" : "off", glide ? "on" : "off");
       const char *st = capturing && net == frontNet ? "on\n" : "off\n";
       char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
       send(c, b, (size_t)n, MSG_NOSIGNAL);

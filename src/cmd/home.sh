@@ -58,7 +58,7 @@ DEF=1
 for k in "${KIND[@]}"; do [[ $k == omacvm ]] && DEF=2; done
 hd "What would you like to do?"
 say "    1  Build a new Omarchy VM"
-say "    2  Change the features of a VM (Glide, gestures, Bridge, Omanotch, ...)"
+say "    2  Change the features of a VM (scroll momentum, gestures, Bridge, Omanotch, ...)"
 say "    3  Add OmacVM to a VM, or bring it up to date"
 say "    4  Update OmacVM everywhere (this checkout, the Mac, your running VMs)"
 say "    5  Check a VM"

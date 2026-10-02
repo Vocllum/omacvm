@@ -5,7 +5,7 @@
 #                                its features, update, check
 #   omacvm build                 a new Omarchy VM in Parallels or UTM, from nothing
 #   omacvm features [--vm NAME]  a VM's features: see them, switch them
-#   omacvm enable FEATURE...     switch features on (omacvm enable glide)
+#   omacvm enable FEATURE...     switch features on (omacvm enable scroll-momentum)
 #   omacvm disable FEATURE...    ... or off
 #   omacvm apply [--vm NAME]     OmacVM onto a VM, also one installed by hand
 #   omacvm update                this checkout, the Mac side and your VMs

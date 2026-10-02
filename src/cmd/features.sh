@@ -3,9 +3,9 @@
 #   omacvm features [--vm NAME] [--json]     list them; in a terminal, switch them
 #   omacvm enable FEATURE... [--vm NAME] [--yes]
 #   omacvm disable FEATURE... [--vm NAME] [--yes]
-# Features (src/features.tsv): bridge wallpaper gestures glide omanotch
+# Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
 # idle-lock autologin thp-kernel. A feature that needs another one brings it
-# along (enable glide also enables gestures) or goes with it (disable bridge
+# along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM. A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
@@ -29,6 +29,7 @@ while (( $# )); do
     -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) [[ $1 == mac-wallpaper ]] && set -- wallpaper "${@:2}"
+       [[ $1 == glide ]] && set -- scroll-momentum "${@:2}"   # its name in the experiment
        feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;
   esac
@@ -100,7 +101,7 @@ if [[ $MODE == features ]]; then
   [[ -n $version ]] || say "    OmacVM is not on this VM yet: these are the defaults it would get."
   if (( ! interactive )); then
     for ((i = 0; i < ${#FN[@]}; i++)); do
-      printf '  %-4s %-12s %s\n' "${FV[$i]}" "${FN[$i]}" "$(label "$i")"
+      printf '  %-4s %-16s %s\n' "${FV[$i]}" "${FN[$i]}" "$(label "$i")"
     done
     echo "  Switch with: omacvm enable|disable FEATURE --vm \"$VM\""
     exit 0

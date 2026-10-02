@@ -81,7 +81,7 @@ fi
 # What was chosen at setup for this VM (defaults for VMs from before the choices).
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
-BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat glide off)
+BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
 
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
@@ -112,8 +112,8 @@ if [[ $GESTURES == on || $TYPE == utm ]]; then
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
       g=$(grep "guest connected: $IP " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
-      if [[ $g == *"Glide on"* ]]; then ok "Glide (Mac)" "scrolling goes to this VM in full screen"
-      else bad "Glide (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
+      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
+      else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
     p=$(last_line "$L/omacvm-gestures.log" 'permission')
     [[ -z $p || $p == *granted* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \

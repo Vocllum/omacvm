@@ -4,7 +4,7 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm]
 #                    [--display WxH@Hz] [--feature NAME=on|off]...
-# Features: the list in ../features.tsv (bridge, wallpaper, gestures, glide,
+# Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, idle-lock, autologin, thp-kernel) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
@@ -28,7 +28,7 @@ while (( $# )); do
     --keyboard) KB=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
-    --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
+    --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
     --no-thp-kernel) SET[thp-kernel]=off; shift ;;
     --thp-kernel) SET[thp-kernel]=on; shift ;;
     --autologin) SET[autologin]=on; shift ;;
@@ -48,6 +48,8 @@ AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
 [[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on
 [[ -x $H/.local/bin/notchcast ]] && F[omanotch]=on
 if [[ -r $ENV ]]; then
+  # scroll-momentum was called glide in the experiment
+  v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
   for f in "${FEATURES[@]}"; do
     v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
     [[ -n $v ]] && F[$f]=$v
@@ -143,10 +145,10 @@ if [[ ${F[gestures]} == on || $TYPE == utm ]]; then
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
 fi
-if [[ ${F[glide]} == on ]]; then
-  log "Glide (experimental)"; "$R/gestures/guest/glide.sh" "$U" on
+if [[ ${F[scroll-momentum]} == on ]]; then
+  log "macOS-native scroll momentum (experimental)"; "$R/gestures/guest/glide.sh" "$U" on
 elif [[ -f $H/.config/hypr/omacvm_glide.lua ]]; then
-  log "Glide: off"; "$R/gestures/guest/glide.sh" "$U" off
+  log "scroll momentum: off"; "$R/gestures/guest/glide.sh" "$U" off
 fi
 log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
 if [[ ${F[bridge]} == on ]]; then

@@ -64,7 +64,7 @@ Setting it up with a coding agent (Claude Code, Codex, …)? See
 |---|---|
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS |
-| **Glide** *(experimental, but awesome)* | macOS-native scrolling, passed through: two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#glide-macos-native-scrolling-passed-through)) |
+| **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
@@ -98,7 +98,7 @@ on every display. **UTM is free** and gets almost everything else.
 | Per-display workspaces | ✓ | (one display) |
 | Wi-Fi, audio, media keys, Night Shift, True Tone, Wi-Fi QR (OmacVM Bridge) | ✓ | ✓ |
 | Trackpad gestures (OmacVM Gestures) | ✓ | ✓ |
-| **Glide**: macOS-native scrolling *(experimental)* | ✓ tuned and tested here | ✓ same code, less tested |
+| **macOS-native scroll momentum** *(experimental)* | ✓ tuned and tested here | ✓ same code, less tested |
 | Bar beside the notch ([Omanotch](https://github.com/gillesgoetsch/omanotch)) | ✓ | ✓ |
 | Wallpaper follows the Omarchy theme | ✓ | ✓ |
 | Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE daemon + OmacVM's Wayland agent) |
@@ -159,13 +159,13 @@ It asks a few questions before it builds anything:
    |---|---|
    | OmacVM Bridge: the Mac's Wi-Fi, audio, Night Shift and media keys in Omarchy | on |
    | Omarchy's wallpaper on the Mac too | on |
-   | Trackpad gestures in Omarchy (macOS's own swipes off in full screen, ⌃⌥⌘ Esc gives them back) | on |
+   | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
    | Omanotch, on a MacBook with a notch | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | kept |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
 
-4. **Glide**, on its own: experimental, so you choose it (default off).
+4. **macOS-native scroll momentum**, on its own: experimental, so you choose it (default off).
 5. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
 
@@ -196,7 +196,7 @@ When it is done, once on the Mac:
 3. **UTM:** keep UTM in the foreground app list (started from the Dock or
    Spotlight); UTM launched in the background runs the VM several times slower.
 
-Put the VM in full screen for the trackpad gestures, Glide and the media keys.
+Put the VM in full screen for the trackpad gestures, the scroll momentum and the media keys.
 While it is full screen and in front, the Mac's trackpad gestures and ⌘
 shortcuts go to Omarchy, and macOS's own Spaces swipe is off. **⌃⌥⌘ Esc**
 hands the trackpad back to macOS (Omarchy shows a notification), so you can
@@ -212,7 +212,7 @@ while you are in the VM.
 
 ```bash
 omacvm features              # see them, switch them (↑/↓, space, Return)
-omacvm enable glide          # or straight away
+omacvm enable scroll-momentum   # or straight away
 omacvm disable gestures --vm "Omarchy ARM"
 ```
 
@@ -220,7 +220,7 @@ Every feature above can be switched on or off later, one at a time, and the
 VM keeps your choices across updates. OmacVM installs what a feature needs on
 the Mac too, and switching one takes well under a minute (the memory-optimized kernel
 takes about 10 minutes the first time). A feature that needs another brings
-it along: Glide needs the trackpad gestures, the wallpaper needs the Bridge.
+it along: the scroll momentum needs the trackpad gestures, the wallpaper needs the Bridge.
 
 **Already have an Omarchy VM** you installed yourself from omarchy-mac?
 `omacvm apply --vm NAME` adds OmacVM to it. If OmacVM cannot get in yet, it
@@ -244,7 +244,7 @@ omacvm check            # --vm NAME for another VM
 ```
 
 Goes through every feature on the Mac and in the running VM (permissions, the
-Bridge, the bar widgets, gestures, Glide, clipboard and pointer, kernel,
+Bridge, the bar widgets, gestures, scroll momentum, clipboard and pointer, kernel,
 memory, Omanotch) and prints `ok` / `FAIL` with what to do about each failure.
 It only reads; nothing is changed. `omacvm vms` lists your VMs and their
 OmacVM version.
@@ -253,7 +253,7 @@ OmacVM version.
 
 OmacVM is built to be driven by an agent as well as by hand. Point yours at
 this repository and ask, for example: *"Set up OmacVM on my Mac: a Parallels
-VM with Glide on"* or *"Turn on Glide for my VM 'Omarchy'"*.
+VM with the macOS-native scroll momentum on"* or *"Turn on the scroll momentum for my VM 'Omarchy'"*.
 
 - [AGENTS.md](AGENTS.md) is the manual for agents: recipes for building,
   switching features, updating and fixing, plus everything that was tried and
@@ -311,11 +311,11 @@ the VM needs a token.
 
 With two VMs running, the wallpaper follows whichever changed its theme last.
 
-### Glide: macOS-native scrolling, passed through
+### macOS-native scroll momentum
 
 Parallels and UTM give Linux a mouse wheel: your trackpad's two-finger
 scrolling arrives as wheel steps, and the feel of macOS (acceleration,
-momentum, precise slow scrolling) is gone. With Glide on, the full-screen
+momentum, precise slow scrolling) is gone. With this on, the full-screen
 VM gets the real thing instead:
 
 - **Your fingers**, as raw positions from the built-in trackpad, precise to
@@ -336,7 +336,7 @@ further per movement than GTK apps, so they get their own factor.
 It is **experimental**: tuned on one Mac, by feel and by measurement, over 29
 rounds. The whole story, with every measurement and the analysis scripts, is in
 [docs/experiments/trackpad-scrolling.md](docs/experiments/trackpad-scrolling.md).
-Try it with `omacvm enable glide`, go back with `omacvm disable glide`.
+Try it with `omacvm enable scroll-momentum`, go back with `omacvm disable scroll-momentum`.
 
 The whole build, every VM setting and the dead ends we hit are in
 [AGENTS.md](AGENTS.md).
@@ -373,12 +373,12 @@ with a notch (`omacvm enable omanotch` on an existing VM).
 - **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
   their own window across the top of the screen (Bartender, for one) can bring
   it back. Quit them while you work in the VM.
-- **Gestures or Glide do nothing**: the VM must be full screen and in front;
+- **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
   ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*.
-- **Glide feels too fast or slow in one app**: Chromium-based apps get their
+- **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
   own factor; tell us the app (window class from `hyprctl clients`) in an
-  issue. Glide's settings are in `src/gestures/guest/omacvm-gestures`
+  issue. The scroll momentum's settings are in `src/gestures/guest/omacvm-gestures`
   (`OMACVM_GLIDE_*`).
 
 ## Uninstall

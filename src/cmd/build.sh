@@ -14,7 +14,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures glide omanotch idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+ or UTM 5, and Homebrew's zstd + e2fsprogs.
 # Exit codes: 0 built, 1 failed, 2 usage (or a question without a terminal),
@@ -39,7 +39,7 @@ feature_flag() {   # NAME on|off
     bridge) BRIDGE=$v; (( v )) || WALLPAPER=0 ;;
     wallpaper|mac-wallpaper) WALLPAPER=$v ;;
     gestures) GESTURES=$v ;;
-    glide) GLIDE=$v ;;
+    scroll-momentum|glide) GLIDE=$v ;;
     omanotch) OMANOTCH=$v ;;
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
@@ -198,8 +198,8 @@ row() { printf '    %-68s %s\n' "$1" "$2"; }
 explain_features() {
   row "Bridge: the Mac's Wi-Fi, audio, Night Shift, media keys in Omarchy" "$(onoff "$BRIDGE")"
   (( BRIDGE )) && row "Omarchy's wallpaper on the Mac too" "$(onoff "$WALLPAPER")"
-  row "Trackpad gestures in Omarchy (macOS swipes off in full screen)" "$(onoff "$GESTURES")"
-  (( GESTURES )) && row "Glide: macOS-native scrolling, passed through (experimental)" "$(onoff "$GLIDE")"
+  row "Trackpad gestures in Omarchy, in full screen (macOS's swipes are off then)" "$(onoff "$GESTURES")"
+  (( GESTURES )) && row "macOS-native scroll momentum (experimental)" "$(onoff "$GLIDE")"
   if [[ $NOTCH == notch ]]; then row "Omanotch: Omarchy's bar beside the notch" "$(onoff "$OMANOTCH")"
   else row "Omanotch (needs a MacBook with a notch)" off; fi
   row "Omarchy's own screensaver and lock after idle" "$( (( IDLE_LOCK )) && echo kept || echo "off, the Mac's lock")"
@@ -241,12 +241,12 @@ if (( ! YES )); then
     ask_yn "Build the memory-optimized kernel?" n && THP=1 || THP=0
   fi
   if (( GESTURES )); then
-    hd "Glide: macOS-native scrolling, passed through  (experimental, but awesome)"
+    hd "macOS-native scroll momentum  (experimental, but awesome)"
     say "    Two-finger scrolling in Omarchy with your Mac's own acceleration and momentum,"
     say "    in every direction, pinch included, tuned side by side with macOS. Still an"
     say "    experiment, so it is off unless you want it; switch it any time with"
-    say "    omacvm enable glide / omacvm disable glide."
-    ask_yn "Try Glide?" n && GLIDE=1 || GLIDE=0
+    say "    omacvm enable scroll-momentum / omacvm disable scroll-momentum."
+    ask_yn "Try it?" n && GLIDE=1 || GLIDE=0
   fi
 fi
 (( GESTURES )) || GLIDE=0
@@ -272,7 +272,7 @@ case $lang in
 esac
 [[ -n $CHANNEL ]] || CHANNEL=$(omarchy_channel)
 
-FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" glide "$GLIDE" omanotch "$OMANOTCH"
+FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
        idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {

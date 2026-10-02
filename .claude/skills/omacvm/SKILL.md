@@ -1,6 +1,6 @@
 ---
 name: omacvm
-description: Set up, change, update or troubleshoot OmacVM (Omarchy in a Parallels or UTM VM on an Apple Silicon Mac) with the omacvm command. Use when someone wants an Omarchy VM built, a feature switched (Glide, trackpad gestures, Bridge, Omanotch, wallpaper, idle lock, autologin, memory-optimized kernel), OmacVM added to an existing Omarchy VM, updated, or checked.
+description: Set up, change, update or troubleshoot OmacVM (Omarchy in a Parallels or UTM VM on an Apple Silicon Mac) with the omacvm command. Use when someone wants an Omarchy VM built, a feature switched (macOS-native scroll momentum, trackpad gestures, Bridge, Omanotch, wallpaper, idle lock, autologin, memory-optimized kernel), OmacVM added to an existing Omarchy VM, updated, or checked.
 ---
 
 # OmacVM
@@ -18,7 +18,7 @@ sections 7-8 before fixing anything by hand.
   (Location Services, Accessibility, Input Monitoring), set Parallels' "Send
   macOS system shortcuts: Always", install Parallels or UTM 5. Hand these over
   (`needs_human` in the JSON); never work around them, never invent a password.
-- Glide is experimental and off by default: offer it, let the person decide.
+- macOS-native scroll momentum (`scroll-momentum`) is experimental and off by default: offer it, let the person decide.
 - A build takes 30-70 minutes: run it in the background and follow its output.
 - Do not edit `/usr/share/omarchy`, the user's macOS Spaces, or Omanotch's
   repository; do not put personal data into this repository.
@@ -26,7 +26,7 @@ sections 7-8 before fixing anything by hand.
 ## New VM
 
 1. `./omacvm vms --json`; then
-   `./omacvm build --plan --json --vm-type parallels|utm [--vm-name NAME] [--feature glide=on]`.
+   `./omacvm build --plan --json --vm-type parallels|utm [--vm-name NAME] [--feature scroll-momentum=on]`.
 2. Show the plan (resources, features, `needs_human`), ask for the password
    and for changes.
 3. Run the plan's `command` with `OMACVM_PASSWORD` set.

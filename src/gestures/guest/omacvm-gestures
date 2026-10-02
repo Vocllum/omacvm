@@ -10,13 +10,14 @@ from the feature choices in the same file) and reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
   O <natural> <w> <h>               the Mac's scrolling direction, trackpad size (1/100 mm)
-  A <dx> <dy>, W <dx> <dy>, P       Glide: macOS's scroll while touching, its
+  A <dx> <dy>, W <dx> <dy>, P       scroll momentum: macOS's scroll while touching, its
                                     momentum (points), a pinch macOS recognized
   K <code> <value>                  UTM: a key on the virtual keyboard
 
-Without Glide the helper sends 3+-finger frames and 2-finger pinches; pointer,
+Without macOS-native scroll momentum (the scroll-momentum feature; "Glide"
+in the code, after the glide that follows a flick) the helper sends 3+-finger frames and 2-finger pinches; pointer,
 clicks and two-finger scrolling come from the VM app's own virtual mouse.
-With Glide (experimental) every two-finger frame comes too, and the scroll is
+With it (experimental) every two-finger frame comes too, and the scroll is
 rebuilt here from the real fingers plus macOS's own acceleration and momentum
 (docs/experiments/trackpad-scrolling.md). Runs as root (uinput); posts a
 notification to the desktop user when the escape combo is used.
@@ -59,7 +60,9 @@ HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") o
 PORT = int(env_float("OMACVM_GESTURES_PORT", 47830))
 # The VM's feature choices (/etc/omacvm/env, loaded by the service).
 GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
-GLIDE_ON = GESTURES and os.environ.get("OMACVM_FEATURE_glide", "off") == "on"
+# (scroll-momentum was called glide in the experiment)
+GLIDE_ON = GESTURES and (os.environ.get("OMACVM_FEATURE_scroll_momentum")
+                         or os.environ.get("OMACVM_FEATURE_glide", "off")) == "on"
 USER = os.environ.get("OMACVM_GESTURES_USER", "")   # default: whoever owns the Wayland session
 # Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm. The real
 # trackpad maps onto the middle of a much larger virtual one, so Glide's
@@ -175,7 +178,7 @@ class Touchpad:
             self.frame([])
 
 
-# Glide's settings (OMACVM_GLIDE_* in a systemd drop-in; defaults = the tuned values).
+# Scroll momentum's settings (OMACVM_GLIDE_* in a systemd drop-in; defaults = the tuned values).
 DEBUG = bool(os.environ.get("OMACVM_GLIDE_DEBUG"))
 # OMACVM_GLIDE_RECORD=1: every virtual-touchpad frame (time, fingers, centre)
 # to /var/log/omacvm-output.tsv, to compare with the Mac's input recording
@@ -556,7 +559,7 @@ def run(pad, keys, glide):
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         s.sendall(f"H {int(GESTURES)} {int(GLIDE_ON)}\n".encode())
         print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
-              f"Glide {'on' if GLIDE_ON else 'off'})", flush=True)
+              f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         buf = b""
         while True:
             try:
@@ -619,7 +622,7 @@ def main():
     keys = Keys(make_keyboard())
     glide = Glide(pad)
     print(f"omacvm-gestures: virtual touchpad {ui.device.path}"
-          f"{', Glide (two-finger scrolling) on' if GLIDE_ON else ''}", flush=True)
+          f"{', macOS-native scroll momentum on' if GLIDE_ON else ''}", flush=True)
     while True:
         try:
             run(pad, keys, glide)

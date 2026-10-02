@@ -5,7 +5,7 @@ a Linux guest only a mouse (pointer, clicks, a wheel), so pinch and
 3/4-finger swipes never arrive. This tool reads the built-in trackpad's raw
 finger contacts on the Mac (private MultitouchSupport framework) and replays
 them on a virtual Apple touchpad in the guest, where libinput and Hyprland turn
-them into real gestures. With **Glide** (experimental, per VM) it also carries
+them into real gestures. With **macOS-native scroll momentum** (experimental, per VM) it also carries
 two-finger scrolling, with macOS's own acceleration and momentum.
 
 **Capture mode** = Parallels or UTM is the frontmost app, its VM window fills a
@@ -16,7 +16,7 @@ trackpad. Then:
   Control / Exposé / Launchpad / pinch on the Mac side;
 - 3+-finger frames and 2-finger pinches go to the guest;
 - pointer, clicks and two-finger scrolling stay on the VM app's own path;
-  with Glide, two-finger scrolling goes to the guest too (below);
+  with scroll momentum, two-finger scrolling goes to the guest too (below);
 - the Mac's pointer is hidden wherever the VM window is what a click would hit
   (the guest draws its own pointer), and shown over anything else (the
   Omanotch strip, the Dock, menus, another display);
@@ -26,9 +26,9 @@ trackpad. Then:
 re-arms when you come back to the full-screen VM, or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
-## Glide
+## macOS-native scroll momentum
 
-Turned on per VM (`omacvm enable glide`; `OMACVM_FEATURE_glide=on` in the VM's
+Turned on per VM (`omacvm enable scroll-momentum`; `OMACVM_FEATURE_scroll_momentum=on` in the VM's
 `/etc/omacvm/env`). While two fingers touch the built-in trackpad, every frame
 goes to the guest, together with macOS's own scroll events for them (`A`, its
 acceleration); macOS's scroll events no longer reach the VM app. After the
@@ -41,7 +41,7 @@ tuning log in `docs/experiments/trackpad-scrolling.md`.
 |---|---|
 | Mac helper | `mac/omacvm-gestures.c` (+ `mac/scroll_ns.m`) → `~/Applications/OmacVMGestures.app` (`org.omacvm.gestures`), LaunchAgent `org.omacvm.gestures`, log `~/Library/Logs/omacvm-gestures.log`. Listens on `10.211.55.2:47830` and `192.168.64.1:47830`. Needs Accessibility + Input Monitoring. Options: `--keys-only` (no trackpad for any VM), `-v`, `--record` (`~/Library/Logs/omacvm-input.tsv`, Glide analysis) |
 | Guest daemon | `guest/omacvm-gestures` → `/usr/local/bin/omacvm-gestures` (python-evdev, root), `guest/omacvm-gestures.service` (systemd, reads `/etc/omacvm/env`). Creates "Apple Inc. Magic Trackpad (OmacVM)" (Apple vendor id) and, on UTM, "OmacVM keyboard (Mac shortcuts)"; connects to the Mac. Glide settings: `OMACVM_GLIDE_*` (defaults = the tuned values) |
-| Glide's Hyprland settings | `guest/glide.sh <user> on\|off` → `~/.config/hypr/omacvm_glide.lua` (required from `hyprland.lua`), `--disable-smooth-scrolling` for Chromium/Chrome |
+| Its Hyprland settings ("Glide" in the code) | `guest/glide.sh <user> on\|off` → `~/.config/hypr/omacvm_glide.lua` (required from `hyprland.lua`), `--disable-smooth-scrolling` for Chromium/Chrome |
 | Hyprland | `~/.config/hypr/input.lua`: `hl.gesture({ fingers = 3/4, direction = "horizontal", action = "workspace" })` |
 | Probe | `probe/probe.c`: raw frame + event-tap feasibility probe (`./probe 30` observe, `./probe 30 block` drop gestures) |
 
@@ -55,5 +55,5 @@ it).
 
 Verified on macOS 15.7.4, Parallels 27.0.2, MacBook Pro M4 Max: 4-finger and
 3-finger swipes switch workspaces, pinch zooms in Chrome, macOS Spaces swipes
-blocked while captured, ⌃⌥⌘ Esc releases and re-arms; Glide's glide distance
+blocked while captured, ⌃⌥⌘ Esc releases and re-arms; the scroll momentum's glide distance
 within 5-10 % of macOS's, with the same decay.

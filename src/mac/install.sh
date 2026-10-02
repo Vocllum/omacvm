@@ -1,13 +1,13 @@
 #!/bin/bash
 # OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display, wallpaper),
-# Gestures (trackpad, Glide, Cmd as Super on UTM), clipboard (VM -> Mac).
+# Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
 #   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--force] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
 # --no-gestures installs it keys-only for every VM: macOS keeps its trackpad
 # gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
-# VM chooses for itself: gestures and Glide are VM features.)
+# VM chooses for itself: gestures and scroll momentum are VM features.)
 # An app whose sources and options did not change since it was installed is
 # left as it is (--force rebuilds it); --quiet only reports what changed.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
