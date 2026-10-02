@@ -483,7 +483,7 @@ cat <<EOF
   One-time steps on the Mac:
 $mac_steps
   In full screen, the trackpad and ⌘ shortcuts belong to Omarchy.
-  [1m⌃⌥⌘ Esc (Control + Option + Command + Escape) gives them back to macOS[0m.
+  ${UB}⌃⌥⌘ Esc (Control + Option + Command + Escape) gives them back to macOS.${UR}
 
   SSH: ssh -i "$KEY" root@$IP
   Check everything: omacvm check --vm "$VM"
