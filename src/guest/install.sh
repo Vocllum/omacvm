@@ -154,12 +154,12 @@ log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
 if [[ ${F[bridge]} == on ]]; then
   log "bridge";     "$R/bridge/guest/install.sh" "$U"
 elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
-  # Disabling the clones brings Omarchy's own Wi-Fi and audio widgets back.
+  # Disabling the clones brings Omarchy's own Bluetooth, Wi-Fi and audio widgets back.
   log "bridge: off"
   user_ctl disable --now omacvm-bridge-osd.service >/dev/null 2>&1 || true
   sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
     'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
-     for p in omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
+     for p in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
   # Omarchy's own night light indicator, as it was before the Bridge.
   NL=$H/.local/state/omacvm/nightlight-indicator C=$H/.config/omarchy/shell.json
   if [[ -f $NL && -f $C ]]; then

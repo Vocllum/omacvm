@@ -275,6 +275,7 @@ human_steps() {
   if (( BRIDGE )); then
     echo "Allow Wi-Fi names: Location Services for OmacVM Bridge (macOS asks)."
     echo "Allow media keys: Accessibility for OmacVM Bridge."
+    echo "Allow Bluetooth devices: Bluetooth for OmacVM Bridge (macOS asks)."
   fi
   if (( GESTURES )) || [[ $TYPE == utm ]]; then
     local what="the trackpad"

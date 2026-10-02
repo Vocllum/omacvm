@@ -3,7 +3,7 @@
 # follow. One feature per line, tab-separated:
 #   name  default (on|off|notch: on with a notch)  sides (mac,vm)  tags  needs  title  summary
 # Tags: experimental, slow (adds build/update time), notch (needs a MacBook with a notch).
-bridge	on	mac,vm	-	-	OmacVM Bridge	the Mac's Wi-Fi, audio, Night Shift and media keys in Omarchy's bar
+bridge	on	mac,vm	-	-	OmacVM Bridge	the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy's bar
 wallpaper	on	vm	-	bridge	Wallpaper on the Mac	Omarchy's wallpaper becomes the Mac's, following the theme
 gestures	on	mac,vm	-	-	Trackpad gestures	3/4-finger swipes and pinch in Omarchy while it is full screen (⌃⌥⌘ Esc hands them back to macOS)
 scroll-momentum	off	mac,vm	experimental	gestures	macOS-native scroll momentum	two-finger scrolling with your Mac's own acceleration and momentum, passed through

@@ -101,6 +101,12 @@ if [[ $BRIDGE == on ]]; then
     st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
     else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
+    bt=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/bluetooth")
+    case $(jq -r '.permission // empty' <<<"$bt" 2>/dev/null) in
+      granted) ok "Bluetooth" "granted (connect devices from the VM)" ;;
+      "") bad "Bluetooth" "the Bridge does not answer /bluetooth: src/mac/install.sh" ;;
+      *) bad "Bluetooth" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Bluetooth)" human ;;
+    esac
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"

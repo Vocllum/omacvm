@@ -83,12 +83,16 @@ if [[ $BRIDGE == on ]]; then
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
-  for w in omacvm.wifi omacvm.audio omacvm.nightshift; do
+  bt=$(as_user omacvm-bridge bluetooth 2>/dev/null)
+  if jq -e .devices >/dev/null 2>&1 <<<"$bt"; then
+    ok "Bluetooth" "$(jq -r '"\(if .power then "on" else "off" end), \([.devices[] | select(.connected)] | length) of \(.devices | length) devices connected"' <<<"$bt")"
+  else bad "Bluetooth" "no answer from the Bridge"; fi
+  for w in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.nightshift; do
     if [[ " $layout " == *" $w "* ]]; then ok "bar: $w" "in the bar"
     elif [[ -s $H/.local/state/omacvm/pending-plugins ]]; then bad "bar: $w" "queued, not enabled yet (log out and in)"
     else bad "bar: $w" "not in the bar"; fi
   done
-  for w in omarchy.network omarchy.audio; do
+  for w in omarchy.bluetooth omarchy.network omarchy.audio; do
     [[ " $layout " == *" $w "* ]] && bad "bar: $w" "the stock widget is back next to OmacVM's"
   done
   if jq -e '.plugins[]? | select(.id == "omacvm.wifiqr")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then ok "Wi-Fi QR card" "omacvm.wifiqr"

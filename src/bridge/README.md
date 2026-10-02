@@ -1,7 +1,7 @@
 # OmacVM Bridge
 
-The Mac's Wi-Fi, audio, media keys and display, inside the Omarchy VM. The VM
-only has a virtual Ethernet card and a virtual sound card; the bridge is a
+The Mac's Wi-Fi, Bluetooth, audio, media keys and display, inside the Omarchy
+VM. The VM only has a virtual Ethernet card and a virtual sound card; the bridge is a
 small Mac menu-bar app that serves the real thing as JSON over the private
 VM network (Parallels or UTM) and pushes every change as Server-Sent Events.
 
@@ -14,11 +14,14 @@ VM network (Parallels or UTM) and pushes every change as Server-Sent Events.
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Night light | `guest/omarchy-toggle-nightlight` in `/usr/local/bin`, ahead of Omarchy's: Super+Ctrl+N and the menu switch the Mac's Night Shift |
-| Bar widgets | `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's network and audio widgets) |
+| Bar widgets | `plugins/omacvm.bluetooth`, `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's Bluetooth, network and audio widgets; Super+Ctrl+B opens the Bluetooth one), `plugins/omacvm.nightshift` |
 
-Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, AppKit, Security,
-and the private DisplayServices and CoreBrightness (brightness, Night Shift,
-True Tone, keyboard light).
+Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, IOBluetooth,
+CoreBluetooth (the permission), AppKit, Security, and the private
+DisplayServices and CoreBrightness (brightness, Night Shift, True Tone,
+keyboard light). Bluetooth power and forgetting a device use IOBluetooth's
+private `IOBluetoothPreferenceSetControllerPowerState` and
+`-[IOBluetoothDevice remove]` (as `blueutil` does), looked up at run time.
 
 ## Permissions
 
@@ -26,6 +29,7 @@ True Tone, keyboard light).
 |---|---|---|
 | Location Services | macOS only shows Wi-Fi names to apps with it; no location is read | prompt on first start; System Settings › Privacy & Security › Location Services |
 | Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
+| Bluetooth | connecting, disconnecting, forgetting and switching from the VM (without it the devices are listed read-only, from macOS's system report) | prompt on first start; Privacy & Security › Bluetooth |
 | Keychain (per request) | the Wi-Fi password for QR sharing | macOS asks for an administrator's approval every time |
 
 The menu-bar icon shows both grants and links to the settings. Permissions
@@ -37,10 +41,11 @@ Every request needs `Authorization: Bearer <token>`; JSON in and out, errors
 are `{"error": "…"}`. The client wraps all of it:
 
 ```bash
-omacvm-bridge state | scan [--cached] | audio | display | events
+omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events
 omacvm-bridge volume +5 | mute | mic-volume 60 | output <uid>
 omacvm-bridge brightness -5 | night-shift toggle | night-shift strength 70 | true-tone off
 omacvm-bridge password [ssid]
+omacvm-bridge bluetooth power toggle | connect AA:BB:CC:DD:EE:FF | disconnect … | forget … | settings
 ```
 
 ```bash
@@ -112,16 +117,44 @@ curl "${H[@]}" -d '{"enabled": false}'         $B/display/true-tone
 `enabled` is Night Shift's manual switch (tinting now); the schedule stays as
 set in macOS.
 
+### Bluetooth
+
+`GET /bluetooth`:
+
+```json
+{"available":true,"power":true,"permission":"granted","power_settable":true,"forget_supported":true,
+ "devices":[{"address":"30:7A:D2:32:1E:AE","name":"AirPods Pro","kind":"headphones","paired":true,
+             "connected":true,"battery":{"left":85,"right":90,"case":40}}]}
+```
+
+- `kind`: `headphones`, `headset`, `speaker`, `keyboard`, `mouse`,
+  `trackpad`, `gamepad`, `phone` or `other` (macOS's own classification).
+- `battery` for connected devices that report one: `left`/`right`/`case`
+  (AirPods, Beats) or `main`; otherwise `null`.
+- `permission`: `granted`, `not-determined` or `denied`. Without it the list
+  comes from macOS's system report and the actions answer `403`.
+
+```bash
+curl "${H[@]}" -d '{"enabled": "toggle"}'                 $B/bluetooth/power      # true | false | "toggle"
+curl "${H[@]}" -d '{"address": "30:7A:D2:32:1E:AE"}'      $B/bluetooth/connect    # also /disconnect, /forget
+curl "${H[@]}" -d '{}'                                    $B/bluetooth/settings   # the Mac's Bluetooth settings
+```
+
+`connect` waits until the device is connected (`409` when it does not answer,
+after about 15 s). Pairing a new device needs macOS's own dialog, so the
+panel's "Pair a new device…" opens the Mac's Bluetooth settings.
+
 ### Events
 
-`GET /events` (Server-Sent Events): on connect the current `wifi`, `audio` and
-`display`; then
+`GET /events` (Server-Sent Events): on connect the current `wifi`, `audio`,
+`display` and `bluetooth`; then
 
 | event | when |
 |---|---|
 | `wifi` | power, SSID, BSSID, link, mode changes (CoreWLAN events, ~0.3 s); RSSI re-read every 5 s |
 | `audio` | default device, volume, mute, devices added/removed (CoreAudio listeners) |
 | `display` | Night Shift (its own notification), True Tone, brightness |
+| `bluetooth` | power, devices connecting and disconnecting (IOBluetooth notifications), anything else within 5 s; battery re-read every minute while something is connected |
 | `scan` | an active scan finished, or macOS refreshed its scan cache (≤ every 10 s) |
 | `osd` | `{"type":"osd","kind":"volume"\|"mute"\|"brightness"\|"keyboard","value":0-100,"muted":bool,"source":"keys"\|"api"\|"external","device":"…"}` |
 
