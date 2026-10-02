@@ -249,6 +249,17 @@ speed: 1 up to 15 mm/s (fine scrolling unchanged), smoothstep up to 3 at
 accelerated speed (the hand-over matches what was sent). Scroll factor 0.082,
 libinput acceleration flat.
 
+- Very unnatural when scrolling fast: decelerating and accelerating within a
+  swipe. The finger speed fluctuates within one stroke, and an instantaneous
+  gain curve follows those fluctuations. Off again (gain 1).
+
+### 17. libinput's adaptive acceleration at a low base speed (in progress)
+
+Our curve off (`OMACVM_SCROLL_ACCEL=15 150 1`); the virtual trackpad back to
+libinput's adaptive profile (smooth, built for this), scroll factor 0.1, the
+low base speed confirmed for slow scrolling. In test 12 adaptive was "slow to
+medium a bit too much", but at 0.25, when everything was far too fast.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
