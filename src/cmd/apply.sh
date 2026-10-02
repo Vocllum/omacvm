@@ -47,7 +47,7 @@ done
 macos=$(sw_vers -productVersion 2>/dev/null)
 (( ${macos%%.*} >= 14 )) || { echo "omacvm apply: OmacVM needs macOS 14 (Sonoma) or newer; this Mac runs $macos" >&2; exit 3; }
 export OMA_KEY=$KEY
-[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q; }
+[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; mkdir -p "$(dirname "$KEY")" && chmod 700 "$(dirname "$KEY")"; ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q; }
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
 # ---------- which VM ----------

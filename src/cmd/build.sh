@@ -367,7 +367,7 @@ build_end() {
 trap 'build_end; ui_restore' EXIT
 
 KEY=~/.ssh/omacvm
-[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
+[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; mkdir -p "$(dirname "$KEY")" && chmod 700 "$(dirname "$KEY")"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
 export OMA_KEY=$KEY
 started=$(date +%s)
 
