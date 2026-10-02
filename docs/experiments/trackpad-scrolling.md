@@ -499,6 +499,30 @@ the chain is then adjusted relative to it:
   kept in `/var/lib/omacvm/scroll-calibration`. On the reference Mac it stays
   at about 1.
 
+### 29. Chromium vs the rest (in progress)
+
+Recording 9 (Chrome and Files side by side): "Chrome is perfect now, Files is
+not: slower, without the same acceleration, and the system in general too";
+"Slack is very smooth" (Electron, i.e. Chromium). Apps convert touchpad scroll
+values differently, and everything had been tuned against Chrome. The Files
+list in the recording was too short to measure (it hit its end), and a
+synthetic in-VM measurement was dropped: on a desktop in use it captured the
+wrong windows, including a login form; the screenshots were deleted.
+
+Ratio from the user's own earlier judgement instead: test 2 ("Files very close
+to macOS") had raw scrolling at 3.3 times today's Chrome-tuned value, converted
+to the same display scale. Omarchy itself sets per-app touchpad speeds
+(`o.window(..., { scroll_touchpad = ... })`, terminals 1.5), so:
+
+- base scroll factor x3.3 (`0.328 * 3.3 * 2 / omarchy_monitor_scale`): GTK
+  and the rest;
+- `scroll_touchpad = 1 / 3.3` for Chromium-based windows (Chromium, Chrome,
+  Brave, Edge, Vivaldi, Omarchy's web apps `chrome-*`, Slack, Discord,
+  VS Code, Cursor, Obsidian, Signal, Spotify, 1Password, Teams, Figma,
+  Electron): exactly as before for them.
+
+Results: pending.
+
 ## Candidate if the wheel cannot pan a zoomed page
 
 Replay macOS's physics as **touchpad** movement instead of wheel steps: move
