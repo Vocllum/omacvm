@@ -163,7 +163,19 @@ the momentum has died down. Touchpad scroll factor for the virtual trackpad:
   156 x 96 mm, so fingers, pinch and swipes feel the same and a glide has room.
 - At the edge the fingers stop and lift after the hold instead of letting go.
 
-Results: pending (baseline: 40 jump warnings before this test).
+- Macro level great; no new touch-jump warnings (still 40): the skipping is
+  gone.
+- Long scrolling (several flicks in a row) often jumps back. Cause: fingers
+  touching down during a glide reuse the trackpad's contact ids, so the new
+  touch continued the glide's virtual touch and leapt back from where the
+  glide had got to.
+
+### 11. A new touch ends the glide's touch first (in progress)
+
+When real fingers touch down while a glide runs, the glide's virtual fingers
+lift first (pending momentum dropped), and the real fingers start a fresh touch.
+
+Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
 

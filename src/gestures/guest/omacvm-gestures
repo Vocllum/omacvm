@@ -233,7 +233,13 @@ class Hybrid:
     def frame(self, contacts):
         now = time.monotonic()
         if contacts:
-            self.held = None
+            if self.held is not None:
+                # Fingers back during a glide: end the glide's touch first, so
+                # the new touch does not continue it (the trackpad reuses ids)
+                # and leap back from where the glide had got to.
+                self.held = None
+                self.pending = [0.0, 0.0]
+                self.pad.frame([])
             self.touch.down = False
             if len(contacts) == 2:
                 self.hist = (self.hist + [(now, (contacts[0][1] + contacts[1][1]) / 2,
