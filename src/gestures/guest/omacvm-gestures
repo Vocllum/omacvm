@@ -241,6 +241,19 @@ class OneEuro:
 
 _f = os.environ.get("OMACVM_SCROLL_FILTER", "1.5 0.1").split()
 FILTER_MIN_CUTOFF, FILTER_BETA = float(_f[0]), float(_f[1])
+# Acceleration of two-finger scrolling, like macOS's: gain 1 below V0 mm/s of
+# finger speed (fine scrolling stays exact), rising smoothly to GAIN at V1.
+_a = os.environ.get("OMACVM_SCROLL_ACCEL", "15 150 3").split()
+ACCEL_V0, ACCEL_V1, ACCEL_GAIN = float(_a[0]), float(_a[1]), float(_a[2])
+
+
+def scroll_gain(v):
+    if v <= ACCEL_V0:
+        return 1.0
+    x = min(1.0, (v - ACCEL_V0) / (ACCEL_V1 - ACCEL_V0))
+    return 1.0 + (ACCEL_GAIN - 1.0) * x * x * (3 - 2 * x)    # smoothstep
+
+
 # Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
 # gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
 PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
@@ -324,7 +337,21 @@ class Hybrid:
             return contacts
         fx = t["fx"](cx / RES, now) * RES
         fy = t["fy"](cy / RES, now) * RES
-        return [(c[0], round(fx + o[0]), round(fy + o[1])) for c, o in zip(contacts, t["off"])]
+        if "vx" not in t:
+            t.update(vx=fx, vy=fy, px=fx, py=fy, pt=now, speed=0.0)
+        else:
+            # The virtual centre moves by the filtered movement times the gain
+            # for the current finger speed (mm/s, smoothed).
+            dx, dy, dt = fx - t["px"], fy - t["py"], max(now - t["pt"], 1e-3)
+            v = math.hypot(dx, dy) / RES / dt
+            t["speed"] = 0.7 * t["speed"] + 0.3 * v
+            g = scroll_gain(t["speed"])
+            t["vx"] += dx * g
+            t["vy"] += dy * g
+            t.update(px=fx, py=fy, pt=now)
+        vx = min(max(t["vx"], 2000), PAD_W - 2000)
+        vy = min(max(t["vy"], 2000), PAD_H - 2000)
+        return [(c[0], round(vx + o[0]), round(vy + o[1])) for c, o in zip(contacts, t["off"])]
 
     def pinch(self):
         """macOS recognized a pinch: the current two-finger touch goes raw. libinput

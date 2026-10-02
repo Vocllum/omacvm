@@ -237,6 +237,19 @@ The helper asks NSEvent for each gesture event's type (`ns_event_type` in
 then it sends `P`. Scroll factor 0.096.
 
 - **Pinch zoom works again**, started by macOS's own recognition.
+- Speed: 15 % slower again, 0.082: slow scrolling now very good, but fast
+  scrolling far too slow; macOS accelerates much more.
+
+### 16. Our own acceleration curve for the finger phase (in progress)
+
+`OMACVM_SCROLL_ACCEL` ("V0 V1 GAIN", default "15 150 3"): the virtual centre
+moves by the filtered finger movement times a gain for the smoothed finger
+speed: 1 up to 15 mm/s (fine scrolling unchanged), smoothstep up to 3 at
+150 mm/s (30 mm/s 1.07, 60 mm/s 1.5, 100 mm/s 2.4). The glide takes over the
+accelerated speed (the hand-over matches what was sent). Scroll factor 0.082,
+libinput acceleration flat.
+
+Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
 
