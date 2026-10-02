@@ -10,6 +10,8 @@ if [[ ${1:-} == --status ]]; then
   omacvm-bridge display | jq -c '{enabled: (.night_shift.enabled // false), temperature: null}'
   exit 0
 fi
+# The VM's own night light stays off: one tint, the Mac's.
+pkill -x hyprsunset 2>/dev/null || true
 state=$(omacvm-bridge night-shift toggle | jq -r '.night_shift.enabled')
 if [[ $state == true ]]; then
   omarchy-notification-send -u low "  Night Shift on (Mac)" 2>/dev/null || true

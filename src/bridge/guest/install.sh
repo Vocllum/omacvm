@@ -8,7 +8,9 @@
 #   /usr/local/bin/omarchy-network-{qr,password} (Omarchy's Wi-Fi QR card shares the Mac's network)
 #   user service omacvm-bridge-osd (Omarchy OSD for the Mac's media keys)
 #   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
-#   the bar widgets in ../plugins (omacvm.wifi, omacvm.audio)
+#   the bar widgets in ../plugins (omacvm.wifi, omacvm.audio, omacvm.nightshift)
+#   Omarchy's own night light out of the way (indicator hidden, hyprsunset
+#   stopped): the Mac's Night Shift tints the whole screen, never both
 # The token (~/.config/omacvm-bridge/token) comes from the Mac, see push-guest.sh.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -41,7 +43,26 @@ for dev in @DEFAULT_AUDIO_SINK@ @DEFAULT_AUDIO_SOURCE@; do
   as_user wpctl set-mute "$dev" 0 2>/dev/null || true
 done
 
-# Bar widgets: the Mac's Wi-Fi and audio, in the slots of Omarchy's own.
+# Bar widgets: the Mac's Wi-Fi and audio, in the slots of Omarchy's own, and
+# the Mac's Night Shift.
 for p in ../plugins/*/; do [[ -f $p/manifest.json ]] && ../../lib/install-plugin.sh "$U" "$p"; done
+
+# Night light: the Mac's Night Shift replaces Omarchy's (hyprsunset in the VM),
+# so the screen is never tinted twice. Omarchy's night light indicator leaves
+# the indicators widget (it would switch hyprsunset); the marker keeps what it
+# had, so turning the Bridge off puts it back (../../guest/install.sh).
+pkill -x hyprsunset 2>/dev/null || true
+C=$H/.config/omarchy/shell.json
+MARK=$H/.local/state/omacvm/nightlight-indicator
+if [[ -f $C ]] && jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators")] | length > 0' "$C" >/dev/null; then
+  if [[ ! -f $MARK ]]; then
+    install -d -o "$U" -g "$U" "$(dirname "$MARK")"
+    jq -c '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | .items] | first' "$C" > "$MARK"
+    chown "$U:$U" "$MARK"
+  fi
+  tmp=$(mktemp)
+  jq '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (.items = ((.items // ["Dictation", "ScreenRecording", "Reminder", "NightLight", "Dnd", "StayAwake"]) - ["NightLight"]))' "$C" > "$tmp"
+  install -o "$U" -g "$U" -m600 "$tmp" "$C"; rm -f "$tmp"
+fi
 
 echo "omacvm-bridge guest side installed for $U"

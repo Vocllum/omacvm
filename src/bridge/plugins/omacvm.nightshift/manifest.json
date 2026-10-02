@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "omacvm.nightshift",
+  "name": "Night Shift (Mac)",
+  "version": "1.0.0",
+  "author": "OmacVM (with Omarchy's night light icon)",
+  "description": "The Mac's Night Shift in the bar: lit while it is on, a click switches it, via omacvm-bridge",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "NightShift.qml"
+  },
+  "barWidget": {
+    "displayName": "Night Shift (Mac)",
+    "description": "The Mac's Night Shift in the bar: lit while it is on, a click switches it",
+    "category": "System",
+    "allowMultiple": false
+  }
+}

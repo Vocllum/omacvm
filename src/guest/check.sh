@@ -83,7 +83,7 @@ if [[ $BRIDGE == on ]]; then
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
-  for w in omacvm.wifi omacvm.audio; do
+  for w in omacvm.wifi omacvm.audio omacvm.nightshift; do
     if [[ " $layout " == *" $w "* ]]; then ok "bar: $w" "in the bar"
     elif [[ -s $H/.local/state/omacvm/pending-plugins ]]; then bad "bar: $w" "queued, not enabled yet (log out and in)"
     else bad "bar: $w" "not in the bar"; fi
@@ -94,6 +94,9 @@ if [[ $BRIDGE == on ]]; then
   if jq -e '.plugins[]? | select(.id == "omacvm.wifiqr")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then ok "Wi-Fi QR card" "omacvm.wifiqr"
   else bad "Wi-Fi QR card" "omacvm.wifiqr not enabled"; fi
   check "Night Shift toggle" "Super+Ctrl+N drives the Mac" test -x /usr/local/bin/omarchy-toggle-nightlight
+  if jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | (.items // ["NightLight"]) | index("NightLight")] | all(. == null)' "$H/.config/omarchy/shell.json" >/dev/null 2>&1 && ! pgrep -x hyprsunset >/dev/null; then
+    ok "one night light" "the Mac's Night Shift; Omarchy's own is off"
+  else bad "one night light" "Omarchy's night light (hyprsunset) is still reachable or running: omacvm apply"; fi
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
     else bad "wallpaper" "omacvm-wallpaper.path not active"; fi
