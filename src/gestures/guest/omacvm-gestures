@@ -29,8 +29,12 @@ from evdev import AbsInfo, UInput, ecodes as e
 HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") or "10.211.55.2"
 PORT = int(os.environ.get("OMACVM_GESTURES_PORT", "47830"))
 USER = os.environ.get("OMACVM_GESTURES_USER", "")   # default: whoever owns the Wayland session
-# Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm.
+# Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm. The real
+# trackpad maps onto the middle of a much larger virtual one, so a glide from
+# macOS's momentum (--scroll) has room to run; fingers feel exactly the same.
 W, H, RES = 15600, 9600, 100
+PAD_W, PAD_H = 100000, 100000
+OFF_X, OFF_Y = (PAD_W - W) // 2, (PAD_H - H) // 2
 SLOTS = 10
 TOOLS = [e.BTN_TOOL_FINGER, e.BTN_TOOL_DOUBLETAP, e.BTN_TOOL_TRIPLETAP, e.BTN_TOOL_QUADTAP, e.BTN_TOOL_QUINTTAP]
 
@@ -39,12 +43,12 @@ def make_device():
     caps = {
         e.EV_KEY: [e.BTN_LEFT, e.BTN_TOUCH] + TOOLS,
         e.EV_ABS: [
-            (e.ABS_X, AbsInfo(0, 0, W, 0, 0, RES)),
-            (e.ABS_Y, AbsInfo(0, 0, H, 0, 0, RES)),
+            (e.ABS_X, AbsInfo(0, 0, PAD_W, 0, 0, RES)),
+            (e.ABS_Y, AbsInfo(0, 0, PAD_H, 0, 0, RES)),
             (e.ABS_MT_SLOT, AbsInfo(0, 0, SLOTS - 1, 0, 0, 0)),
             (e.ABS_MT_TRACKING_ID, AbsInfo(0, 0, 65535, 0, 0, 0)),
-            (e.ABS_MT_POSITION_X, AbsInfo(0, 0, W, 0, 0, RES)),
-            (e.ABS_MT_POSITION_Y, AbsInfo(0, 0, H, 0, 0, RES)),
+            (e.ABS_MT_POSITION_X, AbsInfo(0, 0, PAD_W, 0, 0, RES)),
+            (e.ABS_MT_POSITION_Y, AbsInfo(0, 0, PAD_H, 0, 0, RES)),
         ],
     }
     # Apple vendor id, Magic Trackpad (USB-C) product id: libinput applies its
@@ -173,7 +177,7 @@ class TouchScroll:
         self.x = self.y = 0.0
 
     def _place(self):
-        self.x, self.y = W / 2, H / 2
+        self.x, self.y = PAD_W / 2, PAD_H / 2
         self.down = True
 
     def _frame(self):
@@ -189,7 +193,7 @@ class TouchScroll:
         dx, dy = slow_boost(dx), slow_boost(dy)
         nx = self.x + dx * TOUCH_UNITS_PER_POINT
         ny = self.y + dy * TOUCH_UNITS_PER_POINT
-        if not (1500 < nx < W - 1500 and 1000 < ny < H - 1000):
+        if not (1500 < nx < PAD_W - 1500 and 1000 < ny < PAD_H - 1000):
             # Off the edge: hold still for a moment, lift, start again in the middle.
             for _ in range(3):
                 self._frame()
@@ -223,6 +227,8 @@ class Hybrid:
         self.moved = 0.0     # last momentum step
         self.scale = None    # touchpad units per macOS point for this momentum
         self.wprev = None
+        self.pending = [0.0, 0.0]   # momentum not yet applied, touchpad units
+        self.tick = 0.0
 
     def frame(self, contacts):
         now = time.monotonic()
@@ -241,6 +247,7 @@ class Hybrid:
             # Two fingers lifted: stay down, macOS's momentum may follow.
             self.held = [list(c) for c in self.contacts]
             self.lifted, self.scale, self.wprev = now, None, None
+            self.pending = [0.0, 0.0]
             self.contacts = []
             return
         self.contacts, self.hist = [], []
@@ -262,20 +269,39 @@ class Hybrid:
                 print(f"hand-over: fingers {vf:.0f} units/s, momentum {vw:.0f} pt/s, scale {self.scale:.1f}", flush=True)
         s = self.scale or TOUCH_UNITS_PER_POINT
         self.wprev = now
-        for c in self.held:
-            c[1] += dx * s
-            c[2] += dy * s
-        if not all(0 <= c[1] <= W and 0 <= c[2] <= H for c in self.held):
-            self.pad.frame([])             # off the touchpad: let go
-            self.held = None
-            return
-        self.pad.frame([(c[0], round(c[1]), round(c[2])) for c in self.held])
+        self.pending[0] += dx * s
+        self.pending[1] += dy * s
         self.moved = now
+        self.drain()
+
+    MAX_STEP = 200            # touchpad units (2 mm) per 4 ms tick: libinput never sees a jump
+
+    def drain(self):
+        """Apply pending momentum in small, evenly timed steps."""
+        if self.held is None or not (self.pending[0] or self.pending[1]):
+            return
+        now = time.monotonic()
+        if now - self.tick < 0.004:
+            return
+        self.tick = now
+        px, py = self.pending
+        d = math.hypot(px, py)
+        k = min(1.0, self.MAX_STEP / d) if d else 0.0
+        sx, sy = px * k, py * k
+        if not all(500 <= c[1] + sx <= PAD_W - 500 and 500 <= c[2] + sy <= PAD_H - 500 for c in self.held):
+            self.pending = [0.0, 0.0]      # at the edge: stop here, lift after the hold
+            return
+        for c in self.held:
+            c[1] += sx
+            c[2] += sy
+        self.pending = [px - sx, py - sy]
+        self.pad.frame([(c[0], round(c[1]), round(c[2])) for c in self.held])
 
     def idle(self):
         self.touch.idle()
         if self.held is None:
             return
+        self.drain()
         now = time.monotonic()
         if (self.moved < self.lifted and now - self.lifted > self.MOMENTUM_WAIT) or \
            (self.moved >= self.lifted and now - self.moved > TOUCH_LIFT_AFTER):
@@ -331,7 +357,7 @@ def notify(text):
 
 def run(pad, keys, wheel, touch, hybrid):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
-        s.settimeout(0.02)
+        s.settimeout(0.004)        # also the momentum's step clock
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print(f"omacvm-gestures: connected to {HOST}:{PORT}", flush=True)
         buf = b""
@@ -341,6 +367,7 @@ def run(pad, keys, wheel, touch, hybrid):
             except socket.timeout:
                 hybrid.idle()
                 continue
+            hybrid.idle()
             if not data:
                 raise ConnectionError("helper closed the connection")
             buf += data
@@ -354,7 +381,7 @@ def run(pad, keys, wheel, touch, hybrid):
                     contacts = []
                     for i in range(n):
                         cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
-                        contacts.append((cid, round(min(max(x, 0.0), 1.0) * W), round(min(max(y, 0.0), 1.0) * H)))
+                        contacts.append((cid, OFF_X + round(min(max(x, 0.0), 1.0) * W), OFF_Y + round(min(max(y, 0.0), 1.0) * H)))
                     if SCROLL_MODE == "touch":
                         hybrid.frame(contacts)
                     else:

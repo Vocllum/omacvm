@@ -147,7 +147,23 @@ scaled so that the speed at the hand-over matches the fingers' last speed
 the momentum has died down. Touchpad scroll factor for the virtual trackpad:
 0.25 (acceleration stays the default, which suits the 3/4-finger swipes).
 
-Results: pending.
+- **Overall awesome, at the macro level better than macOS.** Fast scrolling
+  jumps and skips.
+- Cause: Hyprland's log shows libinput's "kernel bug: Touch jump detected and
+  discarded" for the virtual trackpad (40 times). Hand-over scales were 3-21
+  touchpad units per point and momentum steps up to 45 points: several
+  millimetres in one frame, which libinput drops as a jump. Long glides also
+  ran off the 156 x 96 mm virtual touchpad.
+
+### 10. Momentum in small, evenly timed steps; room for the glide (in progress)
+
+- Momentum steps are queued and applied every 4 ms, at most 2 mm per step
+  (a few milliseconds of extra delay in the glide only; the fingers stay direct).
+- The virtual touchpad is 1 x 1 m; the real trackpad maps onto its middle
+  156 x 96 mm, so fingers, pinch and swipes feel the same and a glide has room.
+- At the edge the fingers stop and lift after the hold instead of letting go.
+
+Results: pending (baseline: 40 jump warnings before this test).
 
 ## Candidate if the wheel cannot pan a zoomed page
 
