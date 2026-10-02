@@ -124,16 +124,15 @@ wait_for_app() {
           hd "Parallels Desktop has no licence yet"
           say "    That is fine: it starts its free trial (Pro) or asks you to sign in when the"
           say "    build starts the VM; click through it then. Until a licence is active it does"
-          say "    not say how much a VM may use, so: which edition will you use?"
-          say "      1  Standard        4 CPUs, 8 GB per VM"
-          say "      2  Pro or the trial  up to 32 CPUs, 128 GB per VM (after a trial that ends in"
-          say "                           Standard, lower the VM to 4 CPUs / 8 GB in its settings)"
-          read -r -p "  1, 2, r to check the licence again, q to quit [1]: " a < "$TTY" || die "no answer (no terminal?)"
-          case ${a:-1} in
-            q) exit 1 ;;
-            r) continue ;;
-            2) parallels_planned_limits pro; return 0 ;;
-            1) parallels_planned_limits standard; return 0 ;;
+          say "    not say how much a VM may use."
+          local e
+          ui_select e "Which edition will you use?" 0 \
+            "Standard|4 CPUs, 8 GB per VM" \
+            "Pro or the trial|up to 32 CPUs, 128 GB per VM (if the trial ends in Standard: 4 CPUs / 8 GB in the VM's settings)" \
+            "Check the licence again|after starting the trial or signing in"
+          case $e in
+            0) parallels_planned_limits standard; return 0 ;;
+            1) parallels_planned_limits pro; return 0 ;;
           esac
           continue
         elif [[ -x $PRLCTL && $rc == 2 ]]; then

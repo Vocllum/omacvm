@@ -143,34 +143,37 @@ omacvm            # or: omacvm build
   <img src="docs/build.svg" alt="A terminal running omacvm: live installer, Arch Linux ARM, Omarchy from omarchy-mac, OmacVM on the Mac and in the VM, then the Omarchy desktop." width="100%">
 </p>
 
-It asks a few questions before it builds anything:
+It first shows what it found on your Mac (Xcode's command line tools,
+Homebrew, Parallels, UTM) and installs what is missing, after asking. Then a
+few screens (↑/↓ to choose, space to switch, Return to confirm):
 
 1. **Parallels or UTM**, with the comparison above. If the app isn't
-   installed yet (or UTM is older than 5), it says how to get the right
-   version and waits.
-2. **How much of the Mac the VM gets**: Low, Balanced, High or Best (arrow
-   keys), shown as CPUs and memory; every value can be changed. Best leaves
-   macOS and the GPU a buffer of a quarter of the memory, at least 8 GB.
-   Parallels Standard allows 4 CPUs and 8 GB, and OmacVM stays within that.
-3. **The recommended settings**, which you can take as they are or go
-   through one by one:
+   installed yet (or UTM is older than 5), it offers to install it with
+   Homebrew, or tells you how. A fresh Parallels without a licence yet asks
+   which edition you plan on (the trial is Pro).
+2. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
+   CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
+   quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs
+   and 8 GB, and OmacVM stays within that.
+3. **Features**, one checklist with the recommended ones on:
 
    | | Default |
    |---|---|
    | OmacVM Bridge: the Mac's Wi-Fi, audio, Night Shift and media keys in Omarchy | on |
    | Omarchy's wallpaper on the Mac too | on |
    | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
+   | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
-   | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | kept |
+   | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
 
-4. **macOS-native scroll momentum**, on its own: experimental, so you choose it (default off).
-5. **Your user name, full name and password.** Omarchy's own first-boot setup
+4. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
 
-Then it shows a summary and starts: 30 to 70 minutes, mostly downloads and
-Omarchy's install. A VM window opens on the way: that is the temporary
+Then it shows a summary and starts: 30 to 70 minutes in numbered steps,
+mostly downloads and Omarchy's install, with the whole log in
+`~/Library/Logs/omacvm-build-*.log`. A VM window opens on the way: that is the temporary
 installer, leave it alone. `omacvm build --dry-run` asks everything and stops
 at the summary; `omacvm build --help` lists the options for unattended builds.
 Your keyboard layout, timezone and language come from the Mac.

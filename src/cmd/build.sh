@@ -26,6 +26,8 @@ source "$R/src/vm/utm.sh"
 source "$R/src/lib/setup.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
+source "$R/src/lib/ui.sh"
+source "$R/src/lib/prereq.sh"
 features_load
 
 # The Linux user name suggested from the Mac's: lower case, letters, digits,
@@ -97,28 +99,18 @@ free_gb=$(df -g "$HOME" | awk 'END { print $4 }')
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 [[ -n $OMANOTCH ]] || { [[ $NOTCH == notch ]] && OMANOTCH=1 || OMANOTCH=0; }
 
-(( JSON )) || printf '\n\033[1mOmacVM\033[0m: Omarchy in a VM on your Mac, feeling native.\n'
+if (( ! JSON )); then
+  printf '\n  \033[1;36m⌘\033[0m \033[1mOmacVM %s\033[0m  Omarchy in a VM on your Mac, feeling native\n' "$(cat "$R/src/VERSION")"
+  (( YES )) || prereq_screen
+fi
 
-# Tools the build needs: Homebrew's zstd and e2fsprogs are installed right
-# away (the live installer would install them too); only Homebrew itself and
-# Xcode's command line tools need the person. A plan installs nothing.
-command -v swiftc >/dev/null || needs_person "missing Xcode's command line tools (the Swift compiler): run xcode-select --install, then omacvm again"
-missing=""
-command -v zstd >/dev/null || missing+=" zstd"
-command -v e2fsck >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/e2fsck ]] || missing+=" e2fsprogs"
-# The password's SHA-512 hash: macOS's own LibreSSL has no "passwd -6".
-sha512_openssl() {
-  local o
-  for o in openssl "$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"; do
-    printf x | "$o" passwd -6 -stdin >/dev/null 2>&1 && { echo "$o"; return 0; }
-  done
-  return 1
-}
-sha512_openssl >/dev/null || missing+=" openssl@3"
-if [[ -n $missing ]] && (( ! PLAN )); then
-  command -v brew >/dev/null || needs_person "OmacVM needs Homebrew (https://brew.sh) for$missing: install Homebrew, then omacvm again"
-  log "installing from Homebrew:$missing"
-  brew install -q $missing >/dev/null || needs_person "brew install$missing failed: run it yourself, then omacvm again"
+# What the build needs: Xcode's command line tools and Homebrew (installed
+# after asking), then Homebrew's zstd, e2fsprogs and OpenSSL. A plan only reports.
+if (( PLAN )); then
+  have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
+else
+  ensure_xcode_tools
+  ensure_brew_tools
 fi
 (( free_gb >= 60 )) || needs_person "need ~60 GB free disk space (have $free_gb GB)"
 
@@ -126,17 +118,14 @@ fi
 # ---------- 1. Parallels or UTM ----------
 if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels or utm"
-  hd "Where should Omarchy run?"
-  say "    1  Parallels Desktop  near-native speed, every display. Paid; Standard allows"
-  say "                          4 CPUs / 8 GB per VM, Pro (and the trial) up to 18 / 128 GB."
-  say "    2  UTM                free, no resource limits; one display, slower desktop."
-  say "                          Needs UTM 5, a beta for now (brew install --cask utm@beta)."
+  ui_select pick "Where should Omarchy run?" 0 \
+    "Parallels Desktop|near-native speed, every display · paid" \
+    "UTM|free · one display, slower desktop · UTM 5 (beta)"
+  (( pick == 0 )) && TYPE=parallels || TYPE=utm
   say "    Comparison: $README_ROUTES"
-  while :; do
-    read -r -p "  Choose 1 or 2 [1]: " a < "$TTY" || die "no answer (no terminal?)"
-    case ${a:-1} in 1) TYPE=parallels; break ;; 2) TYPE=utm; break ;; esac
-  done
 fi
+# The app itself: installed now (after asking) when it is missing.
+(( PLAN )) || ensure_vm_app "$TYPE"
 CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; P_EDITION=""; P_TRIAL=""
 case $TYPE in
   parallels)
@@ -185,80 +174,61 @@ if [[ $low == "$T_CPUS/$T_MEM" && -n $LIMITED ]]; then
   (( YES )) || { hd "Resources"; say "    $LIMITED"; say "    The VM gets that: $T_CPUS CPUs, $T_MEM GB memory."; }
   tier=3
 elif (( ! YES )) && [[ -z $CPUS && -z $MEM_GB && -z $RES ]]; then
-  hd "How much of this Mac should the VM get?  ($mac_cores CPUs, $mac_mem_gb GB memory)"
+  say ""
   say "    The VM keeps memory it has touched until it stops; Best leaves macOS and the"
   say "    GPU a buffer of $(( mac_mem_gb / 4 > 8 ? mac_mem_gb / 4 : 8 )) GB.${LIMITED:+ $LIMITED}"
-  say "    ←/→ to choose, Return to confirm"
-  tier=$(pick 1 tier_info "${TIERS[@]}")
-  [[ -n $tier ]] || exit 1
+  opts=()
+  for t in 0 1 2 3; do tier_values "$t"; rec=""; (( t == 1 )) && rec="  (recommended)"; opts+=("${TIERS[$t]}|$T_CPUS CPUs, $T_MEM GB memory$rec"); done
+  opts+=("Custom|choose CPUs, memory and the disk size")
+  ui_select tier "How much of this Mac ($mac_cores CPUs, $mac_mem_gb GB) should the VM get?" 1 "${opts[@]}"
+  (( tier == 4 )) && { custom=1; tier=1; }
 fi
 tier_values "$tier"
 : "${CPUS:=$T_CPUS}"; : "${MEM_GB:=$T_MEM}"
 : "${DISK_GB:=$(( free_gb >= 400 ? 200 : 128 ))}"
-if (( ! YES )) && ! ask_yn "${TIERS[$tier]}: $CPUS CPUs, $MEM_GB GB memory, a $DISK_GB GB disk (grows as it fills). Use these? (n changes them)" y; then
+if (( ${custom:-0} )); then
   CPUS=$(ask_value "CPUs (1-$CAP_CPUS)" "$CPUS" '^[0-9]+$')
   MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$MEM_GB" '^[0-9]+$')
-  DISK_GB=$(ask_value "disk in GB (64-$(( free_gb - 20 )))" "$DISK_GB" '^[0-9]+$')
+  DISK_GB=$(ask_value "disk in GB, grows as it fills (64-$(( free_gb - 20 )))" "$DISK_GB" '^[0-9]+$')
 fi
 (( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
 (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
 (( DISK_GB >= 64 )) || die "disk: at least 64 GB"
 
 # ---------- 3. features ----------
-row() { printf '    %-68s %s\n' "$1" "$2"; }
+# The build's switches by feature name (src/features.tsv).
+fvar() {
+  case $1 in
+    bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
+    scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; idle-lock) echo IDLE_LOCK ;;
+    autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
+  esac
+}
+fget() { local v; v=$(fvar "$1"); echo "${!v:-0}"; }
+fput() { local v; v=$(fvar "$1"); [[ -n $v ]] && printf -v "$v" '%s' "$2"; return 0; }
 explain_features() {
-  row "Bridge: the Mac's Wi-Fi, audio, Night Shift, media keys in Omarchy" "$(onoff "$BRIDGE")"
-  (( BRIDGE )) && row "Omarchy's wallpaper on the Mac too" "$(onoff "$WALLPAPER")"
-  row "Trackpad gestures in Omarchy, in full screen (macOS's swipes are off then)" "$(onoff "$GESTURES")"
-  (( GESTURES )) && row "macOS-native scroll momentum (experimental)" "$(onoff "$GLIDE")"
-  if [[ $NOTCH == notch ]]; then row "Omanotch: Omarchy's bar beside the notch" "$(onoff "$OMANOTCH")"
-  else row "Omanotch (needs a MacBook with a notch)" off; fi
-  row "Omarchy's own screensaver and lock after idle" "$( (( IDLE_LOCK )) && echo kept || echo "off, the Mac's lock")"
-  row "Autologin into Omarchy" "$(onoff "$AUTOLOGIN")"
-  row "Memory-optimized kernel" "$(onoff "$THP")"
+  local i v state
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    v=$(fget "${FN[$i]}")
+    state=$( ((v)) && echo on || echo off)
+    [[ ${FN[$i]} == idle-lock ]] && state=$( ((v)) && echo kept || echo "off, the Mac's lock")
+    [[ ${FN[$i]} == omanotch && $NOTCH != notch ]] && state="off (no notch)"
+    printf '    %-48s %s%s\n' "${FTITLE[$i]}" "$state" "$(feature_has_tag "$i" experimental && echo "  (experimental)")"
+  done
 }
 if (( ! YES )); then
-  hd "Recommended settings"
-  explain_features
-  if ! ask_yn "Use these?" y; then
-    hd "Bridge"
-    say "    Omarchy's bar shows the Mac's real Wi-Fi and audio, Super+Ctrl+N switches the"
-    say "    Mac's Night Shift, and volume and brightness keys change the Mac."
-    ask_yn "Use OmacVM Bridge? (recommended)" y && BRIDGE=1 || BRIDGE=0
-    if (( BRIDGE )); then
-      ask_yn "Show Omarchy's wallpaper on your Mac too (follows the Omarchy theme)?" y && WALLPAPER=1 || WALLPAPER=0
-    else WALLPAPER=0; fi
-    hd "Trackpad gestures"
-    say "    3/4-finger swipes and pinch go to Omarchy while the VM is full screen; macOS's"
-    say "    Mission Control and Spaces swipes are off then. ⌃⌥⌘ Esc hands the trackpad back"
-    say "    to macOS."
-    ask_yn "Pass trackpad gestures to Omarchy? (recommended)" y && GESTURES=1 || GESTURES=0
-    if [[ $NOTCH == notch ]]; then
-      hd "Omanotch"
-      say "    Omarchy's bar beside the MacBook notch, in the strip a full-screen VM leaves black."
-      ask_yn "Use Omanotch? (recommended)" y && OMANOTCH=1 || OMANOTCH=0
-    fi
-    hd "Screensaver and lock"
-    say "    Omarchy starts its own screensaver after 2½ minutes and locks itself after 5"
-    say "    minutes without input in the VM, independently of your Mac."
-    ask_yn "Turn both off and rely on your Mac's lock?" n && IDLE_LOCK=0 || IDLE_LOCK=1
-    hd "Autologin"
-    ask_yn "Start straight into Omarchy without its login screen?" n && AUTOLOGIN=1 || AUTOLOGIN=0
-    hd "Memory-optimized kernel"
-    say "    Arch Linux ARM's kernel has neither transparent huge pages nor MGLRU; this"
-    say "    rebuilds it with both, for maximum memory performance in memory-heavy work."
-    say "    Adds about 10 minutes to the build and to every update, and follows kernel"
-    say "    updates only when rebuilt."
-    ask_yn "Build the memory-optimized kernel?" n && THP=1 || THP=0
-  fi
-  if (( GESTURES )); then
-    hd "macOS-native scroll momentum  (experimental, but awesome)"
-    say "    Two-finger scrolling in Omarchy with your Mac's own acceleration and momentum,"
-    say "    in every direction, pinch included, tuned side by side with macOS. Still an"
-    say "    experiment, so it is off unless you want it; switch it any time with"
-    say "    omacvm enable scroll-momentum / omacvm disable scroll-momentum."
-    ask_yn "Try it?" n && GLIDE=1 || GLIDE=0
-  fi
+  UI_KEYS=(); UI_LABELS=(); UI_DETAILS=(); UI_ON=(); UI_TAG=(); UI_OFF_REASON=(); UI_NEEDS=()
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    UI_KEYS+=("${FN[$i]}"); UI_LABELS+=("${FTITLE[$i]}"); UI_DETAILS+=("${FSUM[$i]}")
+    UI_ON+=("$(fget "${FN[$i]}")")
+    t=""; feature_has_tag "$i" experimental && t=experimental; feature_has_tag "$i" slow && t=slow
+    UI_TAG+=("$t")
+    r=""; feature_has_tag "$i" notch && [[ $NOTCH != notch ]] && r="needs a MacBook with a notch"
+    UI_OFF_REASON+=("$r")
+    n=${FNEEDS[$i]}; [[ $n == - ]] && n=""; UI_NEEDS+=("$n")
+  done
+  ui_checklist "Features (the recommended ones are on; switch any later with omacvm features)"
+  for ((i = 0; i < ${#UI_KEYS[@]}; i++)); do fput "${UI_KEYS[$i]}" "${UI_ON[$i]}"; done
 fi
 (( GESTURES )) || GLIDE=0
 (( BRIDGE )) || WALLPAPER=0
@@ -339,18 +309,16 @@ if [[ $TYPE == parallels ]]; then
 else
   APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
 fi
-cat <<EOF
-
-  OmacVM will build this VM:
-
-    VM             $VM, in $APP_LINE
-    resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
-    user           $U ($FULL), hostname $HOST
-    keyboard       $KB_SHOWN
-    timezone       $TZ_MAC, language $LANG_VM
-    Omarchy        omarchy-mac, $CHANNEL packages
-EOF
-explain_features
+box=("OmacVM will build this VM" ""
+     "VM         $VM, in $APP_LINE"
+     "resources  $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)"
+     "user       $U ($FULL), hostname $HOST"
+     "keyboard   $KB_SHOWN"
+     "timezone   $TZ_MAC, language $LANG_VM"
+     "Omarchy    omarchy-mac, $CHANNEL packages" "")
+while IFS= read -r l; do box+=("${l#    }"); done < <(explain_features)
+if (( UI_FANCY )) && ! (( YES )); then ui_box "${box[@]}"
+else printf '\n'; for l in "${box[@]}"; do printf '  %s\n' "$l"; done; fi
 echo
 if (( DRY )); then echo "  $( ((PLAN)) && echo Plan || echo "Dry run"): nothing was built."; exit 0; fi
 if (( ! YES )); then
@@ -383,13 +351,28 @@ if [[ $TYPE == parallels ]] && ! parallels_profile_emptied; then
   fi
 fi
 
+# From here on: numbered steps, and everything also into a log file.
+STEP=0; STEPS=$( [[ $TYPE == parallels ]] && echo 6 || echo 5)
+step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
+BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
+mkdir -p ~/Library/Logs
+exec > >(tee -a "$BUILD_LOG") 2>&1
+build_end() {
+  local rc=$?
+  (( rc == 0 )) && return
+  printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log: %s\n' "$STEP" "$STEPS" "$BUILD_LOG"
+  printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \
+    "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop" || echo UTM)"
+}
+trap 'build_end; ui_restore' EXIT
+
 KEY=~/.ssh/omacvm
 [[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
 export OMA_KEY=$KEY
 started=$(date +%s)
 
 # ---------- 2. temporary live installer + the real disk ----------
-log "temporary live installer (try-omarchy, about 1.4 GB download)"
+step "Temporary live installer (try-omarchy, about 1.4 GB download)"
 if [[ $TYPE == parallels ]]; then
   "$R/src/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
   PVM="$HOME/Parallels/$VM.pvm"
@@ -422,7 +405,7 @@ fi
 wait_ssh "$IP"
 
 # ---------- 3. Arch Linux ARM onto the NVMe disk ----------
-log "Arch Linux ARM onto the NVMe disk ($IP)"
+step "Arch Linux ARM onto the VM's disk ($IP)"
 {
   printf 'OMA_USER=%q\nOMA_FULLNAME=%q\nOMA_HASH=%q\nOMA_TZ=%q\nOMA_LANG=%q\nOMA_HOSTNAME=%q\n' \
     "$U" "$FULL" "$HASH" "$TZ_MAC" "$LANG_VM" "$HOST"
@@ -432,7 +415,7 @@ gssh "$IP" "cat > /root/omacvm.pub" < "$KEY.pub"
 gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh"
 gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 
-log "boot from the NVMe disk, drop the live installer"
+step "Booting from the new disk"
 if [[ $TYPE == utm ]]; then
   utm_wait_stopped "$VM"
   utm_drop_live "$VM"
@@ -467,10 +450,10 @@ fi
 wait_ssh "$IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------
-log "Omarchy from omarchy-mac (the longest step)"
+step "Omarchy from omarchy-mac (the longest step)"
 gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh"
 if [[ $TYPE == parallels ]]; then
-  log "Parallels Tools"
+  step "Parallels Tools"
   gssh "$IP" "cat > /root/prl-tools-lin-arm.iso" < "/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
   gssh "$IP" "set -e; mkdir -p /mnt/tools; mount -o loop,ro /root/prl-tools-lin-arm.iso /mnt/tools
     /mnt/tools/installer/install-cli.sh --install >/dev/null 2>&1 || /mnt/tools/installer/install-cli.sh --install
@@ -479,7 +462,7 @@ fi
 gssh "$IP" "rm -f /root/omacvm.env"   # it holds the password hash
 
 # ---------- 5. OmacVM ----------
-log "OmacVM: the Mac side, then the VM side"
+step "OmacVM: the Mac side, then the VM side"
 args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do
   args+=(--feature "${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)")
