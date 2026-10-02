@@ -5,6 +5,11 @@
 <p align="center">The real Omarchy bar, right where Parallels (or UTM) leaves a black hole.</p>
 
 <p align="center">
+  <b>Part of the <a href="https://github.com/gillesgoetsch/omacvm">OmacVM</a> experience</b>: OmacVM builds the whole Omarchy VM on your Mac in one command and sets Omanotch up with it, along with trackpad gestures, macOS-like scrolling and the Mac's Wi-Fi, audio and keys in Omarchy.<br>
+  <code>curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash</code>
+</p>
+
+<p align="center">
   <img src="docs/hero.svg" alt="Animated diagram: the VM leaves the notch strip black; inside the VM Omarchy renders its bar on an invisible monitor; Omanotch streams the changed pixels into the strip, the windows grow to full height, and a click on the clock travels back and opens the calendar right below the notch." width="100%">
 </p>
 
