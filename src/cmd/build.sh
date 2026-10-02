@@ -89,6 +89,21 @@ NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
 (( JSON )) || printf '\n\033[1mOmacVM\033[0m: Omarchy in a VM on your Mac, feeling native.\n'
 
+# Tools the build needs: Homebrew's zstd and e2fsprogs are installed right
+# away (the live installer would install them too); only Homebrew itself and
+# Xcode's command line tools need the person. A plan installs nothing.
+command -v swiftc >/dev/null || needs_person "missing Xcode's command line tools (the Swift compiler): run xcode-select --install, then omacvm again"
+missing=""
+command -v zstd >/dev/null || missing+=" zstd"
+command -v e2fsck >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/e2fsck ]] || missing+=" e2fsprogs"
+if [[ -n $missing ]] && (( ! PLAN )); then
+  command -v brew >/dev/null || needs_person "OmacVM needs Homebrew (https://brew.sh) for$missing: install Homebrew, then omacvm again"
+  log "installing from Homebrew:$missing"
+  brew install -q $missing >/dev/null || needs_person "brew install$missing failed: run it yourself, then omacvm again"
+fi
+(( free_gb >= 60 )) || needs_person "need ~60 GB free disk space (have $free_gb GB)"
+
+
 # ---------- 1. Parallels or UTM ----------
 if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels or utm"
@@ -135,13 +150,6 @@ if vm_taken "$VM"; then
     say "    '$VM' exists too"
   done
 fi
-for b in zstd e2fsck; do
-  command -v "$b" >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/$b ]] ||
-    needs_person "missing $b: brew install zstd e2fsprogs"
-done
-command -v swiftc >/dev/null || needs_person "missing the Swift compiler: xcode-select --install"
-(( free_gb >= 60 )) || needs_person "need ~60 GB free disk space (have $free_gb GB)"
-
 # ---------- 2. resources ----------
 LIMITED=""
 if [[ $TYPE == parallels && $CAP_CPUS -le 4 ]]; then
