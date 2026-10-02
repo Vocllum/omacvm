@@ -236,7 +236,7 @@ The helper asks NSEvent for each gesture event's type (`ns_event_type` in
 `scroll_ns.m`); NSEventTypeMagnify (30) means macOS recognized a pinch, and
 then it sends `P`. Scroll factor 0.096.
 
-Results: pending.
+- **Pinch zoom works again**, started by macOS's own recognition.
 
 ## Candidate if the wheel cannot pan a zoomed page
 
