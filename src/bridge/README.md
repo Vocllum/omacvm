@@ -9,7 +9,7 @@ VM network (Parallels or UTM) and pushes every change as Server-Sent Events.
 |---|---|
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
 | Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network) and `192.168.64.1` (UTM's), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
-| Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `apply.sh`) |
+| Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
 | Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
