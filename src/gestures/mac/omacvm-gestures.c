@@ -36,7 +36,7 @@
 // diagnostics, see docs/experiments/scroll-analysis).
 //
 // Protocol (TCP, the guest connects to the Mac on port 47830: 10.211.55.2 on
-// Parallels, 192.168.64.1 on UTM), one line per message:
+// Parallels, 192.168.64.1 on UTM, .1 of Fusion's NAT network), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
 //   O <natural> <w> <h>               on connect: macOS's natural scrolling (1/0) and the
@@ -91,8 +91,23 @@ extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1
 
 #define PORT 47830
 // The Mac's address on each VM network: Parallels' shared network, UTM's
-// shared network (vmnet). One listener per address; never 0.0.0.0.
-static const char *listenAddrs[] = { "10.211.55.2", "192.168.64.1" };
+// shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
+// its subnet at install time, the Mac is .1; empty without Fusion). One
+// listener per address; never 0.0.0.0.
+static char listenAddrs[3][16] = { "10.211.55.2", "192.168.64.1", "" };
+#define NET_UTM 1
+#define NET_FUSION 2
+
+static void readFusionHost(void) {
+  FILE *f = fopen("/Library/Preferences/VMware Fusion/networking", "r");
+  char line[256], a, b, c;
+  unsigned o1, o2, o3;
+  if (!f) return;
+  while (fgets(line, sizeof line, f))
+    if (sscanf(line, "answer VNET_8_HOSTONLY_SUBNET %u.%u.%u%c%c%c", &o1, &o2, &o3, &a, &b, &c) >= 4 && a == '.')
+      snprintf(listenAddrs[NET_FUSION], sizeof listenAddrs[NET_FUSION], "%u.%u.%u.1", o1, o2, o3);
+  fclose(f);
+}
 #define ESC_KEYCODE 53
 #define PINCH_SPREAD 0.035f         // normalized change of finger distance that makes a pinch
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
@@ -101,7 +116,7 @@ static volatile int frontIsVM, escaped, capturing;
 static pid_t frontPid;   // the full-screen VM app in front, else 0
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
-// 1 = UTM, the index into listenAddrs). One connection per VM used to mean
+// 1 = UTM, 2 = Fusion, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
 static struct { int fd, net, gestures, glide; char ip[32]; } clients[MAX_CLIENTS];
@@ -249,8 +264,9 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)t; (void)info;
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  // Parallels' VM window, or UTM's.
-  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? 1 : -1;
+  // Parallels' VM window, UTM's, or VMware Fusion's.
+  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
+          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
   int front = net >= 0 && vmFullScreen(pid);
   if (front) frontNet = net;
   frontPid = front ? pid : 0;
@@ -406,7 +422,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
-        if (type == kCGEventKeyDown && capturing && frontNet == 1 && (f & kCGEventFlagMaskCommand) && haveClient(1)) {
+        if (type == kCGEventKeyDown && capturing && frontNet == NET_UTM && (f & kCGEventFlagMaskCommand) && haveClient(NET_UTM)) {
           forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
           forwarded[kc] = 1;
           return NULL;
@@ -602,7 +618,9 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();
+  readFusionHost();
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
+    if (!listenAddrs[i][0]) continue;
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
   logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");

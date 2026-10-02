@@ -4,7 +4,7 @@
 // media keys go to the VM's own popup while it is full screen (stage 1c).
 //
 // HTTP/1.1 on port 47831 of the Mac's address on each VM network (10.211.55.2
-// for Parallels, 192.168.64.1 for UTM; never 0.0.0.0). Every request needs "Authorization: Bearer <token>":
+// for Parallels, 192.168.64.1 for UTM, .1 of VMware Fusion's NAT network; never 0.0.0.0). Every request needs "Authorization: Bearer <token>":
 //   GET  /state            Wi-Fi state
 //   GET  /scan[?cached=1]  nearby networks, one entry per SSID; cached=1 = the
 //                          system's scan cache (instant, no radio scan)
@@ -36,9 +36,23 @@ import Security
 setvbuf(stdout, nil, _IOLBF, 0)
 
 let env = ProcessInfo.processInfo.environment
-// The Mac's address on each VM network: Parallels' shared network and UTM's
-// shared network (vmnet). One listener per address; never 0.0.0.0.
-let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? "10.211.55.2,192.168.64.1").split(separator: ",").map(String.init)
+// The Mac's address on each VM network: Parallels' shared network, UTM's
+// shared network (vmnet) and VMware Fusion's NAT network (vmnet8, when Fusion
+// is installed). One listener per address; never 0.0.0.0.
+let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? (["10.211.55.2", "192.168.64.1"] + [fusionHost()].compactMap { $0 })
+  .joined(separator: ",")).split(separator: ",").map(String.init)
+
+/// Fusion picks its NAT subnet at install time; the Mac is .1 there (the guests' gateway is .2).
+func fusionHost() -> String? {
+  guard let s = try? String(contentsOfFile: "/Library/Preferences/VMware Fusion/networking", encoding: .utf8) else { return nil }
+  for line in s.split(separator: "\n") {
+    let f = line.split(separator: " ")
+    guard f.count == 3, f[0] == "answer", f[1] == "VNET_8_HOSTONLY_SUBNET" else { continue }
+    let o = f[2].split(separator: ".")
+    return o.count == 4 ? o.prefix(3).joined(separator: ".") + ".1" : nil
+  }
+  return nil
+}
 let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed

@@ -1,6 +1,7 @@
 # VMware Fusion as a third route
 
-Status: spike passed, port in progress. This file is the plan; the code follows it.
+Status: spike passed; increments 1 and 2 done, 3 written (needs a person to verify).
+This file is the plan; the code follows it.
 
 ## Why
 
