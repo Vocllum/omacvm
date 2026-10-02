@@ -44,11 +44,23 @@ install_app() {
   printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m\n' "$name"
   "$R/$dir/install.sh" "$@"
   echo "$sum" > "$STAMPS/$name"
+  INSTALLED+=("$name")
 }
+INSTALLED=()
 (( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac
 case $GESTURES in
   1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac ;;
   0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;
 esac
 install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
+# The permissions macOS asks for now, once per app (they stay with later updates).
+if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
+  printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'
+  printf '  In System Settings > Privacy & Security, turn on:\n'
+  [[ " ${INSTALLED[*]} " == *" OmacVM Gestures "* ]] &&
+    printf '    * Accessibility and Input Monitoring: OmacVM Gestures (trackpad gestures, scroll momentum, Cmd keys)\n'
+  [[ " ${INSTALLED[*]} " == *" OmacVM Bridge "* ]] &&
+    printf '    * Accessibility: OmacVM Bridge (media keys); Location Services: OmacVM Bridge (Wi-Fi names)\n'
+  printf '  Until then those features wait; the build goes on either way.\n\n'
+fi
 (( QUIET )) || echo "OmacVM Mac side installed"
