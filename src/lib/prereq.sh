@@ -63,6 +63,9 @@ ensure_homebrew() {
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" < "$TTY" ||
     die "Homebrew's installer did not finish: see https://brew.sh, then run omacvm again"
   have_homebrew || die "Homebrew is installed but not found: open a new terminal, then run omacvm again"
+  # omacvm in Homebrew's bin too, which every terminal has on its PATH.
+  local here; here=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+  [[ -w $(brew --prefix)/bin ]] && ln -sf "$here/omacvm" "$(brew --prefix)/bin/omacvm"
   # Homebrew on the PATH of new terminals too (its installer only prints how).
   local line="eval \"\$($(command -v brew) shellenv)\""
   if ! grep -qsF "$line" "$HOME/.zprofile" && ask_yn "Put Homebrew on the PATH of new terminals (a line in ~/.zprofile)?" y; then

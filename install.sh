@@ -85,7 +85,8 @@ case ":$PATH:" in
      line='export PATH="$HOME/.local/bin:$PATH"'
      grep -qsF "$line" "$HOME/.zprofile" || printf '\n%s\n' "$line" >> "$HOME/.zprofile"
      export PATH="$bin:$PATH"
-     echo "    $bin is on your PATH now (a line in ~/.zprofile)" ;;
+     echo "    $bin is on your PATH from now on (a line in ~/.zprofile)."
+     echo "    In this terminal window, first run:  source ~/.zprofile   (or open a new window)" ;;
 esac
 
 if (( START )); then
