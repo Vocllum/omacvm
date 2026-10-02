@@ -45,6 +45,8 @@
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <libproc.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
 #include <math.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -246,8 +248,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
 // ---- the macOS pointer over the full-screen VM ----
 // Parallels and UTM only hide the macOS pointer over their window when it comes
 // in from their own window; from the Omanotch strip or another app it can stay
-// on top of the guest's pointer. So it is hidden here whenever the front VM's
-// full-screen window is the top window under it. A background process may only
+// on top of the guest's pointer. So it is hidden here whenever the window under
+// it is the front VM's full-screen window. A background process may only
 // do that with the window server's "SetsCursorInBackground" (private, but
 // stable for many macOS releases); without it this does nothing.
 static int cursorHidden, cursorControl = -1;
@@ -268,23 +270,37 @@ static void setCursorHidden(int h) {
   if (h) CGDisplayHideCursor(kCGNullDirectDisplay); else CGDisplayShowCursor(kCGNullDirectDisplay);
 }
 
-// Whether the front VM's full-screen window is the top window at p.
+// Whether the window a click at p would reach belongs to the front VM app and
+// is a normal window. AppKit's hit test, not the window list: it skips
+// click-through overlays that cover the whole screen (macOS's screenshot
+// tool keeps one around for hours, Bartender has one over the menu bar).
+typedef long (*WindowAtFn)(id, SEL, CGPoint, long);
+static char hitOwner[64]; static int hitLayer;
+
 static int vmWindowAt(CGPoint p, pid_t pid) {
-  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  static Class nsWindow; static SEL windowAt;
+  if (!nsWindow) {
+    // AppKit needs its application object before it talks to the window server.
+    ((id (*)(id, SEL))objc_msgSend)((id)objc_getClass("NSApplication"), sel_registerName("sharedApplication"));
+    nsWindow = objc_getClass("NSWindow");
+    windowAt = sel_registerName("windowNumberAtPoint:belowWindowWithWindowNumber:");
+  }
+  // AppKit's screen coordinates start at the primary display's bottom left.
+  CGPoint q = { p.x, CGDisplayBounds(CGMainDisplayID()).size.height - p.y };
+  long n = ((WindowAtFn)objc_msgSend)((id)nsWindow, windowAt, q, 0);
+  hitOwner[0] = 0; hitLayer = -1;
+  if (n <= 0) return 0;
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, (CGWindowID)n);
   if (!wins) return 0;
   int hit = 0;
-  for (CFIndex i = 0; i < CFArrayGetCount(wins); i++) {
-    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
-    int owner = 0, layer = -1; double alpha = 1; CGRect r;
+  if (CFArrayGetCount(wins) > 0) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, 0);
+    int owner = 0;
     CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
-    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
-    CFNumberRef a = CFDictionaryGetValue(w, kCGWindowAlpha);
-    if (a) CFNumberGetValue(a, kCFNumberDoubleType, &alpha);
-    // Skip the window server's own overlays (cursor, screen shields) and invisible windows.
-    if (layer < 0 || layer >= 1000 || alpha <= 0) continue;
-    if (!CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) || !CGRectContainsPoint(r, p)) continue;
-    hit = owner == pid && layer == 0;
-    break;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &hitLayer);
+    CFStringRef name = CFDictionaryGetValue(w, kCGWindowOwnerName);
+    if (name) CFStringGetCString(name, hitOwner, sizeof hitOwner, kCFStringEncodingUTF8);
+    hit = owner == pid && hitLayer == 0;
   }
   CFRelease(wins);
   return hit;
@@ -308,7 +324,10 @@ static void updateCursor(CFRunLoopTimerRef t, void *info) {
   // windows that appear under a pointer at rest (the Dock, a notification).
   if (p.x == last.x && p.y == last.y && now - lastCheck < 0.5) return;
   last = p; lastCheck = now;
-  setCursorHidden(vmWindowAt(p, pid));
+  int h = vmWindowAt(p, pid);
+  if (verbose && h != cursorHidden)
+    logf_("macOS pointer %s (over %s, layer %d)", h ? "hidden" : "shown", hitOwner[0] ? hitOwner : "nothing", hitLayer);
+  setCursorHidden(h);
 }
 
 // ---- Cmd as Super on UTM ----
