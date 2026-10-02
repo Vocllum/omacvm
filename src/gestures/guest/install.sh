@@ -15,15 +15,22 @@ systemctl enable omacvm-gestures >/dev/null 2>&1
 systemctl restart omacvm-gestures
 
 I=$H/.config/hypr/input.lua
-# Omarchy ships the same line commented out as an example: only an active one counts.
-if ! grep -q '^hl.gesture({ fingers = 3' "$I" 2>/dev/null; then
-  cat >> "$I" <<'LUA'
-
--- OmacVM trackpad: the Mac's multi-finger gestures arrive on a virtual
--- touchpad while the VM is full screen. Swipe between workspaces like Spaces.
-hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })
-hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })
-LUA
+# Each swipe only when no active horizontal gesture with that many fingers is
+# there yet (Hyprland rejects a second one; Omarchy ships the 3-finger line
+# commented out as an example, and a hand-made one counts too).
+missing=()
+for n in 3 4; do
+  grep -Eq "^[[:space:]]*hl\.gesture\(\{ *fingers *= *$n *, *direction *= *\"horizontal\"" "$I" 2>/dev/null || missing+=("$n")
+done
+if (( ${#missing[@]} )); then
+  {
+    grep -q '^-- OmacVM trackpad:' "$I" 2>/dev/null || printf '\n%s\n%s\n' \
+      "-- OmacVM trackpad: the Mac's multi-finger gestures arrive on a virtual" \
+      "-- touchpad while the VM is full screen. Swipe between workspaces like Spaces."
+    for n in "${missing[@]}"; do
+      echo "hl.gesture({ fingers = $n, direction = \"horizontal\", action = \"workspace\" })"
+    done
+  } >> "$I"
   chown "$U:$U" "$I"
 fi
 echo "omacvm-gestures guest side installed"
