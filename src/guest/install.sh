@@ -2,7 +2,7 @@
 # OmacVM, guest side: everything that makes Omarchy feel native in a VM on a
 # Mac, in Parallels or UTM. Run as root inside the VM from a copy of this
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
-#   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm]
+#   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]...
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, idle-lock, autologin, thp-kernel) with its defaults; a feature
@@ -65,19 +65,24 @@ for f in "${FEATURES[@]}"; do
 done
 
 # Which VM, and where its Mac is: Parallels' Mac is 10.211.55.2 on its shared
-# network; on UTM's shared network the Mac is the default gateway.
+# network; on UTM's shared network the Mac is the default gateway; on VMware
+# Fusion's NAT network the gateway is .2 and the Mac is .1.
 if [[ -z $TYPE ]]; then
   case $(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) in
     Parallels*) TYPE=parallels ;;
     QEMU*) TYPE=utm ;;
-    *) echo "guest/install.sh: unknown VM, pass --vm-type parallels|utm" >&2; exit 2 ;;
+    VMware*) TYPE=fusion ;;
+    *) echo "guest/install.sh: unknown VM, pass --vm-type parallels|utm|fusion" >&2; exit 2 ;;
   esac
 fi
 case $TYPE in
   parallels) HOST=10.211.55.2 ;;
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
-  *) echo "guest/install.sh: --vm-type parallels or utm" >&2; exit 2 ;;
+  fusion) HOST=$(ip route show default | awk '{ print $3; exit }')
+          [[ -n $HOST ]] || { echo "guest/install.sh: no default route, cannot find the Mac" >&2; exit 1; }
+          HOST=${HOST%.*}.1 ;;
+  *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
 esac
 {
   printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\n' "$TYPE" "$HOST"
@@ -131,12 +136,15 @@ elif [[ -f $MARK ]]; then
   rm -f "$STAY" "$MARK"
 fi
 
-if [[ $TYPE == parallels ]]; then
-  log "display";    "$R/display/guest/install.sh" "$U"
-  log "clipboard";  "$R/clipboard/guest/install.sh" "$U"
-else
-  log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE"
-fi
+case $TYPE in
+  parallels)
+    log "display";    "$R/display/guest/install.sh" "$U"
+    log "clipboard";  "$R/clipboard/guest/install.sh" "$U" ;;
+  utm)
+    log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
+  fusion)
+    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" ;;
+esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
 # On UTM the gestures daemon also types Cmd shortcuts as Super, so it stays.

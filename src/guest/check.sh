@@ -135,12 +135,13 @@ check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
-if [[ $TYPE == parallels ]]; then
+case $TYPE in
+parallels)
   section "Parallels"
   check "Parallels Tools" "prltoolsd" systemctl is-active -q prltoolsd
   check "dynamic resolution" "parallels-dynres" test -x /usr/local/bin/parallels-dynres
-  check "clipboard VM -> Mac" "parallels-clip-out" test -x /usr/local/bin/parallels-clip-out
-else
+  check "clipboard VM -> Mac" "parallels-clip-out" test -x /usr/local/bin/parallels-clip-out ;;
+utm)
   section "UTM"
   check "SPICE daemon" "spice-vdagentd" systemctl is-active -q spice-vdagentd
   if user_active omacvm-vdagent.service; then ok "clipboard + pointer" "omacvm-vdagent"
@@ -159,8 +160,12 @@ EOF
   elif [[ $tab == "$w" ]]; then ok "pointer range" "${tab} px, the whole screen"
   else bad "pointer range" "tablet $tab px vs screen $w px"; fi
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
-  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
-fi
+  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf ;;
+fusion)
+  section "VMware Fusion"
+  check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
+  check "DNS" "public resolvers (Fusion's own drops lookups)" test -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf ;;
+esac
 
 section "Speed and safety"
 k=$(uname -r)

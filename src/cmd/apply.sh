@@ -1,8 +1,8 @@
 #!/bin/bash
-# omacvm apply: put OmacVM onto a running VM, Parallels or UTM, or bring it up
+# omacvm apply: put OmacVM onto a running VM (Parallels, UTM or VMware Fusion), or bring it up
 # to this version: the Mac side the VM's features need, then the VM side. Also
 # for an Omarchy you installed by hand from omarchy-mac.
-#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME]
+#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
@@ -52,12 +52,12 @@ NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
 # ---------- which VM ----------
 if [[ -n $IP ]]; then
-  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels or utm" >&2; exit 2; }
+  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
   [[ -n $VM ]] || VM="the VM at $IP"
 else
   resolve_vm start
 fi
-[[ $TYPE == parallels || $TYPE == utm ]] || { echo "omacvm apply: --vm-type parallels or utm" >&2; exit 2; }
+case $TYPE in parallels|utm|fusion) ;; *) echo "omacvm apply: --vm-type parallels, utm or fusion" >&2; exit 2 ;; esac
 vm_network_ok "$TYPE" "$IP" || exit 3
 if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
   printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2

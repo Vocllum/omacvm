@@ -33,7 +33,7 @@ while IFS=$'\t' read -r name type state; do
     locked) what="running, OmacVM cannot get in yet" ;;
     *) what="stopped" ;;
   esac
-  printf '    %-24s %-10s %s\n' "$name" "$( [[ $type == parallels ]] && echo Parallels || echo UTM)" "$what" > "$TTY"
+  printf '    %-24s %-10s %s\n' "$name" "$(case $type in parallels) echo Parallels ;; utm) echo UTM ;; fusion) echo Fusion ;; esac)" "$what" > "$TTY"
 done < <(vms_list)
 
 if (( ${#NAMES[@]} == 0 )); then
