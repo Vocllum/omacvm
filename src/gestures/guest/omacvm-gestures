@@ -263,8 +263,11 @@ class OneEuro:
         return self.x
 
 
-_f = os.environ.get("OMACVM_SCROLL_FILTER", "1.5 0.1").split()
+# "min_cutoff beta d_cutoff": smoothing at rest (Hz), how fast it opens with
+# speed, and how quickly a change of speed is noticed (Hz).
+_f = (os.environ.get("OMACVM_SCROLL_FILTER", "") or "1.5 0.4 8").split()
 FILTER_MIN_CUTOFF, FILTER_BETA = float(_f[0]), float(_f[1])
+FILTER_D_CUTOFF = float(_f[2]) if len(_f) > 2 else 8.0
 # Acceleration of two-finger scrolling, like macOS's: gain 1 below V0 mm/s of
 # finger speed (fine scrolling stays exact), rising smoothly to GAIN at V1.
 _a = os.environ.get("OMACVM_SCROLL_ACCEL", "15 150 3").split()
@@ -369,8 +372,8 @@ class Hybrid:
         if t is None or t["ids"] != ids:
             t = self.two = {"ids": ids, "c0": (cx, cy), "d0": dist, "pinch": False,
                             "off": [(c[1] - cx, c[2] - cy) for c in contacts],
-                            "fx": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA),
-                            "fy": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA)}
+                            "fx": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF),
+                            "fy": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF)}
         if not t["pinch"] and PINCH_MM > 0:
             spread = abs(dist - t["d0"]) / RES
             moved = math.hypot(cx - t["c0"][0], cy - t["c0"][1]) / RES

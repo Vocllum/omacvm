@@ -311,6 +311,20 @@ medium a bit too much", but at 0.25, when everything was far too fast.
   coalescing bunched ones (positions are absolute, nothing is lost); a lift
   and a new touch go into two frames.
 
+- Definitely fast now, but the curve is not macOS's: it only gets fast when
+  scrolling really fast; macOS notices the speeding up much sooner.
+- Jumps 64 -> 69, same-frame errors 524 -> 532 during the test: rare now (they
+  were about one per scroll), not yet zero.
+- Cause of the late response: the One Euro filter measured the finger's speed
+  through a 1 Hz filter of its own, so it kept smoothing (and lagging) for a
+  while after the finger sped up.
+
+### 21. The filter notices speeding up sooner (in progress)
+
+`OMACVM_SCROLL_FILTER` = "1.5 0.4 8": smoothing at rest unchanged (1.5 Hz),
+opening with speed four times as strongly (beta 0.4), speed changes noticed
+at 8 Hz instead of 1 Hz.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
