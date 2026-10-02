@@ -185,8 +185,13 @@ FS_UUID="$("$DUMPE2FS" -h "$WORKDIR/rootfs16.ext4" 2>/dev/null | awk -F': *' '/F
 info "ext4 UUID: $FS_UUID"
 
 log "extracting systemd-boot from the guest rootfs"
-"$DEBUGFS" -R "dump /usr/lib/systemd/boot/efi/systemd-bootaa64.efi $WORKDIR/systemd-bootaa64.efi" \
+# debugfs takes its request as one line split at spaces: dump into a temporary
+# folder without any (a home folder like "/Volumes/Macintosh SSD/..." has one).
+DUMP_TMP=$(mktemp -d)
+"$DEBUGFS" -R "dump /usr/lib/systemd/boot/efi/systemd-bootaa64.efi $DUMP_TMP/systemd-bootaa64.efi" \
     "$WORKDIR/rootfs.ext4" >/dev/null 2>&1
+mv -f "$DUMP_TMP/systemd-bootaa64.efi" "$WORKDIR/systemd-bootaa64.efi" 2>/dev/null || true
+rm -rf "$DUMP_TMP"
 file "$WORKDIR/systemd-bootaa64.efi" | grep -q "EFI application" || die "systemd-boot extraction failed"
 
 # ---------- 2. build the ESP ----------
