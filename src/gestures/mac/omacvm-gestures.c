@@ -11,6 +11,9 @@
 //     every frame with 3+ fingers, and 2-finger frames once they are a pinch;
 //   * one-finger movement, clicks and two-finger scrolling stay on Parallels'
 //     own path (absolute pointer, native smooth scrolling).
+// While the VM is full screen, the macOS pointer is hidden wherever the VM window
+// is what lies under it (the guest draws its own pointer); over anything else
+// (the Omanotch strip, the Dock, menus, another display) it shows.
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
@@ -40,6 +43,7 @@
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <arpa/inet.h>
+#include <dlfcn.h>
 #include <libproc.h>
 #include <math.h>
 #include <netinet/in.h>
@@ -84,6 +88,7 @@ static const char *listenAddrs[] = { "10.211.55.2", "192.168.64.1" };
 #define PINCH_RATIO 1.3f            // ... and it must exceed the centroid movement by this much
 
 static volatile int frontIsVM, escaped, capturing;
+static pid_t frontPid;   // the full-screen VM app in front, else 0
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, the index into listenAddrs). One connection per VM used to mean
@@ -225,6 +230,7 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? 1 : -1;
   int front = net >= 0 && vmFullScreen(pid);
   if (front) frontNet = net;
+  frontPid = front ? pid : 0;
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -235,6 +241,74 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
     sendState(now ? "on" : (front ? "esc" : "off"));
   }
   if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+}
+
+// ---- the macOS pointer over the full-screen VM ----
+// Parallels and UTM only hide the macOS pointer over their window when it comes
+// in from their own window; from the Omanotch strip or another app it can stay
+// on top of the guest's pointer. So it is hidden here whenever the front VM's
+// full-screen window is the top window under it. A background process may only
+// do that with the window server's "SetsCursorInBackground" (private, but
+// stable for many macOS releases); without it this does nothing.
+static int cursorHidden, cursorControl = -1;
+
+static int enableCursorControl(void) {
+  typedef int (*DefaultConnection)(void);
+  typedef int (*SetProperty)(int, int, CFStringRef, CFTypeRef);
+  DefaultConnection c = (DefaultConnection)dlsym(RTLD_DEFAULT, "_CGSDefaultConnection");
+  SetProperty set = (SetProperty)dlsym(RTLD_DEFAULT, "CGSSetConnectionProperty");
+  if (!c || !set) return 0;
+  int cid = c();
+  return set(cid, cid, CFSTR("SetsCursorInBackground"), kCFBooleanTrue) == 0;
+}
+
+static void setCursorHidden(int h) {
+  if (h == cursorHidden) return;
+  cursorHidden = h;
+  if (h) CGDisplayHideCursor(kCGNullDirectDisplay); else CGDisplayShowCursor(kCGNullDirectDisplay);
+}
+
+// Whether the front VM's full-screen window is the top window at p.
+static int vmWindowAt(CGPoint p, pid_t pid) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  int hit = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins); i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1; double alpha = 1; CGRect r;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    CFNumberRef a = CFDictionaryGetValue(w, kCGWindowAlpha);
+    if (a) CFNumberGetValue(a, kCFNumberDoubleType, &alpha);
+    // Skip the window server's own overlays (cursor, screen shields) and invisible windows.
+    if (layer < 0 || layer >= 1000 || alpha <= 0) continue;
+    if (!CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) || !CGRectContainsPoint(r, p)) continue;
+    hit = owner == pid && layer == 0;
+    break;
+  }
+  CFRelease(wins);
+  return hit;
+}
+
+static void updateCursor(CFRunLoopTimerRef t, void *info) {
+  (void)t; (void)info;
+  static CGPoint last = { -1, -1 };
+  static CFAbsoluteTime lastCheck;
+  if (cursorControl < 0) {
+    cursorControl = enableCursorControl();
+    if (!cursorControl) logf_("cannot hide the macOS pointer from the background");
+  }
+  pid_t pid = frontPid;
+  if (!cursorControl || !pid) { setCursorHidden(0); last.x = -1; return; }
+  CGEventRef e = CGEventCreate(NULL);
+  CGPoint p = CGEventGetLocation(e);
+  CFRelease(e);
+  CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  // The window list only when the pointer moved, and every half second for
+  // windows that appear under a pointer at rest (the Dock, a notification).
+  if (p.x == last.x && p.y == last.y && now - lastCheck < 0.5) return;
+  last = p; lastCheck = now;
+  setCursorHidden(vmWindowAt(p, pid));
 }
 
 // ---- Cmd as Super on UTM ----
@@ -463,6 +537,8 @@ int main(int argc, char **argv) {
 
   CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
+  CFRunLoopTimerRef cursorTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 1.0 / 120, 0, 0, updateCursor, NULL);
+  CFRunLoopAddTimer(CFRunLoopGetCurrent(), cursorTimer, kCFRunLoopCommonModes);
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();
