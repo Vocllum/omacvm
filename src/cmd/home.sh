@@ -48,11 +48,14 @@ choose_vm() {   # PROMPT -> sets PICK (a name)
   hd "$1"
   for ((i = 0; i < ${#NAMES[@]}; i++)); do printf '    %d  %s\n' $((i + 1)) "${NAMES[$i]}"; done
   while :; do
-    read -r -p "  Choose 1-${#NAMES[@]}: " a < "$TTY" || exit 1
+    read -r -p "  Choose 1-${#NAMES[@]} [1]: " a < "$TTY" || exit 1
+    a=${a:-1}
     [[ $a =~ ^[0-9]+$ ]] && (( a >= 1 && a <= ${#NAMES[@]} )) && { PICK=${NAMES[$((a - 1))]}; return; }
   done
 }
 
+DEF=1
+for k in "${KIND[@]}"; do [[ $k == omacvm ]] && DEF=2; done
 hd "What would you like to do?"
 say "    1  Build a new Omarchy VM"
 say "    2  Change the features of a VM (Glide, gestures, Bridge, Omanotch, ...)"
@@ -60,8 +63,8 @@ say "    3  Add OmacVM to a VM, or bring it up to date"
 say "    4  Update OmacVM everywhere (this checkout, the Mac, your running VMs)"
 say "    5  Check a VM"
 while :; do
-  read -r -p "  Choose 1-5 (q quits): " a < "$TTY" || exit 1
-  case $a in
+  read -r -p "  Choose 1-5, q quits [$DEF]: " a < "$TTY" || exit 1
+  case ${a:-$DEF} in
     1) exec "$R/src/cmd/build.sh" ;;
     2) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" ;;
     3) choose_vm "Which VM?"; exec "$R/src/cmd/apply.sh" --vm "$PICK" ;;

@@ -96,6 +96,15 @@ command -v swiftc >/dev/null || needs_person "missing Xcode's command line tools
 missing=""
 command -v zstd >/dev/null || missing+=" zstd"
 command -v e2fsck >/dev/null || [[ -x $(brew --prefix e2fsprogs 2>/dev/null)/sbin/e2fsck ]] || missing+=" e2fsprogs"
+# The password's SHA-512 hash: macOS's own LibreSSL has no "passwd -6".
+sha512_openssl() {
+  local o
+  for o in openssl "$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"; do
+    printf x | "$o" passwd -6 -stdin >/dev/null 2>&1 && { echo "$o"; return 0; }
+  done
+  return 1
+}
+sha512_openssl >/dev/null || missing+=" openssl@3"
 if [[ -n $missing ]] && (( ! PLAN )); then
   command -v brew >/dev/null || needs_person "OmacVM needs Homebrew (https://brew.sh) for$missing: install Homebrew, then omacvm again"
   log "installing from Homebrew:$missing"
@@ -114,8 +123,8 @@ if [[ -z $TYPE ]]; then
   say "                          Needs UTM 5, a beta for now (brew install --cask utm@beta)."
   say "    Comparison: $README_ROUTES"
   while :; do
-    read -r -p "  Choose 1 or 2: " a < "$TTY" || die "no answer (no terminal?)"
-    case $a in 1) TYPE=parallels; break ;; 2) TYPE=utm; break ;; esac
+    read -r -p "  Choose 1 or 2 [1]: " a < "$TTY" || die "no answer (no terminal?)"
+    case ${a:-1} in 1) TYPE=parallels; break ;; 2) TYPE=utm; break ;; esac
   done
 fi
 CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; P_EDITION=""; P_TRIAL=""
@@ -307,11 +316,20 @@ if (( PLAN && JSON )); then
   printf '\n  ],\n  "command": %s\n}\n' "$(json_str "$cmd")"
   exit 0
 fi
+# What the VM runs in, for the summary.
+if [[ $TYPE == parallels ]]; then
+  APP_LINE="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}"
+  if [[ -n ${P_PLANNED:-} ]]; then APP_LINE+=" (planned; no licence yet, the trial starts with the VM)"
+  elif [[ $P_TRIAL == yes ]]; then APP_LINE+=" (trial)"; fi
+  APP_LINE+=" (~/Parallels/$VM.pvm)"
+else
+  APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
+fi
 cat <<EOF
 
   OmacVM will build this VM:
 
-    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ -n ${P_PLANNED:-} ]] && echo " (planned; no licence yet, the trial starts with the VM)" || { [[ $P_TRIAL == yes ]] && echo " (trial)"; })") (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
+    VM             $VM, in $APP_LINE
     resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
     user           $U ($FULL), hostname $HOST
     keyboard       $KB   (from the Mac)
@@ -333,7 +351,8 @@ else
   read -r -s -p "  Again: " PW2 < "$TTY"; echo
   [[ $PW == "$PW2" && -n $PW ]] || die "passwords differ or are empty"
 fi
-HASH=$(printf '%s' "$PW" | openssl passwd -6 -stdin)
+HASH=$(printf '%s' "$PW" | "$(sha512_openssl)" passwd -6 -stdin) || die "could not hash the password (openssl passwd -6)"
+[[ $HASH == '$6$'* ]] || die "could not hash the password (openssl passwd -6)"
 unset PW PW2
 
 # Cmd as Super in Parallels: its Linux keyboard profile turns Cmd+C/V/X into
