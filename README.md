@@ -9,6 +9,11 @@
 </p>
 
 <p align="center">
+  <a href="docs/omacvm-demo.mp4"><img src="docs/demo.webp" alt="A real MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a three-finger swipe to the next workspace." width="560"></a>
+  <br><sub><a href="docs/omacvm-demo.mp4">Watch the full one-minute demo</a> (a real MacBook Pro, no sound)</sub>
+</p>
+
+<p align="center">
   <img src="docs/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
 </p>
 
