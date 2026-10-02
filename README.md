@@ -223,6 +223,14 @@ When it is done, once on the Mac:
 3. **UTM:** keep UTM in the foreground app list (started from the Dock or
    Spotlight); UTM launched in the background runs the VM several times slower.
 
+> [!TIP]
+> **⌃⌥⌘ Esc (Control + Option + Command + Escape) gives the trackpad back to macOS.**
+> While the VM is full screen and in front, the trackpad's gestures and the ⌘
+> shortcuts belong to Omarchy, so macOS's own swipes do nothing. Press ⌃⌥⌘ Esc
+> to get them back (Omarchy shows a notification), for example to swipe to
+> your other Spaces; press it again, or come back to the full-screen VM, to
+> hand them to Omarchy again.
+
 Put the VM in full screen for the trackpad gestures, the scroll momentum and the media keys.
 While it is full screen and in front, the Mac's trackpad gestures and ⌘
 shortcuts go to Omarchy, and macOS's own Spaces swipe is off. **⌃⌥⌘ Esc**
