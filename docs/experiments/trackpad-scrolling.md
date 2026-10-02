@@ -75,6 +75,26 @@ through Parallels. The virtual touchpad's test settings were removed.
 `OMACVM_SCROLL_POINTS_PER_DETENT=60` (systemd drop-in
 `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`).
 
+- Chromium (with the flag): **very nice**, very close to macOS; slightly less
+  clean than macOS's 120 Hz scrolling.
+- Google Chrome reads its own `~/.config/chrome-flags.conf`, still had smooth
+  scrolling on: glides too much.
+- Pinch-zoomed page, two-finger panning: **impossible** with the wheel, in
+  Chrome (expected in any Chromium-based browser: a wheel does not pan the
+  zoomed viewport).
+
+### 6. macOS's physics replayed as two virtual fingers (in progress)
+
+`OMACVM_SCROLL_MODE=touch` in the guest (`wheel` stays the alternative):
+macOS's deltas move two virtual fingers on the virtual touchpad
+(`OMACVM_SCROLL_TOUCH_SCALE` touchpad units per point, start 4; the touchpad
+is 100 units per mm), held down through macOS's momentum and lifted 60 ms
+after the last delta, when the movement has died down. Near the touchpad's
+edge they hold still for three frames, lift and start again in the middle.
+Real finger frames (pinch, 3/4-finger swipes) take over the touchpad. Chrome
+also got `--disable-smooth-scrolling` (original in
+`chrome-flags.conf.before-omacvm-scroll-test`).
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
@@ -88,9 +108,12 @@ zero speed at the lift, so Chromium and GTK add no fling of their own.
 ## Test changes on the production VM (to revert or adopt)
 
 - `/usr/local/bin/omacvm-gestures`: this branch's guest daemon.
-- `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`.
-- `~/.config/chromium-flags.conf`: `--disable-smooth-scrolling` added
-  (original in `chromium-flags.conf.before-omacvm-scroll-test`).
+- `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`
+  (`OMACVM_SCROLL_MODE`, `OMACVM_SCROLL_TOUCH_SCALE`,
+  `OMACVM_SCROLL_POINTS_PER_DETENT`).
+- `~/.config/chromium-flags.conf` and `~/.config/chrome-flags.conf`:
+  `--disable-smooth-scrolling` added (originals in
+  `*-flags.conf.before-omacvm-scroll-test`).
 - `~/.config/hypr/input.lua`: test block removed again (original in
   `input.lua.before-omacvm-scroll-test`).
 - `/root/.ssh/authorized_keys`: the current `omacvm` key added (kept).

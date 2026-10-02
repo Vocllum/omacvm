@@ -99,6 +99,12 @@ class Touchpad:
 
 # One wheel detent (120 high-resolution units) per this many macOS points.
 POINTS_PER_DETENT = float(os.environ.get("OMACVM_SCROLL_POINTS_PER_DETENT", "40"))
+# How macOS's scrolling reaches the apps: "wheel" (a high-resolution wheel) or
+# "touch" (two virtual fingers on the touchpad, moved by macOS's deltas, lifted
+# once macOS's momentum has died down, so apps add no fling of their own).
+SCROLL_MODE = os.environ.get("OMACVM_SCROLL_MODE", "wheel")
+TOUCH_UNITS_PER_POINT = float(os.environ.get("OMACVM_SCROLL_TOUCH_SCALE", "4"))
+TOUCH_LIFT_AFTER = 0.06      # seconds without scrolling before the fingers lift
 
 
 def make_wheel():
@@ -134,6 +140,51 @@ class Wheel:
                 self.lo[i] -= d * 120
                 self.ui.write(e.EV_REL, lo, d)
         self.ui.syn()
+
+
+class TouchScroll:
+    """macOS's scroll deltas as two fingers moving on the virtual touchpad."""
+    IDS = (100001, 100002)
+
+    def __init__(self, pad):
+        self.pad = pad
+        self.down = False
+        self.last = 0.0
+        self.x = self.y = 0.0
+
+    def _place(self):
+        self.x, self.y = W / 2, H / 2
+        self.down = True
+
+    def _frame(self):
+        x, y, gap = round(self.x), round(self.y), 1500
+        self.pad.frame([(self.IDS[0], x - gap // 2, y), (self.IDS[1], x + gap // 2, y)])
+
+    def scroll(self, dx, dy):
+        # Natural scrolling (macOS's deltas already have it): content moves
+        # with the fingers.
+        if not self.down:
+            self._place()
+            self._frame()
+        nx = self.x + dx * TOUCH_UNITS_PER_POINT
+        ny = self.y + dy * TOUCH_UNITS_PER_POINT
+        if not (1500 < nx < W - 1500 and 1000 < ny < H - 1000):
+            # Off the edge: hold still for a moment, lift, start again in the middle.
+            for _ in range(3):
+                self._frame()
+                time.sleep(0.008)
+            self.pad.frame([])
+            self._place()
+            self._frame()
+            nx, ny = self.x + dx * TOUCH_UNITS_PER_POINT, self.y + dy * TOUCH_UNITS_PER_POINT
+        self.x, self.y = nx, ny
+        self._frame()
+        self.last = time.monotonic()
+
+    def idle(self):
+        if self.down and time.monotonic() - self.last > TOUCH_LIFT_AFTER:
+            self.pad.frame([])
+            self.down = False
 
 
 def make_keyboard():
@@ -182,14 +233,18 @@ def notify(text):
                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def run(pad, keys, wheel):
+def run(pad, keys, wheel, touch):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
-        s.settimeout(None)
+        s.settimeout(0.02)
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         print(f"omacvm-gestures: connected to {HOST}:{PORT}", flush=True)
         buf = b""
         while True:
-            data = s.recv(65536)
+            try:
+                data = s.recv(65536)
+            except socket.timeout:
+                touch.idle()
+                continue
             if not data:
                 raise ConnectionError("helper closed the connection")
             buf += data
@@ -204,9 +259,13 @@ def run(pad, keys, wheel):
                     for i in range(n):
                         cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
                         contacts.append((cid, round(min(max(x, 0.0), 1.0) * W), round(min(max(y, 0.0), 1.0) * H)))
+                    touch.down = False   # real fingers (pinch, swipes) take over the touchpad
                     pad.frame(contacts)
                 elif p[0] == b"W":
-                    wheel.scroll(float(p[1]), float(p[2]))
+                    if SCROLL_MODE == "touch":
+                        touch.scroll(float(p[1]), float(p[2]))
+                    else:
+                        wheel.scroll(float(p[1]), float(p[2]))
                 elif p[0] == b"K":
                     keys.key(int(p[1]), int(p[2]))
                 elif p[0] == b"S":
@@ -224,10 +283,11 @@ def main():
     pad = Touchpad(ui)
     keys = Keys(make_keyboard())
     wheel = Wheel(make_wheel())
-    print(f"omacvm-gestures: virtual touchpad {ui.device.path}", flush=True)
+    touch = TouchScroll(pad)
+    print(f"omacvm-gestures: virtual touchpad {ui.device.path}, scrolling as {SCROLL_MODE}", flush=True)
     while True:
         try:
-            run(pad, keys, wheel)
+            run(pad, keys, wheel, touch)
         except (OSError, ConnectionError, ValueError, IndexError) as err:
             pad.release()
             keys.release()
