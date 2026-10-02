@@ -51,10 +51,9 @@ ensure_xcode_tools() {
   have_xcode_tools && return 0
   prereq_install "Xcode's command line tools" "xcode-select --install"
   xcode-select --install >/dev/null 2>&1 || true
-  say "    macOS shows its own installer window: click Install. Waiting for it to finish..."
-  local i
-  for ((i = 0; i < 360; i++)); do have_xcode_tools && { info "Xcode's command line tools installed"; return 0; }; sleep 5; done
-  die "Xcode's command line tools are not there after 30 minutes: install them (xcode-select --install), then run omacvm again"
+  xcode_wait() { local i; for ((i = 0; i < 720; i++)); do have_xcode_tools && return 0; sleep 5; done; return 1; }
+  ui_spin "Installing Xcode's command line tools (click Install in macOS's window)" xcode_wait ||
+    die "Xcode's command line tools are not there after an hour: install them (xcode-select --install), then run omacvm again"
 }
 
 ensure_homebrew() {
@@ -76,8 +75,7 @@ ensure_brew_tools() {
   [[ -z $m ]] && return 0
   (( PLAN )) && return 0
   ensure_homebrew
-  log "installing from Homebrew: $m"
-  brew install -q $m >/dev/null || needs_person "brew install $m failed: run it yourself, then omacvm again"
+  ui_spin "Installing from Homebrew: $m" brew install -q $m || needs_person "brew install $m failed: run it yourself, then omacvm again"
 }
 
 ensure_vm_app() {

@@ -357,6 +357,7 @@ step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
 BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
 mkdir -p "$HOME/Library/Logs"
 exec > >(tee -a "$BUILD_LOG") 2>&1
+UI_LOG=$BUILD_LOG
 build_end() {
   local rc=$?
   (( rc == 0 )) && return
@@ -390,7 +391,7 @@ if [[ $TYPE == parallels ]]; then
   cp "$PVM/config.pvs" "$PVM/config.pvs.backup"
   "$PRLCTL" register "$PVM" >/dev/null
   vm_start "$VM" "$PVM"
-  IP=$(vm_ip "$PVM" 300) || die "the live installer got no IP address"
+  ui_spin_val IP "The live installer gets its address" vm_ip "$PVM" 300 || die "the live installer got no IP address"
 else
   LIVE="$HOME/Library/Caches/omacvm/live/$VM-live.img"
   "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
@@ -400,9 +401,9 @@ else
   utm_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" $((DISK_GB * 1024)) >/dev/null
   rm -f "$LIVE"
   utm_start "$VM"
-  IP=$(utm_ip "$VM" 300) || die "the live installer got no IP address"
+  ui_spin_val IP "The live installer gets its address" utm_ip "$VM" 300 || die "the live installer got no IP address"
 fi
-wait_ssh "$IP"
+ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 3. Arch Linux ARM onto the NVMe disk ----------
 step "Arch Linux ARM onto the VM's disk ($IP)"
@@ -417,14 +418,14 @@ gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 
 step "Booting from the new disk"
 if [[ $TYPE == utm ]]; then
-  utm_wait_stopped "$VM"
+  ui_spin "The live installer shuts down" utm_wait_stopped "$VM"
   utm_drop_live "$VM"
   utm_set_icon "$VM"
   utm_start "$VM"
   sleep 20
-  IP=$(utm_ip "$VM" 300) || die "the new system got no IP address"
+  ui_spin_val IP "The new system starts and gets its address" utm_ip "$VM" 300 || die "the new system got no IP address"
 else
-wait_stopped "$VM"
+ui_spin "The live installer shuts down" wait_stopped "$VM"
 "$PRLCTL" unregister "$VM" >/dev/null
 live=$(python3 - "$PVM/config.pvs" <<'PY'
 import sys, xml.etree.ElementTree as ET
@@ -445,9 +446,9 @@ cp "$PVM/config.pvs" "$PVM/config.pvs.backup"
 "$PRLCTL" register "$PVM" >/dev/null
 vm_start "$VM" "$PVM"
 sleep 20
-IP=$(vm_ip "$PVM" 300) || die "the new system got no IP address"
+ui_spin_val IP "The new system starts and gets its address" vm_ip "$PVM" 300 || die "the new system got no IP address"
 fi
-wait_ssh "$IP"
+ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------
 step "Omarchy from omarchy-mac (the longest step)"

@@ -164,3 +164,41 @@ ui_box() {
 }
 
 ui_step() { printf '\n\033[1;36m[%s/%s]\033[0m \033[1m%s\033[0m\n' "$1" "$2" "$3"; }
+
+# ui_spin "Message" command...: runs the command with a spinner and the elapsed
+# time, its output kept aside (and in the build log, if any); a ✓ when done,
+# or ✗ and the output's last lines when it fails. Returns the command's status.
+# ui_spin_val VAR "Message" command...: the same, the command's output into VAR.
+UI_FRAMES='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+ui_spin() {
+  local msg=$1; shift
+  local out rc pid i=0 t0=$SECONDS e
+  out=$(mktemp)
+  if (( ! UI_FANCY )); then
+    printf '  %s...\n' "$msg" > "$TTY"
+    "$@" > "$out" 2>&1; rc=$?
+  else
+    "$@" > "$out" 2>&1 &
+    pid=$!
+    printf '\033[?25l' > "$TTY"
+    while kill -0 "$pid" 2>/dev/null; do
+      e=$(( SECONDS - t0 ))
+      printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$(ui_fit "$msg")" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
+      i=$(( i + 1 )); sleep 0.1
+    done
+    wait "$pid"; rc=$?
+    printf '\r\033[2K\033[?25h' > "$TTY"
+  fi
+  e=$(( SECONDS - t0 ))
+  if (( rc == 0 )); then printf '  %s✓%s %s %s(%dm %02ds)%s\n' "$UOK" "$UR" "$msg" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR"
+  else printf '  \033[31m✗\033[0m %s\n' "$msg"; tail -15 "$out" | sed 's/^/    /'; fi
+  [[ -n ${UI_LOG:-} ]] && cat "$out" >> "$UI_LOG" 2>/dev/null
+  UI_SPIN_OUT=$(cat "$out"); rm -f "$out"
+  return $rc
+}
+ui_spin_val() {
+  local var=$1 rc; shift
+  ui_spin "$@" && rc=0 || rc=$?
+  printf -v "$var" '%s' "$(tail -1 <<<"$UI_SPIN_OUT")"
+  return $rc
+}
