@@ -71,6 +71,11 @@ last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*:
 say_ "Mac"
 L=~/Library/Logs
 # The VM network's Mac address exists only while a VM of that type runs.
+if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
+  bad "VM network" "$msg" human
+  (( JSON )) && json_out false
+  exit 1
+fi
 if ! ifconfig | grep -q "inet $HOST "; then
   bad "VM network" "$HOST is not up on this Mac: start the VM, then run omacvm check again"
   (( JSON )) && json_out false

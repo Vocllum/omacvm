@@ -74,6 +74,8 @@ while (( $# )); do
   esac
 done
 [[ $(uname -m) == arm64 ]] || die "OmacVM needs an Apple Silicon Mac"
+macos=$(sw_vers -productVersion 2>/dev/null)
+(( ${macos%%.*} >= 14 )) || { printf '\033[1;31mneeds you:\033[0m OmacVM needs macOS 14 (Sonoma) or newer; this Mac runs %s\n' "$macos" >&2; exit 3; }
 (( JSON )) && ! (( PLAN )) && usage "--json goes with --plan"
 (( PLAN && JSON )) && YES=1   # a plan for an agent never asks
 (( YES )) || { : < "$TTY"; } 2>/dev/null || usage "the setup questions need a terminal (or pass --yes and the answers as options, see --help)"
@@ -137,6 +139,7 @@ case $TYPE in
       (( rc != 2 )) || needs_person "Parallels Desktop reports no active licence yet (${P_STATUS:-no status}): start the trial or sign in, then run this again"
       (( rc == 0 )) || needs_person "Parallels Desktop is not installed and set up: install it (https://www.parallels.com/products/desktop/ or brew install --cask parallels), open it once and sign in or start the trial"
     else wait_for_app parallels; fi
+    vm_network_ok parallels || needs_person "Parallels' shared network is not its default (see above)"
     (( CAP_CPUS > mac_cores )) && CAP_CPUS=$mac_cores
     (( CAP_MEM_GB > mac_mem_gb )) && CAP_MEM_GB=$mac_mem_gb ;;
   utm)

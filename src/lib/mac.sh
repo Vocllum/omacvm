@@ -152,3 +152,24 @@ utm_wait_stopped() {   # <vm name>
   for ((i = 0; i < 180; i += 3)); do [[ $(utm_state "$1") == stopped ]] && return 0; sleep 3; done
   die "UTM VM '$1' did not stop"
 }
+
+# OmacVM's helpers listen on the Mac's address on each VM app's default shared
+# network: 10.211.55.2 (Parallels), 192.168.64.1 (UTM). vm_network_ok TYPE [IP]
+# says (on stderr) what to change when that network was moved.
+vm_network_ok() {
+  local a
+  case $1 in
+    parallels)
+      a=$(prlsrvctl net info Shared 2>/dev/null | awk '/Parallels adapter/ { f = 1 } f && /IPv4 address:/ { print $3; exit }')
+      if [[ -n $a && $a != 10.211.55.2 ]]; then
+        printf 'Parallels'"'"'s shared network is at %s; OmacVM needs its default, 10.211.55.0/24 (the Mac at 10.211.55.2): set it back in Parallels Desktop > Settings > Network (Shared).\n' "$a" >&2
+        return 1
+      fi ;;
+    utm)
+      if [[ -n ${2:-} && $2 != 192.168.64.* ]]; then
+        printf 'The UTM VM is at %s, outside UTM'"'"'s default shared network 192.168.64.0/24 (the Mac at 192.168.64.1), which OmacVM needs: give the VM the "Shared Network" mode with macOS'"'"'s default range.\n' "$2" >&2
+        return 1
+      fi ;;
+  esac
+  return 0
+}

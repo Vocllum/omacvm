@@ -44,6 +44,8 @@ while (( $# )); do
     *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
+macos=$(sw_vers -productVersion 2>/dev/null)
+(( ${macos%%.*} >= 14 )) || { echo "omacvm apply: OmacVM needs macOS 14 (Sonoma) or newer; this Mac runs $macos" >&2; exit 3; }
 export OMA_KEY=$KEY
 [[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q; }
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
@@ -56,6 +58,7 @@ else
   resolve_vm start
 fi
 [[ $TYPE == parallels || $TYPE == utm ]] || { echo "omacvm apply: --vm-type parallels or utm" >&2; exit 2; }
+vm_network_ok "$TYPE" "$IP" || exit 3
 if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
   printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
   printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
