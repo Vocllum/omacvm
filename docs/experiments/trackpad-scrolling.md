@@ -260,6 +260,22 @@ libinput's adaptive profile (smooth, built for this), scroll factor 0.1, the
 low base speed confirmed for slow scrolling. In test 12 adaptive was "slow to
 medium a bit too much", but at 0.25, when everything was far too fast.
 
+- Slow scrolling perfect; a fast swipe from the top of a page to the bottom
+  stays slow and looks animated. libinput's adaptive profile barely affects
+  two-finger scrolling: raw finger movement has no acceleration worth the name.
+
+### 18. macOS's own acceleration on the raw fingers (in progress)
+
+- Mac: while the fingers touch, macOS's (dropped) scroll events now go to the
+  guest as `A <dx> <dy>`: what macOS would scroll, with its acceleration.
+- Guest: over 150 ms, macOS points per millimetre of finger movement, divided
+  by the same ratio during slow scrolling (below 20 mm/s; calibrated as you
+  scroll, `OMACVM_SCROLL_BASE` to preset), is the gain on the raw, filtered
+  finger movement (low-passed, capped at 6, `OMACVM_SCROLL_ACCEL_MAX`).
+  Direction and fineness from the fingers, the amount of acceleration from
+  macOS. Debug: `accel:` lines.
+- Virtual trackpad: flat, 0.082 (perfect for slow scrolling).
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page

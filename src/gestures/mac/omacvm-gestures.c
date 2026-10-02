@@ -32,6 +32,8 @@
 //   S <on|off|esc>                    capture state changes
 //   W <dx> <dy>                       --scroll: macOS scroll deltas in points
 //   P                                 --scroll: macOS recognized a pinch (magnify)
+//   A <dx> <dy>                       --scroll: macOS's scroll while the fingers touch
+//                                     (points; the guest reads macOS's acceleration from it)
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -301,8 +303,17 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     // the guest; a wheel mouse's discrete steps pass to Parallels.
     if (!(scroll2 && trackpad && capturing && haveClient(frontNet))) return e;
     if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
-    // Fingers on the built-in trackpad: their raw frames carry this scroll.
-    if (fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase)) return NULL;
+    // Fingers on the built-in trackpad: their raw frames carry this scroll; the
+    // guest only learns from it how much macOS accelerates right now.
+    if (fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase)) {
+      double ay = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
+      double ax = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
+      if (ax != 0 || ay != 0) {
+        char b[64]; int n = snprintf(b, sizeof b, "A %.2f %.2f\n", ax, ay);
+        sendLine(b, (size_t)n);
+      }
+      return NULL;
+    }
     double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
     double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
     double nx = 0, ny = 0;
