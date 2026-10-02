@@ -320,7 +320,11 @@ BLEND_V0, BLEND_V1 = float(_b[0]), float(_b[1])
 # scroll factor for the virtual trackpad is raised by the same factor (4x).
 RAW_SCALE = float(os.environ.get("OMACVM_SCROLL_RAW_SCALE", "0.25"))
 # Units per macOS point: 1 point = 1 pixel, like on the Mac (measured).
-POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "5.5"))
+POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "3.6"))
+# Glide scale: macOS's momentum at POINT_UNITS (measured to continue macOS's
+# own speed), or matched to the speed at the lift (OMACVM_SCROLL_GLIDE_MATCH=1;
+# measured too short: fingers slow down just before lifting).
+GLIDE_MATCH = os.environ.get("OMACVM_SCROLL_GLIDE_MATCH") == "1"
 
 
 # Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
@@ -490,7 +494,7 @@ class Hybrid:
         # (measured: a fixed scale made medium flicks speed up after the lift) and
         # takes macOS's momentum only for its shape: scale = virtual speed at the
         # lift / macOS's first momentum speed.
-        s = (self.scale or POINT_UNITS) * GLIDE
+        s = ((self.scale or POINT_UNITS) if GLIDE_MATCH else POINT_UNITS) * GLIDE
         self.wprev = now
         self.pending[0] += dx * s
         self.pending[1] += dy * s

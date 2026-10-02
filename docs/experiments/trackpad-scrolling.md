@@ -417,6 +417,24 @@ Scale = virtual speed at the lift / macOS's first momentum speed (limited to
 a quarter to four times `POINT_UNITS`): macOS's momentum gives the shape and
 duration, the content does not speed up or slow down at the lift.
 
+Recording 5 (with input):
+- Glide distance per speed at the lift: macOS 0.71 s, Omarchy 0.40 s: matching
+  the lift speed overshoots the other way (the last frames before a lift are
+  slower: fingers slow down before lifting, and the filter lags).
+- Touch phase, output px per finger mm (two recordings agree): Omarchy is 1.2-2
+  times macOS's at 160 mm/s and more, where macOS's own steps are used (160-250:
+  13.3 vs 6.6; 250-400: 8.7 vs 7.1; over 400: 14.3 vs 9.3). The point scale
+  "1 point = 1 pixel" was computed, not measured; the production VM also runs
+  at display scale 1.6, so a VM pixel looks smaller than a macOS pixel.
+
+### 26. Measured point scale, fixed glide scale (in progress)
+
+`OMACVM_SCROLL_POINT_UNITS` 3.6 (5.5 x 0.65, the median of the measured
+bands), the glide back at that fixed scale (`OMACVM_SCROLL_GLIDE_MATCH=1`
+keeps the matched variant): fast touch and glide as macOS's, seen on screen;
+slow scrolling (raw fingers) unchanged. Expected glide distance per speed:
+test 24's 0.93 x 0.65 = 0.60 (macOS 0.58-0.71).
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
