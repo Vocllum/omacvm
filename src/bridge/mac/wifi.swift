@@ -3,6 +3,7 @@
 import AppKit
 import CoreLocation
 import CoreWLAN
+import SystemConfiguration
 
 func securityName(_ s: CWSecurity) -> String {
   switch s {
@@ -125,6 +126,16 @@ final class WiFi: NSObject, CWEventDelegate {
     DispatchQueue.main.asyncAfter(deadline: .now() + 1) { self.subscribe() }
   }
 
+  // Whether the Mac's primary connection is wired (Ethernet, Thunderbolt or USB
+  // network adapters: an "en" interface that is not the Wi-Fi one), like a
+  // Mac mini on a cable. VPN tunnels (utun) do not count.
+  func wiredPrimary(wifiName: String?) -> Bool {
+    guard let store = SCDynamicStoreCreate(nil, "omacvm-bridge" as CFString, nil, nil),
+          let g = SCDynamicStoreCopyValue(store, "State:/Network/Global/IPv4" as CFString) as? [String: Any],
+          let primary = g["PrimaryInterface"] as? String else { return false }
+    return primary.hasPrefix("en") && primary != wifiName
+  }
+
   func state(locationOK: Bool) -> [String: Any] {
     let detail = ["ssid", "bssid", "rssi", "noise", "snr", "quality", "channel", "security", "secure",
                   "tx_rate_mbps", "phy_mode", "can_share"]
@@ -132,8 +143,10 @@ final class WiFi: NSObject, CWEventDelegate {
     for k in detail { s[k] = NSNull() }
     guard let i = client.interface() else {
       s["interface"] = NSNull(); s["power"] = false; s["connected"] = false; s["country_code"] = NSNull()
+      s["wired"] = wiredPrimary(wifiName: nil)
       return s
     }
+    s["wired"] = wiredPrimary(wifiName: i.interfaceName)
     let power = i.powerOn()
     let channel = power ? i.wlanChannel() : nil
     let rssi = i.rssiValue()

@@ -33,7 +33,11 @@ Panel {
   readonly property var wifi: bridge.wifi || ({})
   readonly property string kind: Model.kindFor(bridge.available, bridge.wifi)
   readonly property int signalStrength: kind === "wifi" ? (parseInt(wifi.quality, 10) || 0) : -1
-  readonly property string icon: Model.connectionIcon(kind, signalStrength)
+  // The Mac on a cable (a Mac mini on Ethernet): the bar shows Omarchy's wired
+  // icon, as Omarchy's own widget does when Ethernet is up; the panel keeps
+  // the Mac's Wi-Fi below it.
+  readonly property bool wired: available && wifi.wired === true
+  readonly property string icon: wired ? "󰈀" : Model.connectionIcon(kind, signalStrength)
   readonly property bool locationOff: available && wifi.location_authorized === false
   readonly property string ssid: wifi.ssid || ""
 
@@ -424,6 +428,7 @@ Panel {
 
             readonly property string title: {
               if (root.kind === "unavailable") return "Mac unavailable"
+              if (root.wired && root.kind !== "wifi") return "Ethernet"
               if (root.kind === "off") return "Wi-Fi off"
               if (root.kind === "disconnected") return "Wi-Fi"
               return root.ssid || "Wi-Fi"
@@ -445,6 +450,7 @@ Panel {
             width: parent.width
             text: {
               if (root.kind === "unavailable") return "WAITING FOR THE MAC"
+              if (root.wired && root.kind !== "wifi") return "THE MAC IS ON A CABLE" + (root.kind === "off" ? " · WI-FI OFF" : "")
               if (root.kind === "off") return "TURNED OFF ON THE MAC"
               if (root.kind === "disconnected") return "NOT CONNECTED"
               return root.connectionPhrase.toUpperCase()
