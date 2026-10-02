@@ -556,18 +556,6 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  if (trackpad) {
-    startTrackpad();
-    if (!trackpadStarted) {
-      // A Mac without a built-in trackpad (Mac mini, iMac, Studio) and no
-      // Magic Trackpad connected yet: keys only until one is (checked again
-      // every 10 s), instead of exiting into a launchd restart loop.
-      logf_("no trackpad found: keys only until a Magic Trackpad connects");
-      CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
-      CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
-    }
-  }
-
   CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
   for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
@@ -589,6 +577,23 @@ int main(int argc, char **argv) {
   CFRelease(opts);
   if (asked) logf_("permissions granted");
   CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(NULL, tapPort, 0), kCFRunLoopCommonModes);
+
+  // The trackpad only now, with the permissions granted and the run loop about
+  // to run: opened while still waiting, its frames were never taken, and on a
+  // MacBook that stalled the built-in keyboard and trackpad (one device) until
+  // the user granted Accessibility, which they then could not click.
+  if (trackpad) {
+    startTrackpad();
+    if (!trackpadStarted) {
+      // A Mac without a built-in trackpad (Mac mini, iMac, Studio) and no
+      // Magic Trackpad connected yet: keys only until one is (checked again
+      // every 10 s), instead of exiting into a launchd restart loop.
+      logf_("no trackpad found: keys only until a Magic Trackpad connects");
+      CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
+      CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
+    }
+  }
+
 
   CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
