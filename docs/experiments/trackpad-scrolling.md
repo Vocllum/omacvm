@@ -462,7 +462,17 @@ agree independently (distance per lift speed 0.87 s vs 0.65 s, 1.34x). About
   as at scale 1.6, where it was "perfect".
 - macOS steps arriving after the lift go into the glide.
 
-Results: pending.
+Recording 8 (`glidecal.py`: on-screen glide pixels per macOS momentum point,
+per glide, independent of the lift speed, which the VM's display delay skews):
+
+| | median px per momentum point |
+|---|---|
+| macOS | 0.99 (1 point = 1 pixel: validates the method) |
+| Omarchy | 0.99-1.11 (assuming 0-60 ms VM display delay) |
+
+The glide, ~94 % of a fast scroll, now travels as far as macOS's within about
+5-10 %; decay 0.22-0.25 s on both. Two Omarchy glides measured short (0.39,
+0.59) were cut by the next touch.
 
 ## Candidate if the wheel cannot pan a zoomed page
 
