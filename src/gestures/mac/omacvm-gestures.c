@@ -512,6 +512,37 @@ static void *serverThread(void *arg) {
   return NULL;
 }
 
+// ---- the trackpad: the built-in one, else an external Magic Trackpad ----
+// MultitouchSupport lists every multi-touch surface, the Magic Mouse's too; a
+// trackpad is told apart by its size (a Magic Trackpad is 160 x 115 mm, a Magic
+// Mouse's surface well under 100 mm wide).
+static int trackpadStarted;
+
+static void startTrackpad(void) {
+  CFArrayRef list = MTDeviceCreateList();
+  MTDeviceRef pick = NULL; int pw = 0, ph = 0;
+  for (int pass = 0; pass < 2 && !pick; pass++) {
+    for (CFIndex i = 0; list && i < CFArrayGetCount(list) && !pick; i++) {
+      MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
+      int w = 0, h = 0;
+      if (MTDeviceGetSensorSurfaceDimensions(d, &w, &h) != 0) w = h = 0;
+      if (pass == 0 ? MTDeviceIsBuiltIn(d) : (!MTDeviceIsBuiltIn(d) && w >= 10000)) { pick = d; pw = w; ph = h; }
+    }
+  }
+  if (!pick) return;
+  if (pw > 0 && ph > 0) { tpW = pw; tpH = ph; }
+  MTRegisterContactFrameCallback(pick, frameCb);
+  MTDeviceStart(pick, 0);
+  trackpadStarted = 1;
+  logf_("trackpad: %s, %d x %d mm", MTDeviceIsBuiltIn(pick) ? "built-in" : "Magic Trackpad", tpW / 100, tpH / 100);
+}
+
+static void retryTrackpad(CFRunLoopTimerRef t, void *info) {
+  (void)info;
+  if (!trackpadStarted) startTrackpad();
+  if (trackpadStarted) CFRunLoopTimerInvalidate(t);
+}
+
 int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
@@ -525,15 +556,17 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  CFArrayRef list = trackpad ? MTDeviceCreateList() : NULL;
-  int started = 0;
-  for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
-    MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
-    if (!MTDeviceIsBuiltIn(d)) continue;   // built-in trackpad only
-    { int w = 0, h = 0; if (MTDeviceGetSensorSurfaceDimensions(d, &w, &h) == 0 && w > 0 && h > 0) { tpW = w; tpH = h; } }
-    MTRegisterContactFrameCallback(d, frameCb); MTDeviceStart(d, 0); started++;
+  if (trackpad) {
+    startTrackpad();
+    if (!trackpadStarted) {
+      // A Mac without a built-in trackpad (Mac mini, iMac, Studio) and no
+      // Magic Trackpad connected yet: keys only until one is (checked again
+      // every 10 s), instead of exiting into a launchd restart loop.
+      logf_("no trackpad found: keys only until a Magic Trackpad connects");
+      CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
+      CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
+    }
   }
-  if (trackpad && !started) { logf_("no built-in trackpad found"); return 1; }
 
   CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
