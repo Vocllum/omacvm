@@ -20,3 +20,21 @@ ffmpeg -i "$F" -vf "crop=200:24:300:46,scale=1:1,format=rgb24" -f rawvideo top.r
 roughness (deviation from a clean exponential), and the distance.
 Crop coordinates fit a 3456 x 2234 recording of a full-screen browser; adjust
 for others.
+
+## With the input recorded
+
+Run the Mac helper with `--record` (OmacVM Gestures writes every trackpad
+frame and every macOS scroll event to `~/Library/Logs/omacvm-input.tsv`) and
+the guest with `OMACVM_SCROLL_RECORD=1` (every virtual-touchpad frame to
+`/var/log/omacvm-output.tsv`), record the screen, then:
+
+```bash
+cp ~/Library/Logs/omacvm-input.tsv input.tsv
+T0=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "<creation_time from ffprobe>" +%s)
+./venv/bin/python align.py $T0
+```
+
+`align.py` finds the offset between video and logs (correlating macOS's
+scroll with the video's movement), then compares macOS and Omarchy against
+the same finger input: output speed per finger speed while touching, and for
+each lift the speed at the lift, the glide's distance and decay.

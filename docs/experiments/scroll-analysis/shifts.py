@@ -20,8 +20,11 @@ for t in range(1, n):
     gi = int(np.argmax(vals))
     # tracking: best peak within +-60 px of the previous shift, if nearly as good
     near = np.where(np.abs(lags - prev) <= 60)[0]
-    ni = near[np.argmax(vals[near])]
-    i = ni if vals[ni] >= 0.85 * vals[gi] else gi
+    if len(near):
+        ni = near[np.argmax(vals[near])]
+        i = ni if vals[ni] >= 0.85 * vals[gi] else gi
+    else:
+        i = gi                     # faster than the search window: no tracking
     k = lags[i]
     if 0 < i < len(vals) - 1 and abs(lags[i+1]-lags[i]) == 1 and abs(lags[i]-lags[i-1]) == 1:
         a, b, d = vals[i-1], vals[i], vals[i+1]; den = a - 2*b + d

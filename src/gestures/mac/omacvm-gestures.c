@@ -95,6 +95,8 @@ void ns_scroll_delta(CGEventRef e, double *dx, double *dy);   // scroll_ns.m
 int ns_event_type(CGEventRef e);                               // scroll_ns.m
 static int trackpad = 1;          // 0 with --keys-only
 static int scroll2;               // 1 with --scroll
+static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
+static double unixNow(void) { return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970; }
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
 static volatile double lastTwo;   // when it last had two or more fingers
 static int pinchSent;             // P sent for the current two-finger touch
@@ -149,6 +151,11 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   int send = 0;
   if (k != 2) pinchSent = 0;
   fingers = k;
+  if (rec && k > 0) {
+    float sx = 0, sy = 0;
+    for (int i = 0; i < k; i++) { sx += c[i]->normalized.pos.x; sy += 1.0f - c[i]->normalized.pos.y; }
+    fprintf(rec, "F\t%.4f\t%d\t%.5f\t%.5f\t%d\n", unixNow(), k, sx / k, sy / k, capturing);
+  }
   if (k >= 2) lastTwo = CFAbsoluteTimeGetCurrent();
   if (trackpad && capturing && haveClient(frontNet)) {
     if (k >= 3 || (k == 2 && scroll2)) send = 1;
@@ -220,6 +227,7 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   if (now != capturing) {
     capturing = now;
     logf_("capture %s", now ? "ON" : "off");
+    if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
     sendState(now ? "on" : (front ? "esc" : "off"));
   }
   if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
@@ -298,6 +306,13 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     swallowEscUp = 1;
     return NULL;
   }
+  if (type == kCGEventScrollWheel && rec)
+    fprintf(rec, "S\t%.4f\t%lld\t%lld\t%.2f\t%.2f\t%lld\t%d\n", unixNow(),
+            CGEventGetIntegerValueField(e, kCGScrollWheelEventScrollPhase),
+            CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase),
+            CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2),
+            CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1),
+            CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous), capturing);
   if (type == kCGEventScrollWheel) {
     // Continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it, goes to
     // the guest; a wheel mouse's discrete steps pass to Parallels.
@@ -394,6 +409,11 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
     else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
     else if (!strcmp(argv[i], "--scroll")) scroll2 = 1;
+    else if (!strcmp(argv[i], "--record")) {
+      char path[1024]; snprintf(path, sizeof path, "%s/Library/Logs/omacvm-input.tsv", getenv("HOME"));
+      rec = fopen(path, "a");
+      if (rec) setvbuf(rec, NULL, _IOLBF, 0);
+    }
   }
   signal(SIGPIPE, SIG_IGN);
 

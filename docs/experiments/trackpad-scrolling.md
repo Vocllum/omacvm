@@ -392,7 +392,32 @@ per frame).
   (`OMACVM_SCROLL_GLIDE_TAU` 25 ms) on a 2 ms clock: the same movement in
   every 120 Hz frame.
 
-Results: pending (jump baseline 89; same-frame errors stopped at 532).
+- "This is so good!" Recordings 2 and 3 (`scroll-analysis/metrics.py`): the
+  cap is gone, peaks 15,800-21,800 px/s on both, distances in the same range
+  (matched big flicks: macOS 22,199 px/s, 8,727 px, decay 0.159 s; Omarchy
+  21,813 px/s, 7,984 px, 0.155 s). Recording 2 showed regular empty frames on
+  Omarchy (every ~8 frames, the VM's display output); recording 3 had none.
+
+### Input recording (recording 4, `scroll-analysis/align.py`)
+
+Trackpad frames and macOS's scroll events recorded on the Mac, the virtual
+fingers in the guest, lined up with the video (offset +0.2 s):
+
+- Glide decay: macOS 0.220 s, Omarchy 0.218 s: matches.
+- Glide distance relative to the speed at the lift: macOS 0.58 s (median),
+  Omarchy 0.93 s; medium flicks sped up after the lift (1,500-1,800 px/s at the
+  lift, 1,850-2,900 px of glide). The fixed glide scale (1 point = 1 pixel)
+  starts at macOS's internal speed, while at medium speeds the content moved
+  slower during the touch (raw fingers).
+- Touch phase: too few samples per speed band to tune on.
+
+### 25. The glide continues at the content's speed (in progress)
+
+Scale = virtual speed at the lift / macOS's first momentum speed (limited to
+a quarter to four times `POINT_UNITS`): macOS's momentum gives the shape and
+duration, the content does not speed up or slow down at the lift.
+
+Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
 
