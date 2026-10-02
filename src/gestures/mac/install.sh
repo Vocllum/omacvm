@@ -1,12 +1,18 @@
 #!/bin/bash
 # Install OmacVMGestures.app to ~/Applications and start it at login (LaunchAgent).
-#   ./install.sh [--keys-only]
+#   ./install.sh [--keys-only | --scroll]
 # --keys-only: trackpad gestures stay with macOS; on UTM, Cmd still reaches
-# Omarchy as Super.
+# Omarchy as Super. --scroll: two-finger scrolling goes to Omarchy's virtual
+# touchpad too (only one-finger movement and clicks stay with the VM app).
 set -euo pipefail
 cd "$(dirname "$0")"
 ARGS=""
-[[ ${1:-} == --keys-only ]] && ARGS="<string>--keys-only</string>"
+for a in "$@"; do
+  case $a in
+    --keys-only|--scroll) ARGS+="<string>$a</string>" ;;
+    *) echo "install.sh: unknown option $a" >&2; exit 2 ;;
+  esac
+done
 ./build.sh
 LABEL=org.omacvm.gestures
 PL=~/Library/LaunchAgents/$LABEL.plist
@@ -28,4 +34,4 @@ cat > "$PL" <<PL
 </dict></plist>
 PL
 launchctl bootstrap gui/$(id -u) "$PL"
-echo "installed${ARGS:+ (keys only)}; log: ~/Library/Logs/omacvm-gestures.log"
+echo "installed${ARGS:+ ($*)}; log: ~/Library/Logs/omacvm-gestures.log"

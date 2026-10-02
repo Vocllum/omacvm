@@ -14,6 +14,12 @@
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
+// --scroll: scrolling keeps macOS's own physics. macOS's continuous scroll
+// events (trackpad and Magic Mouse: macOS's acceleration, and its momentum
+// after the fingers lift) go to the guest as pixel deltas, "W <dx> <dy>", for
+// its virtual high-resolution wheel, instead of to Parallels. A wheel mouse
+// (discrete steps) still scrolls through Parallels; one-finger movement and
+// clicks stay with Parallels.
 // --keys-only (trackpad gestures turned off at setup): macOS keeps every
 // gesture and nothing is sent from the trackpad; on UTM, Cmd still reaches the
 // guest as Super (below).
@@ -22,6 +28,7 @@
 // Parallels, 192.168.64.1 on UTM), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
+//   W <dx> <dy>                       --scroll: macOS scroll deltas in points
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -80,6 +87,9 @@ static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
 static int trackpad = 1;          // 0 with --keys-only
+static int scroll2;               // 1 with --scroll
+static volatile int fingers;      // contacts in the built-in trackpad's last frame
+static volatile double lastTwo;   // when it last had two or more fingers
 
 static void logf_(const char *fmt, ...) {
   time_t t = time(NULL); char ts[16]; strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
@@ -129,6 +139,8 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   for (int i = 0; i < n && k < 16; i++) if (touching(&touches[i])) c[k++] = &touches[i];
 
   int send = 0;
+  fingers = k;
+  if (k >= 2) lastTwo = CFAbsoluteTimeGetCurrent();
   if (trackpad && capturing && haveClient(frontNet)) {
     if (k >= 3) send = 1;
     else if (k == 2) {
@@ -277,6 +289,19 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     swallowEscUp = 1;
     return NULL;
   }
+  if (type == kCGEventScrollWheel) {
+    // Continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it, goes to
+    // the guest; a wheel mouse's discrete steps pass to Parallels.
+    if (!(scroll2 && trackpad && capturing && haveClient(frontNet))) return e;
+    if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
+    double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
+    double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
+    if (dx != 0 || dy != 0) {
+      char b[64]; int n = snprintf(b, sizeof b, "W %.2f %.2f\n", dx, dy);
+      sendLine(b, (size_t)n);
+    }
+    return NULL;
+  }
   return capturing && trackpad ? NULL : e;   // a gesture event type
 }
 
@@ -323,6 +348,7 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
     else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
+    else if (!strcmp(argv[i], "--scroll")) scroll2 = 1;
   }
   signal(SIGPIPE, SIG_IGN);
 
@@ -335,7 +361,7 @@ int main(int argc, char **argv) {
   }
   if (trackpad && !started) { logf_("no built-in trackpad found"); return 1; }
 
-  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp);
+  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
   for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
   // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
@@ -365,7 +391,8 @@ int main(int argc, char **argv) {
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
-  logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
+  logf_(!trackpad ? "running, keys only: trackpad gestures stay with macOS"
+        : scroll2 ? "running with two-finger scrolling (escape: Ctrl+Option+Cmd+Esc)" : "running (escape: Ctrl+Option+Cmd+Esc)");
   CFRunLoopRun();
   return 0;
 }

@@ -1,0 +1,98 @@
+# Experiment: two-finger scrolling through OmacVM Gestures
+
+Branch `experiment/trackpad-scrolling`. Nothing here is on `main` until a
+decision is made. Tested on the production Parallels VM (Omarchy 4.0.3rc4,
+Hyprland 0.56.2, libinput 1.32.0, Chromium 153) on a MacBook Pro M4 Max,
+macOS 15.7.4, Parallels Desktop 27.0.2.
+
+## Goal
+
+OmacVM Gestures' 3/4-finger swipes and pinch feel more responsive than
+Parallels' own smooth scrolling. Try the same for two-finger scrolling, in all
+directions, so that only one-finger pointer movement (and clicks) still come
+from Parallels.
+
+## Test log (2026-10-02)
+
+### 1. Raw two-finger touches to the virtual touchpad
+
+`omacvm-gestures --scroll`: every two-finger frame goes to the guest's virtual
+Apple touchpad (not only pinches); macOS's scroll events from the built-in
+trackpad, momentum included, are dropped so Parallels does not scroll as well.
+libinput turns the touches into touchpad scrolling.
+
+- Panning in every direction while zoomed in (Chromium): **excellent**.
+- Normal scrolling: far too sensitive and accelerated; small inputs keep
+  scrolling for about a second.
+
+Guest touchpad settings at the time (Omarchy defaults): natural scrolling on,
+tap-to-click off, scroll factor 0.4, adaptive acceleration.
+
+### 2. Flat acceleration, scroll factor 0.25 for the virtual touchpad
+
+`hl.device({ name = "apple-inc.-magic-trackpad-(omacvm)", accel_profile = "flat", scroll_factor = 0.25 })`
+
+- Files (GTK): very close to macOS; long scrolls a bit slow.
+- Chromium: still overshoots, gliding on for about a second.
+
+Recording in the guest (evdev, timestamps) of a few short scrolls:
+
+- Parallels' virtual mouse sent **no** scroll events: no double scrolling.
+- Finger frames arrive evenly every 8 ms (125 Hz), no bursts; the touches end
+  0.1-0.15 s after a short push. The overshoot happens after the last frame:
+  it is **Chromium's own fling** (and its fling booster, which speeds up
+  repeated swipes in the same direction). Chromium has no switch to tune it
+  (`ExperimentalFlingAnimation` was tried and made it worse).
+
+### 3. Custom acceleration curves (`scroll_points`)
+
+A macOS-like curve (1:1 slow, up to 1.5x fast) for scrolling. Everything,
+4-finger swipes included, became 3-5x too sensitive: libinput slows touchpad
+motion by 0.297 ("magic slowdown") only in its built-in profiles; a custom
+curve bypasses it. Rescaled by 0.297: still too sensitive overall. Reverted.
+
+### 4. macOS's own scroll physics, replayed as a high-resolution wheel
+
+`omacvm-gestures --scroll` (current branch code): macOS's continuous scroll
+events (trackpad, Magic Mouse; macOS's acceleration and momentum included)
+go to the guest as point deltas (`W <dx> <dy>`), and the guest replays them on
+a virtual high-resolution wheel, "OmacVM scroll (macOS)" (120 units per
+`OMACVM_SCROLL_POINTS_PER_DETENT` points, default 40). Two-finger touches go
+to the virtual touchpad only for pinch again. A wheel mouse still scrolls
+through Parallels. The virtual touchpad's test settings were removed.
+
+- 3- and 4-finger swipes: almost perfect.
+- Files: fine, a bit nervous and fast.
+- Chromium: still glides too much (now its smooth-scrolling animation of
+  wheel steps, on top of macOS's momentum).
+- Chromium pinch zoom: works well.
+- Chromium pinch zoom, then two-finger panning: the worst, very buggy (when
+  zoomed in, Chromium pans smoothly only with touchpad scrolling, not a wheel).
+
+### 5. Chromium without smooth scrolling, slower wheel (in progress)
+
+`--disable-smooth-scrolling` in `~/.config/chromium-flags.conf`;
+`OMACVM_SCROLL_POINTS_PER_DETENT=60` (systemd drop-in
+`/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`).
+
+Results: pending.
+
+## Candidate if the wheel cannot pan a zoomed page
+
+Replay macOS's physics as **touchpad** movement instead of wheel steps: move
+two virtual fingers on the virtual touchpad by macOS's scroll deltas, keep them
+down through macOS's momentum and lift only when it has died down. Apps then
+get touchpad scrolling (Chromium pans a zoomed page properly), but with near
+zero speed at the lift, so Chromium and GTK add no fling of their own.
+
+## Test changes on the production VM (to revert or adopt)
+
+- `/usr/local/bin/omacvm-gestures`: this branch's guest daemon.
+- `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`.
+- `~/.config/chromium-flags.conf`: `--disable-smooth-scrolling` added
+  (original in `chromium-flags.conf.before-omacvm-scroll-test`).
+- `~/.config/hypr/input.lua`: test block removed again (original in
+  `input.lua.before-omacvm-scroll-test`).
+- `/root/.ssh/authorized_keys`: the current `omacvm` key added (kept).
+- Mac: OmacVM Gestures installed with `--scroll` (back:
+  `src/gestures/mac/install.sh`).

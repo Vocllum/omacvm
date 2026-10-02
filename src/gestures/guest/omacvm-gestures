@@ -7,6 +7,8 @@ Connects to the Mac helper (gestures/mac) on the Mac's address on the VM network
 and reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
+  W <dx> <dy>                       scrolling as macOS shaped it (points), for the
+                                    virtual high-resolution wheel
 
 The helper only sends 3+-finger frames and 2-finger pinches; one-finger
 movement, clicks and two-finger scrolling keep coming from Parallels' own
@@ -95,6 +97,45 @@ class Touchpad:
             self.frame([])
 
 
+# One wheel detent (120 high-resolution units) per this many macOS points.
+POINTS_PER_DETENT = float(os.environ.get("OMACVM_SCROLL_POINTS_PER_DETENT", "40"))
+
+
+def make_wheel():
+    """A virtual high-resolution wheel for macOS's scrolling (--scroll on the Mac):
+    apps get the finished movement, macOS's acceleration and momentum included."""
+    caps = {
+        e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
+        e.EV_REL: [e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL, e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES],
+    }
+    return UInput(caps, name="OmacVM scroll (macOS)", vendor=0x05AC, product=0x0001, bustype=e.BUS_VIRTUAL)
+
+
+class Wheel:
+    def __init__(self, ui):
+        self.ui = ui
+        self.hi = [0.0, 0.0]     # high-resolution remainders (x, y)
+        self.lo = [0, 0]         # high-resolution units toward the next legacy detent
+
+    def scroll(self, dx, dy):
+        # macOS: positive dy = content moves down (natural scrolling already
+        # applied) = REL_WHEEL positive; positive dx = content moves right =
+        # REL_HWHEEL negative.
+        for i, (v, hi, lo) in enumerate(((-dx, e.REL_HWHEEL_HI_RES, e.REL_HWHEEL), (dy, e.REL_WHEEL_HI_RES, e.REL_WHEEL))):
+            self.hi[i] += v * 120.0 / POINTS_PER_DETENT
+            n = int(self.hi[i])
+            if not n:
+                continue
+            self.hi[i] -= n
+            self.ui.write(e.EV_REL, hi, n)
+            self.lo[i] += n
+            d = int(self.lo[i] / 120)
+            if d:
+                self.lo[i] -= d * 120
+                self.ui.write(e.EV_REL, lo, d)
+        self.ui.syn()
+
+
 def make_keyboard():
     """A virtual keyboard for the Mac's Cmd shortcuts on UTM (sent as Super+key)."""
     return UInput({e.EV_KEY: list(range(1, 249))}, name="OmacVM keyboard (Mac shortcuts)")
@@ -141,7 +182,7 @@ def notify(text):
                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def run(pad, keys):
+def run(pad, keys, wheel):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
         s.settimeout(None)
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
@@ -164,6 +205,8 @@ def run(pad, keys):
                         cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
                         contacts.append((cid, round(min(max(x, 0.0), 1.0) * W), round(min(max(y, 0.0), 1.0) * H)))
                     pad.frame(contacts)
+                elif p[0] == b"W":
+                    wheel.scroll(float(p[1]), float(p[2]))
                 elif p[0] == b"K":
                     keys.key(int(p[1]), int(p[2]))
                 elif p[0] == b"S":
@@ -180,10 +223,11 @@ def main():
     ui = make_device()
     pad = Touchpad(ui)
     keys = Keys(make_keyboard())
+    wheel = Wheel(make_wheel())
     print(f"omacvm-gestures: virtual touchpad {ui.device.path}", flush=True)
     while True:
         try:
-            run(pad, keys)
+            run(pad, keys, wheel)
         except (OSError, ConnectionError, ValueError, IndexError) as err:
             pad.release()
             keys.release()
