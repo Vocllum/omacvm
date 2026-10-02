@@ -54,6 +54,32 @@ Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && .
 Setting it up with a coding agent (Claude Code, Codex, …)? See
 [With a coding agent](#with-a-coding-agent).
 
+## What you get
+
+| | |
+|---|---|
+| **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS |
+| **Glide** *(experimental, but awesome)* | macOS-native scrolling, passed through: two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#glide-macos-native-scrolling-passed-through)) |
+| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
+| **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
+| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
+| **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
+| **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
+| **Clipboard both ways, Cmd+V** | Copy in Omarchy, paste on the Mac and back; Cmd+V pastes everywhere, terminals included |
+| **Night Shift and True Tone** | Omarchy's nightlight toggle (Super+Ctrl+N) switches the Mac's Night Shift; strength and True Tone too |
+| **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
+| **Your keyboard layout** | Taken from the Mac |
+| **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
+
+<p align="center">
+  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and the omacvm command." width="100%">
+</p>
+
+<p align="center">
+  <img src="docs/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
+</p>
+
 ## Two routes: Parallels or UTM
 
 **Parallels Desktop is the recommended route**: Omarchy runs at native speed,
@@ -75,32 +101,6 @@ on every display. **UTM is free** and gets almost everything else.
 | Memory tuning, snapshots in GRUB, keyboard, Cmd+V, optional memory-optimized kernel | ✓ | ✓ |
 | OmacVM icon for the VM | ✓ (Dock) | ✓ (UTM's library) |
 | Cost | paid: Standard works; **Pro** for more than 4 CPUs / 8 GB | free; needs **UTM 5 (beta)**: `brew install --cask utm@beta` |
-
-## What you get
-
-| | |
-|---|---|
-| **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
-| **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS |
-| **Glide** *(experimental, but awesome)* | macOS-native scrolling, passed through: two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#glide-macos-native-scrolling-passed-through)) |
-| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
-| **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
-| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
-| **Night Shift and True Tone** | Omarchy's nightlight toggle (Super+Ctrl+N) switches the Mac's Night Shift; strength and True Tone too |
-| **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
-| **Clipboard both ways, Cmd+V** | Copy in Omarchy, paste on the Mac and back; Cmd+V pastes everywhere, terminals included |
-| **Your keyboard layout** | Taken from the Mac |
-| **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's bar moves into the strip beside the MacBook's notch |
-| **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
-
-<p align="center">
-  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and the omacvm command." width="100%">
-</p>
-
-<p align="center">
-  <img src="docs/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
-</p>
 
 ## Requirements
 
@@ -343,15 +343,16 @@ Measured on a MacBook Pro M4 Max: Parallels Desktop Pro (trial) with 16 vCPUs an
 
 | | Mac (macOS) | Parallels | UTM |
 |---|---|---|---|
-| Geekbench multi-core | 26999 | 27201 | |
-| Geekbench single-core | 3286 | 3270 | |
+| Geekbench 7 multi-core | 26999 | 27201 | 24230 |
+| Geekbench 7 single-core | 3286 | 3270 | 3020 |
 | Speedometer 3.1, Chrome, headless | 46.3 | 46.1 | 36.7 |
 | Speedometer 3.1, Chrome on the desktop | | 42.7 | 29.5–31.6 |
 | Random reads over 1 GiB | 0.186 s | 0.22 s | |
 | Cross-CPU thread wake-up | | 24.8 µs | 46.6 µs |
 
-UTM numbers are with OmacVM's UTM setting (UTM's Vulkan driver off); out of the
-box UTM scored 24.8.
+UTM's Speedometer numbers are with OmacVM's UTM setting (UTM's Vulkan driver
+off); out of the box UTM scored 24.8. Its Geekbench run was on an earlier
+Omarchy VM with the same 16 vCPUs.
 
 ## With Omanotch: the bar beside the notch
 
