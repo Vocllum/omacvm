@@ -31,6 +31,7 @@
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
 //   W <dx> <dy>                       --scroll: macOS scroll deltas in points
+//   P                                 --scroll: macOS recognized a pinch (magnify)
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -93,6 +94,7 @@ static int trackpad = 1;          // 0 with --keys-only
 static int scroll2;               // 1 with --scroll
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
 static volatile double lastTwo;   // when it last had two or more fingers
+static int pinchSent;             // P sent for the current two-finger touch
 
 static void logf_(const char *fmt, ...) {
   time_t t = time(NULL); char ts[16]; strftime(ts, sizeof ts, "%H:%M:%S", localtime(&t));
@@ -142,6 +144,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   for (int i = 0; i < n && k < 16; i++) if (touching(&touches[i])) c[k++] = &touches[i];
 
   int send = 0;
+  if (k != 2) pinchSent = 0;
   fingers = k;
   if (k >= 2) lastTwo = CFAbsoluteTimeGetCurrent();
   if (trackpad && capturing && haveClient(frontNet)) {
@@ -314,6 +317,13 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       sendLine(b, (size_t)n);
     }
     return NULL;
+  }
+  // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
+  // two-finger touch passes raw fingers from now on.
+  if (type == 30 && scroll2 && capturing && trackpad && !pinchSent && haveClient(frontNet)) {
+    sendLine("P\n", 2);
+    pinchSent = 1;
+    if (verbose) logf_("pinch (macOS)");
   }
   return capturing && trackpad ? NULL : e;   // a gesture event type
 }

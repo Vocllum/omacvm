@@ -241,7 +241,9 @@ class OneEuro:
 
 _f = os.environ.get("OMACVM_SCROLL_FILTER", "1.5 0.1").split()
 FILTER_MIN_CUTOFF, FILTER_BETA = float(_f[0]), float(_f[1])
-PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "6"))
+# Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
+# gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
+PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
 
 
 class Hybrid:
@@ -309,7 +311,7 @@ class Hybrid:
                             "off": [(c[1] - cx, c[2] - cy) for c in contacts],
                             "fx": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA),
                             "fy": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA)}
-        if not t["pinch"]:
+        if not t["pinch"] and PINCH_MM > 0:
             spread = abs(dist - t["d0"]) / RES
             moved = math.hypot(cx - t["c0"][0], cy - t["c0"][1]) / RES
             if spread > PINCH_MM and spread > moved:
@@ -319,6 +321,11 @@ class Hybrid:
         fx = t["fx"](cx / RES, now) * RES
         fy = t["fy"](cy / RES, now) * RES
         return [(c[0], round(fx + o[0]), round(fy + o[1])) for c, o in zip(contacts, t["off"])]
+
+    def pinch(self):
+        """macOS recognized a pinch: the current two-finger touch goes raw."""
+        if self.two is not None:
+            self.two["pinch"] = True
 
     def momentum(self, dx, dy):
         if self.held is None:
@@ -453,6 +460,8 @@ def run(pad, keys, wheel, touch, hybrid):
                         hybrid.frame(contacts)
                     else:
                         pad.frame(contacts)
+                elif p[0] == b"P":
+                    hybrid.pinch()
                 elif p[0] == b"W":
                     if SCROLL_DEBUG:
                         print(f"W {time.monotonic():.3f} {p[1].decode()} {p[2].decode()}", flush=True)

@@ -189,6 +189,27 @@ centre moves, through a One Euro filter (`OMACVM_SCROLL_FILTER`, min cutoff
 none when fast). A clear spread (`OMACVM_SCROLL_PINCH_MM`, 6 mm, and more than
 the centre has moved) switches the touch to raw fingers: a pinch.
 
+- Much better. Still: random pinch zooms when scrolling slowly and carefully
+  (the fingers drift apart a few millimetres over a long touch, and the
+  accumulated spread looked like a pinch), and going from very slow to
+  medium speed accelerates a bit too much (libinput's adaptive acceleration on
+  the virtual touchpad).
+
+### 13. Pinch is macOS's decision; flat acceleration (in progress)
+
+- Mac: when macOS recognizes a pinch (NSEventTypeMagnify, which the event tap
+  already sees and drops), the helper sends `P`; the guest switches the
+  current two-finger touch to raw fingers only then. The spread-based guess is
+  off (`OMACVM_SCROLL_PINCH_MM=0`).
+- Guest: `accel_profile = "flat"` for the virtual trackpad again (scroll
+  factor 0.25). To watch: whether 3/4-finger swipes still feel right with flat.
+- Question from the test: take over the Mac's trackpad settings? Already: the
+  pointer (macOS's cursor via Parallels) and the glide (macOS's momentum,
+  macOS's scroll direction). Not yet: while the fingers touch, Omarchy's own
+  natural-scrolling setting and speed apply. Candidate: read macOS's natural
+  scrolling and Accessibility scrolling speed and set them for the virtual
+  trackpad.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
