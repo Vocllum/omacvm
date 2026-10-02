@@ -6,9 +6,9 @@ cd "$(dirname "$0")"
 LABEL=org.omacvm.bridge
 PL=~/Library/LaunchAgents/$LABEL.plist
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
-mkdir -p ~/Applications ~/Library/LaunchAgents
-rm -rf ~/Applications/OmacVMBridge.app
-cp -R build/OmacVMBridge.app ~/Applications/
+mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
+rm -rf "$HOME/Applications/OmacVMBridge.app"
+cp -R build/OmacVMBridge.app "$HOME/Applications/"
 # KeepAlive only after a crash: "Quit" in the menu bar stays quit until next login.
 cat > "$PL" <<PL
 <?xml version="1.0" encoding="UTF-8"?>

@@ -92,13 +92,13 @@ if (( MAC )); then
   { on gestures || [[ $TYPE == utm ]]; } || args+=(--skip-gestures)   # on UTM it also types Cmd as Super
   "$R/src/mac/install.sh" "${args[@]}"
   if on omanotch; then
-    if [[ ! -d ~/omanotch ]]; then
+    if [[ ! -d $HOME/omanotch ]]; then
       log "Omanotch on the Mac"
-      git clone -q https://github.com/gillesgoetsch/omanotch.git ~/omanotch
-      ~/omanotch/mac/install.sh
-    elif [[ ! -d ~/Applications/Omanotch.app ]]; then
+      git clone -q https://github.com/gillesgoetsch/omanotch.git "$HOME/omanotch"
+      "$HOME/omanotch/mac/install.sh"
+    elif [[ ! -d $HOME/Applications/Omanotch.app ]]; then
       log "Omanotch on the Mac"
-      ~/omanotch/mac/install.sh
+      "$HOME/omanotch/mac/install.sh"
     fi
   fi
 fi

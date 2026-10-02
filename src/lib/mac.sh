@@ -72,7 +72,7 @@ EOF
 
 # Parallels' "Linux" keyboard profile emptied by mac/parallels-shortcuts.sh?
 parallels_profile_emptied() {
-  [[ $(xxd -p ~/Library/Preferences/Parallels/Linux.dat 2>/dev/null | tr -d '\n') == \
+  [[ $(xxd -p "$HOME/Library/Preferences/Parallels/Linux.dat" 2>/dev/null | tr -d '\n') == \
      00030231000000010000000a004c0069006e00750078000000000000000000000000 ]]
 }
 

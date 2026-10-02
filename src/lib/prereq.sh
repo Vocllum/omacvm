@@ -66,8 +66,8 @@ ensure_homebrew() {
   have_homebrew || die "Homebrew is installed but not found: open a new terminal, then run omacvm again"
   # Homebrew on the PATH of new terminals too (its installer only prints how).
   local line="eval \"\$($(command -v brew) shellenv)\""
-  if ! grep -qsF "$line" ~/.zprofile && ask_yn "Put Homebrew on the PATH of new terminals (a line in ~/.zprofile)?" y; then
-    printf '\n%s\n' "$line" >> ~/.zprofile
+  if ! grep -qsF "$line" "$HOME/.zprofile" && ask_yn "Put Homebrew on the PATH of new terminals (a line in ~/.zprofile)?" y; then
+    printf '\n%s\n' "$line" >> "$HOME/.zprofile"
   fi
 }
 

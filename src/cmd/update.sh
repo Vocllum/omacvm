@@ -42,15 +42,15 @@ if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- -
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
-if [[ -d ~/omanotch/.git && -d ~/Applications/Omanotch.app ]]; then
-  if [[ -n $(git -C ~/omanotch status --porcelain --untracked-files=no) ]]; then
+if [[ -d $HOME/omanotch/.git && -d $HOME/Applications/Omanotch.app ]]; then
+  if [[ -n $(git -C "$HOME/omanotch" status --porcelain --untracked-files=no) ]]; then
     info "Omanotch: ~/omanotch has local changes, left as it is"
   else
-    before=$(git -C ~/omanotch rev-parse HEAD)
-    git -C ~/omanotch pull -q --ff-only 2>/dev/null || info "Omanotch: git pull failed, left as it is"
-    if [[ $(git -C ~/omanotch rev-parse HEAD) != "$before" ]]; then
+    before=$(git -C "$HOME/omanotch" rev-parse HEAD)
+    git -C "$HOME/omanotch" pull -q --ff-only 2>/dev/null || info "Omanotch: git pull failed, left as it is"
+    if [[ $(git -C "$HOME/omanotch" rev-parse HEAD) != "$before" ]]; then
       log "Omanotch on the Mac"
-      ~/omanotch/mac/install.sh
+      "$HOME/omanotch/mac/install.sh"
     fi
   fi
 fi

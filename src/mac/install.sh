@@ -26,7 +26,7 @@ for a in "$@"; do
   esac
 done
 STAMPS=~/Library/Application\ Support/omacvm/installed
-mkdir -p ~/.local/share/omacvm/clip "$STAMPS"
+mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
 
 # install_app NAME LAUNCHD_LABEL DIR [ARGS...]: DIR/install.sh unless the same
 # sources and options are already installed and running.

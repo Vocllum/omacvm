@@ -53,7 +53,7 @@ case ":$PATH:" in
   *":$bin:"*) ;;
   *) # ~/.local/bin on the PATH of new terminals, and of this run.
      line='export PATH="$HOME/.local/bin:$PATH"'
-     grep -qsF "$line" ~/.zprofile || printf '\n%s\n' "$line" >> ~/.zprofile
+     grep -qsF "$line" "$HOME/.zprofile" || printf '\n%s\n' "$line" >> "$HOME/.zprofile"
      export PATH="$bin:$PATH"
      echo "    $bin is on your PATH now (a line in ~/.zprofile)" ;;
 esac

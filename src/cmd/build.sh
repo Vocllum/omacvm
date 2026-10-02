@@ -355,7 +355,7 @@ fi
 STEP=0; STEPS=$( [[ $TYPE == parallels ]] && echo 6 || echo 5)
 step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
 BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
-mkdir -p ~/Library/Logs
+mkdir -p "$HOME/Library/Logs"
 exec > >(tee -a "$BUILD_LOG") 2>&1
 build_end() {
   local rc=$?
@@ -384,9 +384,9 @@ if [[ $TYPE == parallels ]]; then
     --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM"
   python3 "$P" "$PVM/config.pvs" add-nvme omarchy.hdd $((DISK_GB * 1024)) >/dev/null
   python3 "$P" "$PVM/config.pvs" boot-from 0
-  mkdir -p ~/.local/share/omacvm/clip
+  mkdir -p "$HOME/.local/share/omacvm/clip"
   python3 "$P" "$PVM/config.pvs" add-share vmlog "$PVM" ro                       # display layout (parallels.log)
-  python3 "$P" "$PVM/config.pvs" add-share clip ~/.local/share/omacvm/clip rw     # clipboard VM -> Mac
+  python3 "$P" "$PVM/config.pvs" add-share clip "$HOME/.local/share/omacvm/clip" rw     # clipboard VM -> Mac
   cp "$PVM/config.pvs" "$PVM/config.pvs.backup"
   "$PRLCTL" register "$PVM" >/dev/null
   vm_start "$VM" "$PVM"

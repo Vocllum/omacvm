@@ -20,9 +20,9 @@ done
 LABEL=org.omacvm.gestures
 PL=~/Library/LaunchAgents/$LABEL.plist
 launchctl bootout gui/$(id -u)/$LABEL 2>/dev/null || true
-mkdir -p ~/Applications ~/Library/LaunchAgents
-rm -rf ~/Applications/OmacVMGestures.app
-cp -R build/OmacVMGestures.app ~/Applications/
+mkdir -p "$HOME/Applications" "$HOME/Library/LaunchAgents"
+rm -rf "$HOME/Applications/OmacVMGestures.app"
+cp -R build/OmacVMGestures.app "$HOME/Applications/"
 cat > "$PL" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
