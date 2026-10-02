@@ -74,10 +74,20 @@ if [[ -z $here ]]; then
   else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
 fi
 
-# On the PATH: Homebrew's bin (OmacVM needs Homebrew anyway), else ~/.local/bin.
+# On the PATH, so "omacvm" works right away in this terminal too: Homebrew's
+# bin when there is one, else /usr/local/bin (on macOS's default PATH; created
+# with the Mac password if needed), else ~/.local/bin via ~/.zprofile.
+bin=""
 if command -v brew >/dev/null && [[ -w $(brew --prefix)/bin ]]; then bin=$(brew --prefix)/bin
-else bin=$HOME/.local/bin; mkdir -p "$bin"; fi
-ln -sf "$here/omacvm" "$bin/omacvm"
+elif [[ -d /usr/local/bin && -w /usr/local/bin ]]; then bin=/usr/local/bin
+elif [[ ":$PATH:" == *":/usr/local/bin:"* ]] && { : < /dev/tty; } 2>/dev/null; then
+  echo "    putting omacvm into /usr/local/bin (your Mac password, if macOS asks):"
+  if sudo mkdir -p /usr/local/bin < /dev/tty && sudo ln -sf "$here/omacvm" /usr/local/bin/omacvm < /dev/tty; then
+    bin=/usr/local/bin
+  fi
+fi
+if [[ -z $bin ]]; then bin=$HOME/.local/bin; mkdir -p "$bin"; fi
+[[ $bin == /usr/local/bin && ! -w $bin ]] || ln -sf "$here/omacvm" "$bin/omacvm"
 say "omacvm $(cat "$here/src/VERSION") -> $bin/omacvm"
 case ":$PATH:" in
   *":$bin:"*) ;;
