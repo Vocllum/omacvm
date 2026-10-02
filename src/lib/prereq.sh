@@ -56,6 +56,20 @@ ensure_xcode_tools() {
     die "Xcode's command line tools are not there after an hour: install them (xcode-select --install), then run omacvm again"
 }
 
+# The Swift compiler must actually build an AppKit app (OmacVM's Mac apps are
+# built in the last step): command line tools older than macOS, or half
+# updated, fail there after the long VM install. Tried once, up front.
+swift_builds_apps() {
+  local d; d=$(mktemp -d)
+  printf 'import AppKit\nprint(NSApplication.shared.isRunning ? "" : "ok")\n' > "$d/t.swift"
+  swiftc -o "$d/t" "$d/t.swift" >/dev/null 2>&1 && [[ $("$d/t" 2>/dev/null) == ok ]]
+  local rc=$?; rm -rf "$d"; return $rc
+}
+ensure_swift_works() {
+  ui_spin "Checking the Swift compiler (OmacVM builds two small Mac apps)" swift_builds_apps && return 0
+  needs_person "Xcode's command line tools cannot build a Mac app on this macOS (often after a macOS update). Reinstall them: sudo rm -rf /Library/Developer/CommandLineTools && xcode-select --install, then run omacvm again"
+}
+
 ensure_homebrew() {
   have_homebrew && return 0
   prereq_install "Homebrew" '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'

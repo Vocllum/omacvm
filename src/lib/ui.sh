@@ -182,7 +182,7 @@ ui_spin() {
   local out rc pid i=0 t0=$SECONDS e
   out=$(mktemp)
   if (( ! UI_FANCY )); then
-    printf '  %s...\n' "$msg" > "$TTY"
+    printf '  %s...\n' "$msg"   # no terminal to draw on (scripts, agents): plain output
     "$@" > "$out" 2>&1; rc=$?
   else
     "$@" > "$out" 2>&1 &

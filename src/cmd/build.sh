@@ -113,6 +113,7 @@ if (( PLAN )); then
   have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
 else
   ensure_xcode_tools
+  ensure_swift_works
   ensure_brew_tools
 fi
 # A build peaks at about 25 GB (download, temporary installer, new disk); a
