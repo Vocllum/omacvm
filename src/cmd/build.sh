@@ -104,6 +104,8 @@ case $TYPE in
   parallels)
     if (( YES )); then
       rc=1; [[ -x $PRLCTL ]] && { parallels_limits && rc=0 || rc=$?; }
+      # A fresh install starts its trial when the VM starts: Standard's limits.
+      (( rc == 3 )) && { parallels_standard_limits; P_EDITION="no licence yet"; rc=0; }
       (( rc != 2 )) || needs_person "Parallels Desktop reports no active licence yet (${P_STATUS:-no status}): start the trial or sign in, then run this again"
       (( rc == 0 )) || needs_person "Parallels Desktop is not installed and set up: install it (https://www.parallels.com/products/desktop/ or brew install --cask parallels), open it once and sign in or start the trial"
     else wait_for_app parallels; fi
@@ -139,7 +141,11 @@ command -v swiftc >/dev/null || needs_person "missing the Swift compiler: xcode-
 # ---------- 2. resources ----------
 LIMITED=""
 if [[ $TYPE == parallels && $CAP_CPUS -le 4 ]]; then
-  LIMITED="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1} allows $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
+  if [[ $P_EDITION == "no licence yet" ]]; then
+    LIMITED="Parallels has no licence yet, so the VM gets what every edition allows: $CAP_CPUS CPUs / $CAP_MEM_GB GB (more later in its settings, within your licence)."
+  else
+    LIMITED="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1} allows $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
+  fi
 fi
 case ${RES:-balanced} in low) tier=0 ;; balanced) tier=1 ;; high) tier=2 ;; best) tier=3 ;; *) die "--resources low|balanced|high|best" ;; esac
 tier_values 0; low="$T_CPUS/$T_MEM"; tier_values 3
@@ -292,7 +298,7 @@ cat <<EOF
 
   OmacVM will build this VM:
 
-    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ $P_TRIAL == yes ]] && echo " (trial)" ) (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
+    VM             $VM, in $( [[ $TYPE == parallels ]] && echo "Parallels Desktop$( [[ $P_EDITION == "no licence yet" ]] && echo " (no licence yet: the trial starts with the VM)" || echo " $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}$( [[ $P_TRIAL == yes ]] && echo " (trial)" )") (~/Parallels/$VM.pvm)" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" )
     resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
     user           $U ($FULL), hostname $HOST
     keyboard       $KB   (from the Mac)

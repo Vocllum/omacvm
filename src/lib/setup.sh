@@ -83,11 +83,13 @@ tier_info() { tier_values "$1"; printf '%s CPUs, %s GB memory' "$T_CPUS" "$T_MEM
 # ---------- the apps ----------
 # Parallels' own licence limits per VM: sets P_EDITION, P_TRIAL, P_STATUS,
 # CAP_CPUS, CAP_MEM_GB. Status 0: read; 1: Parallels does not answer (not set up
-# yet); 2: it answers, but reports no active licence with limits yet (a fresh
-# install before the trial or sign-in has gone through).
+# yet); 2: it answers, but reports no active licence with limits; 3: "No license
+# installed", a fresh install: Parallels starts its trial (or asks to sign in)
+# when the first VM starts, so the build can go ahead.
 parallels_limits() {
   local info c m
   info=$(prlsrvctl info --license 2>/dev/null) || return 1
+  grep -q "No license installed" <<<"$info" && { P_STATUS="no licence yet"; return 3; }
   P_EDITION=$(sed -n 's/.*edition="\([^"]*\)".*/\1/p' <<<"$info")
   P_TRIAL=$(sed -n 's/.*is_trial="\([^"]*\)".*/\1/p' <<<"$info")
   P_STATUS=$(sed -n 's/.*status="\([^"]*\)".*/\1/p' <<<"$info")
@@ -110,7 +112,21 @@ wait_for_app() {
       parallels)
         local rc=1
         if [[ -x $PRLCTL ]]; then parallels_limits && return 0; rc=$?; fi
-        if [[ -x $PRLCTL && $rc == 2 ]]; then
+        if [[ -x $PRLCTL && $rc == 3 ]]; then
+          hd "Parallels Desktop has no licence yet"
+          say "    That is fine: it starts its free trial (or asks you to sign in) when the"
+          say "    build starts the VM; click through it then. Until a licence is active,"
+          say "    Parallels does not say how much a VM may use, so the VM gets what every"
+          say "    edition allows: 4 CPUs and 8 GB (change it later in the VM's settings)."
+          say "    To size it by your licence instead, start the trial or sign in first and"
+          say "    press r."
+          read -r -p "  Return to go on, r to check again, q to quit: " a < "$TTY" || die "no answer (no terminal?)"
+          case $a in
+            q) exit 1 ;;
+            r) continue ;;
+          esac
+          parallels_standard_limits; P_EDITION="no licence yet"; return 0
+        elif [[ -x $PRLCTL && $rc == 2 ]]; then
           hd "Parallels Desktop has no active licence yet (it reports: ${P_STATUS:-no status}${P_EDITION:+, $P_EDITION})"
           say "    In Parallels Desktop, start the trial or sign in with your Parallels account,"
           say "    then press Return here."
