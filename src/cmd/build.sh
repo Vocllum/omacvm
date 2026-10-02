@@ -102,8 +102,10 @@ fi
 CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; P_EDITION=""; P_TRIAL=""
 case $TYPE in
   parallels)
-    if (( YES )); then [[ -x $PRLCTL ]] && parallels_limits ||
-      needs_person "Parallels Desktop is not installed and set up: install it (https://www.parallels.com/products/desktop/ or brew install --cask parallels), open it once and sign in or start the trial"
+    if (( YES )); then
+      rc=1; [[ -x $PRLCTL ]] && { parallels_limits && rc=0 || rc=$?; }
+      (( rc != 2 )) || needs_person "Parallels Desktop reports no active licence yet (${P_STATUS:-no status}): start the trial or sign in, then run this again"
+      (( rc == 0 )) || needs_person "Parallels Desktop is not installed and set up: install it (https://www.parallels.com/products/desktop/ or brew install --cask parallels), open it once and sign in or start the trial"
     else wait_for_app parallels; fi
     (( CAP_CPUS > mac_cores )) && CAP_CPUS=$mac_cores
     (( CAP_MEM_GB > mac_mem_gb )) && CAP_MEM_GB=$mac_mem_gb ;;

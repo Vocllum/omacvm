@@ -81,18 +81,24 @@ tier_values() {
 tier_info() { tier_values "$1"; printf '%s CPUs, %s GB memory' "$T_CPUS" "$T_MEM"; }
 
 # ---------- the apps ----------
-# Parallels' own licence limits per VM: sets P_EDITION, P_TRIAL, CAP_CPUS, CAP_MEM_GB.
+# Parallels' own licence limits per VM: sets P_EDITION, P_TRIAL, P_STATUS,
+# CAP_CPUS, CAP_MEM_GB. Status 0: read; 1: Parallels does not answer (not set up
+# yet); 2: it answers, but reports no active licence with limits yet (a fresh
+# install before the trial or sign-in has gone through).
 parallels_limits() {
-  local info
+  local info c m
   info=$(prlsrvctl info --license 2>/dev/null) || return 1
   P_EDITION=$(sed -n 's/.*edition="\([^"]*\)".*/\1/p' <<<"$info")
   P_TRIAL=$(sed -n 's/.*is_trial="\([^"]*\)".*/\1/p' <<<"$info")
-  local c m
+  P_STATUS=$(sed -n 's/.*status="\([^"]*\)".*/\1/p' <<<"$info")
   c=$(sed -n 's/.*cpu_total=\([0-9]*\).*/\1/p' <<<"$info")
   m=$(sed -n 's/.*max_memory=\([0-9]*\).*/\1/p' <<<"$info")
-  [[ -n $P_EDITION && -n $c && -n $m ]] || return 1
+  [[ -n $P_EDITION && -n $c && -n $m ]] || return 2
   CAP_CPUS=$c; CAP_MEM_GB=$(( m / 1024 ))
 }
+
+# Standard's per-VM limits: always within what any edition allows.
+parallels_standard_limits() { P_EDITION=standard; P_TRIAL=""; CAP_CPUS=4; CAP_MEM_GB=8; }
 
 utm_major() { defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null | cut -d. -f1; }
 
@@ -102,8 +108,21 @@ wait_for_app() {
   while :; do
     case $1 in
       parallels)
-        if [[ -x $PRLCTL ]] && parallels_limits; then return 0; fi
-        if [[ -x $PRLCTL ]]; then
+        local rc=1
+        if [[ -x $PRLCTL ]]; then parallels_limits && return 0; rc=$?; fi
+        if [[ -x $PRLCTL && $rc == 2 ]]; then
+          hd "Parallels Desktop has no active licence yet (it reports: ${P_STATUS:-no status}${P_EDITION:+, $P_EDITION})"
+          say "    In Parallels Desktop, start the trial or sign in with your Parallels account,"
+          say "    then press Return here."
+          say "    Or type s to go on with Parallels Standard's limits (4 CPUs, 8 GB per VM),"
+          say "    which every edition allows."
+          read -r -p "  Return to check again, s to go on, q to quit: " a < "$TTY" || die "no answer (no terminal?)"
+          case $a in
+            q) exit 1 ;;
+            s) parallels_standard_limits; return 0 ;;
+          esac
+          continue
+        elif [[ -x $PRLCTL ]]; then
           hd "Parallels Desktop is installed but not set up yet"
           say "    Open Parallels Desktop once and sign in or start the trial."
         else
