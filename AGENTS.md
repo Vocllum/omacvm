@@ -1,12 +1,44 @@
 # AGENTS.md: operating manual for coding agents
 
-Read this before changing anything. It describes how the full OmacVM setup is
-built on both routes (Parallels Desktop, UTM), how the pieces talk to each
-other, how to verify it, and what has already been tried and does not work.
+Read this before changing anything. It describes how to set OmacVM up for a
+person (section 0), how the full setup is built on both routes (Parallels
+Desktop, UTM), how the pieces talk to each other, how to verify it, and what
+has already been tried and does not work.
 
 OmacVM = Omarchy (omarchy-mac, Arch Linux ARM) in a VM on an Apple Silicon Mac,
 made to feel native. Sibling project: [Omanotch](https://github.com/gillesgoetsch/omanotch)
 (Omarchy's bar beside the notch; separate repo, Parallels and UTM).
+
+## 0. Recipes: setting OmacVM up for someone
+
+Everything goes through `./omacvm` (or `omacvm` once `install.sh` put it on
+the PATH). Without a terminal it never asks: give options, read `--json`.
+Exit codes: 0 done, 1 failed, 2 usage (a missing option is named), 3 needs a
+person (the message says what). Only the person can grant macOS permissions,
+change Parallels' "Send macOS system shortcuts" setting, install Parallels or
+UTM, or choose their password: hand those over, never work around them.
+
+- **New VM**:
+  1. `omacvm vms --json` (what exists) and
+     `omacvm build --plan --json --vm-type parallels|utm [--feature glide=on ...]`:
+     resources within the licence, features, `needs_human`, and `command`.
+  2. Show the person the plan; ask for their password (never invent one) and
+     what they want changed. Glide is experimental and off by default: offer
+     it, do not decide it.
+  3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes; run it in the
+     background and follow its output). Exit 3 = something to install first.
+  4. Hand over the `needs_human` steps, then `omacvm check --json` until
+     `ok` (the person must be logged in to Omarchy; `needs_human: true`
+     entries are theirs).
+- **Switch a feature** on an existing VM: `omacvm features --vm NAME --json`,
+  then `omacvm enable|disable FEATURE... --vm NAME --yes`, then
+  `omacvm check --vm NAME --json`. Dependencies are handled (glide brings
+  gestures, bridge off takes wallpaper).
+- **An Omarchy installed by hand**: `omacvm apply --vm NAME`. Exit 3 with a
+  command in the message = the person runs that command once in the VM's
+  terminal (it adds OmacVM's SSH key), then apply again.
+- **Update**: `omacvm update` (all running OmacVM VMs) or `--vm NAME`.
+- **Something is off**: `omacvm check --json`, then section 7 below.
 
 ## 1. Definition of done
 
@@ -19,7 +51,9 @@ A build is done when all of this holds:
 2. `ssh -i ~/.ssh/omacvm root@<ip>` works (key only; ufw allows 22 from the VM
    network's /24).
 3. `/etc/omacvm/env` names the VM type, the Mac's address and the feature
-   choices (`OMACVM_FEATURE_<name>=on|off`); `./check.sh --vm <name>` passes.
+   choices (`OMACVM_FEATURE_<name>=on|off`, every feature of
+   `src/features.tsv`); `/usr/local/share/omacvm/VERSION` = `src/VERSION`;
+   `omacvm check --vm <name>` passes.
 4. Display: Parallels: `hyprctl monitors` matches the Mac (native pixels,
    refresh rate, arrangement) within seconds of a change. UTM: Virtual-1 runs
    the mode from `src/display/mac-display.swift` (e.g. 3456x2160@120).
@@ -46,17 +80,26 @@ A build is done when all of this holds:
 
 ## 3. Repository map
 
-The root holds only the three commands (`build.sh`, `apply.sh`, `check.sh`),
-the docs and `docs/` (README graphics); everything else lives in `src/`, one
-folder per feature plus the install plumbing (`guest/`, `mac/`, `lib/`, `vm/`).
-Keep it that way: a short root keeps the README near the top on GitHub.
+The root holds only the entry points (`omacvm`, `install.sh`, and `build.sh`,
+`apply.sh`, `check.sh`, which forward to `omacvm` for one release), the docs and
+`docs/` (README graphics); everything else lives in `src/`: the commands in
+`src/cmd/`, one folder per feature, and the install plumbing (`guest/`, `mac/`,
+`lib/`, `vm/`). Keep it that way: a short root keeps the README near the top on
+GitHub.
 
 | Path | What |
 |---|---|
-| `build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels or UTM (waits until installed; UTM ≥ 5), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence), recommended settings or one question each, user/full name, summary, password. Options: `--vm-type --vm-name --resources --cpus --memory-gb --disk-gb --user --full-name --hostname --no-bridge --no-mac-wallpaper --no-gestures --no-omanotch --no-idle-lock --autologin --thp-kernel --yes --dry-run`, hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes` |
-| `check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL. Add a line here for every new feature |
-| `apply.sh` | Guest side onto a running VM (either type, found by name): bridge token + `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), `src/guest/install.sh`, Dock icon (Parallels). Re-run after updating the repo |
-| `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper. `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
+| `omacvm` | The command: dispatches to `src/cmd/*.sh` (`build`, `apply`, `check`, `vms`, `update`, `features`/`enable`/`disable` → `features.sh`, no command → `home.sh`, the menu; without a terminal it prints the help, exit 2). Resolves its own symlink, so it works from the PATH |
+| `install.sh` | Bootstrap: clones to `~/.omacvm` (or links the clone it runs from), symlinks `omacvm` into Homebrew's bin (else `~/.local/bin`), starts it on `/dev/tty` (works piped from curl) |
+| `src/VERSION` | OmacVM's version; copied into the VM with `src/` (what `omacvm vms` reports per VM) |
+| `src/features.tsv` | **The feature list**: name, default (`on`/`off`/`notch`), sides, tags (`experimental`, `slow`, `notch`), needs, title, summary. Read by `src/lib/features.sh` (Mac, bash 3.2), `src/guest/install.sh` (VM), `features.sh`; a new feature also needs its case in `build.sh` (`feature_flag`, question), the VM installer and the checks |
+| `src/lib/vm.sh` | Finding VMs without starting UTM (`vms_list`: Parallels via prlctl, UTM via utmctl when it runs, else UTM's `Registry` preference, which knows VMs outside its folder), `vm_type` (running first, Parallels' "invalid" last), `resolve_vm` (no name: "Omarchy", else the only running VM), `vm_probe` (user, version, env, features set up before 2.0), `ssh_setup_command` |
+| `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels or UTM (waits until installed; UTM ≥ 5), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence), recommended settings or one question each, user/full name, summary, password. Glide is asked separately (also with the recommended settings). Options: `--vm-type --vm-name --resources --cpus --memory-gb --disk-gb --user --full-name --hostname`, `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch) |
+| `src/cmd/check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL; `--json` (guest side `--tsv`) with `needs_human` per check. Add a line here for every new feature |
+| `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, Omanotch's Mac app), copies the bridge token and `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). No SSH access: exit 3 with the command for the VM's terminal |
+| `src/cmd/features.sh` | `features` (list, `--json`, or a checklist in a terminal), `enable`/`disable`; changes go through `apply.sh` |
+| `src/cmd/update.sh`, `vms.sh`, `home.sh` | `update`: git pull (clean clone only, then re-exec), Mac side as installed, Omanotch's clone when clean, `apply --no-mac` on every running OmacVM VM. `vms`: table or `--json`. `home.sh`: the menu |
+| `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper; an app whose sources and options are unchanged since its install is skipped (stamps in `~/Library/Application Support/omacvm/installed`, `--force`). `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
 | `src/guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
 | `src/vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH; a Parallels VM, or `--raw-image` for UTM |
 | `src/vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
@@ -64,11 +107,11 @@ Keep it that way: a short root keeps the README near the top on GitHub.
 | `src/vm/pvs.py` | Parallels `config.pvs` editor (settings, NVMe disk, boot order, shares) |
 | `src/vm/utm.sh` | UTM: create the VM (AppleScript `make new virtual machine`), drop the live disk, app-wide speed settings |
 | `src/lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`) and UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) |
-| `src/guest/omacvm-omanotch.service` | `build.sh --omanotch`: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
+| `src/guest/omacvm-omanotch.service` | The omanotch feature: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
 | `src/lib/install-plugin.sh`, `src/lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login); restarts the shell once when a plugin's files changed |
 | `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
 | `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr}` |
-| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap), `guest/omacvm-gestures` (uinput touchpad) |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap; also hides the Mac's pointer over the full-screen VM), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). Glide's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
 | `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
@@ -76,7 +119,7 @@ Keep it that way: a short root keeps the README near the top on GitHub.
 | `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
 | `src/keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
 | `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; opt-in memory-optimized kernel (THP always + MGLRU) from ALARM's PKGBUILD, built only with `--thp-kernel`. ALARM's stock `linux-aarch64` has `# CONFIG_TRANSPARENT_HUGEPAGE is not set` and `# CONFIG_LRU_GEN is not set` (verified 7.2.8), so the THP/MGLRU tmpfiles lines are no-ops there (systemd-tmpfiles skips missing files) |
-| Feature switches | `src/guest/install.sh --feature bridge\|wallpaper\|gestures\|idle-lock\|thp-kernel\|autologin=on\|off`, kept in `/etc/omacvm/env`; `apply.sh` maps `--[no-]bridge --[no-]mac-wallpaper --[no-]gestures --[no-]idle-lock --[no-]autologin --[no-]thp-kernel` onto it. idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). Gestures off: Mac app `--keys-only` on UTM (it still types Cmd as Super), not installed on Parallels |
+| Feature switches | `src/guest/install.sh --feature NAME=on\|off` for every feature in `src/features.tsv`, kept in `/etc/omacvm/env`; `omacvm apply` passes all of them (also `--[no-]FEATURE`, and 1.x's `--[no-]mac-wallpaper`). omanotch=on: clones Omanotch to `~/.local/share/omanotch`, `omacvm-omanotch.service` installs it in the session (now if Hyprland runs, else at the next login); off: Omanotch's own `guest/uninstall.sh` in the session. glide: `gestures/guest/glide.sh` on/off (`omacvm_glide.lua` required from `hyprland.lua`, `--disable-smooth-scrolling` in existing `chromium-flags.conf`/`chrome-flags.conf`, marker `~/.local/state/omacvm/glide-flags` so off removes only what it added). idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). Gestures off: the VM's daemon says so in its hello (on UTM it still runs, for Cmd as Super) and the Mac helper leaves that VM's trackpad to macOS; on Parallels the daemon is not installed. `--keys-only` on the Mac app is a Mac-wide off switch |
 | `src/icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`src/vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
 | `docs/` | README graphics (hand-written SVG + SMIL) |
 
@@ -89,7 +132,7 @@ OmacVMBridge.app   :47831 on 10.211.55.2 ◀── HTTP ── omacvm-bridge (cu
   CoreWLAN, CoreAudio, CoreBrightness,  and 192.168.64.1   omacvm-bridge-osd → omarchy-osd,
   media-key event tap, keychain, wallpaper          omarchy-toggle-nightlight, omarchy-network-qr,
                                                     omacvm-wallpaper (POST /wallpaper)
-OmacVMGestures.app :47830 on both       ◀── TCP ─── omacvm-gestures (root, uinput touchpad)
+OmacVMGestures.app :47830 on both       ◀── TCP ─── omacvm-gestures (root, uinput touchpad, Glide)
 Parallels only:
 omacvm-clip-in     ◀── share "clip"  ◀──────────── parallels-clip-out (wl-paste --watch)
 VM bundle (.pvm)   ──▶ share "vmlog" (ro) ───────▶ parallels-dynres reads parallels.log [DYNRES]
@@ -107,6 +150,23 @@ Omanotch.app (separate) :47811          ◀────────── notchc
 - Full-screen capture (media keys, gestures): frontmost app `prl_client_app`
   (Parallels) or `UTM`, and its window covers a display (the strip beside the
   notch excepted).
+- Gestures protocol (one line each, `src/gestures/mac/omacvm-gestures.c`
+  header): the guest says `H <gestures> <glide>` right after connecting (a 1.x
+  daemon says nothing: gestures on, Glide off). The helper captures the
+  trackpad only for a network whose connected daemons all want it, and Glide
+  (macOS's continuous scroll events dropped, `A`/`W`/`P` sent, every
+  two-finger frame forwarded) only when they all want that.
+- Glide in the guest (`Glide` class): two-finger frames go through a One Euro
+  filter (rigid spacing, so libinput never reads a pinch); below 80 mm/s the
+  raw movement (× `RAW_SCALE` × self-calibration × scroll direction), above
+  160 mm/s macOS's accelerated `A` deltas (× `POINT_UNITS`), smoothstep in
+  between; after the lift the virtual fingers stay down and macOS's momentum
+  (`W`) drains with τ = 25 ms, capped at 1000 mm/s (libinput's touch-jump
+  limit), lifting 0.5 s after the last movement; `P` (macOS saw a magnify)
+  restarts the touch as raw fingers. Frames ≥ 3 ms apart; a lift and a new
+  touch never share a frame. Virtual pad 1 × 1 m, the real trackpad in its
+  middle. `omacvm_glide.lua`: `scroll_factor = 0.328 × 3.3 × 2 / scale` for the
+  virtual trackpad, `scroll_touchpad = 1/3.3` for Chromium/Electron windows.
 - Disk: GPT on NVMe: 2 GiB EFI at `/boot` + btrfs `@ @home @log` (+ `@factory`
   and snapper from omarchy-mac), `noatime,compress=zstd:1,space_cache=v2,discard=async`.
   GRUB (omarchy-mac's restore tooling expects it), normal and `--removable`.
@@ -135,7 +195,7 @@ a Qt data stream, Parallels must be quit).
 setting; with Always, Parallels writes `sendtovmkeys.dat` (count + one 9-byte
 entry per macOS shortcut, flag 1). `src/lib/mac.sh` `parallels_sends_shortcuts`
 reads that as a best guess and `parallels_shortcuts_alert` reminds the user
-(build.sh, apply.sh); never write the file.
+(omacvm build, omacvm apply); never write the file.
 
 ### UTM settings (vm/utm.sh)
 
@@ -149,7 +209,7 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | guest `/etc/environment.d/90-omacvm-utm.conf` | `WLR_NO_HARDWARE_CURSORS=1 AQ_NO_MODIFIERS=1 WLR_RENDERER_ALLOW_SOFTWARE=1` | hardware cursors and DRM modifiers misbehave on virtio-gpu |
 | guest user unit `omacvm-vdagent.service` (stock `spice-vdagent.service` masked globally) | reports the largest Hyprland monitor to spice-vdagentd, clipboard text via wl-copy/wl-paste | the stock agent is X11: on XWayland it sees Omanotch's notch strip beside the screen, reports 2× the width and vdagentd's pointer tablet then only reaches the left half |
 
-## 5. Build pipeline (build.sh)
+## 5. Build pipeline (omacvm build)
 
 1. Questionnaire (see `build.sh` above); keyboard, timezone, language from the
    Mac; password hashed (SHA-512) after the summary. Cmd as Super: Parallels'
@@ -163,14 +223,16 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 5. `src/vm/omarchy-install.sh` (temporary NOPASSWD + `verifypw=any` sudo, removed by
    trap; SSH firewall rule kept even if ufw cannot apply it live). Parallels Tools
    on Parallels.
-6. `src/mac/install.sh`, `apply.sh` (token, repo, `src/guest/install.sh`, icon),
-   optional Omanotch, reboot.
+6. `src/cmd/apply.sh` with every feature explicit: Mac side, token, `src/`,
+   `src/guest/install.sh` (Omanotch included), icon; reboot.
 
 ## 6. Standard procedures
 
-- **Build**: `./build.sh [--vm-type utm]` or unattended with `OMACVM_PASSWORD=… ./build.sh --yes …`.
-- **Update an existing VM**: `git pull && src/mac/install.sh && ./apply.sh --vm <name>` (keeps the VM's feature choices).
-- **Try the questionnaire**: `./build.sh --dry-run`; scripted with `expect` for tests (it reads `/dev/tty`).
+- **Build**: `./omacvm build [--vm-type utm]` or unattended with `OMACVM_PASSWORD=… ./omacvm build --yes …` (`--plan --json` first).
+- **Update**: `./omacvm update` (pull, Mac side, every running OmacVM VM; keeps feature choices); one VM: `./omacvm apply --vm <name>`.
+- **Features**: `./omacvm features|enable|disable … --vm <name>`.
+- **Try the questionnaire**: `./omacvm build --dry-run`; scripted with `expect` for tests (it reads `/dev/tty`).
+- **Glide diagnostics**: Mac helper `-v --record` (`src/gestures/mac/install.sh -v --record`, back without), guest `OMACVM_GLIDE_DEBUG=1` / `OMACVM_GLIDE_RECORD=1` in a systemd drop-in for `omacvm-gestures`; `docs/experiments/scroll-analysis/`.
 - **SSH**: `ssh -i ~/.ssh/omacvm root@<ip>` (Parallels: DHCP lease file
   `/Library/Preferences/Parallels/parallels_dhcp_leases`; UTM: `utmctl ip-address <name>`
   or `/var/db/dhcpd_leases`).
@@ -191,7 +253,7 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `check.sh`: Omanotch not connected, Mac log says "another guest is connected" | Omanotch serves one VM at a time | close or stop `notchcast` in the other VM |
+| `omacvm check`: Omanotch not connected, Mac log says "another guest is connected" | Omanotch serves one VM at a time | close or stop `notchcast` in the other VM |
 | Bar widgets missing after a fresh build | the Omarchy shell was not running at install time | queued; `omacvm-plugins.service` enables them at the first login |
 | `OMARCHY_PATH is not set` from omarchy commands run as root/sudo | no Omarchy env | `source /usr/share/omarchy/default/bash/env-bootstrap` first |
 | A command replacement in `/usr/local/bin` is ignored by the bar | the Omarchy shell runs with `/usr/share/omarchy/bin` (symlinks to /usr/bin) first on PATH; Hyprland does not | call `/usr/local/bin/...` by full path from QML (see `omacvm.wifiqr`) |
@@ -205,6 +267,10 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | UTM desktop blank after a resolution change | virgl under UTM cannot switch modes live | fixed mode in `monitors.lua`, reboot to change it |
 | UTM VM very slow | UTM started with `open -g` (background priority) or Vulkan driver on | start UTM normally; `QEMUVulkanDriver` 1 |
 | VM resumes a dead state after a hard kill (Parallels) | suspend files | delete `<pvm>/*.mem*` and `vm.lock` |
+| The Mac's pointer shows over the full-screen VM | another app's window over the VM hit-test area (Bartender's menu-bar overlay brings it back) | the gestures helper hides the pointer by AppKit hit test (click-through overlays such as `screencaptureui`'s are skipped); quit such menu-bar tools |
+| The Mac's wallpaper changes only on one Space | `NSWorkspace.setDesktopImageURL` sets only the current Space | the Bridge rewrites `~/Library/Application Support/com.apple.wallpaper/Store/Index.plist` for every Space and restarts `WallpaperAgent` |
+| A command starts UTM by itself | `utmctl` launches UTM | use `vms_list`/`vm_type` from `src/lib/vm.sh` (UTM's `Registry` preference while UTM is not running) |
+| SSH output in a `while read` loop eats the loop's input | `ssh` reads stdin | `< /dev/null` on SSH calls inside loops (`vm_probe` has it) |
 | ALARM downloads time out | geo-DNS mirror far away | `src/vm/base-install.sh` ranks mirrors |
 
 ## 8. Hard-won rules (do NOT)
@@ -245,6 +311,10 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 - Every installer is idempotent and safe to re-run.
 - Ports: 47811 Omanotch, 47830 Gestures, 47831 Bridge.
 - One commit per change, message says what the user gets.
-- Verify on real VMs before committing behaviour changes: `apply.sh` against a
-  test VM, `build.sh --vm-name "OmacVM Test"` (and `--vm-type utm`) for the full path,
-  then `./check.sh --vm <name>` must pass.
+- A new feature: a line in `src/features.tsv`, its `feature_flag` case and
+  question in `src/cmd/build.sh`, its on/off in `src/guest/install.sh`, its
+  checks, and the README's tables. Experimental features are off by default
+  and say so wherever they are offered.
+- Verify on real VMs before committing behaviour changes: `omacvm apply` against a
+  test VM, `omacvm build --vm-name "OmacVM Test"` (and `--vm-type utm`) for the full path,
+  then `omacvm check --vm <name>` must pass.
