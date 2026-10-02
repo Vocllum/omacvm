@@ -292,7 +292,9 @@ ACCEL_SLOW = 20.0            # mm/s: below this a window calibrates the base rat
 
 # How much further the glide after a flick carries than macOS's momentum at
 # the fingers' speed (1 = exactly macOS's distance).
-GLIDE = float(os.environ.get("OMACVM_SCROLL_GLIDE", "1.5"))
+GLIDE = float(os.environ.get("OMACVM_SCROLL_GLIDE", "1.0"))
+# Share of the pending glide applied per 4 ms tick (ease-out; 0.15 = ~25 ms).
+GLIDE_SHARE = float(os.environ.get("OMACVM_SCROLL_GLIDE_SHARE", "0.15"))
 
 
 # Fast scrolling follows macOS's own accelerated scroll (the "A" lines), slow
@@ -489,7 +491,13 @@ class Hybrid:
         self.tick = now
         px, py = self.pending
         d = math.hypot(px, py)
-        k = min(1.0, self.MAX_STEP / d) if d else 0.0
+        if d < 1.0:
+            self.pending = [0.0, 0.0]
+            return
+        # A fixed share of what is left per tick: a continuous glide that eases
+        # out exponentially, instead of jumping by macOS's whole-point steps.
+        step = min(d * GLIDE_SHARE, self.MAX_STEP) if d > 4 else d
+        k = step / d
         sx, sy = px * k, py * k
         if not all(500 <= c[1] + sx <= PAD_W - 500 and 500 <= c[2] + sy <= PAD_H - 500 for c in self.held):
             self.pending = [0.0, 0.0]      # at the edge: stop here, lift after the hold

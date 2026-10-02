@@ -348,6 +348,16 @@ calibration had been thrown off by macOS's whole points at slow speeds.
   no velocity matching), so distances match macOS's.
 - Debug: `blend:` lines.
 
+- Better, but without macOS's ease-out at the end of a glide: macOS's momentum
+  comes in whole points at irregular intervals, single small steps towards
+  the end, and they were applied as they came.
+
+### 23. A continuous, easing glide (in progress)
+
+Each 4 ms tick moves the virtual fingers by a share of the pending glide
+(`OMACVM_SCROLL_GLIDE_SHARE` 0.15, about 25 ms) instead of all of it: the same
+distance, but a continuous movement that eases out exponentially.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
