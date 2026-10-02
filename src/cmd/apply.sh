@@ -1,20 +1,29 @@
 #!/bin/bash
-# Apply OmacVM's guest side to a running VM, Parallels or UTM (build.sh ends
-# with this; run it again after pulling a newer OmacVM):
-#   ./apply.sh [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME] [--key PRIVATE_KEY]
-#              [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz]
-#              [--thp-kernel | --no-thp-kernel] [--autologin | --no-autologin]
-#              [--no-bridge | --bridge] [--no-mac-wallpaper | --mac-wallpaper]
-#              [--no-gestures | --gestures] [--no-idle-lock | --idle-lock]
-# Defaults: VM "Omarchy", its type from Parallels/UTM, user = your Mac login
-# name, key ~/.ssh/omacvm, keyboard = the Mac's current layout, display (UTM)
-# = the Mac's built-in display below the notch. Feature switches not given
-# keep what the VM had (see src/guest/install.sh). Copies the bridge token and
-# src/ into the VM (/usr/local/share/omacvm), runs guest/install.sh there as
-# root, and (Parallels) gives the VM its OmacVM Dock icon.
+# omacvm apply: put OmacVM onto a running VM, Parallels or UTM, or bring it up
+# to this version: the Mac side the VM's features need, then the VM side. Also
+# for an Omarchy you installed by hand from omarchy-mac.
+#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME]
+#                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
+#                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
+# Features: `omacvm features` lists them (src/features.tsv). Not given: what the
+# VM has (new to OmacVM: the defaults). --no-mac leaves the Mac side alone.
+# VM: the one named Omarchy, else the only running one. A stopped VM is
+# started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
+# Mac's current layout. Display (UTM): the Mac's built-in display below the notch.
+# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (see the message).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm; KB=""; MODE=""; EXTRA=(); NOBRIDGE=0
+source "$R/src/lib/mac.sh"
+source "$R/src/lib/vm.sh"
+source "$R/src/lib/features.sh"
+features_load
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1
+SETN=(); SETV=()
+set_feature() {   # NAME on|off
+  feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
+  [[ $2 == on || $2 == off ]] || { echo "omacvm apply: --feature $1=$2: on or off" >&2; exit 2; }
+  SETN+=("$1"); SETV+=("$2")
+}
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -24,54 +33,98 @@ while (( $# )); do
     --key) KEY=$2; shift 2 ;;
     --keyboard) KB=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
-    --thp-kernel|--no-thp-kernel|--autologin|--no-autologin|--bridge|--no-bridge|--mac-wallpaper|--no-mac-wallpaper|--gestures|--no-gestures|--idle-lock|--no-idle-lock)
-      f=${1#--}; v=on; [[ $f == no-* ]] && { f=${f#no-}; v=off; }
-      [[ $f == mac-wallpaper ]] && f=wallpaper
-      [[ $f == bridge && $v == off ]] && NOBRIDGE=1
-      EXTRA+=(--feature "$f=$v"); shift ;;
-    -h|--help) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    *) echo "apply.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
+    --no-mac) MAC=0; shift ;;
+    --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
+    --mac-wallpaper) set_feature wallpaper on; shift ;;       # 1.x names
+    --no-mac-wallpaper) set_feature wallpaper off; shift ;;
+    --no-*) set_feature "${1#--no-}" off; shift ;;
+    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --*) f=${1#--}; feature_index "$f" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
+         set_feature "$f" on; shift ;;
+    *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
-source "$R/src/lib/mac.sh"
-[[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels or UTM VM named '$VM' (or pass --vm-type and --ip)"
-case $TYPE in
-  parallels)
-    PVM=$(vm_bundle "$VM")
-    [[ -n $IP ]] || IP=$(vm_ip "$PVM") || die "no IP for VM '$VM' (is it running?)" ;;
-  utm)
-    PVM=""
-    [[ -n $IP ]] || IP=$(utm_ip "$VM" 30) || die "no IP for UTM VM '$VM' (is it running?)"
-    [[ -n $MODE ]] || MODE=$(swift "$R/src/display/mac-display.swift") ;;
-  *) die "--vm-type parallels or utm" ;;
-esac
 export OMA_KEY=$KEY
-wait_ssh "$IP"
-log "$TYPE VM '$VM' at $IP"
+[[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q; }
+NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
-log "bridge token -> $IP"
-T=~/Library/Application\ Support/omacvm-bridge/token
-if [[ ! -f $T ]]; then
-  (( NOBRIDGE )) || die "no bridge token yet: run src/mac/install.sh first (or pass --no-bridge)"
+# ---------- which VM ----------
+if [[ -n $IP ]]; then
+  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels or utm" >&2; exit 2; }
+  [[ -n $VM ]] || VM="the VM at $IP"
 else
-gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
-  install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
-  install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
+  resolve_vm start
+fi
+[[ $TYPE == parallels || $TYPE == utm ]] || { echo "omacvm apply: --vm-type parallels or utm" >&2; exit 2; }
+if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
+  printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
+  printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
+  exit 3
+fi
+[[ $TYPE == utm && -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
+probe=$(vm_probe "$IP")
+[[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")
+[[ -n $U ]] || die "no desktop user in '$VM' (pass --user NAME)"
+had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
+
+# ---------- the features it gets ----------
+features_read_env "$probe"
+if [[ -z $had ]]; then   # new to OmacVM: the defaults, Omanotch with a notch
+  for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
+fi
+for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
+before=("${FV[@]}"); features_fix
+for ((i = 0; i < ${#FN[@]}; i++)); do
+  [[ ${before[$i]} != "${FV[$i]}" ]] && info "${FTITLE[$i]}: off (it needs ${FNEEDS[$i]})"
+done
+on() { [[ ${FV[$(feature_index "$1")]} == on ]]; }
+log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
+info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
+
+# ---------- the Mac side ----------
+if (( MAC )); then
+  args=(--quiet)
+  on bridge || args+=(--no-bridge)
+  { on gestures || [[ $TYPE == utm ]]; } || args+=(--skip-gestures)   # on UTM it also types Cmd as Super
+  "$R/src/mac/install.sh" "${args[@]}"
+  if on omanotch; then
+    if [[ ! -d ~/omanotch ]]; then
+      log "Omanotch on the Mac"
+      git clone -q https://github.com/gillesgoetsch/omanotch.git ~/omanotch
+      ~/omanotch/mac/install.sh
+    elif [[ ! -d ~/Applications/Omanotch.app ]]; then
+      log "Omanotch on the Mac"
+      ~/omanotch/mac/install.sh
+    fi
+  fi
 fi
 
+# ---------- the VM side ----------
+T=~/Library/Application\ Support/omacvm-bridge/token
+if [[ -f $T ]]; then
+  log "bridge token -> $IP"
+  gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
+    install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
+    install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
+elif on bridge; then
+  die "no bridge token yet: the Mac side did not install (run omacvm apply without --no-mac)"
+fi
 log "OmacVM -> $IP:/usr/local/share/omacvm"
-COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build -czf - . |
+COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycache__ -czf - . |
   gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
               tar -C /usr/local/share/omacvm -xzf - 2>/dev/null"
-gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE} ${EXTRA[*]:-}"
+fargs=""
+for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
+gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 
-if [[ $TYPE == parallels && -d $PVM ]]; then
-  log "Dock icon"
-  "$R/src/icon/set-vm-icon.sh" "$PVM"
+if [[ $TYPE == parallels ]]; then
+  PVM=$(vm_bundle "$VM")
+  [[ -d $PVM ]] && { log "Dock icon"; "$R/src/icon/set-vm-icon.sh" "$PVM"; }
+  if ! parallels_sends_shortcuts; then
+    info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
+    parallels_shortcuts_alert
+  fi
 fi
-if [[ $TYPE == parallels ]] && ! parallels_sends_shortcuts; then
-  info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
-  parallels_shortcuts_alert
-fi
-log "done: reboot the VM to apply everything (kernel, zram, keyboard${MODE:+, display})"
+now=$(cat "$R/src/VERSION")
+log "done$( [[ -n $had && $had != "$now" ]] && echo " (OmacVM $had -> $now)"): kernel, memory and keyboard changes apply after a reboot of the VM"

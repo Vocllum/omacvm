@@ -1,14 +1,17 @@
 #!/bin/bash
-# Check that every OmacVM feature is in place and working, on the Mac and in a
-# running VM (Parallels or UTM). Read-only; run it after build.sh / apply.sh or
-# whenever something seems off:
-#   ./check.sh [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME] [--key PRIVATE_KEY]
-# Defaults as in apply.sh: VM "Omarchy", user = your Mac login, key
-# ~/.ssh/omacvm. One line per feature (ok / FAIL / skip); exits 1 if anything
-# failed. The desktop user must be logged in to the VM.
+# omacvm check: is every OmacVM feature in place and working, on the Mac and
+# in a running VM (Parallels or UTM)? Read-only; run it after a build or an
+# apply, or whenever something seems off:
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME] [--key PRIVATE_KEY] [--json]
+# VM, user and key as in omacvm apply (a stopped VM is not started). One line
+# per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
+# must be logged in to the VM.
+# --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status",
+# "detail", "needs_human"}]}; needs_human = only a person can fix it (a macOS
+# permission, a Parallels setting).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; JSON=0
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -16,11 +19,19 @@ while (( $# )); do
     --vm-type) TYPE=$2; shift 2 ;;
     --user) U=$2; shift 2 ;;
     --key) KEY=$2; shift 2 ;;
-    -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
-    *) echo "check.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
+    --json) JSON=1; shift ;;
+    -h|--help) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    *) echo "omacvm check: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 source "$R/src/lib/mac.sh"
+source "$R/src/lib/vm.sh"
+source "$R/src/lib/features.sh"
+export OMA_KEY=$KEY
+if [[ -z $IP ]]; then
+  resolve_vm
+  [[ -n $IP ]] || { echo "omacvm check: '$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)" >&2; exit 1; }
+fi
 [[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels or UTM VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
@@ -31,27 +42,46 @@ case $TYPE in
 esac
 export OMA_KEY=$KEY
 
-fails=0
-ok()   { printf '  ok    %-24s %s\n' "$1" "${2:-}"; }
-bad()  { printf '  FAIL  %-24s %s\n' "$1" "${2:-}"; fails=$((fails + 1)); }
-skip() { printf '  skip  %-24s %s\n' "$1" "${2:-}"; }
+fails=0; ROWS=""; SECTION=Mac
+# line STATUS LABEL NAME DETAIL [human]
+line() {
+  if (( JSON )); then ROWS+="$1"$'\t'"$SECTION"$'\t'"$3"$'\t'"$4"$'\t'"${5:+1}"$'\n'
+  else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
+}
+ok()   { line ok ok "$1" "${2:-}"; }
+bad()  { line fail FAIL "$1" "${2:-}" "${3:-}"; fails=$((fails + 1)); }
+skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
+say_() { (( JSON )) || echo "$@"; }
+json_out() {   # the collected rows as JSON
+  local first=1 st sec name detail human
+  printf '{"vm": %s, "type": "%s", "ip": %s, "ok": %s, "checks": [' "$(json_str "${VM:-}")" "$TYPE" "$(json_str "${IP:-}")" "$1"
+  while IFS=$'\t' read -r st sec name detail human; do
+    [[ -n $st ]] || continue
+    printf '%s\n  {"section": %s, "name": %s, "status": "%s", "detail": %s, "needs_human": %s}' \
+      "$( ((first)) || echo ,)" "$(json_str "$sec")" "$(json_str "$name")" "$st" "$(json_str "$detail")" "$( [[ $human == 1 ]] && echo true || echo false)"
+    first=0
+  done <<<"$ROWS"
+  printf '\n]}\n'
+}
 running() { launchctl print "gui/$(id -u)/$1" 2>/dev/null | grep -q 'state = running'; }
 # listeners PORT: the addresses something listens on for that port
 listeners() { lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { sub(/:[0-9]+$/, "", $9); print $9 }' | sort -u | tr '\n' ' '; }
 last_line() { grep -E "$2" "$1" 2>/dev/null | tail -1 | sed 's/^.*omacvm-[a-z]*: //'; }
 
-echo "Mac"
+say_ "Mac"
 L=~/Library/Logs
 # The VM network's Mac address exists only while a VM of that type runs.
 if ! ifconfig | grep -q "inet $HOST "; then
-  bad "VM network" "$HOST is not up on this Mac: start the VM, then run check.sh again"
+  bad "VM network" "$HOST is not up on this Mac: start the VM, then run omacvm check again"
+  (( JSON )) && json_out false
   exit 1
 fi
-(wait_ssh "$IP" 30) >/dev/null 2>&1 || { bad "SSH" "no SSH to $IP with $KEY"; exit 1; }
+(wait_ssh "$IP" 30) >/dev/null 2>&1 || { bad "SSH" "no SSH to $IP with $KEY (omacvm apply shows how to let OmacVM in)"; (( JSON )) && json_out false; exit 1; }
+[[ -n $U ]] || U=$(vm_probe "$IP" | sed -n 's/^OMACVM_USER=//p')
 # What was chosen at setup for this VM (defaults for VMs from before the choices).
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
-feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-on}"; }
-BRIDGE=$(feat bridge); GESTURES=$(feat gestures)
+feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
+BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat glide off)
 
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
@@ -65,7 +95,7 @@ if [[ $BRIDGE == on ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
     st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
-    else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)"; fi
+    else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
@@ -80,18 +110,23 @@ if [[ $GESTURES == on || $TYPE == utm ]]; then
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
+    if [[ $GESTURES == on && $GLIDE == on ]]; then
+      g=$(grep "guest connected: $IP " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      if [[ $g == *"Glide on"* ]]; then ok "Glide (Mac)" "scrolling goes to this VM in full screen"
+      else bad "Glide (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
+    fi
     p=$(last_line "$L/omacvm-gestures.log" 'permission')
-    [[ $p == *granted* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
-      || bad "keyboard/trackpad access" "${p:-unknown}: System Settings > Privacy & Security"
+    [[ -z $p || $p == *granted* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+      || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 if [[ $TYPE == parallels ]]; then
   running org.omacvm.clip-in && ok "clipboard VM -> Mac" "org.omacvm.clip-in" || bad "clipboard VM -> Mac" "org.omacvm.clip-in not running"
   # Parallels keeps both settings in undocumented files: hints, not failures.
   parallels_sends_shortcuts && ok "Cmd+Space etc. to the VM" "Send macOS system shortcuts: Always" \
-    || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
+    || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always" human
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
-    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh"
+    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human
 else
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
     || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
@@ -99,6 +134,15 @@ fi
 pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
 (( fails )) && mac_failed=1 || mac_failed=0
 
+if (( JSON )); then
+  out=$(gssh "$IP" "bash -s -- --user '$U' --tsv" < "$R/src/guest/check.sh"); guest=$?
+  while IFS=$'\t' read -r a b c d; do
+    if [[ $a == section ]]; then SECTION="VM: $b"
+    elif [[ -n $a ]]; then ROWS+="$a"$'\t'"$SECTION"$'\t'"$b"$'\t'"$c"$'\t'"$d"$'\n'; fi
+  done <<<"$out"
+  json_out "$( (( guest == 0 && ! mac_failed )) && echo true || echo false)"
+  (( guest == 0 && ! mac_failed )); exit
+fi
 echo
 echo "VM '$VM' at $IP"
 gssh "$IP" "bash -s -- --user '$U'" < "$R/src/guest/check.sh"

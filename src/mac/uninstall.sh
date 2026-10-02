@@ -7,5 +7,6 @@ R=$(cd "$(dirname "$0")/.." && pwd)
 "$R/clipboard/mac/uninstall.sh"
 tccutil reset Accessibility org.omacvm.gestures >/dev/null 2>&1 || true
 tccutil reset ListenEvent org.omacvm.gestures >/dev/null 2>&1 || true
+rm -rf ~/Library/Application\ Support/omacvm/installed
 [[ ${1:-} == --purge ]] && rm -rf ~/.local/share/omacvm
 echo "OmacVM removed from this Mac"

@@ -1,29 +1,53 @@
 #!/bin/bash
 # OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display, wallpaper),
-# Gestures, clipboard (VM -> Mac). Idempotent; build.sh runs it.
-#   src/mac/install.sh [--no-bridge] [--no-gestures | --skip-gestures]
+# Gestures (trackpad, Glide, Cmd as Super on UTM), clipboard (VM -> Mac).
+# Idempotent; `omacvm apply` runs it with what the VM's features need.
+#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--force] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
-# may use it). --no-gestures installs OmacVM Gestures keys-only: macOS keeps
-# its trackpad gestures, and on UTM Cmd still reaches Omarchy as Super.
-# --skip-gestures leaves it out (Parallels with gestures off needs nothing).
+# may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
+# --no-gestures installs it keys-only for every VM: macOS keeps its trackpad
+# gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
+# VM chooses for itself: gestures and Glide are VM features.)
+# An app whose sources and options did not change since it was installed is
+# left as it is (--force rebuilds it); --quiet only reports what changed.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1
+BRIDGE=1; GESTURES=1; FORCE=0; QUIET=0
 for a in "$@"; do
   case $a in
     --no-bridge) BRIDGE=0 ;;
     --no-gestures) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
+    --force) FORCE=1 ;;
+    --quiet) QUIET=1 ;;
     *) echo "src/mac/install.sh: unknown option $a" >&2; exit 2 ;;
   esac
 done
-mkdir -p ~/.local/share/omacvm/clip
-(( BRIDGE )) && "$R/bridge/mac/install.sh"
+STAMPS=~/Library/Application\ Support/omacvm/installed
+mkdir -p ~/.local/share/omacvm/clip "$STAMPS"
+
+# install_app NAME LAUNCHD_LABEL DIR [ARGS...]: DIR/install.sh unless the same
+# sources and options are already installed and running.
+install_app() {
+  local name=$1 label=$2 dir=$3; shift 3
+  local sum
+  sum=$( { find "$R/$dir" "$R/icon" "$R/lib/sign.sh" -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
+           sort -z | xargs -0 shasum; echo "args: $*"; } | shasum | cut -c1-16)
+  if (( ! FORCE )) && [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] &&
+     launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+    (( QUIET )) || echo "$name: up to date"
+    return 0
+  fi
+  printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m\n' "$name"
+  "$R/$dir/install.sh" "$@"
+  echo "$sum" > "$STAMPS/$name"
+}
+(( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac
 case $GESTURES in
-  1) "$R/gestures/mac/install.sh" ;;
-  0) "$R/gestures/mac/install.sh" --keys-only ;;
+  1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac ;;
+  0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;
 esac
-"$R/clipboard/mac/install.sh"
-echo "OmacVM Mac side installed"
+install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
+(( QUIET )) || echo "OmacVM Mac side installed"

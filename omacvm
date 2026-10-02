@@ -1,0 +1,44 @@
+#!/bin/bash
+# OmacVM: Omarchy in a VM on your Mac, feeling native.
+#
+#   omacvm                       asks what you want to do: build a VM, change
+#                                its features, update, check
+#   omacvm build                 a new Omarchy VM in Parallels or UTM, from nothing
+#   omacvm features [--vm NAME]  a VM's features: see them, switch them
+#   omacvm enable FEATURE...     switch features on (omacvm enable glide)
+#   omacvm disable FEATURE...    ... or off
+#   omacvm apply [--vm NAME]     OmacVM onto a VM, also one installed by hand
+#   omacvm update                this checkout, the Mac side and your VMs
+#   omacvm check [--vm NAME]     is everything working, on the Mac and in the VM
+#   omacvm vms                   your VMs and their OmacVM state
+#   omacvm uninstall [--purge]   OmacVM off this Mac (your VMs stay as they are)
+#   omacvm help COMMAND          the options of a command (or COMMAND --help)
+#   omacvm --version
+#
+# For scripts and coding agents: --json on vms, features, check and build
+# --plan; --yes (or no terminal) never asks; exit codes 0 done, 1 failed,
+# 2 usage, 3 needs a person. See AGENTS.md.
+set -euo pipefail
+# The checkout, also when omacvm is called through a symlink on the PATH.
+src=$0
+while [[ -L $src ]]; do
+  l=$(readlink "$src"); [[ $l == /* ]] && src=$l || src=$(dirname "$src")/$l
+done
+R=$(cd "$(dirname "$src")" && pwd)
+C=$R/src/cmd
+cmd=${1:-}; [[ $# -gt 0 ]] && shift
+case $cmd in
+  "") exec "$C/home.sh" ;;
+  build|apply|check|vms|update) exec "$C/$cmd.sh" "$@" ;;
+  features|enable|disable) exec "$C/features.sh" "$cmd" "$@" ;;
+  uninstall) exec "$R/src/mac/uninstall.sh" "$@" ;;
+  --version|-v|version) echo "OmacVM $(cat "$R/src/VERSION")"; exit 0 ;;
+  help|-h|--help)
+    case ${1:-} in
+      "") sed -n '2,20s/^# \{0,1\}//p' "$0" ;;
+      features|enable|disable) exec "$C/features.sh" "$1" --help ;;
+      build|apply|check|vms|update) exec "$C/$1.sh" --help ;;
+      *) echo "omacvm help: no command '$1'" >&2; exit 2 ;;
+    esac ;;
+  *) echo "omacvm: no command '$cmd' (omacvm help)" >&2; exit 2 ;;
+esac
