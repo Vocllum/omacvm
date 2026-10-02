@@ -27,19 +27,24 @@ UTM, or choose their password: hand those over, never work around them.
 - **New VM**:
   1. `omacvm vms --json` (what exists) and
      `omacvm build --plan --json --vm-type parallels|utm [--feature scroll-momentum=on ...]`:
-     resources within the licence, features, `needs_human`, and `command`.
+     resources within the licence, `resource_tiers` (what each
+     `--resources` tier gives on this Mac), features, `needs_human`, and
+     `command`. The VM name defaults to "Omarchy", or the next free
+     "Omarchy N" when a VM of that name exists in either app.
   2. Show the person the plan and explain the choices: Parallels (fast, every
      display, paid: Standard 4 CPUs / 8 GB per VM) or UTM (free, one display,
      slower); the resource tiers; each feature (`omacvm features --json` has
-     titles and summaries). Ask for their password (never invent one) and
+     titles and summaries; without `--vm` it also reads a running VM's state,
+     so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
      is experimental and off by default: offer
      it, do not decide it.
   3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes; run it in the
      background and follow its output). Exit 3 = something to install first.
-  4. Hand over the `needs_human` steps, then `omacvm check --json` until
-     `ok` (the person must be logged in to Omarchy; `needs_human: true`
-     entries are theirs).
+  4. Hand over the `needs_human` steps, then `omacvm check --vm NAME --json`
+     until `ok` (the person must be logged in to Omarchy; `needs_human: true`
+     entries are theirs). With several VMs, Omanotch serves one at a time: an
+     Omanotch failure on the others is expected, and `check` exits 1 for it.
 - **Switch a feature** on an existing VM: `omacvm features --vm NAME --json`,
   then `omacvm enable|disable FEATURE... --vm NAME --yes`, then
   `omacvm check --vm NAME --json`. Dependencies are handled (scroll-momentum brings
