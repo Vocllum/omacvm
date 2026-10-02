@@ -35,6 +35,18 @@ USER = os.environ.get("OMACVM_GESTURES_USER", "")   # default: whoever owns the 
 W, H, RES = 15600, 9600, 100
 PAD_W, PAD_H = 100000, 100000
 OFF_X, OFF_Y = (PAD_W - W) // 2, (PAD_H - H) // 2
+NATURAL = 1                  # -1 when the Mac scrolls the traditional way ("O" from the Mac)
+
+
+def set_mac(natural, w, h):
+    """The Mac's scrolling direction and its trackpad's size (1/100 mm = units)."""
+    global W, H, OFF_X, OFF_Y, NATURAL
+    NATURAL = 1 if natural else -1
+    if 2000 < w < 40000 and 2000 < h < 30000:
+        W, H = w, h
+        OFF_X, OFF_Y = (PAD_W - W) // 2, (PAD_H - H) // 2
+    print(f"omacvm-gestures: Mac trackpad {W / RES:.0f} x {H / RES:.0f} mm, "
+          f"{'natural' if NATURAL > 0 else 'traditional'} scrolling", flush=True)
 SLOTS = 10
 TOOLS = [e.BTN_TOOL_FINGER, e.BTN_TOOL_DOUBLETAP, e.BTN_TOOL_TRIPLETAP, e.BTN_TOOL_QUADTAP, e.BTN_TOOL_QUINTTAP]
 
@@ -336,6 +348,21 @@ POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "2.45"))
 GLIDE_MATCH = os.environ.get("OMACVM_SCROLL_GLIDE_MATCH") == "1"
 
 
+# Self-calibration of slow (raw) scrolling to the Mac's scrolling speed: macOS
+# points per millimetre of finger at medium speed (40-120 mm/s), relative to
+# the reference Mac OmacVM was tuned on (6.74; MacBook Pro 16", default
+# scrolling speed, measured over five recordings).
+CAL_REF = 6.74
+CAL_FILE = "/var/lib/omacvm/scroll-calibration"
+
+
+def load_cal():
+    try:
+        return min(max(float(open(CAL_FILE).read().split()[0]), 0.5), 2.0)
+    except (OSError, ValueError, IndexError):
+        return 1.0
+
+
 # Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
 # gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
 PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
@@ -361,6 +388,8 @@ class Hybrid:
         self.two = None      # current two-finger touch: ids, offsets, start, mode, filters
         self.apts = []       # (time, macOS points) while the fingers touch
         self.adelta = [0.0, 0.0]   # macOS's scroll since the last frame (points)
+        self.cal = load_cal()       # slow-scrolling gain for this Mac's scrolling speed
+        self.cal_pts = self.cal_mm = 0.0
         self.amm = []        # (time, finger millimetres)
         self.base = float(os.environ["OMACVM_SCROLL_BASE"]) if os.environ.get("OMACVM_SCROLL_BASE") else None
         self.logged = 0.0
@@ -393,6 +422,7 @@ class Hybrid:
             self.contacts = contacts
             self.pad.frame(contacts)
             return
+        self.calibrate()
         if len(self.contacts) == 2 and len(self.hist) >= 2:
             # Two fingers lifted: stay down, macOS's momentum may follow.
             self.held = [list(c) for c in self.contacts]
@@ -441,8 +471,12 @@ class Hybrid:
             x = min(1.0, max(0.0, (v - BLEND_V0) / (BLEND_V1 - BLEND_V0)))
             w = x * x * (3 - 2 * x)
             ax, ay = ad[0] * POINT_UNITS, ad[1] * POINT_UNITS
-            t["vx"] += (1 - w) * dx * RAW_SCALE + w * ax
-            t["vy"] += (1 - w) * dy * RAW_SCALE + w * ay
+            raw = RAW_SCALE * self.cal * NATURAL
+            t["vx"] += (1 - w) * dx * raw + w * ax
+            t["vy"] += (1 - w) * dy * raw + w * ay
+            if 40 <= v < 120:          # calibration samples
+                self.cal_mm += math.hypot(dx, dy) / RES
+                self.cal_pts += math.hypot(ad[0], ad[1])
             if SCROLL_DEBUG and now - self.logged > 0.3:
                 print(f"blend: {v:.0f} mm/s, macOS share {w:.2f}", flush=True)
                 self.logged = now
@@ -481,6 +515,23 @@ class Hybrid:
             print(f"accel: {sm / ACCEL_WINDOW:.0f} mm/s, {r:.1f} pt/mm, base {self.base or 0:.1f}, gain {target:.2f}", flush=True)
             self.logged = now
         return target
+
+    def calibrate(self):
+        """After a touch: once enough medium-speed movement is collected, move
+        the slow-scrolling gain towards this Mac's points per mm / reference."""
+        if self.cal_mm < 20:
+            return
+        g = min(max(self.cal_pts / self.cal_mm / CAL_REF, 0.5), 2.0)
+        self.cal = 0.8 * self.cal + 0.2 * g
+        self.cal_pts = self.cal_mm = 0.0
+        try:
+            os.makedirs(os.path.dirname(CAL_FILE), exist_ok=True)
+            with open(CAL_FILE, "w") as f:
+                f.write(f"{self.cal:.4f}\n")
+        except OSError:
+            pass
+        if SCROLL_DEBUG:
+            print(f"calibration: this touch {g:.2f}, slow-scrolling gain {self.cal:.3f}", flush=True)
 
     def pinch(self):
         """macOS recognized a pinch: the current two-finger touch goes raw. libinput
@@ -642,6 +693,8 @@ def run(pad, keys, wheel, touch, hybrid):
                         hybrid.frame(contacts)
                     else:
                         pad.frame(contacts)
+                elif p[0] == b"O":
+                    set_mac(int(p[1]), int(p[2]), int(p[3]))
                 elif p[0] == b"A":
                     hybrid.macos(float(p[1]), float(p[2]))
                 elif p[0] == b"P":

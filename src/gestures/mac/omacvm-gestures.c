@@ -32,6 +32,8 @@
 //   S <on|off|esc>                    capture state changes
 //   W <dx> <dy>                       --scroll: macOS scroll deltas in points
 //   P                                 --scroll: macOS recognized a pinch (magnify)
+//   O <natural> <w> <h>               on connect: macOS's natural scrolling (1/0) and the
+//                                     trackpad's size in 1/100 mm
 //   A <dx> <dy>                       --scroll: macOS's scroll while the fingers touch
 //                                     (points; the guest reads macOS's acceleration from it)
 #include <ApplicationServices/ApplicationServices.h>
@@ -71,6 +73,7 @@ extern CFArrayRef MTDeviceCreateList(void);
 extern void MTRegisterContactFrameCallback(MTDeviceRef, MTFrameCallback);
 extern void MTDeviceStart(MTDeviceRef, int);
 extern bool MTDeviceIsBuiltIn(MTDeviceRef);
+extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1/100 mm
 
 #define PORT 47830
 // The Mac's address on each VM network: Parallels' shared network, UTM's
@@ -95,6 +98,7 @@ void ns_scroll_delta(CGEventRef e, double *dx, double *dy);   // scroll_ns.m
 int ns_event_type(CGEventRef e);                               // scroll_ns.m
 static int trackpad = 1;          // 0 with --keys-only
 static int scroll2;               // 1 with --scroll
+static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
 static double unixNow(void) { return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970; }
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
@@ -396,7 +400,15 @@ static void *serverThread(void *arg) {
       pthread_mutex_unlock(&sendLock);
       logf_("guest connected: %s", ip);
       const char *st = capturing && net == frontNet ? "on\n" : "off\n";
-      char b[16]; int n = snprintf(b, sizeof b, "S %s", st);
+      char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
+      send(c, b, (size_t)n, MSG_NOSIGNAL);
+      // The Mac's scrolling direction and the trackpad's size, so the guest
+      // scales finger movement for this Mac (OmacVM's tuning is relative to a
+      // 156 x 96 mm trackpad with natural scrolling).
+      CFPropertyListRef nat = CFPreferencesCopyAppValue(CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication);
+      int natural = nat ? CFBooleanGetValue((CFBooleanRef)nat) : 1;
+      if (nat) CFRelease(nat);
+      n = snprintf(b, sizeof b, "O %d %d %d\n", natural, tpW, tpH);
       send(c, b, (size_t)n, MSG_NOSIGNAL);
     }
     close(s);
@@ -422,6 +434,7 @@ int main(int argc, char **argv) {
   for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
     MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
     if (!MTDeviceIsBuiltIn(d)) continue;   // built-in trackpad only
+    { int w = 0, h = 0; if (MTDeviceGetSensorSurfaceDimensions(d, &w, &h) == 0 && w > 0 && h > 0) { tpW = w; tpH = h; } }
     MTRegisterContactFrameCallback(d, frameCb); MTDeviceStart(d, 0); started++;
   }
   if (trackpad && !started) { logf_("no built-in trackpad found"); return 1; }

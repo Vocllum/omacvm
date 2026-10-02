@@ -474,6 +474,31 @@ The glide, ~94 % of a fast scroll, now travels as far as macOS's within about
 5-10 %; decay 0.22-0.25 s on both. Two Omarchy glides measured short (0.39,
 0.59) were cut by the next touch.
 
+"This really feels awesome."
+
+### 28. Locked to this setup, relative for others
+
+The tuning above is the reference: MacBook Pro 16" (trackpad 156 x 96 mm, read
+from MultitouchSupport), natural scrolling and the default scrolling speed
+(neither key set in macOS's preferences), VM display scale 2. Each factor of
+the chain is then adjusted relative to it:
+
+- Display scale: the virtual trackpad's scroll factor is `0.328 * 2 /
+  omarchy_monitor_scale` in `monitors.lua`, next to Omarchy's own scaling
+  value, so it follows Omarchy's scaling menu (logical pixels look
+  scale/2 times as large).
+- Trackpad size: the helper reads it (`MTDeviceGetSensorSurfaceDimensions`)
+  and sends it with the scrolling direction on connect (`O <natural> <w> <h>`);
+  the guest maps finger movement in real millimetres.
+- Natural scrolling: macOS's own steps (fast touch, glide) already follow it;
+  the raw finger movement gets the matching sign.
+- Scrolling speed (Accessibility): macOS's own steps follow it; slow (raw)
+  scrolling self-calibrates. At 40-120 mm/s the guest compares macOS points
+  per finger millimetre with the reference, 6.74 (6.1-7.7 over five
+  recordings), and moves a gain (0.5-2) towards the ratio after each touch,
+  kept in `/var/lib/omacvm/scroll-calibration`. On the reference Mac it stays
+  at about 1.
+
 ## Candidate if the wheel cannot pan a zoomed page
 
 Replay macOS's physics as **touchpad** movement instead of wheel steps: move
