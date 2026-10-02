@@ -14,6 +14,13 @@ for a in "$@"; do
     *) echo "install.sh: unknown option $a" >&2; exit 2 ;;
   esac
 done
+# Characters, not bytes, for the spinner, ✓ and the box (a C locale, e.g. over
+# SSH or with LANG unset, would cut them apart): a UTF-8 locale, which every
+# Mac has.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) ;;
+  *) if [[ -n ${LC_ALL:-} ]]; then export LC_ALL=en_US.UTF-8; else export LC_CTYPE=en_US.UTF-8; fi ;;
+esac
 say() { printf '\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo "OmacVM needs an Apple Silicon Mac." >&2; exit 1; }
 

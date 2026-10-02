@@ -9,6 +9,13 @@
 #   ui_box "line" ...                                        a framed block
 #   ui_step N TOTAL "text"                                   "[N/TOTAL] text"
 TTY=${TTY:-/dev/tty}
+# Characters, not bytes, for the spinner, ✓ and the box (a C locale, e.g. over
+# SSH or with LANG unset, would cut them apart): a UTF-8 locale, which every
+# Mac has.
+case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+  *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) ;;
+  *) if [[ -n ${LC_ALL:-} ]]; then export LC_ALL=en_US.UTF-8; else export LC_CTYPE=en_US.UTF-8; fi ;;
+esac
 UI_FANCY=0
 if { : < "$TTY"; } 2>/dev/null && [[ ${TERM:-dumb} != dumb ]] && tput cuu1 >/dev/null 2>&1; then UI_FANCY=1; fi
 
