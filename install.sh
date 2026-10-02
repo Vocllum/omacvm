@@ -4,6 +4,7 @@
 # builds one). From GitHub in one line:
 #   curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash
 # From a clone: ./install.sh (links that clone instead). --no-start: only install.
+# OMACVM_REF=<branch or tag> installs that instead of main.
 set -euo pipefail
 REPO=https://github.com/gillesgoetsch/omacvm.git
 START=1
@@ -26,7 +27,7 @@ if [[ -z $here ]]; then
   here=$HOME/.omacvm
   command -v git >/dev/null || { echo "OmacVM needs git: xcode-select --install" >&2; exit 3; }
   if [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
-  else say "OmacVM -> $here"; git clone -q "$REPO" "$here"; fi
+  else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
 fi
 
 # On the PATH: Homebrew's bin (OmacVM needs Homebrew anyway), else ~/.local/bin.
