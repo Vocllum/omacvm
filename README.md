@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="docs/omacvm-demo.mp4"><img src="docs/demo.webp" alt="A real MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a three-finger swipe to the next workspace." width="560"></a>
+  <a href="docs/omacvm-demo.mp4"><img src="docs/demo.webp" alt="A real MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="560"></a>
   <br><sub><a href="docs/omacvm-demo.mp4">Watch the full one-minute demo</a> (a real MacBook Pro, no sound)</sub>
 </p>
 
