@@ -124,6 +124,29 @@ Chrome as a fraction of a pixel, and Chrome drops part of such amounts.
 movement, 1 -> 2, 2 -> 2.5, 3 and more unchanged (additive, so it always
 rises with the input). Normal and fast scrolling stay exactly as macOS sends it.
 
+- Worse: coarser, no more per-pixel scrolling. Boost off again (0).
+
+Logging both of macOS's scroll fields and NSEvent's `scrollingDeltaY` (what
+macOS's own apps use) in OmacVM Gestures: during slow scrolling all of them
+carry **whole points only** (the fixed-point field is 0 for small movements).
+macOS's scroll events have no finer data; macOS shows its 1-point steps at
+120 Hz, 1 point = 1 pixel.
+
+### 9. Hybrid: raw fingers while touching, macOS's momentum after (in progress)
+
+Mac (`--scroll`): two-finger frames go to the guest as raw touches again; while
+two fingers touch the built-in trackpad, macOS's scroll events are dropped;
+after the lift only macOS's momentum goes, as `W` deltas. Other continuous
+scrolling (Magic Mouse) still goes as `W` as a whole.
+
+Guest (`OMACVM_SCROLL_MODE=touch`): the virtual fingers follow the raw
+positions (hundredths of a millimetre). When two fingers lift, they stay down
+for up to 0.15 s waiting for momentum; macOS's momentum then moves them on,
+scaled so that the speed at the hand-over matches the fingers' last speed
+(units/s against points/s of the first momentum steps); they lift 0.5 s after
+the momentum has died down. Touchpad scroll factor for the virtual trackpad:
+0.25 (acceleration stays the default, which suits the 3/4-finger swipes).
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page

@@ -14,12 +14,14 @@
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
-// --scroll: scrolling keeps macOS's own physics. macOS's continuous scroll
-// events (trackpad and Magic Mouse: macOS's acceleration, and its momentum
-// after the fingers lift) go to the guest as pixel deltas, "W <dx> <dy>", for
-// its virtual high-resolution wheel, instead of to Parallels. A wheel mouse
-// (discrete steps) still scrolls through Parallels; one-finger movement and
-// clicks stay with Parallels.
+// --scroll: two-finger scrolling goes to the guest too. While fingers touch the
+// built-in trackpad, their raw positions do (every two-finger frame, precise to
+// hundredths of a millimetre); after they lift, macOS's momentum goes as point
+// deltas, "W <dx> <dy>", which the guest continues the touch with. macOS's own
+// scroll events are not passed to Parallels then. Other continuous scrolling
+// (Magic Mouse) goes as W deltas as a whole; a wheel mouse (discrete steps)
+// still scrolls through Parallels; one-finger movement and clicks stay with
+// Parallels.
 // --keys-only (trackpad gestures turned off at setup): macOS keeps every
 // gesture and nothing is sent from the trackpad; on UTM, Cmd still reaches the
 // guest as Super (below).
@@ -86,6 +88,7 @@ static volatile int frontNet = -1;
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
+void ns_scroll_delta(CGEventRef e, double *dx, double *dy);   // scroll_ns.m
 static int trackpad = 1;          // 0 with --keys-only
 static int scroll2;               // 1 with --scroll
 static volatile int fingers;      // contacts in the built-in trackpad's last frame
@@ -142,7 +145,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
   fingers = k;
   if (k >= 2) lastTwo = CFAbsoluteTimeGetCurrent();
   if (trackpad && capturing && haveClient(frontNet)) {
-    if (k >= 3) send = 1;
+    if (k >= 3 || (k == 2 && scroll2)) send = 1;
     else if (k == 2) {
       float dx = c[0]->normalized.pos.x - c[1]->normalized.pos.x, dy = c[0]->normalized.pos.y - c[1]->normalized.pos.y;
       float d = sqrtf(dx * dx + dy * dy);
@@ -294,8 +297,18 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     // the guest; a wheel mouse's discrete steps pass to Parallels.
     if (!(scroll2 && trackpad && capturing && haveClient(frontNet))) return e;
     if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
+    // Fingers on the built-in trackpad: their raw frames carry this scroll.
+    if (fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase)) return NULL;
     double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
     double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
+    double nx = 0, ny = 0;
+    if (verbose) ns_scroll_delta(e, &nx, &ny);
+    if (verbose)
+      logf_("scroll pt %.3f %.3f ns %.4f %.4f fixed %.4f %.4f phase %lld momentum %lld", dx, dy, nx, ny,
+            CGEventGetDoubleValueField(e, kCGScrollWheelEventFixedPtDeltaAxis2),
+            CGEventGetDoubleValueField(e, kCGScrollWheelEventFixedPtDeltaAxis1),
+            CGEventGetIntegerValueField(e, kCGScrollWheelEventScrollPhase),
+            CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase));
     if (dx != 0 || dy != 0) {
       char b[64]; int n = snprintf(b, sizeof b, "W %.2f %.2f\n", dx, dy);
       sendLine(b, (size_t)n);

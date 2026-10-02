@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 ARGS=""
 for a in "$@"; do
   case $a in
-    --keys-only|--scroll) ARGS+="<string>$a</string>" ;;
+    --keys-only|--scroll|-v) ARGS+="<string>$a</string>" ;;
     *) echo "install.sh: unknown option $a" >&2; exit 2 ;;
   esac
 done

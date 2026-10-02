@@ -5,8 +5,8 @@ cd "$(dirname "$0")"
 APP=build/OmacVMGestures.app
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ../../icon/make-icns.sh "$APP/Contents/Resources/OmacVM.icns"
-clang -O2 -Wall -o "$APP/Contents/MacOS/omacvm-gestures" omacvm-gestures.c \
-  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon -framework CoreFoundation
+clang -O2 -Wall -o "$APP/Contents/MacOS/omacvm-gestures" omacvm-gestures.c scroll_ns.m \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon -framework CoreFoundation -framework AppKit
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
