@@ -307,6 +307,7 @@ final class MenuBar: NSObject, NSMenuDelegate {
     info(mediaKeys.status)
     info("Accessibility: " + (AXIsProcessTrusted() ? "granted" : "not granted…"), #selector(openAccessibility))
     info("Location Services: " + (location.authorized ? "granted" : "not granted…"), #selector(openLocation))
+    info("Bluetooth: " + (bluetooth.permission == "granted" ? "granted" : "not granted…"), #selector(openBluetooth))
     for s in servers { info(s.status) }
     info("VM event clients: \(hub.clientCount)")
     menu.addItem(.separator())
@@ -328,6 +329,10 @@ final class MenuBar: NSObject, NSMenuDelegate {
 
   @objc private func openLocation() {
     NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")!)
+  }
+
+  @objc private func openBluetooth() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Bluetooth")!)
   }
 
   @objc private func openLog() { NSWorkspace.shared.open(URL(fileURLWithPath: logPath)) }

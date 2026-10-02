@@ -131,7 +131,7 @@ final class Hub {
 }
 
 // ---- HTTP ----
-let reasons = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 404: "Not Found", 405: "Method Not Allowed",
+let reasons = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 408: "Request Timeout", 405: "Method Not Allowed",
                409: "Conflict", 413: "Payload Too Large", 500: "Internal Server Error", 501: "Not Implemented", 503: "Service Unavailable"]
 
 func httpHead(_ code: Int, _ type: String, length: Int?, extra: String = "") -> Data {
@@ -226,6 +226,21 @@ func handle(_ fd: Int32, peer: String) {
     respond(fd, 200, hub.current("audio"))
   case ("GET", "/display"):
     respond(fd, 200, hub.current("display"))
+  case ("GET", "/bluetooth"):
+    respond(fd, 200, hub.current("bluetooth"))
+  case ("POST", let p) where p.hasPrefix("/bluetooth/"):
+    guard let obj = (body.isEmpty ? [:] : try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
+      respond(fd, 400, ["error": "body must be a JSON object"]); return
+    }
+    do {
+      log("\(p) from \(peer): \(try bluetooth.control(p, obj))")
+      respond(fd, 200, hub.current("bluetooth"))   // also pushes the change to /events clients
+    } catch let e as APIError {
+      log("\(p) from \(peer) failed: \(e.message)")
+      respond(fd, e.status, ["error": e.message])
+    } catch {
+      respond(fd, 500, ["error": "\(error)"])
+    }
   case ("GET", "/wifi/password"):
     let ssid = query.first { $0.name == "ssid" }?.value.flatMap { $0.isEmpty ? nil : $0 }
     do { respond(fd, 200, try wifiPassword(ssid: ssid, peer: peer)) }
@@ -260,7 +275,7 @@ func handle(_ fd: Int32, peer: String) {
     }
   case ("POST", "/power"), ("POST", "/join"), ("POST", "/disconnect"):
     respond(fd, 501, ["error": "Wi-Fi control is not implemented yet (stage 2)"])
-  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/wifi/password"), (_, "/events"):
+  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/wifi/password"), (_, "/events"):
     respond(fd, 405, ["error": "method not allowed"])
   default:
     respond(fd, 404, ["error": "not found"])
