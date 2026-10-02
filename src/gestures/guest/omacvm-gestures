@@ -1,19 +1,25 @@
 #!/usr/bin/env python3
 """omacvm-gestures (guest side): replays the Mac trackpad's multi-finger
 gestures on a virtual touchpad, so libinput/Hyprland see 3/4-finger swipes and
-pinch/rotate like on a real Apple touchpad.
+pinch/rotate like on a real Apple touchpad; on UTM it also types the Mac's Cmd
+shortcuts as Super.
 
-Connects to the Mac helper (gestures/mac) on the Mac's address on the VM network (from /etc/omacvm/env)
-and reads lines:
+Connects to the Mac helper (gestures/mac) at the Mac's address on the VM
+network (/etc/omacvm/env), says what this VM wants ("H <gestures> <glide>",
+from the feature choices in the same file) and reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
-  W <dx> <dy>                       scrolling as macOS shaped it (points), for the
-                                    virtual high-resolution wheel
+  O <natural> <w> <h>               the Mac's scrolling direction, trackpad size (1/100 mm)
+  A <dx> <dy>, W <dx> <dy>, P       Glide: macOS's scroll while touching, its
+                                    momentum (points), a pinch macOS recognized
+  K <code> <value>                  UTM: a key on the virtual keyboard
 
-The helper only sends 3+-finger frames and 2-finger pinches; one-finger
-movement, clicks and two-finger scrolling keep coming from Parallels' own
-virtual mouse. Runs as root (uinput); posts a notification to the desktop user
-when the escape combo is used.
+Without Glide the helper sends 3+-finger frames and 2-finger pinches; pointer,
+clicks and two-finger scrolling come from the VM app's own virtual mouse.
+With Glide (experimental) every two-finger frame comes too, and the scroll is
+rebuilt here from the real fingers plus macOS's own acceleration and momentum
+(docs/experiments/trackpad-scrolling.md). Runs as root (uinput); posts a
+notification to the desktop user when the escape combo is used.
 """
 import glob
 import math
@@ -26,12 +32,38 @@ import time
 
 from evdev import AbsInfo, UInput, ecodes as e
 
+def env_float(name, default):
+    """A number from the environment; a malformed value keeps the default."""
+    try:
+        return float(os.environ.get(name, "") or default)
+    except ValueError:
+        print(f"omacvm-gestures: {name}={os.environ[name]!r} is not a number, using {default}", file=sys.stderr, flush=True)
+        return float(default)
+
+
+def env_floats(name, default):
+    """Several numbers from the environment (space-separated); malformed: the defaults."""
+    try:
+        v = [float(x) for x in (os.environ.get(name, "") or default).split()]
+        if len(v) == len(default.split()):
+            return v
+    except ValueError:
+        pass
+    if os.environ.get(name):
+        print(f"omacvm-gestures: {name}={os.environ[name]!r} is not {len(default.split())} numbers, using {default!r}",
+              file=sys.stderr, flush=True)
+    return [float(x) for x in default.split()]
+
+
 HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") or "10.211.55.2"
-PORT = int(os.environ.get("OMACVM_GESTURES_PORT", "47830"))
+PORT = int(env_float("OMACVM_GESTURES_PORT", 47830))
+# The VM's feature choices (/etc/omacvm/env, loaded by the service).
+GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
+GLIDE_ON = GESTURES and os.environ.get("OMACVM_FEATURE_glide", "off") == "on"
 USER = os.environ.get("OMACVM_GESTURES_USER", "")   # default: whoever owns the Wayland session
 # Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm. The real
-# trackpad maps onto the middle of a much larger virtual one, so a glide from
-# macOS's momentum (--scroll) has room to run; fingers feel exactly the same.
+# trackpad maps onto the middle of a much larger virtual one, so Glide's
+# momentum has room to run; fingers feel exactly the same.
 W, H, RES = 15600, 9600, 100
 PAD_W, PAD_H = 100000, 100000
 OFF_X, OFF_Y = (PAD_W - W) // 2, (PAD_H - H) // 2
@@ -143,75 +175,21 @@ class Touchpad:
             self.frame([])
 
 
-# One wheel detent (120 high-resolution units) per this many macOS points.
-POINTS_PER_DETENT = float(os.environ.get("OMACVM_SCROLL_POINTS_PER_DETENT", "40"))
-# How macOS's scrolling reaches the apps: "wheel" (a high-resolution wheel) or
-# "touch" (two virtual fingers on the touchpad, moved by macOS's deltas, lifted
-# once macOS's momentum has died down, so apps add no fling of their own).
-SCROLL_MODE = os.environ.get("OMACVM_SCROLL_MODE", "wheel")
-TOUCH_UNITS_PER_POINT = float(os.environ.get("OMACVM_SCROLL_TOUCH_SCALE", "5.5"))
-SCROLL_DEBUG = bool(os.environ.get("OMACVM_SCROLL_DEBUG"))
-# OMACVM_SCROLL_RECORD=1: every virtual-touchpad frame (time, fingers, centre)
-# to /var/log/omacvm-output.tsv, to compare with the Mac's input recording.
-RECORD = open("/var/log/omacvm-output.tsv", "a", buffering=1) if os.environ.get("OMACVM_SCROLL_RECORD") else None
-# macOS sends slow scrolling as 1-point steps; after the compositor's touchpad
-# factor they reach apps as fractions of a pixel, which Chrome partly drops.
-# Steps below SLOW_UNTIL points get extra movement: SLOW_BOOST points at a
-# 1-point step, tapering to none at SLOW_UNTIL (1 -> 2, 2 -> 2.5, 3 -> 3 with the
-# defaults); normal and fast scrolling stay exactly as macOS sends it.
-SLOW_BOOST = float(os.environ.get("OMACVM_SCROLL_SLOW_BOOST", "1.0"))
-SLOW_UNTIL = 3.0
-
-
-def slow_boost(d):
-    a = abs(d)
-    if not 0 < a < SLOW_UNTIL:
-        return d
-    extra = SLOW_BOOST * min(1.0, (SLOW_UNTIL - a) / (SLOW_UNTIL - 1))
-    return d + extra if d > 0 else d - extra
-# Seconds without scrolling before the fingers lift. libinput only starts a
-# two-finger scroll after the fingers have moved a little; staying down through
-# the pauses of slow, fine scrolling avoids paying that again and again.
-TOUCH_LIFT_AFTER = float(os.environ.get("OMACVM_SCROLL_TOUCH_HOLD", "0.5"))
-
-
-def make_wheel():
-    """A virtual high-resolution wheel for macOS's scrolling (--scroll on the Mac):
-    apps get the finished movement, macOS's acceleration and momentum included."""
-    caps = {
-        e.EV_KEY: [e.BTN_LEFT, e.BTN_RIGHT, e.BTN_MIDDLE],
-        e.EV_REL: [e.REL_X, e.REL_Y, e.REL_WHEEL, e.REL_HWHEEL, e.REL_WHEEL_HI_RES, e.REL_HWHEEL_HI_RES],
-    }
-    return UInput(caps, name="OmacVM scroll (macOS)", vendor=0x05AC, product=0x0001, bustype=e.BUS_VIRTUAL)
-
-
-class Wheel:
-    def __init__(self, ui):
-        self.ui = ui
-        self.hi = [0.0, 0.0]     # high-resolution remainders (x, y)
-        self.lo = [0, 0]         # high-resolution units toward the next legacy detent
-
-    def scroll(self, dx, dy):
-        # macOS: positive dy = content moves down (natural scrolling already
-        # applied) = REL_WHEEL positive; positive dx = content moves right =
-        # REL_HWHEEL negative.
-        for i, (v, hi, lo) in enumerate(((-dx, e.REL_HWHEEL_HI_RES, e.REL_HWHEEL), (dy, e.REL_WHEEL_HI_RES, e.REL_WHEEL))):
-            self.hi[i] += v * 120.0 / POINTS_PER_DETENT
-            n = int(self.hi[i])
-            if not n:
-                continue
-            self.hi[i] -= n
-            self.ui.write(e.EV_REL, hi, n)
-            self.lo[i] += n
-            d = int(self.lo[i] / 120)
-            if d:
-                self.lo[i] -= d * 120
-                self.ui.write(e.EV_REL, lo, d)
-        self.ui.syn()
+# Glide's settings (OMACVM_GLIDE_* in a systemd drop-in; defaults = the tuned values).
+DEBUG = bool(os.environ.get("OMACVM_GLIDE_DEBUG"))
+# OMACVM_GLIDE_RECORD=1: every virtual-touchpad frame (time, fingers, centre)
+# to /var/log/omacvm-output.tsv, to compare with the Mac's input recording
+# (omacvm-gestures --record on the Mac; docs/experiments/scroll-analysis).
+RECORD = open("/var/log/omacvm-output.tsv", "a", buffering=1) if os.environ.get("OMACVM_GLIDE_RECORD") else None
+# Seconds without scrolling before the virtual fingers lift. libinput only
+# starts a two-finger scroll after the fingers have moved a little; staying
+# down through the pauses of slow, fine scrolling avoids paying that again.
+HOLD = env_float("OMACVM_GLIDE_HOLD", 0.5)
 
 
 class TouchScroll:
-    """macOS's scroll deltas as two fingers moving on the virtual touchpad."""
+    """macOS's scroll deltas as two fingers moving on the virtual touchpad: for
+    continuous scrolling without fingers on the built-in trackpad (Magic Mouse)."""
     IDS = (100001, 100002)
 
     def __init__(self, pad):
@@ -229,14 +207,13 @@ class TouchScroll:
         self.pad.frame([(self.IDS[0], x - gap // 2, y), (self.IDS[1], x + gap // 2, y)])
 
     def scroll(self, dx, dy):
-        # Natural scrolling (macOS's deltas already have it): content moves
+        # macOS's deltas already follow its scrolling direction: content moves
         # with the fingers.
         if not self.down:
             self._place()
             self._frame()
-        dx, dy = slow_boost(dx), slow_boost(dy)
-        nx = self.x + dx * TOUCH_UNITS_PER_POINT
-        ny = self.y + dy * TOUCH_UNITS_PER_POINT
+        nx = self.x + dx * POINT_UNITS
+        ny = self.y + dy * POINT_UNITS
         if not (1500 < nx < PAD_W - 1500 and 1000 < ny < PAD_H - 1000):
             # Off the edge: hold still for a moment, lift, start again in the middle.
             for _ in range(3):
@@ -245,13 +222,13 @@ class TouchScroll:
             self.pad.frame([])
             self._place()
             self._frame()
-            nx, ny = self.x + dx * TOUCH_UNITS_PER_POINT, self.y + dy * TOUCH_UNITS_PER_POINT
+            nx, ny = self.x + dx * POINT_UNITS, self.y + dy * POINT_UNITS
         self.x, self.y = nx, ny
         self._frame()
         self.last = time.monotonic()
 
     def idle(self):
-        if self.down and time.monotonic() - self.last > TOUCH_LIFT_AFTER:
+        if self.down and time.monotonic() - self.last > HOLD:
             self.pad.frame([])
             self.down = False
 
@@ -292,63 +269,29 @@ class OneEuro:
 
 # "min_cutoff beta d_cutoff": smoothing at rest (Hz), how fast it opens with
 # speed, and how quickly a change of speed is noticed (Hz).
-_f = (os.environ.get("OMACVM_SCROLL_FILTER", "") or "1.5 0.4 8").split()
-FILTER_MIN_CUTOFF, FILTER_BETA = float(_f[0]), float(_f[1])
-FILTER_D_CUTOFF = float(_f[2]) if len(_f) > 2 else 8.0
-# Acceleration of two-finger scrolling, like macOS's: gain 1 below V0 mm/s of
-# finger speed (fine scrolling stays exact), rising smoothly to GAIN at V1.
-_a = os.environ.get("OMACVM_SCROLL_ACCEL", "15 150 3").split()
-ACCEL_V0, ACCEL_V1, ACCEL_GAIN = float(_a[0]), float(_a[1]), float(_a[2])
-
-
-def scroll_gain(v):
-    if v <= ACCEL_V0:
-        return 1.0
-    x = min(1.0, (v - ACCEL_V0) / (ACCEL_V1 - ACCEL_V0))
-    return 1.0 + (ACCEL_GAIN - 1.0) * x * x * (3 - 2 * x)    # smoothstep
-
-
-# macOS's own acceleration (from its scroll while the fingers touch, "A" lines):
-# over ACCEL_WINDOW seconds, macOS points per millimetre of finger movement,
-# relative to that ratio during slow scrolling (calibrated as you scroll),
-# scales the raw movement; capped at ACCEL_MAX.
-ACCEL_WINDOW = 0.15
-ACCEL_MAX = float(os.environ.get("OMACVM_SCROLL_ACCEL_MAX", "6"))
-ACCEL_SLOW = 20.0            # mm/s: below this a window calibrates the base ratio
-
-
-# How much further the glide after a flick carries than macOS's momentum at
-# the fingers' speed (1 = exactly macOS's distance).
-GLIDE = float(os.environ.get("OMACVM_SCROLL_GLIDE", "1.0"))
-# Time constant (s) of the glide's smoothing of macOS's momentum steps.
-GLIDE_TAU = float(os.environ.get("OMACVM_SCROLL_GLIDE_TAU", "0.025"))
+FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF = env_floats("OMACVM_GLIDE_FILTER", "1.5 0.4 8")
+# Slow scrolling follows the raw fingers, fast scrolling macOS's own accelerated
+# scroll (the "A" lines): below BLEND_V0 mm/s raw, above BLEND_V1 macOS's,
+# smoothly blended in between.
+BLEND_V0, BLEND_V1 = env_floats("OMACVM_GLIDE_BLEND", "80 160")
+# Virtual touchpad units per 1/100 mm of real finger movement while scrolling:
+# below 1 keeps the virtual fingers slow, so libinput's touch-jump limit never
+# caps a fast scroll; the compositor's scroll factor for the virtual trackpad
+# makes up for it (omacvm_glide.lua).
+RAW_SCALE = env_float("OMACVM_GLIDE_RAW_SCALE", 0.184)
+# Units per macOS point: measured at display scale 2 (1 unit = 0.408 px on
+# screen), 2.45 units make 1 macOS point one on-screen pixel, like macOS.
+POINT_UNITS = env_float("OMACVM_GLIDE_POINT_UNITS", 2.45)
+# How far the glide after a flick carries, relative to macOS's momentum (1 =
+# macOS's distance; measured within 5-10 %), and the time constant (s) that
+# smooths macOS's momentum steps into a continuous movement.
+GLIDE = env_float("OMACVM_GLIDE_DISTANCE", 1.0)
+GLIDE_TAU = env_float("OMACVM_GLIDE_TAU", 0.025)
 # Top speed of the virtual fingers (units/s): 1000 mm/s, under libinput's
-# touch-jump limit; at RAW_SCALE 0.25 that is about 17,600 px/s on screen.
-MAX_RATE = float(os.environ.get("OMACVM_SCROLL_MAX_RATE", "100000"))
+# touch-jump limit (about 20 mm per 12 ms).
+MAX_RATE = env_float("OMACVM_GLIDE_MAX_RATE", 100000)
 
-
-# Fast scrolling follows macOS's own accelerated scroll (the "A" lines), slow
-# scrolling the raw fingers: below BLEND_V0 mm/s raw, above BLEND_V1 macOS's,
-# smoothly blended in between. POINT_UNITS converts macOS points into virtual
-# touchpad units (also for the glide), so distances match macOS.
-_b = (os.environ.get("OMACVM_SCROLL_BLEND", "") or "80 160").split()
-BLEND_V0, BLEND_V1 = float(_b[0]), float(_b[1])
-# Virtual touchpad units per millimetre of real finger movement while
-# scrolling, divided by 100: a quarter keeps the virtual fingers' speed (in mm)
-# low, so libinput's touch-jump limit never caps a fast scroll; the compositor's
-# scroll factor for the virtual trackpad is raised by the same factor (4x).
-RAW_SCALE = float(os.environ.get("OMACVM_SCROLL_RAW_SCALE", "0.184"))
-# Units per macOS point: 1 point = 1 pixel, like on the Mac (measured).
-# Measured at display scale 2 (1 unit = 0.408 px on screen): 2.45 units per
-# macOS point = 1 point per on-screen pixel, like macOS.
-POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "2.45"))
-# Glide scale: macOS's momentum at POINT_UNITS (measured to continue macOS's
-# own speed), or matched to the speed at the lift (OMACVM_SCROLL_GLIDE_MATCH=1;
-# measured too short: fingers slow down just before lifting).
-GLIDE_MATCH = os.environ.get("OMACVM_SCROLL_GLIDE_MATCH") == "1"
-
-
-# Self-calibration of slow (raw) scrolling to the Mac's scrolling speed: macOS
+# Self-calibration of slow (raw) scrolling to this Mac's scrolling speed: macOS
 # points per millimetre of finger at medium speed (40-120 mm/s), relative to
 # the reference Mac OmacVM was tuned on (6.74; MacBook Pro 16", default
 # scrolling speed, measured over five recordings).
@@ -363,35 +306,27 @@ def load_cal():
         return 1.0
 
 
-# Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
-# gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
-PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
-
-
-class Hybrid:
-    """--scroll on the Mac with touch mode: the real two-finger frames while the
-    fingers touch (precise to hundredths of a millimetre), then macOS's momentum
-    on the same virtual fingers, which stay down until it has died down."""
+class Glide:
+    """Glide: the real two-finger frames while the fingers touch (precise to
+    hundredths of a millimetre, macOS's acceleration blended in when fast), then
+    macOS's momentum on the same virtual fingers, which stay down until it has
+    died down, so apps add no fling of their own."""
     MOMENTUM_WAIT = 0.15     # seconds to wait for macOS's momentum after a lift
 
-    def __init__(self, pad, touch):
-        self.pad, self.touch = pad, touch
+    def __init__(self, pad):
+        self.pad = pad
+        self.touch = TouchScroll(pad)
         self.contacts = []   # the last real contacts
         self.hist = []       # (time, x, y) of the two-finger centroid, last frames
         self.held = None     # contacts kept down after the real fingers lifted
         self.lifted = 0.0
         self.moved = 0.0     # last momentum step
-        self.scale = None    # touchpad units per macOS point for this momentum
-        self.wprev = None
         self.pending = [0.0, 0.0]   # momentum not yet applied, touchpad units
         self.tick = 0.0
-        self.two = None      # current two-finger touch: ids, offsets, start, mode, filters
-        self.apts = []       # (time, macOS points) while the fingers touch
+        self.two = None      # current two-finger touch: ids, offsets, mode, filters
         self.adelta = [0.0, 0.0]   # macOS's scroll since the last frame (points)
         self.cal = load_cal()       # slow-scrolling gain for this Mac's scrolling speed
         self.cal_pts = self.cal_mm = 0.0
-        self.amm = []        # (time, finger millimetres)
-        self.base = float(os.environ["OMACVM_SCROLL_BASE"]) if os.environ.get("OMACVM_SCROLL_BASE") else None
         self.logged = 0.0
 
     def frame(self, contacts):
@@ -423,10 +358,11 @@ class Hybrid:
             self.pad.frame(contacts)
             return
         self.calibrate()
+        self.two = None
         if len(self.contacts) == 2 and len(self.hist) >= 2:
             # Two fingers lifted: stay down, macOS's momentum may follow.
             self.held = [list(c) for c in self.contacts]
-            self.lifted, self.scale, self.wprev = now, None, None
+            self.lifted = now
             self.pending = [0.0, 0.0]
             self.contacts = []
             return
@@ -435,52 +371,41 @@ class Hybrid:
 
     def two_fingers(self, contacts, now):
         """Scroll stays scroll: the fingers' spacing is fixed at touch-down and the
-        filtered centre moves; a clear spread switches to raw fingers (pinch)."""
+        filtered centre moves; a pinch (macOS's call) switches to raw fingers."""
         ids = (contacts[0][0], contacts[1][0])
         cx = (contacts[0][1] + contacts[1][1]) / 2
         cy = (contacts[0][2] + contacts[1][2]) / 2
-        dist = math.hypot(contacts[0][1] - contacts[1][1], contacts[0][2] - contacts[1][2])
         t = self.two
         if t is None or t["ids"] != ids:
-            t = self.two = {"ids": ids, "c0": (cx, cy), "d0": dist, "pinch": False,
+            t = self.two = {"ids": ids, "pinch": False,
                             "off": [(c[1] - cx, c[2] - cy) for c in contacts],
                             "fx": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF),
                             "fy": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA, FILTER_D_CUTOFF)}
-        if not t["pinch"] and PINCH_MM > 0:
-            spread = abs(dist - t["d0"]) / RES
-            moved = math.hypot(cx - t["c0"][0], cy - t["c0"][1]) / RES
-            if spread > PINCH_MM and spread > moved:
-                t["pinch"] = True
         if t["pinch"]:
             if t.pop("restart", False):
-                if SCROLL_DEBUG:
-                    print(f"restart {time.monotonic():.3f}", flush=True)
                 self.pad.frame([])   # lift; the raw fingers below begin a new touch
             return contacts
         fx = t["fx"](cx / RES, now) * RES
         fy = t["fy"](cy / RES, now) * RES
         ad, self.adelta = self.adelta, [0.0, 0.0]        # macOS's scroll since the last frame
         if "vx" not in t:
-            t.update(vx=fx, vy=fy, px=fx, py=fy, pt=now, speed=0.0)
+            t.update(vx=fx, vy=fy, px=fx, py=fy)
         else:
-            # The virtual centre moves by the filtered movement times the gain
-            # for the current finger speed (mm/s, smoothed).
             dx, dy = fx - t["px"], fy - t["py"]
             # Finger speed (mm/s) from the filter's own speed estimate.
             v = math.hypot(t["fx"].dx or 0.0, t["fy"].dx or 0.0)
             x = min(1.0, max(0.0, (v - BLEND_V0) / (BLEND_V1 - BLEND_V0)))
             w = x * x * (3 - 2 * x)
-            ax, ay = ad[0] * POINT_UNITS, ad[1] * POINT_UNITS
             raw = RAW_SCALE * self.cal * NATURAL
-            t["vx"] += (1 - w) * dx * raw + w * ax
-            t["vy"] += (1 - w) * dy * raw + w * ay
+            t["vx"] += (1 - w) * dx * raw + w * ad[0] * POINT_UNITS
+            t["vy"] += (1 - w) * dy * raw + w * ad[1] * POINT_UNITS
             if 40 <= v < 120:          # calibration samples
                 self.cal_mm += math.hypot(dx, dy) / RES
                 self.cal_pts += math.hypot(ad[0], ad[1])
-            if SCROLL_DEBUG and now - self.logged > 0.3:
-                print(f"blend: {v:.0f} mm/s, macOS share {w:.2f}", flush=True)
+            if DEBUG and now - self.logged > 0.3:
+                print(f"glide: {v:.0f} mm/s, macOS share {w:.2f}", flush=True)
                 self.logged = now
-            t.update(px=fx, py=fy, pt=now)
+            t.update(px=fx, py=fy)
         vx = min(max(t["vx"], 2000), PAD_W - 2000)
         vy = min(max(t["vy"], 2000), PAD_H - 2000)
         return [(c[0], round(vx + o[0]), round(vy + o[1])) for c, o in zip(contacts, t["off"])]
@@ -494,27 +419,8 @@ class Hybrid:
             self.pending[1] += dy * POINT_UNITS * GLIDE
             self.moved = time.monotonic()
             return
-        self.apts.append((time.monotonic(), math.hypot(dx, dy)))
         self.adelta[0] += dx
         self.adelta[1] += dy
-
-    def macos_gain(self, now, mm):
-        self.amm.append((now, mm))
-        cut = now - ACCEL_WINDOW
-        self.apts = [a for a in self.apts if a[0] >= cut]
-        self.amm = [a for a in self.amm if a[0] >= cut]
-        sp = sum(a[1] for a in self.apts)
-        sm = sum(a[1] for a in self.amm)
-        if sm < 0.3 or sp <= 0:
-            return 1.0
-        r = sp / sm
-        if sm / ACCEL_WINDOW < ACCEL_SLOW:
-            self.base = r if self.base is None else 0.9 * self.base + 0.1 * r
-        target = min(max(r / (self.base or r), 1.0), ACCEL_MAX)
-        if SCROLL_DEBUG and now - self.logged > 0.3:
-            print(f"accel: {sm / ACCEL_WINDOW:.0f} mm/s, {r:.1f} pt/mm, base {self.base or 0:.1f}, gain {target:.2f}", flush=True)
-            self.logged = now
-        return target
 
     def calibrate(self):
         """After a touch: once enough medium-speed movement is collected, move
@@ -530,48 +436,26 @@ class Hybrid:
                 f.write(f"{self.cal:.4f}\n")
         except OSError:
             pass
-        if SCROLL_DEBUG:
-            print(f"calibration: this touch {g:.2f}, slow-scrolling gain {self.cal:.3f}", flush=True)
+        if DEBUG:
+            print(f"glide: calibration {g:.2f} this touch, slow-scrolling gain {self.cal:.3f}", flush=True)
 
     def pinch(self):
         """macOS recognized a pinch: the current two-finger touch goes raw. libinput
         never turns a running scroll into a pinch, so the touch starts afresh."""
-        if SCROLL_DEBUG:
-            print(f"P {time.monotonic():.3f} two={'yes' if self.two else 'no'} "
-                  f"pinch={self.two and self.two['pinch']}", flush=True)
         if self.two is not None and not self.two["pinch"]:
             self.two["pinch"] = True
             self.two["restart"] = True
+            if DEBUG:
+                print("glide: pinch", flush=True)
 
     def momentum(self, dx, dy):
         if self.held is None:
             self.touch.scroll(dx, dy)      # no fingers just lifted: Magic Mouse & co.
             return
-        now = time.monotonic()
-        if self.scale is None and self.wprev is not None and (dx or dy):
-            # Match the speed at the hand-over: the fingers' last speed (units/s)
-            # against macOS's first momentum steps (points/s).
-            (t0, x0, y0), (t1, x1, y1) = self.hist[0], self.hist[-1]
-            vf = math.hypot(x1 - x0, y1 - y0) / max(t1 - t0, 1e-3)
-            vw = math.hypot(dx, dy) / max(now - self.wprev, 1e-3)
-            self.scale = min(max(vf / vw, POINT_UNITS / 4), POINT_UNITS * 4) if vw > 0 else POINT_UNITS
-            if SCROLL_DEBUG:
-                print(f"hand-over: fingers {vf:.0f} units/s, momentum {vw:.0f} pt/s, scale {self.scale:.1f}", flush=True)
-        # The glide continues at the speed the content had when the fingers lifted
-        # (measured: a fixed scale made medium flicks speed up after the lift) and
-        # takes macOS's momentum only for its shape: scale = virtual speed at the
-        # lift / macOS's first momentum speed.
-        s = ((self.scale or POINT_UNITS) if GLIDE_MATCH else POINT_UNITS) * GLIDE
-        self.wprev = now
-        self.pending[0] += dx * s
-        self.pending[1] += dy * s
-        self.moved = now
+        self.pending[0] += dx * POINT_UNITS * GLIDE
+        self.pending[1] += dy * POINT_UNITS * GLIDE
+        self.moved = time.monotonic()
         self.drain()
-
-    # Touchpad units per 4 ms tick: 400 = 4 mm = 1000 mm/s, under libinput's
-    # touch-jump threshold (about 20 mm per 12 ms); fast flicks hand over at up
-    # to ~550 mm/s, which a lower limit would throttle into a sluggish glide.
-    MAX_STEP = int(os.environ.get("OMACVM_SCROLL_MAX_STEP", "400"))
 
     def drain(self):
         """Apply pending momentum in small, evenly timed steps."""
@@ -604,16 +488,20 @@ class Hybrid:
         self.pad.frame([(c[0], round(c[1]), round(c[2])) for c in self.held])
 
     def idle(self):
-        self.pad.flush()
         self.touch.idle()
         if self.held is None:
             return
         self.drain()
         now = time.monotonic()
         if (self.moved < self.lifted and now - self.lifted > self.MOMENTUM_WAIT) or \
-           (self.moved >= self.lifted and now - self.moved > TOUCH_LIFT_AFTER):
+           (self.moved >= self.lifted and now - self.moved > HOLD):
             self.pad.frame([])
             self.held = None
+
+    def release(self):
+        self.held = None
+        self.two = None
+        self.contacts, self.hist = [], []
 
 
 def make_keyboard():
@@ -662,19 +550,23 @@ def notify(text):
                      env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def run(pad, keys, wheel, touch, hybrid):
+def run(pad, keys, glide):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
         s.settimeout(0.002)        # also the glide's clock
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        print(f"omacvm-gestures: connected to {HOST}:{PORT}", flush=True)
+        s.sendall(f"H {int(GESTURES)} {int(GLIDE_ON)}\n".encode())
+        print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
+              f"Glide {'on' if GLIDE_ON else 'off'})", flush=True)
         buf = b""
         while True:
             try:
                 data = s.recv(65536)
             except socket.timeout:
-                hybrid.idle()
+                pad.flush()
+                glide.idle()
                 continue
-            hybrid.idle()
+            pad.flush()
+            glide.idle()
             if not data:
                 raise ConnectionError("helper closed the connection")
             buf += data
@@ -683,54 +575,56 @@ def run(pad, keys, wheel, touch, hybrid):
                 p = line.split()
                 if not p:
                     continue
-                if p[0] == b"F":
-                    n = int(p[1])
-                    contacts = []
-                    for i in range(n):
-                        cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
-                        contacts.append((cid, OFF_X + round(min(max(x, 0.0), 1.0) * W), OFF_Y + round(min(max(y, 0.0), 1.0) * H)))
-                    if SCROLL_MODE == "touch":
-                        hybrid.frame(contacts)
-                    else:
-                        pad.frame(contacts)
-                elif p[0] == b"O":
-                    set_mac(int(p[1]), int(p[2]), int(p[3]))
-                elif p[0] == b"A":
-                    hybrid.macos(float(p[1]), float(p[2]))
-                elif p[0] == b"P":
-                    hybrid.pinch()
-                elif p[0] == b"W":
-                    if SCROLL_DEBUG:
-                        print(f"W {time.monotonic():.3f} {p[1].decode()} {p[2].decode()}", flush=True)
-                    if SCROLL_MODE == "touch":
-                        hybrid.momentum(float(p[1]), float(p[2]))
-                    else:
-                        wheel.scroll(float(p[1]), float(p[2]))
-                elif p[0] == b"K":
-                    keys.key(int(p[1]), int(p[2]))
-                elif p[0] == b"S":
-                    state = p[1].decode()
-                    print(f"omacvm-gestures: capture {state}", flush=True)
-                    if state != "on":
-                        hybrid.held = None
-                        pad.release()
-                        keys.release()
-                    if state == "esc":
-                        notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
+                try:
+                    handle(p, pad, keys, glide)
+                except (ValueError, IndexError):
+                    print(f"omacvm-gestures: skipped a malformed line: {line[:80]!r}", file=sys.stderr, flush=True)
+
+
+def handle(p, pad, keys, glide):
+    if p[0] == b"F":
+        n = int(p[1])
+        contacts = []
+        for i in range(n):
+            cid, x, y = int(p[2 + 4 * i]), float(p[3 + 4 * i]), float(p[4 + 4 * i])
+            contacts.append((cid, OFF_X + round(min(max(x, 0.0), 1.0) * W), OFF_Y + round(min(max(y, 0.0), 1.0) * H)))
+        if GLIDE_ON:
+            glide.frame(contacts)
+        else:
+            pad.frame(contacts)
+    elif p[0] == b"O":
+        set_mac(int(p[1]), int(p[2]), int(p[3]))
+    elif p[0] == b"A":
+        glide.macos(float(p[1]), float(p[2]))
+    elif p[0] == b"W":
+        glide.momentum(float(p[1]), float(p[2]))
+    elif p[0] == b"P":
+        glide.pinch()
+    elif p[0] == b"K":
+        keys.key(int(p[1]), int(p[2]))
+    elif p[0] == b"S":
+        state = p[1].decode()
+        print(f"omacvm-gestures: capture {state}", flush=True)
+        if state != "on":
+            glide.release()
+            pad.release()
+            keys.release()
+        if state == "esc":
+            notify("Trackpad gestures → macOS (⌃⌥⌘ Esc to take them back)")
 
 
 def main():
     ui = make_device()
     pad = Touchpad(ui)
     keys = Keys(make_keyboard())
-    wheel = Wheel(make_wheel())
-    touch = TouchScroll(pad)
-    hybrid = Hybrid(pad, touch)
-    print(f"omacvm-gestures: virtual touchpad {ui.device.path}, scrolling as {SCROLL_MODE}", flush=True)
+    glide = Glide(pad)
+    print(f"omacvm-gestures: virtual touchpad {ui.device.path}"
+          f"{', Glide (two-finger scrolling) on' if GLIDE_ON else ''}", flush=True)
     while True:
         try:
-            run(pad, keys, wheel, touch, hybrid)
-        except (OSError, ConnectionError, ValueError, IndexError) as err:
+            run(pad, keys, glide)
+        except (OSError, ConnectionError) as err:
+            glide.release()
             pad.release()
             keys.release()
             print(f"omacvm-gestures: {err}; retrying", file=sys.stderr, flush=True)
