@@ -71,7 +71,7 @@ Setting it up with a coding agent (Claude Code, Codex, …)? See
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
 | **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
 | **Clipboard both ways, Cmd+V** | Copy in Omarchy, paste on the Mac and back; Cmd+V pastes everywhere, terminals included |
-| **Night Shift** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon: lit while it is on, a click (or Super+Ctrl+N) switches it for the whole screen. It replaces Omarchy's own night light, so the screen is never tinted twice. Strength and True Tone from the terminal (`omacvm-bridge night-shift strength 60`, `omacvm-bridge true-tone on`) |
+| **Night Shift and True Tone** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon, lit while it is on. A click opens a panel like Omarchy's own: Night Shift, its strength and True Tone, all on the Mac (Super+Ctrl+N switches Night Shift directly). It replaces Omarchy's own night light, so the screen is never tinted twice |
 | **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
 | **Your keyboard layout** | Taken from the Mac |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
