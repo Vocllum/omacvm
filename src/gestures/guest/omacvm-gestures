@@ -263,8 +263,15 @@ class OneEuro:
             return x
         dt = max(t - self.t, 1e-4)
         dx = (x - self.x) / dt
-        a_d = self._alpha(self.d_cutoff, dt)
-        self.dx = a_d * dx + (1 - a_d) * self.dx
+        if abs(dx) > abs(self.dx):
+            # Fast attack: a finger that speeds up is followed at once (measured:
+            # starting from "still", the filter lagged ~100 ms into every flick
+            # and the movement it had not caught up with by the lift was lost);
+            # slowing down is smoothed as before.
+            self.dx = dx
+        else:
+            a_d = self._alpha(self.d_cutoff, dt)
+            self.dx = a_d * dx + (1 - a_d) * self.dx
         a = self._alpha(self.min_cutoff + self.beta * abs(self.dx), dt)
         self.x = a * x + (1 - a) * self.x
         self.t = t
@@ -318,9 +325,11 @@ BLEND_V0, BLEND_V1 = float(_b[0]), float(_b[1])
 # scrolling, divided by 100: a quarter keeps the virtual fingers' speed (in mm)
 # low, so libinput's touch-jump limit never caps a fast scroll; the compositor's
 # scroll factor for the virtual trackpad is raised by the same factor (4x).
-RAW_SCALE = float(os.environ.get("OMACVM_SCROLL_RAW_SCALE", "0.25"))
+RAW_SCALE = float(os.environ.get("OMACVM_SCROLL_RAW_SCALE", "0.184"))
 # Units per macOS point: 1 point = 1 pixel, like on the Mac (measured).
-POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "3.6"))
+# Measured at display scale 2 (1 unit = 0.408 px on screen): 2.45 units per
+# macOS point = 1 point per on-screen pixel, like macOS.
+POINT_UNITS = float(os.environ.get("OMACVM_SCROLL_POINT_UNITS", "2.45"))
 # Glide scale: macOS's momentum at POINT_UNITS (measured to continue macOS's
 # own speed), or matched to the speed at the lift (OMACVM_SCROLL_GLIDE_MATCH=1;
 # measured too short: fingers slow down just before lifting).
@@ -444,6 +453,13 @@ class Hybrid:
 
     def macos(self, dx, dy):
         """macOS's scroll for the current touch (points, with its acceleration)."""
+        if self.held is not None:
+            # Arrived just after the lift (measured: ~10 % of a touch's steps):
+            # it belongs to the glide.
+            self.pending[0] += dx * POINT_UNITS * GLIDE
+            self.pending[1] += dy * POINT_UNITS * GLIDE
+            self.moved = time.monotonic()
+            return
         self.apts.append((time.monotonic(), math.hypot(dx, dy)))
         self.adelta[0] += dx
         self.adelta[1] += dy

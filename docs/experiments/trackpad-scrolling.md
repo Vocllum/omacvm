@@ -435,6 +435,33 @@ keeps the matched variant): fast touch and glide as macOS's, seen on screen;
 slow scrolling (raw fingers) unchanged. Expected glide distance per speed:
 test 24's 0.93 x 0.65 = 0.60 (macOS 0.58-0.71).
 
+Recording 6 and a better analysis (`transfer.py`): the earlier touch-phase
+numbers were distorted by the virtual centre's jumps at touch restarts.
+Counting only steps within one touch and converting units to on-screen pixels
+by total distance (robust to the VM's display delay): 0.301 and 0.306 px per
+unit in two recordings. With that, Omarchy's fast touch phase was 0.2-0.3x
+macOS's, the opposite of the earlier conclusion. A sign check (macOS's steps
+and the fingers agree 128 of 128 times) and a filter replay (the filter
+follows a recorded 44.7 mm flick to 44.1 mm) ruled out the suspects; a fast
+attack for the filter's speed estimate went in anyway.
+
+### Recording 7: both systems at display scale 2
+
+Per gesture (`trace.py`): a fast macOS scroll is ~6 % touch and ~94 % glide
+(590 points while touching, 8,994 of momentum); Omarchy's glide is macOS's
+momentum times the point scale, as designed. So distance hangs on one number,
+on-screen pixels per macOS point: 1 virtual unit = 0.408 px at scale 2 (0.30 at
+1.6), 3.6 units per point = 1.47 px on Omarchy against 1.0 on macOS; the glides
+agree independently (distance per lift speed 0.87 s vs 0.65 s, 1.34x). About
+10 % of a touch's macOS steps arrive just after the lift and were dropped.
+
+### 27. Calibrated: 1 macOS point = 1 on-screen pixel (in progress)
+
+- `OMACVM_SCROLL_POINT_UNITS` 2.45 (3.6 / 1.47).
+- `OMACVM_SCROLL_RAW_SCALE` 0.184 (0.25 / 1.36): slow scrolling looks exactly
+  as at scale 1.6, where it was "perfect".
+- macOS steps arriving after the lift go into the glide.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
