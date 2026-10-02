@@ -88,7 +88,7 @@ More in [With a coding agent](#with-a-coding-agent).
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
-| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
+| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
@@ -414,6 +414,10 @@ with a notch (`omacvm enable omanotch` on an existing VM).
 - **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
   their own window across the top of the screen (Bartender, for one) can bring
   it back. Quit them while you work in the VM.
+- **The Bluetooth panel lists your devices but cannot connect them**: allow
+  Bluetooth for *OmacVM Bridge* (System Settings › Privacy & Security ›
+  Bluetooth); the panel says so too. A device that is off or out of range
+  shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
   ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
   Accessibility and Input Monitoring permissions of *OmacVM Gestures*.
