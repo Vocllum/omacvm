@@ -90,6 +90,7 @@ A build is done when all of this holds:
 | Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
 | Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12); required: on UTM 4.7 GL clients map but never paint (black windows) unless rendering is forced to software (ggalancs/omarchy-arm-utm#7). OmacVM never sets `LIBGL_ALWAYS_SOFTWARE`; VirGL (virtio-gpu-gl), Vulkan off. VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
+| VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/experiments/vmware-fusion.md`. `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
 | Tools | Xcode Command Line Tools (swiftc, clang, swift), Homebrew `zstd` + `e2fsprogs` (live installer), python3, openssl |
 | Network | ~1.4 GB try-omarchy download (live installer) + Arch Linux ARM and Omarchy packages |
 | Disk | ~60 GB free for the build (VM disks are expanding) |
@@ -121,8 +122,10 @@ GitHub.
 | `src/vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
 | `src/vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |
 | `src/vm/pvs.py` | Parallels `config.pvs` editor (settings, NVMe disk, boot order, shares) |
+| `src/vm/fusion.sh` | VMware Fusion: create the VM (`fusion_create`: vmcli, then `.vmx` lines; the raw live image through a monolithicFlat descriptor), drop the live disk |
+| `src/fusion/` | Fusion guest specifics: public DNS (`dns.sh`), Hyprland with the vmwgfx fix (`build-hyprland.sh`, the patch, a pacman hook that rebuilds after hyprland upgrades), the Mac's display mode in `monitors.lua` |
 | `src/vm/utm.sh` | UTM: create the VM (AppleScript `make new virtual machine`), drop the live disk, app-wide speed settings |
-| `src/lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`) and UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) |
+| `src/lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`), UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) and Fusion (`fusion_list` from Fusion's `vmInventory`, `fusion_ip` from `vmnet-dhcpd-vmnet8.leases`, `fusion_state`, `fusion_start`, `fusion_host`) |
 | `src/guest/omacvm-omanotch.service` | The omanotch feature: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
 | `src/lib/install-plugin.sh`, `src/lib/omacvm-plugins` | Omarchy shell plugin install; queues until the shell runs (first login); restarts the shell once when a plugin's files changed |
 | `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
@@ -214,6 +217,22 @@ entry per macOS shortcut, flag 1). `src/lib/mac.sh` `parallels_sends_shortcuts`
 reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 (omacvm build, omacvm apply); never write the file.
 
+### VMware Fusion settings (vm/fusion.sh)
+
+| Setting | Value | Why |
+|---|---|---|
+| guest OS, firmware | `arm-other6xlinux-64`, `efi` | |
+| `mks.enable3d`, `svga.graphicsMemoryKB` | TRUE, 4 GB | vmwgfx with SVGA3D |
+| `nvme0:0` | system disk (vmware-vdiskmanager, growable) | base-install takes the one NVMe disk |
+| `sata0:0` | the raw live image via a monolithicFlat `live.vmdk` (removed after the base install) | ALARM's live kernel boots from it; no conversion |
+| `ethernet0` | `e1000e`, `nat` | ALARM's kernel has no vmxnet3 |
+| guest NetworkManager `90-omacvm-fusion.conf` | global DNS 1.1.1.1, 9.9.9.9 | Fusion's NAT DNS drops lookups under load (failed the yay build) |
+| guest Hyprland | built with `src/fusion/guest/hyprland-vmwgfx-dmabuf.patch`, stock kept as `/usr/bin/Hyprland.stock`, `/var/lib/omacvm/hyprland-vmwgfx` = version + checksum | without it every GPU client dies (`invalid arguments for wl_surface.attach`), SDDM's greeter first |
+
+The Mac is `.1` on Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in
+`/Library/Preferences/VMware Fusion/networking`, chosen per Fusion install); the
+guest's gateway is `.2`.
+
 ### UTM settings (vm/utm.sh)
 
 | Setting | Value | Why |
@@ -289,6 +308,9 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | A command starts UTM by itself | `utmctl` launches UTM | use `vms_list`/`vm_type` from `src/lib/vm.sh` (UTM's `Registry` preference while UTM is not running) |
 | SSH output in a `while read` loop eats the loop's input | `ssh` reads stdin | `< /dev/null` on SSH calls inside loops (`vm_probe` has it) |
 | ALARM downloads time out | geo-DNS mirror far away | `src/vm/base-install.sh` ranks mirrors |
+| Fusion VM: black screen at SDDM, `invalid arguments for wl_surface.attach` in the journal | stock Hyprland on vmwgfx (e.g. an update the hook could not rebuild) | `omacvm apply`, or in the VM `/usr/local/share/omacvm/fusion/guest/build-hyprland.sh` (log `/var/cache/omacvm/hyprland-vmwgfx/build.log`) |
+| Fusion VM: `no such host` during a build | Fusion's NAT DNS | `src/fusion/guest/dns.sh` |
+| Testing the hook with `pacman -S hyprland` downgrades Hyprland | Arch's `extra` comes before Omarchy's repo | `pacman -S omarchy/hyprland` |
 
 ## 8. Hard-won rules (do NOT)
 

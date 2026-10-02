@@ -130,6 +130,23 @@ on every display. **UTM is free** and gets almost everything else.
 | OmacVM icon for the VM | ✓ (Dock) | ✓ (UTM's library) |
 | Cost | paid: Standard works; **Pro** for more than 4 CPUs / 8 GB | free; needs **UTM 5 (beta)**: `brew install --cask utm@beta` |
 
+### New: VMware Fusion
+
+VMware Fusion Pro is free, and `omacvm build --vm-type fusion` builds the same
+Omarchy VM in it. Stock Omarchy shows a black screen on Fusion: its GPU driver
+(`vmwgfx`) hands Hyprland buffers it cannot release, and every app dies on its
+first frame. OmacVM builds Hyprland with a one-file fix for that (by
+Pascal-0x90, [hyprwm/Hyprland#12966](https://github.com/hyprwm/Hyprland/discussions/12966)),
+and a pacman hook builds it again after every Hyprland update (10 to 20
+minutes, inside `omarchy update`).
+
+What works so far: the desktop and apps on the GPU, live resolution changes,
+the Mac's display mode from boot, every `omacvm check` line. Not there yet:
+more than one display, the clipboard (VMware's tools are not in Arch Linux
+ARM), Omanotch; trackpad gestures, media keys and the Bridge are written but
+not yet tried on a Mac. The plan and the test results:
+[docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
+
 ## Requirements
 
 - An Apple Silicon Mac with macOS 14 or newer.
@@ -150,6 +167,8 @@ on every display. **UTM is free** and gets almost everything else.
   Already have 4.7 from Homebrew? `brew uninstall --cask utm && brew install --cask utm@beta`
   (your VMs stay). OmacVM uses UTM 5's OpenGL path (VirGL), which renders
   Linux desktops, unlike its new Vulkan one.
+- Or VMware Fusion 13 or newer (`brew install --cask vmware-fusion`; tested
+  with 26.0.1), see above.
 - Xcode Command Line Tools (`xcode-select --install`), [Homebrew](https://brew.sh)
   and its `zstd` and `e2fsprogs` (`brew install zstd e2fsprogs`).
 - About 30 GB of free disk space for the build (a finished VM takes 10–12 GB and

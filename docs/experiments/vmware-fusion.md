@@ -1,7 +1,8 @@
 # VMware Fusion as a third route
 
-Status: spike passed; increments 1, 2 and 4 done (a full `omacvm build --vm-type fusion`
-passed `omacvm check` in 24 minutes); 3 written, needs a person to verify; 5 to do.
+Status: increments 1, 2, 4 and 5 done (a full `omacvm build --vm-type fusion` passed
+`omacvm check` in 24 minutes; the display follows the Mac's mode after a reboot);
+3 written, needs a person on the Mac to verify (permissions, full screen).
 This file is the plan; the code follows it.
 
 ## Why
