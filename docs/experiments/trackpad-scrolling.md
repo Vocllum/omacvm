@@ -358,7 +358,41 @@ Each 4 ms tick moves the virtual fingers by a share of the pending glide
 (`OMACVM_SCROLL_GLIDE_SHARE` 0.15, about 25 ms) instead of all of it: the same
 distance, but a continuous movement that eases out exponentially.
 
-Results: pending.
+- Very close, but in a side-by-side screen recording (macOS, Omarchy, twice
+  each, the same scrolls) the scroll does not travel in a perfectly smooth
+  ease-in and ease-out.
+
+### Recording analysis (2026-10-02, `scroll-analysis/`)
+
+Per-frame page movement at 60 fps over the full page width:
+
+| | macOS | Omarchy (test 23) |
+|---|---|---|
+| fast flick, rise to full speed | about 5 frames (80 ms) | about 9 frames, bumpy: 60, 77, 53, 45, 49, 108 |
+| peak speed | 8,000-13,800 px/s | capped: exactly 36.75 px per 120 Hz frame = 4,410 px/s |
+| glide decay constant | 0.24 s | 0.25 s (matches: macOS's momentum) |
+| tail roughness | 0.31 | 0.42 (3.5, 10, 6.5, 8, 4, 7, 2, 6 px) |
+| distance of a fast scroll | 11,000-12,000 px | 5,000-6,000 px |
+
+Causes: the glide's speed limit (1000 mm/s of virtual finger) at the then
+scale; a mis-placed blend (between 30 and 80 mm/s macOS scrolls only ~0.5-1
+point per mm, far less than the raw fingers, then jumps to 7-13 above
+80 mm/s); and glide steps on a 4 ms clock against 120 Hz frames (2 or 3 steps
+per frame).
+
+### 24. Fixes from the analysis (in progress)
+
+- Virtual finger movement at a quarter of the units (`OMACVM_SCROLL_RAW_SCALE`
+  0.25, `OMACVM_SCROLL_POINT_UNITS` 5.5 = 1 macOS point per pixel), the
+  compositor's scroll factor four times higher (0.328): the same slow
+  scrolling, four times the headroom under libinput's jump limit (about
+  17,600 px/s at `OMACVM_SCROLL_MAX_RATE` 100,000 units/s).
+- Blend between 80 and 160 mm/s, where macOS's steps meet the raw fingers.
+- The glide moves by the share matching the real time since the last tick
+  (`OMACVM_SCROLL_GLIDE_TAU` 25 ms) on a 2 ms clock: the same movement in
+  every 120 Hz frame.
+
+Results: pending (jump baseline 89; same-frame errors stopped at 532).
 
 ## Candidate if the wheel cannot pan a zoomed page
 
