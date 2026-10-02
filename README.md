@@ -54,13 +54,13 @@ Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && .
 Setting it up with a coding agent (Claude Code, Codex, …)? See
 [With a coding agent](#with-a-coding-agent).
 
-## What you get
-
 <p align="center">
   <img src="docs/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
 </p>
 
-| | |
+## What you get
+
+| Feature | What it does |
 |---|---|
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |

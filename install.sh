@@ -49,8 +49,14 @@ if command -v brew >/dev/null && [[ -w $(brew --prefix)/bin ]]; then bin=$(brew 
 else bin=$HOME/.local/bin; mkdir -p "$bin"; fi
 ln -sf "$here/omacvm" "$bin/omacvm"
 say "omacvm $(cat "$here/src/VERSION") -> $bin/omacvm"
-case ":$PATH:" in *":$bin:"*) ;; *) echo "    add $bin to your PATH (e.g. in ~/.zshrc: export PATH=\"$bin:\$PATH\")" ;; esac
-command -v brew >/dev/null || echo "    OmacVM's build needs Homebrew (https://brew.sh): brew install zstd e2fsprogs"
+case ":$PATH:" in
+  *":$bin:"*) ;;
+  *) # ~/.local/bin on the PATH of new terminals, and of this run.
+     line='export PATH="$HOME/.local/bin:$PATH"'
+     grep -qsF "$line" ~/.zprofile || printf '\n%s\n' "$line" >> ~/.zprofile
+     export PATH="$bin:$PATH"
+     echo "    $bin is on your PATH now (a line in ~/.zprofile)" ;;
+esac
 
 if (( START )); then
   # Piped from curl, stdin is the script: the questions read the terminal.
