@@ -77,7 +77,8 @@ A build is done when all of this holds:
    shows bridge, gestures, clip-in.
 6. In the guest as the desktop user: `omacvm-bridge state` prints the Mac's
    Wi-Fi with an SSID (Location Services granted), `omacvm-bridge audio` the
-   Mac's devices; the bar shows `omacvm.wifi`, `omacvm.audio`,
+   Mac's devices, `omacvm-bridge bluetooth` its Bluetooth devices; the bar
+   shows `omacvm.bluetooth`, `omacvm.wifi`, `omacvm.audio`,
    `omacvm.workspaces` in the slots of the stock widgets.
 7. Changing Omarchy's background sets the Mac's wallpaper (bridge log
    `/wallpaper from …`).

@@ -2,7 +2,7 @@
 
 <h3 align="center">Omarchy in a VM on your Mac, feeling native</h3>
 
-<p align="center">One command builds the VM, in Parallels Desktop or UTM. Then your Mac's Wi-Fi, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
+<p align="center">One command builds the VM, in Parallels Desktop or UTM. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
   <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
@@ -21,8 +21,8 @@ fast, but out of the box it feels like a guest:
   macOS's Mission Control and Spaces, never to Omarchy's workspaces.
 - **Scrolling doesn't feel like a Mac.** The VM app turns your trackpad into a
   wheel; macOS's acceleration and momentum get lost on the way.
-- **The bar shows a virtual network card**, not your Wi-Fi, and none of the
-  Mac's audio devices.
+- **The bar shows a virtual network card**, not your Wi-Fi, no Bluetooth at
+  all, and none of the Mac's audio devices.
 - **The Mac's keys aren't Omarchy's.** Volume and brightness open macOS's
   popups, Cmd+Space opens Spotlight, and Parallels turns Cmd+C/V into Ctrl.
 - **External displays ignore your macOS arrangement.**
@@ -89,6 +89,7 @@ More in [With a coding agent](#with-a-coding-agent).
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
+| **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
@@ -119,7 +120,7 @@ on every display. **UTM is free** and gets almost everything else.
 | Displays | every display, in the macOS arrangement, native Retina, 120 Hz, follows window and display changes live | one display, native Retina, 120 Hz, fixed from boot (UTM's GPU path goes blank on live mode changes) |
 | CPUs and memory per VM | **Standard: 4 CPUs / 8 GB.** Pro (and the trial): up to 18 CPUs / 128 GB | no limit |
 | Per-display workspaces | ✓ | (one display) |
-| Wi-Fi, audio, media keys, Night Shift, True Tone, Wi-Fi QR (OmacVM Bridge) | ✓ | ✓ |
+| Wi-Fi, Bluetooth, audio, media keys, Night Shift, True Tone, Wi-Fi QR (OmacVM Bridge) | ✓ | ✓ |
 | Trackpad gestures (OmacVM Gestures) | ✓ | ✓ |
 | **macOS-native scroll momentum** *(experimental)* | ✓ tuned and tested here | ✓ same code, less tested |
 | Bar beside the notch ([Omanotch](https://github.com/gillesgoetsch/omanotch)) | ✓ | ✓ |
@@ -183,7 +184,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
 
    | | Default |
    |---|---|
-   | OmacVM Bridge: the Mac's Wi-Fi, audio, Night Shift and media keys in Omarchy | on |
+   | OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy | on |
    | Omarchy's wallpaper on the Mac too | on |
    | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
    | macOS-native scroll momentum *(experimental)* | off |
@@ -206,8 +207,8 @@ Your keyboard layout, timezone and language come from the Mac.
 When it is done, once on the Mac:
 
 1. **Allow the prompts**: Location Services for *OmacVM Bridge* (Wi-Fi
-   names), Accessibility for *OmacVM Bridge* and *OmacVM Gestures*,
-   Input Monitoring for *OmacVM Gestures*.
+   names), Bluetooth for *OmacVM Bridge*, Accessibility for *OmacVM Bridge*
+   and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures*.
 2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
    Cmd+C/V/X into Ctrl before the VM sees them; the build empties it when no VM
    is running (otherwise: quit Parallels Desktop and run
@@ -317,8 +318,8 @@ for Parallels and `192.168.64.1` for UTM. Nothing listens anywhere else, and
 the VM needs a token.
 
 - **OmacVM Bridge** (`src/bridge/`) is a small menu-bar app. It reads the Mac's
-  Wi-Fi (CoreWLAN), audio (CoreAudio) and display (brightness, Night Shift, True
-  Tone) and pushes every change to the VM; Omarchy's bar widgets and popups
+  Wi-Fi (CoreWLAN), Bluetooth (IOBluetooth), audio (CoreAudio) and display
+  (brightness, Night Shift, True Tone) and pushes every change to the VM; Omarchy's bar widgets and popups
   listen. While the VM is full screen it takes the media keys. It also sets the
   wallpaper the VM sends. [API and details](src/bridge/README.md).
 - **OmacVM Gestures** (`src/gestures/`) reads the trackpad's raw touches and
