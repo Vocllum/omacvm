@@ -164,6 +164,11 @@ EOF
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
+  hv=$(pacman -Q hyprland 2>/dev/null | awk '{ print $2 }')
+  if [[ "$(cat /var/lib/omacvm/hyprland-vmwgfx 2>/dev/null)" == "$hv $(sha256sum /usr/bin/Hyprland | awk '{ print $1 }')" ]]; then
+    ok "Hyprland" "$hv with the vmwgfx fix"
+  else bad "Hyprland" "$hv without the vmwgfx fix (black screen at the next login): omacvm apply builds it"; fi
+  check "Hyprland after updates" "pacman hook rebuilds it" test -f /etc/pacman.d/hooks/zz-omacvm-hyprland.hook
   check "DNS" "public resolvers (Fusion's own drops lookups)" test -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf ;;
 esac
 
