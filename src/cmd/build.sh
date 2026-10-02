@@ -15,7 +15,7 @@
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+ or UTM 5, and Homebrew's zstd + e2fsprogs.
 set -euo pipefail
-R=$(cd "$(dirname "$0")" && pwd)
+R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
 source "$R/src/vm/utm.sh"
 source "$R/src/lib/setup.sh"

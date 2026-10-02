@@ -7,7 +7,7 @@
 # ~/.ssh/omacvm. One line per feature (ok / FAIL / skip); exits 1 if anything
 # failed. The desktop user must be logged in to the VM.
 set -uo pipefail
-R=$(cd "$(dirname "$0")" && pwd)
+R=$(cd "$(dirname "$0")/../.." && pwd)
 VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm
 while (( $# )); do
   case $1 in

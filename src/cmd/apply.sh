@@ -13,7 +13,7 @@
 # src/ into the VM (/usr/local/share/omacvm), runs guest/install.sh there as
 # root, and (Parallels) gives the VM its OmacVM Dock icon.
 set -euo pipefail
-R=$(cd "$(dirname "$0")" && pwd)
+R=$(cd "$(dirname "$0")/../.." && pwd)
 VM=Omarchy; IP=""; TYPE=""; U=$(id -un); KEY=~/.ssh/omacvm; KB=""; MODE=""; EXTRA=(); NOBRIDGE=0
 while (( $# )); do
   case $1 in
