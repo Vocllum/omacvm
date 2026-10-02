@@ -25,7 +25,19 @@ if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
 fi
 if [[ -z $here ]]; then
   here=$HOME/.omacvm
-  command -v git >/dev/null || { echo "OmacVM needs git: xcode-select --install" >&2; exit 3; }
+  # A fresh Mac: git (and Swift, for the build) come with Xcode's command line
+  # tools; macOS's /usr/bin/git is only a stub that offers to install them.
+  if ! xcode-select -p >/dev/null 2>&1 || ! /usr/bin/git --version >/dev/null 2>&1; then
+    say "Xcode's command line tools first (git, Swift): macOS shows its installer, click Install"
+    xcode-select --install >/dev/null 2>&1 || true
+    for ((i = 0; i < 720; i++)); do
+      xcode-select -p >/dev/null 2>&1 && /usr/bin/git --version >/dev/null 2>&1 && break
+      (( i % 12 == 0 )) && echo "    waiting for the command line tools to finish installing..."
+      sleep 5
+    done
+    /usr/bin/git --version >/dev/null 2>&1 ||
+      { echo "Xcode's command line tools did not finish: run xcode-select --install, then this again." >&2; exit 3; }
+  fi
   if [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
   else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
 fi
