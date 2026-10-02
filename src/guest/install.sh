@@ -217,11 +217,24 @@ if [[ ${F[thp-kernel]} == on ]]; then
   fi
 fi
 # Updated bar widgets only load in a new shell: restart it once if any changed.
+# Never while the session is locked: Omarchy's lock screen lives in the shell,
+# and a restart leaves Hyprland's "lockscreen app died" screen behind. Locked:
+# a background job restarts it right after the next unlock.
 RS=$H/.local/state/omacvm/restart-shell
 if [[ -f $RS ]]; then
   rm -f "$RS"
-  sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" \
-    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; omarchy-shell shell ping >/dev/null 2>&1 && omarchy-restart-shell >/dev/null 2>&1' || true
+  sudo -u "$U" env XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c '
+    source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
+    omarchy-shell shell ping >/dev/null 2>&1 || exit 0
+    if [[ $(omarchy-shell lock isLocked 2>/dev/null) != true ]]; then
+      omarchy-restart-shell >/dev/null 2>&1
+    else
+      systemd-run --user --quiet --collect --unit=omacvm-restart-shell bash -c "
+        source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
+        while [[ \$(omarchy-shell lock isLocked 2>/dev/null) == true ]]; do sleep 5; done
+        sleep 2; omarchy-restart-shell" 2>/dev/null || true
+      echo "the Omarchy shell restarts after the next unlock (new bar widgets)"
+    fi' || true
 fi
 mkinitcpio -P >/dev/null 2>&1 || true
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
