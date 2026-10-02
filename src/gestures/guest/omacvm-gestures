@@ -317,15 +317,19 @@ class Hybrid:
             if spread > PINCH_MM and spread > moved:
                 t["pinch"] = True
         if t["pinch"]:
+            if t.pop("restart", False):
+                self.pad.frame([])   # lift; the raw fingers below begin a new touch
             return contacts
         fx = t["fx"](cx / RES, now) * RES
         fy = t["fy"](cy / RES, now) * RES
         return [(c[0], round(fx + o[0]), round(fy + o[1])) for c, o in zip(contacts, t["off"])]
 
     def pinch(self):
-        """macOS recognized a pinch: the current two-finger touch goes raw."""
-        if self.two is not None:
+        """macOS recognized a pinch: the current two-finger touch goes raw. libinput
+        never turns a running scroll into a pinch, so the touch starts afresh."""
+        if self.two is not None and not self.two["pinch"]:
             self.two["pinch"] = True
+            self.two["restart"] = True
 
     def momentum(self, dx, dy):
         if self.held is None:

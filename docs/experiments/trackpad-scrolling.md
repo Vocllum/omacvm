@@ -210,6 +210,20 @@ the centre has moved) switches the touch to raw fingers: a pinch.
   scrolling and Accessibility scrolling speed and set them for the virtual
   trackpad.
 
+- Good overall, but still too fast; 3/4-finger swipes awesome with flat.
+- Pinch zoom no longer works: macOS's signal arrives (logged), but libinput
+  never turns a touch it already treats as a scroll into a pinch.
+- To tidy: the helper sends `P` many times per pinch (229 log lines);
+  harmless, the guest ignores repeats.
+
+### 14. Pinch restarts the touch; slower (in progress)
+
+- On `P` the guest lifts the virtual fingers and puts them down again with the
+  raw positions: a new touch whose fingers spread, which libinput reads as a
+  pinch from the start.
+- Scroll factor for the virtual trackpad 0.18 (was 0.25); the glide follows,
+  being matched to the finger speed.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
