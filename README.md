@@ -197,7 +197,8 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
 Then it shows a summary and starts: 30 to 70 minutes in numbered steps,
 mostly downloads and Omarchy's install, with the whole log in
 `~/Library/Logs/omacvm-build-*.log`. A VM window opens on the way: that is the temporary
-installer, leave it alone. `omacvm build --dry-run` asks everything and stops
+installer, leave it alone. Parallels Desktop may also show its own windows on
+the way (sign in, continue the trial): click through them, the build waits. `omacvm build --dry-run` asks everything and stops
 at the summary; `omacvm build --help` lists the options for unattended builds.
 Your keyboard layout, timezone and language come from the Mac.
 

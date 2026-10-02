@@ -375,6 +375,10 @@ started=$(date +%s)
 # ---------- 2. temporary live installer + the real disk ----------
 step "Temporary live installer (try-omarchy, about 1.4 GB download)"
 if [[ $TYPE == parallels ]]; then
+  info "Parallels Desktop may show its own windows on the way (sign in, continue the trial,"
+  info "allow access): click through them, the build waits for the VM to start."
+fi
+if [[ $TYPE == parallels ]]; then
   "$R/src/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
   PVM="$HOME/Parallels/$VM.pvm"
   "$PRLCTL" unregister "$VM" >/dev/null
