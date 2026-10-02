@@ -1,6 +1,6 @@
 #!/bin/bash
 # omacvm-bridge (guest side): small client for the OmacVM Bridge on the Mac.
-#   omacvm-bridge state | scan [--cached] | audio | display | events
+#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events
 #   omacvm-bridge volume +5 | -5 | 40        percent; +/- = relative, unmutes when raising
 #   omacvm-bridge mute [on|off|toggle]       default: toggle
 #   omacvm-bridge mic-volume 60 | mic-mute [on|off|toggle]
@@ -9,6 +9,8 @@
 #   omacvm-bridge night-shift [on|off|toggle] [strength 0-100]
 #   omacvm-bridge true-tone [on|off|toggle]
 #   omacvm-bridge password [ssid]            Wi-Fi password + QR string (the Mac asks first)
+#   omacvm-bridge bluetooth power [on|off|toggle] | connect|disconnect|forget <address>
+#   omacvm-bridge bluetooth settings         the Mac's Bluetooth settings (to pair a device)
 #   omacvm-bridge wallpaper <image> [theme]  make it the Mac's wallpaper
 # Env: OMACVM_BRIDGE_URL (default: the Mac's address from /etc/omacvm/env, port 47831),
 #      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token)
@@ -39,6 +41,16 @@ case ${1:-} in
   scan) [[ ${2:-} == --cached ]] && req "$URL/scan?cached=1" || req "$URL/scan" ;;
   audio) req "$URL/audio" ;;
   display) req "$URL/display" ;;
+  bluetooth)
+    case ${2:-} in
+      "") req "$URL/bluetooth" ;;
+      power) check_switch power "${3:-}"; post /bluetooth/power "{\"enabled\": $(switch_json "${3:-}")}" ;;
+      connect|disconnect|forget)
+        [[ ${3:-} =~ ^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$ ]] || { echo "bluetooth $2: a device address, e.g. AA:BB:CC:DD:EE:FF" >&2; exit 2; }
+        post "/bluetooth/$2" "{\"address\": \"$3\"}" ;;
+      settings) post /bluetooth/settings '{}' ;;
+      *) echo "bluetooth: power, connect, disconnect, forget or settings" >&2; exit 2 ;;
+    esac ;;
   events) req -N "$URL/events" ;;
   volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
   mute) check_switch mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}")}" ;;
@@ -61,5 +73,5 @@ case ${1:-} in
     req -X POST -H 'Content-Type: application/octet-stream' -H "X-Omarchy-Theme: ${3:-}" \
       --data-binary "@$2" "$URL/wallpaper" ;;
   password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
-  *) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

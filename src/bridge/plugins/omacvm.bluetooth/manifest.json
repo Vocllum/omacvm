@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "omacvm.bluetooth",
+  "name": "Mac Bluetooth",
+  "version": "1.0.0",
+  "author": "OmacVM (based on Omarchy's Bluetooth widget)",
+  "description": "The Mac host's Bluetooth devices in the VM, via omacvm-bridge",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Mac Bluetooth",
+    "description": "The Mac host's Bluetooth devices in the VM, via omacvm-bridge",
+    "category": "Network",
+    "allowMultiple": false
+  },
+  "omarchy": {
+    "clonedFrom": "omarchy.bluetooth"
+  }
+}

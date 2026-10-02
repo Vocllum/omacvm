@@ -8,7 +8,8 @@
 #   /usr/local/bin/omarchy-network-{qr,password} (Omarchy's Wi-Fi QR card shares the Mac's network)
 #   user service omacvm-bridge-osd (Omarchy OSD for the Mac's media keys)
 #   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
-#   the bar widgets in ../plugins (omacvm.wifi, omacvm.audio, omacvm.nightshift)
+#   the bar widgets in ../plugins (omacvm.bluetooth, omacvm.wifi, omacvm.audio,
+#   omacvm.nightshift)
 #   Omarchy's own night light out of the way (indicator hidden, hyprsunset
 #   stopped): the Mac's Night Shift tints the whole screen, never both
 # The token (~/.config/omacvm-bridge/token) comes from the Mac, see push-guest.sh.
