@@ -296,7 +296,22 @@ medium a bit too much", but at 0.25, when everything was far too fast.
   ends first and the raw fingers start a new one.
 - The macOS-gain code stays in for now (gain about 1); remove when adopting.
 
-Results: pending (jump baseline 108).
+- Better; fast scrolling should be faster still. Jump count 108 -> 118.
+- Hyprland's log around the new jumps: "kernel bug: touch N ended and began in
+  same frame" (a new touch replacing an old one was written in one frame) and
+  jumps right at scroll start: finger frames arriving bunched over the network
+  were written microseconds apart, and libinput normalizes movement to time,
+  so a normal step looks like a leap.
+
+### 20. Glide factor; paced frames; lift and new touch in separate frames (in progress)
+
+- `OMACVM_SCROLL_GLIDE` (1.5): the glide carries 1.5 times macOS's momentum at
+  the fingers' speed.
+- The virtual touchpad writes the same fingers' frames at least 3 ms apart,
+  coalescing bunched ones (positions are absolute, nothing is lost); a lift
+  and a new touch go into two frames.
+
+Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
 

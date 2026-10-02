@@ -63,8 +63,31 @@ class Touchpad:
         self.slots = {}          # mac contact id -> slot
         self.next_tid = 1
         self.tool = None
+        self.last_write = 0.0
+        self.pending = None
+
+    MIN_GAP = 0.003      # seconds between frames: libinput normalizes movement to time,
+                         # so frames microseconds apart look like leaps ("touch jump")
 
     def frame(self, contacts):
+        """Write a frame; the same fingers' frames arriving closer than MIN_GAP are
+        coalesced (positions are absolute), a lift and a new touch never share
+        one frame (libinput rejects that)."""
+        ids = {c[0] for c in contacts}
+        if contacts and ids == set(self.slots) and time.monotonic() - self.last_write < self.MIN_GAP:
+            self.pending = contacts
+            return
+        self.pending = None
+        if contacts and set(self.slots) - ids and ids - set(self.slots):
+            self._write([c for c in contacts if c[0] in self.slots])   # lifts first
+        self._write(contacts)
+
+    def flush(self):
+        if self.pending is not None and time.monotonic() - self.last_write >= self.MIN_GAP:
+            contacts, self.pending = self.pending, None
+            self._write(contacts)
+
+    def _write(self, contacts):
         ui = self.ui
         ids = {c[0] for c in contacts}
         for cid in [c for c in self.slots if c not in ids]:          # lifted fingers
@@ -96,6 +119,7 @@ class Touchpad:
             ui.write(e.EV_ABS, e.ABS_X, contacts[0][1])
             ui.write(e.EV_ABS, e.ABS_Y, contacts[0][2])
         ui.syn()
+        self.last_write = time.monotonic()
 
     def release(self):
         if self.slots or self.tool:
@@ -263,6 +287,11 @@ ACCEL_MAX = float(os.environ.get("OMACVM_SCROLL_ACCEL_MAX", "6"))
 ACCEL_SLOW = 20.0            # mm/s: below this a window calibrates the base ratio
 
 
+# How much further the glide after a flick carries than macOS's momentum at
+# the fingers' speed (1 = exactly macOS's distance).
+GLIDE = float(os.environ.get("OMACVM_SCROLL_GLIDE", "1.5"))
+
+
 # Pinch is macOS's decision ("P" from the Mac, when macOS recognizes a magnify
 # gesture). OMACVM_SCROLL_PINCH_MM > 0 adds a spread-based fallback.
 PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "0"))
@@ -416,7 +445,7 @@ class Hybrid:
             self.scale = min(max(vf / vw, 1.0), 60.0) if vw > 0 else TOUCH_UNITS_PER_POINT
             if SCROLL_DEBUG:
                 print(f"hand-over: fingers {vf:.0f} units/s, momentum {vw:.0f} pt/s, scale {self.scale:.1f}", flush=True)
-        s = self.scale or TOUCH_UNITS_PER_POINT
+        s = (self.scale or TOUCH_UNITS_PER_POINT) * GLIDE
         self.wprev = now
         self.pending[0] += dx * s
         self.pending[1] += dy * s
@@ -450,6 +479,7 @@ class Hybrid:
         self.pad.frame([(c[0], round(c[1]), round(c[2])) for c in self.held])
 
     def idle(self):
+        self.pad.flush()
         self.touch.idle()
         if self.held is None:
             return
