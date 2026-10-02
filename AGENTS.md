@@ -11,6 +11,12 @@ made to feel native. Sibling project: [Omanotch](https://github.com/gillesgoetsc
 
 ## 0. Recipes: setting OmacVM up for someone
 
+Install: `curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash -s -- --no-start`
+(clones to `~/.omacvm`, puts `omacvm` on the PATH, installs Xcode's command
+line tools first on a fresh Mac, which needs the person to click Install in
+macOS's window; `--no-start` keeps it from opening the interactive setup).
+Homebrew, Parallels or UTM are the person's to install (or `omacvm build`
+offers it in a terminal); with `--yes` it stops with the exact command (exit 3).
 Everything goes through `./omacvm` (or `omacvm` once `install.sh` put it on
 the PATH). Without a terminal it never asks: give options, read `--json`.
 Exit codes: 0 done, 1 failed, 2 usage (a missing option is named), 3 needs a
@@ -22,7 +28,10 @@ UTM, or choose their password: hand those over, never work around them.
   1. `omacvm vms --json` (what exists) and
      `omacvm build --plan --json --vm-type parallels|utm [--feature scroll-momentum=on ...]`:
      resources within the licence, features, `needs_human`, and `command`.
-  2. Show the person the plan; ask for their password (never invent one) and
+  2. Show the person the plan and explain the choices: Parallels (fast, every
+     display, paid: Standard 4 CPUs / 8 GB per VM) or UTM (free, one display,
+     slower); the resource tiers; each feature (`omacvm features --json` has
+     titles and summaries). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
      is experimental and off by default: offer
      it, do not decide it.

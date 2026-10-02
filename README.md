@@ -51,8 +51,20 @@ what you want to do (build another VM, switch features, update, check).
 Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && ./install.sh`
 (or just `./omacvm`).
 
-Setting it up with a coding agent (Claude Code, Codex, …)? See
-[With a coding agent](#with-a-coding-agent).
+Or let your coding agent (Claude Code, Codex, …) do it, with this prompt:
+
+```text
+Set up OmacVM on my Mac (github.com/gillesgoetsch/omacvm): Omarchy in a VM.
+Read https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/AGENTS.md
+first (section 0) and follow it. Install it with
+curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash -s -- --no-start
+then walk me through the build: ask me Parallels or UTM, how much of my Mac
+the VM gets and which features I want (explain each, scroll momentum is
+experimental), show me the plan, ask for my password, build it, and tell me
+the steps only I can do.
+```
+
+More in [With a coding agent](#with-a-coding-agent).
 
 <p align="center">
   <img src="docs/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
