@@ -28,7 +28,15 @@ source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 features_load
 
-TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(id -un); FULL=""; HOST="omarchy"
+# The Linux user name suggested from the Mac's: lower case, letters, digits,
+# - and _ only, starting with a letter ("Gilles.Goetsch" -> "gillesgoetsch").
+linux_name() {
+  local n; n=$(iconv -f UTF-8 -t ASCII//TRANSLIT <<<"$1" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')
+  n=${n#"${n%%[a-z_]*}"}
+  printf '%s' "${n:0:32}"
+}
+TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
+[[ -n $U ]] || U=omarchy
 BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0
 usage() { echo "omacvm build: $*" >&2; exit 2; }
@@ -264,7 +272,10 @@ if (( ! YES )); then
 fi
 [[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "user name '$U': lower-case letters, digits, - and _ only"
 
-KB=$("$R/src/keyboard/mac-layout.sh")
+KB_NOTE=$("$R/src/keyboard/mac-layout.sh" 2>&1 >/dev/null)
+KB=$("$R/src/keyboard/mac-layout.sh" 2>/dev/null)
+KB_SHOWN="$KB   (from the Mac)"
+[[ -n $KB_NOTE ]] && KB_SHOWN="$KB   (no Linux match for your Mac's layout yet: set yours in Omarchy's keyboard settings)"
 TZ_MAC=$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')
 lang=$(defaults read -g AppleLanguages 2>/dev/null | sed -n '2s/[^A-Za-z-]//gp')   # e.g. de-CH
 region=$(defaults read -g AppleLocale 2>/dev/null | sed 's/@.*//')                 # e.g. de_CH
@@ -335,7 +346,7 @@ cat <<EOF
     VM             $VM, in $APP_LINE
     resources      $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)
     user           $U ($FULL), hostname $HOST
-    keyboard       $KB   (from the Mac)
+    keyboard       $KB_SHOWN
     timezone       $TZ_MAC, language $LANG_VM
     Omarchy        omarchy-mac, $CHANNEL packages
 EOF
