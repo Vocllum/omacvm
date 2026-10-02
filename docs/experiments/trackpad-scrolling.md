@@ -108,6 +108,22 @@ also got `--disable-smooth-scrolling` (original in
 half a second without scrolling, so slow, fine scrolling runs in one touch.
 They are still by then, so lifting starts no fling.
 
+- Very good, but really slow movement (about 1 mm/s) is still less sensitive
+  than macOS: Chrome skips input.
+
+Recording (guest: the received deltas, `libinput debug-events` on the virtual
+touchpad): macOS sends slow scrolling as whole 1-point steps every 4-20 ms,
+some of them sideways (macOS does that for its own apps too). libinput passes
+**every** step on: a 1-point step becomes a finger scroll of 0.42, nothing is
+swallowed. After the compositor's touchpad factor (0.4) a slow step reaches
+Chrome as a fraction of a pixel, and Chrome drops part of such amounts.
+
+### 8. Low-speed boost (in progress)
+
+`OMACVM_SCROLL_SLOW_BOOST` (default 1.0): steps below 3 points get extra
+movement, 1 -> 2, 2 -> 2.5, 3 and more unchanged (additive, so it always
+rises with the input). Normal and fast scrolling stay exactly as macOS sends it.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page

@@ -104,6 +104,22 @@ POINTS_PER_DETENT = float(os.environ.get("OMACVM_SCROLL_POINTS_PER_DETENT", "40"
 # once macOS's momentum has died down, so apps add no fling of their own).
 SCROLL_MODE = os.environ.get("OMACVM_SCROLL_MODE", "wheel")
 TOUCH_UNITS_PER_POINT = float(os.environ.get("OMACVM_SCROLL_TOUCH_SCALE", "4"))
+SCROLL_DEBUG = bool(os.environ.get("OMACVM_SCROLL_DEBUG"))
+# macOS sends slow scrolling as 1-point steps; after the compositor's touchpad
+# factor they reach apps as fractions of a pixel, which Chrome partly drops.
+# Steps below SLOW_UNTIL points get extra movement: SLOW_BOOST points at a
+# 1-point step, tapering to none at SLOW_UNTIL (1 -> 2, 2 -> 2.5, 3 -> 3 with the
+# defaults); normal and fast scrolling stay exactly as macOS sends it.
+SLOW_BOOST = float(os.environ.get("OMACVM_SCROLL_SLOW_BOOST", "1.0"))
+SLOW_UNTIL = 3.0
+
+
+def slow_boost(d):
+    a = abs(d)
+    if not 0 < a < SLOW_UNTIL:
+        return d
+    extra = SLOW_BOOST * min(1.0, (SLOW_UNTIL - a) / (SLOW_UNTIL - 1))
+    return d + extra if d > 0 else d - extra
 # Seconds without scrolling before the fingers lift. libinput only starts a
 # two-finger scroll after the fingers have moved a little; staying down through
 # the pauses of slow, fine scrolling avoids paying that again and again.
@@ -169,6 +185,7 @@ class TouchScroll:
         if not self.down:
             self._place()
             self._frame()
+        dx, dy = slow_boost(dx), slow_boost(dy)
         nx = self.x + dx * TOUCH_UNITS_PER_POINT
         ny = self.y + dy * TOUCH_UNITS_PER_POINT
         if not (1500 < nx < W - 1500 and 1000 < ny < H - 1000):
@@ -265,6 +282,8 @@ def run(pad, keys, wheel, touch):
                     touch.down = False   # real fingers (pinch, swipes) take over the touchpad
                     pad.frame(contacts)
                 elif p[0] == b"W":
+                    if SCROLL_DEBUG:
+                        print(f"W {time.monotonic():.3f} {p[1].decode()} {p[2].decode()}", flush=True)
                     if SCROLL_MODE == "touch":
                         touch.scroll(float(p[1]), float(p[2]))
                     else:
