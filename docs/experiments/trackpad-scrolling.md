@@ -1,9 +1,17 @@
 # Experiment: two-finger scrolling through OmacVM Gestures
 
-Branch `experiment/trackpad-scrolling`. Nothing here is on `main` until a
-decision is made. Tested on the production Parallels VM (Omarchy 4.0.3rc4,
-Hyprland 0.56.2, libinput 1.32.0, Chromium 153) on a MacBook Pro M4 Max,
-macOS 15.7.4, Parallels Desktop 27.0.2.
+**Outcome: shipped in OmacVM 2.0 as Glide** ("macOS-native scrolling, passed
+through"), experimental and off by default: `omacvm enable glide`. The state
+of test 29 is what Glide does; the code is `src/gestures/guest/omacvm-gestures`
+(`Glide`), `src/gestures/guest/omacvm_glide.lua` and the Mac helper. The test
+switches below (`--scroll`, `OMACVM_SCROLL_*`) became the per-VM feature and
+`OMACVM_GLIDE_*` (FILTER, BLEND, RAW_SCALE, POINT_UNITS, DISTANCE, TAU,
+MAX_RATE, HOLD, DEBUG, RECORD); the wheel mode, the boosts and the
+acceleration curves were dropped.
+
+Developed on the branch `experiment/trackpad-scrolling`. Tested on the
+production Parallels VM (Omarchy 4.0.3rc4, Hyprland 0.56.2, libinput 1.32.0,
+Chromium 153) on a MacBook Pro M4 Max, macOS 15.7.4, Parallels Desktop 27.0.2.
 
 ## Goal
 
@@ -499,7 +507,7 @@ the chain is then adjusted relative to it:
   kept in `/var/lib/omacvm/scroll-calibration`. On the reference Mac it stays
   at about 1.
 
-### 29. Chromium vs the rest (in progress)
+### 29. Chromium vs the rest (final)
 
 Recording 9 (Chrome and Files side by side): "Chrome is perfect now, Files is
 not: slower, without the same acceleration, and the system in general too";
@@ -521,7 +529,7 @@ to the same display scale. Omarchy itself sets per-app touchpad speeds
   VS Code, Cursor, Obsidian, Signal, Spotify, 1Password, Teams, Figma,
   Electron): exactly as before for them.
 
-Results: pending.
+Results: "much better, love it". This is the state that shipped as Glide.
 
 ## Candidate if the wheel cannot pan a zoomed page
 
@@ -531,17 +539,11 @@ down through macOS's momentum and lift only when it has died down. Apps then
 get touchpad scrolling (Chromium pans a zoomed page properly), but with near
 zero speed at the lift, so Chromium and GTK add no fling of their own.
 
-## Test changes on the production VM (to revert or adopt)
+## Test changes on the production VM (resolved)
 
-- `/usr/local/bin/omacvm-gestures`: this branch's guest daemon.
-- `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`
-  (`OMACVM_SCROLL_MODE`, `OMACVM_SCROLL_TOUCH_SCALE`,
-  `OMACVM_SCROLL_POINTS_PER_DETENT`).
-- `~/.config/chromium-flags.conf` and `~/.config/chrome-flags.conf`:
-  `--disable-smooth-scrolling` added (originals in
-  `*-flags.conf.before-omacvm-scroll-test`).
-- `~/.config/hypr/input.lua`: test block removed again (original in
-  `input.lua.before-omacvm-scroll-test`).
-- `/root/.ssh/authorized_keys`: the current `omacvm` key added (kept).
-- Mac: OmacVM Gestures installed with `--scroll` (back:
-  `src/gestures/mac/install.sh`).
+Adopted on 2026-10-02 through the feature itself (`omacvm enable glide`): the
+test drop-in `/etc/systemd/system/omacvm-gestures.service.d/scroll-test.conf`
+was removed, Chromium's and Chrome's flags files were restored from their
+backups (Glide adds `--disable-smooth-scrolling` itself and remembers it), the
+test block in `monitors.lua` gave way to `omacvm_glide.lua`, and the Mac helper
+runs without test options again.
