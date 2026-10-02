@@ -276,7 +276,27 @@ medium a bit too much", but at 0.25, when everything was far too fast.
   macOS. Debug: `accel:` lines.
 - Virtual trackpad: flat, 0.082 (perfect for slow scrolling).
 
-Results: pending.
+- Fast scrolling still "like dragging a stone on a rope through mud".
+- The `accel:` log: while the fingers touch, macOS scrolls roughly 8-16 points
+  per millimetre at every speed from 16 to 360 mm/s, so macOS barely
+  accelerates during the touch (the gain stayed at 1). macOS's fast feel is
+  its glide after the lift.
+- Fast flicks hand over at up to 55,000 units/s (550 mm/s), but the momentum
+  step limit allowed 500 mm/s: the excess queued and trickled out, the sluggish
+  glide.
+- libinput's touch-jump count had risen from 40 to 108 since test 11: leaving a
+  two-finger scroll for three or four fingers switched the two existing fingers
+  from their filtered virtual positions to the raw ones within one touch.
+
+### 19. Faster glide limit; a clean touch when leaving two fingers (in progress)
+
+- Momentum step limit 400 units (4 mm) per 4 ms = 1000 mm/s
+  (`OMACVM_SCROLL_MAX_STEP`), under libinput's jump threshold (~20 mm/12 ms).
+- When a two-finger scroll turns into three or more fingers, its virtual touch
+  ends first and the raw fingers start a new one.
+- The macOS-gain code stays in for now (gain about 1); remove when adopting.
+
+Results: pending (jump baseline 108).
 
 ## Candidate if the wheel cannot pan a zoomed page
 

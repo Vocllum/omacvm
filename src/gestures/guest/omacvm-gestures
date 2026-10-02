@@ -304,7 +304,12 @@ class Hybrid:
             self.touch.down = False
             if len(contacts) == 2:
                 contacts = self.two_fingers(contacts, now)
-            else:
+            elif self.two is not None:
+                # Leaving a two-finger scroll (a third finger, a swipe): its
+                # virtual positions differ from the raw ones, so end that touch
+                # instead of letting the fingers leap (libinput drops leaps as jumps).
+                if not self.two["pinch"]:
+                    self.pad.frame([])
                 self.two = None
             if len(contacts) == 2:
                 self.hist = (self.hist + [(now, (contacts[0][1] + contacts[1][1]) / 2,
@@ -418,7 +423,10 @@ class Hybrid:
         self.moved = now
         self.drain()
 
-    MAX_STEP = 200            # touchpad units (2 mm) per 4 ms tick: libinput never sees a jump
+    # Touchpad units per 4 ms tick: 400 = 4 mm = 1000 mm/s, under libinput's
+    # touch-jump threshold (about 20 mm per 12 ms); fast flicks hand over at up
+    # to ~550 mm/s, which a lower limit would throttle into a sluggish glide.
+    MAX_STEP = int(os.environ.get("OMACVM_SCROLL_MAX_STEP", "400"))
 
     def drain(self):
         """Apply pending momentum in small, evenly timed steps."""
