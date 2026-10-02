@@ -128,7 +128,7 @@ if [[ $TYPE == utm ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
-kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty')
+kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
 if [[ $TYPE == parallels ]]; then
@@ -142,7 +142,7 @@ else
   if user_active omacvm-vdagent.service; then ok "clipboard + pointer" "omacvm-vdagent"
   else bad "clipboard + pointer" "omacvm-vdagent.service not running"; fi
   user_active spice-vdagent.service && bad "stock SPICE agent" "running: the pointer stops halfway"
-  w=$(as_user hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) | .width')
+  w=$(as_user hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) | .width' 2>/dev/null)
   tab=$(python3 - 2>/dev/null <<'EOF'
 import evdev
 for p in evdev.list_devices():
