@@ -17,6 +17,44 @@ done
 say() { printf '\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 [[ $(uname -s) == Darwin && $(uname -m) == arm64 ]] || { echo "OmacVM needs an Apple Silicon Mac." >&2; exit 1; }
 
+# Xcode's command line tools (git, and Swift for the build), the way Homebrew's
+# own installer gets them: through macOS's software update, no window to find
+# (asks for the Mac password); macOS's install window only if that finds none.
+spin_until() {   # "message" test-command...: a spinner with the time until it succeeds
+  local msg=$1 frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' t0=$SECONDS i=0 e; shift
+  until "$@"; do
+    e=$(( SECONDS - t0 ))
+    (( e > 3600 )) && return 1
+    printf '\r  %s %s %dm %02ds ' "${frames:i % 10:1}" "$msg" $(( e / 60 )) $(( e % 60 )) > /dev/tty 2>/dev/null
+    i=$(( i + 1 )); sleep 0.2
+  done
+  printf '\r\033[2K' > /dev/tty 2>/dev/null
+}
+clt_ready() { xcode-select -p >/dev/null 2>&1 && /usr/bin/git --version >/dev/null 2>&1; }
+install_clt() {
+  local flag=/tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress label list
+  say "Xcode's command line tools first (git, Swift), from macOS's software update"
+  touch "$flag"
+  list=$(mktemp)
+  /usr/sbin/softwareupdate -l > "$list" 2>&1 &
+  spin_until "Looking for them in software update" bash -c "! kill -0 $! 2>/dev/null"
+  label=$(grep -B 1 -E 'Command Line Tools' "$list" | awk -F'*' '/^ *\*/ { print $2 }' |
+          sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1)
+  rm -f "$list"
+  if [[ -n $label ]]; then
+    echo "    installing \"$label\" (your Mac password):"
+    sudo /usr/sbin/softwareupdate -i "$label" < /dev/tty && sudo /usr/bin/xcode-select --switch /Library/Developer/CommandLineTools
+  fi
+  rm -f "$flag"
+  if ! clt_ready; then
+    echo "    software update did not install them: macOS's own installer window opens now, click Install"
+    xcode-select --install >/dev/null 2>&1 || true
+    spin_until "Waiting for Xcode's command line tools (click Install in macOS's window)" clt_ready ||
+      { echo "Xcode's command line tools did not install: run xcode-select --install, then this again." >&2; exit 3; }
+  fi
+  echo "    Xcode's command line tools are installed"
+}
+
 # This checkout, when run from one; else ~/.omacvm.
 here=""
 if [[ -n ${BASH_SOURCE[0]:-} && -f ${BASH_SOURCE[0]} ]]; then
@@ -28,20 +66,7 @@ if [[ -z $here ]]; then
   # A fresh Mac: git (and Swift, for the build) come with Xcode's command line
   # tools; macOS's /usr/bin/git is only a stub that offers to install them.
   if ! xcode-select -p >/dev/null 2>&1 || ! /usr/bin/git --version >/dev/null 2>&1; then
-    say "Xcode's command line tools first (git, Swift): macOS shows its installer, click Install"
-    xcode-select --install >/dev/null 2>&1 || true
-    # A spinner with the elapsed time while macOS installs them (5-15 minutes).
-    frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'; t0=$SECONDS; i=0
-    until xcode-select -p >/dev/null 2>&1 && /usr/bin/git --version >/dev/null 2>&1; do
-      e=$(( SECONDS - t0 ))
-      (( e > 3600 )) && break
-      printf '\r  %s Installing Xcode'"'"'s command line tools (click Install in macOS'"'"'s window) %dm %02ds ' \
-        "${frames:i % 10:1}" $(( e / 60 )) $(( e % 60 )) > /dev/tty 2>/dev/null
-      i=$(( i + 1 )); sleep 0.2
-    done
-    printf '\r\033[2K' > /dev/tty 2>/dev/null
-    /usr/bin/git --version >/dev/null 2>&1 ||
-      { echo "Xcode's command line tools did not finish: run xcode-select --install, then this again." >&2; exit 3; }
+    install_clt
   fi
   # A clone that failed half-way (no .git) is OmacVM's own leftover: start over.
   [[ -d $here && ! -d $here/.git ]] && rm -rf "$here"
