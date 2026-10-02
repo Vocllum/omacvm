@@ -325,7 +325,10 @@ medium a bit too much", but at 0.25, when everything was far too fast.
 opening with speed four times as strongly (beta 0.4), speed changes noticed
 at 8 Hz instead of 1 Hz.
 
-Results: pending.
+- Better; but fast scrolls run on too long after the lift: with the filter
+  responding properly, the 1.5 glide factor (added while the filter still held
+  fast scrolling back) carries too far. Glide back to 1.0, macOS's own
+  (`OMACVM_SCROLL_GLIDE=1.0`).
 
 ## Candidate if the wheel cannot pan a zoomed page
 
