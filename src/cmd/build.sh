@@ -175,7 +175,7 @@ fi
 tier_values "$tier"
 : "${CPUS:=$T_CPUS}"; : "${MEM_GB:=$T_MEM}"
 : "${DISK_GB:=$(( free_gb >= 400 ? 200 : 128 ))}"
-if (( ! YES )) && ask_yn "${TIERS[$tier]}: $CPUS CPUs, $MEM_GB GB memory, a $DISK_GB GB disk (grows as it fills). Change any?" n; then
+if (( ! YES )) && ! ask_yn "${TIERS[$tier]}: $CPUS CPUs, $MEM_GB GB memory, a $DISK_GB GB disk (grows as it fills). Use these? (n changes them)" y; then
   CPUS=$(ask_value "CPUs (1-$CAP_CPUS)" "$CPUS" '^[0-9]+$')
   MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$MEM_GB" '^[0-9]+$')
   DISK_GB=$(ask_value "disk in GB (64-$(( free_gb - 20 )))" "$DISK_GB" '^[0-9]+$')
