@@ -63,7 +63,7 @@ Setting it up with a coding agent (Claude Code, Codex, …)? See
 | | |
 |---|---|
 | **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first) |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
@@ -318,7 +318,7 @@ scrolling arrives as wheel steps, and the feel of macOS (acceleration,
 momentum, precise slow scrolling) is gone. With this on, the full-screen
 VM gets the real thing instead:
 
-- **Your fingers**, as raw positions from the built-in trackpad, precise to
+- **Your fingers**, as raw positions from the trackpad, precise to
   hundredths of a millimetre, on a virtual Apple trackpad in the VM: slow
   scrolling follows them exactly;
 - **macOS's own acceleration**, blended in as you speed up;
