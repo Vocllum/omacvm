@@ -212,6 +212,38 @@ class TouchScroll:
             self.down = False
 
 
+class OneEuro:
+    """One Euro filter (Casiez et al.): smooths strongly when slow or still (finger
+    jitter), hardly at all when fast (no lag). Values in millimetres."""
+
+    def __init__(self, min_cutoff, beta, d_cutoff=1.0):
+        self.min_cutoff, self.beta, self.d_cutoff = min_cutoff, beta, d_cutoff
+        self.x = self.dx = self.t = None
+
+    @staticmethod
+    def _alpha(cutoff, dt):
+        tau = 1.0 / (2 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / dt)
+
+    def __call__(self, x, t):
+        if self.x is None:
+            self.x, self.dx, self.t = x, 0.0, t
+            return x
+        dt = max(t - self.t, 1e-4)
+        dx = (x - self.x) / dt
+        a_d = self._alpha(self.d_cutoff, dt)
+        self.dx = a_d * dx + (1 - a_d) * self.dx
+        a = self._alpha(self.min_cutoff + self.beta * abs(self.dx), dt)
+        self.x = a * x + (1 - a) * self.x
+        self.t = t
+        return self.x
+
+
+_f = os.environ.get("OMACVM_SCROLL_FILTER", "1.5 0.1").split()
+FILTER_MIN_CUTOFF, FILTER_BETA = float(_f[0]), float(_f[1])
+PINCH_MM = float(os.environ.get("OMACVM_SCROLL_PINCH_MM", "6"))
+
+
 class Hybrid:
     """--scroll on the Mac with touch mode: the real two-finger frames while the
     fingers touch (precise to hundredths of a millimetre), then macOS's momentum
@@ -229,6 +261,7 @@ class Hybrid:
         self.wprev = None
         self.pending = [0.0, 0.0]   # momentum not yet applied, touchpad units
         self.tick = 0.0
+        self.two = None      # current two-finger touch: ids, offsets, start, mode, filters
 
     def frame(self, contacts):
         now = time.monotonic()
@@ -241,6 +274,10 @@ class Hybrid:
                 self.pending = [0.0, 0.0]
                 self.pad.frame([])
             self.touch.down = False
+            if len(contacts) == 2:
+                contacts = self.two_fingers(contacts, now)
+            else:
+                self.two = None
             if len(contacts) == 2:
                 self.hist = (self.hist + [(now, (contacts[0][1] + contacts[1][1]) / 2,
                                            (contacts[0][2] + contacts[1][2]) / 2)])[-5:]
@@ -258,6 +295,30 @@ class Hybrid:
             return
         self.contacts, self.hist = [], []
         self.pad.frame([])
+
+    def two_fingers(self, contacts, now):
+        """Scroll stays scroll: the fingers' spacing is fixed at touch-down and the
+        filtered centre moves; a clear spread switches to raw fingers (pinch)."""
+        ids = (contacts[0][0], contacts[1][0])
+        cx = (contacts[0][1] + contacts[1][1]) / 2
+        cy = (contacts[0][2] + contacts[1][2]) / 2
+        dist = math.hypot(contacts[0][1] - contacts[1][1], contacts[0][2] - contacts[1][2])
+        t = self.two
+        if t is None or t["ids"] != ids:
+            t = self.two = {"ids": ids, "c0": (cx, cy), "d0": dist, "pinch": False,
+                            "off": [(c[1] - cx, c[2] - cy) for c in contacts],
+                            "fx": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA),
+                            "fy": OneEuro(FILTER_MIN_CUTOFF, FILTER_BETA)}
+        if not t["pinch"]:
+            spread = abs(dist - t["d0"]) / RES
+            moved = math.hypot(cx - t["c0"][0], cy - t["c0"][1]) / RES
+            if spread > PINCH_MM and spread > moved:
+                t["pinch"] = True
+        if t["pinch"]:
+            return contacts
+        fx = t["fx"](cx / RES, now) * RES
+        fy = t["fy"](cy / RES, now) * RES
+        return [(c[0], round(fx + o[0]), round(fy + o[1])) for c, o in zip(contacts, t["off"])]
 
     def momentum(self, dx, dy):
         if self.held is None:

@@ -175,6 +175,20 @@ the momentum has died down. Touchpad scroll factor for the virtual trackpad:
 When real fingers touch down while a glide runs, the glide's virtual fingers
 lift first (pending momentum dropped), and the real fingers start a fresh touch.
 
+- No more jumping back.
+- Random pinch zooms while scrolling: raw fingers never keep their spacing
+  exactly, and libinput sometimes reads the change as a pinch.
+- Resting two fingers makes the page shiver: finger jitter of fractions of a
+  millimetre, now passed on precisely, scrolls back and forth.
+
+### 12. Scroll stays scroll, jitter filtered (in progress)
+
+Guest, two-finger touches: the spacing is fixed at touch-down and only the
+centre moves, through a One Euro filter (`OMACVM_SCROLL_FILTER`, min cutoff
+1.5 Hz, beta 0.1, in millimetres: strong smoothing when still or slow, almost
+none when fast). A clear spread (`OMACVM_SCROLL_PINCH_MM`, 6 mm, and more than
+the centre has moved) switches the touch to raw fingers: a pinch.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
