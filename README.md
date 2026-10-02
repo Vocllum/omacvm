@@ -406,6 +406,10 @@ with a notch (`omacvm enable omanotch` on an existing VM).
 ## Troubleshooting
 
 - **First stop**: `omacvm check` names what is wrong and what to do.
+- **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
+  show it. System Settings › Menu Bar (on older macOS: Control Center) ›
+  Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
+  `omacvm check` points this out.
 - **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
   their own window across the top of the screen (Bartender, for one) can bring
   it back. Quit them while you work in the VM.

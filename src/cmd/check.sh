@@ -120,11 +120,18 @@ if [[ $GESTURES == on || $TYPE == utm ]]; then
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
-    p=$(last_line "$L/omacvm-gestures.log" 'permission')
-    [[ -z $p || $p == *granted* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+    # The helper listens only once it has its permissions, so a later
+    # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
+    p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+    [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
       || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+# macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
+# menu bar over the full-screen VM: a hint (it is the person's setting).
+if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
+  skip "menu bar in full screen" "macOS always shows it: System Settings > Menu Bar (older macOS: Control Center) > Automatically hide and show the menu bar: In Full Screen Only" human
+else ok "menu bar in full screen" "hidden by macOS"; fi
 if [[ $TYPE == parallels ]]; then
   running org.omacvm.clip-in && ok "clipboard VM -> Mac" "org.omacvm.clip-in" || bad "clipboard VM -> Mac" "org.omacvm.clip-in not running"
   # Parallels keeps both settings in undocumented files: hints, not failures.
