@@ -417,7 +417,7 @@ step "Arch Linux ARM onto the VM's disk ($IP)"
   read -r l v <<<"$KB"; printf 'OMA_XKB_LAYOUT=%q\nOMA_XKB_VARIANT=%q\n' "$l" "${v:-}"
 } | gssh "$IP" "umask 077; cat > /root/omacvm.env"
 gssh "$IP" "cat > /root/omacvm.pub" < "$KEY.pub"
-gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh"
+gssh "$IP" "bash -s" < "$R/src/vm/base-install.sh" 2>&1 | ui_follow "Arch Linux ARM onto the disk"
 gssh "$IP" "systemctl poweroff" 2>/dev/null || true
 
 step "Booting from the new disk"
@@ -456,7 +456,7 @@ ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------
 step "Omarchy from omarchy-mac (the longest step)"
-gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh"
+gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh" 2>&1 | ui_follow "Installing Omarchy (20-40 minutes)"
 if [[ $TYPE == parallels ]]; then
   step "Parallels Tools"
   gssh "$IP" "cat > /root/prl-tools-lin-arm.iso" < "/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"

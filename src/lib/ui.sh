@@ -202,3 +202,30 @@ ui_spin_val() {
   printf -v "$var" '%s' "$(tail -1 <<<"$UI_SPIN_OUT")"
   return $rc
 }
+
+# command | ui_follow "Message": shows the command's lines as they come (into
+# the build log too), a repeated line once with a count, and below them a
+# status line with a spinner and the elapsed time, so a long quiet stretch
+# never looks stuck. (The spinner is its own background loop: bash 3.2's read
+# cannot tell a timeout from the end of the input.)
+ui_follow() {
+  local msg=$1 line last="" n=0 ticker=""
+  if (( UI_FANCY )); then
+    ( t0=$SECONDS; i=0
+      while :; do
+        e=$(( SECONDS - t0 ))
+        printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$msg" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
+        i=$(( i + 1 )); sleep 0.2
+      done ) &
+    ticker=$!
+  fi
+  while IFS= read -r line; do
+    (( UI_FANCY )) && printf '\r\033[2K' > "$TTY"
+    if [[ $line == "$last" ]]; then n=$(( n + 1 )); continue; fi
+    (( n > 1 )) && printf '    %s(× %d)%s\n' "$UD" "$n" "$UR"
+    printf '%s\n' "$line"; last=$line; n=1
+  done
+  (( n > 1 )) && printf '    %s(× %d)%s\n' "$UD" "$n" "$UR"
+  if [[ -n $ticker ]]; then kill "$ticker" 2>/dev/null || true; wait "$ticker" 2>/dev/null || true; printf '\r\033[2K' > "$TTY"; fi
+  return 0
+}
