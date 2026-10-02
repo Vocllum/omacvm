@@ -112,7 +112,7 @@ parallels_planned_limits() {
 
 utm_major() { defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null | cut -d. -f1; }
 
-# wait_for_app parallels|utm: until the app is there (and usable), or the user quits.
+# wait_for_app parallels|utm|fusion: until the app is there (and usable), or the user quits.
 wait_for_app() {
   local a
   while :; do
@@ -159,6 +159,11 @@ wait_for_app() {
       utm)
         if [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )); then return 0; fi
         utm_install_help ;;
+      fusion)
+        have_fusion && return 0
+        hd "VMware Fusion is not installed"
+        say "    Free for personal use: brew install --cask vmware-fusion"
+        say "    Install it and open it once." ;;
     esac
     read -r -p "  Press Return to check again, or q to quit: " a < "$TTY" || die "no answer (no terminal?)"
     [[ $a == q ]] && exit 1

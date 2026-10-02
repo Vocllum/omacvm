@@ -1,6 +1,7 @@
 # VMware Fusion as a third route
 
-Status: spike passed; increments 1 and 2 done, 3 written (needs a person to verify).
+Status: spike passed; increments 1, 2 and 4 done (a full `omacvm build --vm-type fusion`
+passed `omacvm check` in 24 minutes); 3 written, needs a person to verify; 5 to do.
 This file is the plan; the code follows it.
 
 ## Why

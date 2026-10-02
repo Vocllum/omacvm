@@ -36,6 +36,7 @@ missing_brew_tools() {
 }
 have_parallels() { [[ -d "/Applications/Parallels Desktop.app" && -x $PRLCTL ]]; }
 have_utm5() { [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )); }
+have_fusion() { [[ -x $VMRUN && -x $FUSION_LIB/vmcli ]] && (( $(fusion_version | cut -d. -f1) >= 13 )); }
 
 # The installs: ask (or stop with the command under --yes), run, check.
 prereq_install() {   # "what" "command" -> runs the command after asking
@@ -123,6 +124,13 @@ ensure_vm_app() {
       fi
       brew install --cask utm@beta || die "brew install --cask utm@beta failed: see https://github.com/utmapp/UTM/releases"
       open -a UTM 2>/dev/null || true ;;
+    fusion)
+      have_fusion && return 0
+      ensure_homebrew
+      prereq_install "VMware Fusion" "brew install --cask vmware-fusion"
+      brew install --cask vmware-fusion || die "brew install --cask vmware-fusion failed: install it from https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion, then run omacvm again"
+      open -a "VMware Fusion" 2>/dev/null || true
+      say "    VMware Fusion opens: follow its first steps (it asks for your Mac password once)." ;;
   esac
 }
 
@@ -134,7 +142,7 @@ prereq_screen() {
   printf '\n  %s%s%s  ·  %s  ·  %s GB  ·  macOS %s%s\n' "$UB" "${model:-Mac}" "$UR" "${chip:-Apple Silicon}" "$mac_mem_gb" \
     "$(sw_vers -productVersion)" "$( [[ $NOTCH == notch ]] && echo "  ·  notch")" > "$TTY"
   for mark in "Xcode's command line tools|have_xcode_tools" "Homebrew|have_homebrew" \
-              "Parallels Desktop|have_parallels" "UTM 5|have_utm5"; do
+              "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion"; do
     if ${mark#*|}; then printf '  %s✓%s %s\n' "$UOK" "$UR" "${mark%%|*}" > "$TTY"
     else printf '  %s·%s %s %s(not installed)%s\n' "$UD" "$UR" "${mark%%|*}" "$UD" "$UR" > "$TTY"; fi
   done

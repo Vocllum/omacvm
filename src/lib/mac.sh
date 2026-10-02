@@ -161,6 +161,10 @@ VMRUN=$FUSION_LIB/vmrun
 FUSION_INVENTORY="$HOME/Library/Application Support/VMware Fusion/vmInventory"
 FUSION_NETWORKING="/Library/Preferences/VMware Fusion/networking"
 FUSION_LEASES=/var/db/vmware/vmnet-dhcpd-vmnet8.leases
+FUSION_DIR=${OMACVM_FUSION_DIR:-$HOME/Virtual Machines.localized}   # where omacvm build puts new VMs
+
+fusion_bundle() { echo "$FUSION_DIR/$1.vmwarevm"; }   # <vm name> -> the folder omacvm build gives it
+fusion_version() { defaults read "/Applications/VMware Fusion.app/Contents/Info" CFBundleShortVersionString 2>/dev/null; }
 
 fusion_list() {   # one line per VM in Fusion's library: NAME<TAB>VMX
   local x n
@@ -172,9 +176,10 @@ fusion_list() {   # one line per VM in Fusion's library: NAME<TAB>VMX
   done
 }
 
-fusion_vmx() {   # <vm name> -> its .vmx
+fusion_vmx() {   # <vm name> -> its .vmx (in Fusion's library, or one omacvm build made)
   local x
   x=$(fusion_list | awk -F'\t' -v n="$1" '$1 == n { print $2; exit }')
+  [[ -n $x ]] || { x="$(fusion_bundle "$1")/$1.vmx"; [[ -f $x ]] || x=""; }
   [[ -n $x ]] && echo "$x"
 }
 
