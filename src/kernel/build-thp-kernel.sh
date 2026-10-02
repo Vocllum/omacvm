@@ -4,13 +4,21 @@
 # Run as root inside the VM: ./build-thp-kernel.sh <desktop-user>
 # Takes ~10 min on 16 vCPUs. The stock kernel stays installed as the fallback
 # entry in GRUB's advanced menu; GRUB boots the THP kernel by default.
-# Re-run it to follow a new ALARM kernel release.
+# Re-run it to follow a new ALARM kernel release; when the installed one is
+# already ALARM's current release it does nothing (OMACVM_REBUILD_KERNEL=1
+# builds anyway).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 U=${1:?usage: build-thp-kernel.sh <desktop-user>}
 ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux-aarch64
 W=$(getent passwd "$U" | cut -d: -f6)/.cache/omacvm/linux-aarch64-thp
 
+latest=$(curl -fsSL "$ALARM/PKGBUILD" | sed -n 's/^pkgver=//p; s/^pkgrel=//p' | paste -sd- -)
+have=$(pacman -Q linux-aarch64-thp 2>/dev/null | awk '{ print $2 }')
+if [[ -n $latest && $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
+  echo "linux-aarch64-thp $have is ALARM's current kernel: nothing to build"
+  exit 0
+fi
 pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel >/dev/null 2>&1
 rm -rf "$W"; install -d -o "$U" -g "$U" "$W"
 cd "$W"
