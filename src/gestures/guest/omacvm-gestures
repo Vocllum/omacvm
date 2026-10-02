@@ -104,7 +104,10 @@ POINTS_PER_DETENT = float(os.environ.get("OMACVM_SCROLL_POINTS_PER_DETENT", "40"
 # once macOS's momentum has died down, so apps add no fling of their own).
 SCROLL_MODE = os.environ.get("OMACVM_SCROLL_MODE", "wheel")
 TOUCH_UNITS_PER_POINT = float(os.environ.get("OMACVM_SCROLL_TOUCH_SCALE", "4"))
-TOUCH_LIFT_AFTER = 0.06      # seconds without scrolling before the fingers lift
+# Seconds without scrolling before the fingers lift. libinput only starts a
+# two-finger scroll after the fingers have moved a little; staying down through
+# the pauses of slow, fine scrolling avoids paying that again and again.
+TOUCH_LIFT_AFTER = float(os.environ.get("OMACVM_SCROLL_TOUCH_HOLD", "0.5"))
 
 
 def make_wheel():

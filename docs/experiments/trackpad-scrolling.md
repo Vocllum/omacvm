@@ -95,6 +95,19 @@ Real finger frames (pinch, 3/4-finger swipes) take over the touchpad. Chrome
 also got `--disable-smooth-scrolling` (original in
 `chrome-flags.conf.before-omacvm-scroll-test`).
 
+- **Very good**: Chrome and Chromium very close to macOS, zoomed panning works.
+- Very small, slow scrolling (almost per pixel) does not respond, like a dead
+  zone in the middle; macOS reacts there. Cause: libinput starts a two-finger
+  scroll only after some movement, and with 60 ms the virtual fingers lifted
+  in every pause of slow scrolling, so each small step had to cross that
+  threshold again.
+
+### 7. Virtual fingers stay down through pauses (in progress)
+
+`OMACVM_SCROLL_TOUCH_HOLD` (default now 0.5 s): the fingers lift only after
+half a second without scrolling, so slow, fine scrolling runs in one touch.
+They are still by then, so lifting starts no fling.
+
 Results: pending.
 
 ## Candidate if the wheel cannot pan a zoomed page
