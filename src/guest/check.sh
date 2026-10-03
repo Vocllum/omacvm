@@ -109,7 +109,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Trackpad and keyboard"
-if [[ $GESTURES == on || $TYPE == utm ]]; then   # on UTM the daemon also types Cmd as Super
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then   # on UTM and Fusion the daemon also types Cmd as Super
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
@@ -129,7 +129,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
-if [[ $TYPE == utm ]]; then
+if [[ $TYPE == utm || $TYPE == fusion ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
