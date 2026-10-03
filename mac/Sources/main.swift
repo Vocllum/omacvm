@@ -87,7 +87,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var activeGuest: GuestInfo? { state.active.flatMap { guests[$0] } }
     private var activeStream: GuestStream? { state.active.flatMap { link.stream(for: $0) } }
     /// Title of the full-screen VM window: re-read on app and Space changes,
-    /// for another window, or (none yet) after `wait`.
+    /// for another window, or (none yet, or not sure) after `wait` (0: kept).
     private var titleCache: (window: CGWindowID, title: String?, retry: Date, wait: TimeInterval)?
     /// The VM's full-screen window on the built-in display, tracked across Spaces.
     private var vmWindow: CGWindowID?
@@ -221,16 +221,19 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
 
     /// The title of the full-screen VM window, kept until the window changes
     /// (or a Space or app change clears it). No title (no permission yet, or a
-    /// busy VM app): asked again after 3 s, then up to every 10 s.
+    /// busy VM app): asked again after 3 s, then up to every 10 s. A title from
+    /// the app's focused window (two VM windows of one app at that spot) may
+    /// lag a Space switch: asked again after 1.5 s, then up to every 10 s.
     private func windowTitle(_ g: StripGeometry) -> String? {
-        var wait: TimeInterval = 3
+        var wait: TimeInterval?
         if let c = titleCache, c.window == g.windowID {
-            if c.title != nil || Date() < c.retry { return c.title }
+            if c.wait == 0 || Date() < c.retry { return c.title }
             wait = min(c.wait * 2, 10)
         }
         WindowTitle.askOnce()
-        let title = WindowTitle.title(pid: g.ownerPID, rect: g.windowRect)
-        titleCache = (g.windowID, title, Date().addingTimeInterval(wait), wait)
+        let (title, exact) = WindowTitle.title(pid: g.ownerPID, rect: g.windowRect)
+        let next: TimeInterval = exact ? 0 : wait ?? (title == nil ? 3 : 1.5)
+        titleCache = (g.windowID, title, Date().addingTimeInterval(next), next)
         return title
     }
 

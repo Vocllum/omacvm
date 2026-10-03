@@ -4,9 +4,10 @@ import AppKit
 /// title; the window list only gives names with Screen Recording permission.
 enum WindowTitle {
     /// The title of the app's window at `rect` (CG coordinates), else of its
-    /// focused or main window. nil without Accessibility permission.
-    static func title(pid: pid_t, rect: CGRect) -> String? {
-        guard pid > 0, AXIsProcessTrusted() else { return nil }
+    /// focused or main window (`exact` false). nil without Accessibility
+    /// permission.
+    static func title(pid: pid_t, rect: CGRect) -> (title: String?, exact: Bool) {
+        guard pid > 0, AXIsProcessTrusted() else { return (nil, false) }
         let app = AXUIElementCreateApplication(pid)
         // A busy VM app must not stall the main thread.
         AXUIElementSetMessagingTimeout(app, 0.2)
@@ -21,14 +22,14 @@ enum WindowTitle {
                 titles.append(t)
             }
         }
-        if titles.count == 1 { return titles[0] }
+        if titles.count == 1 { return (titles[0], true) }
         for attr in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
             guard let v = value(app, attr), CFGetTypeID(v) == AXUIElementGetTypeID() else { continue }
             let w = v as! AXUIElement
             AXUIElementSetMessagingTimeout(w, 0.2)
-            if let t = value(w, kAXTitleAttribute) as? String { return t }
+            if let t = value(w, kAXTitleAttribute) as? String { return (t, false) }
         }
-        return nil
+        return (nil, false)
     }
 
     private static var asked = false
