@@ -2,7 +2,7 @@
 # the terminal directly, so build.sh's own output can be piped or logged.
 
 TTY=/dev/tty
-README_ROUTES="https://github.com/gillesgoetsch/omacvm#two-routes-parallels-or-utm"
+README_ROUTES="https://github.com/gillesgoetsch/omacvm#three-routes-parallels-utm-or-vmware-fusion"
 
 say() { printf '%s\n' "$*"; }
 hd() { printf '\n\033[1m%s\033[0m\n' "$*"; }

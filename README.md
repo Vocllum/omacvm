@@ -108,10 +108,12 @@ More in [With a coding agent](#with-a-coding-agent).
   <img src="docs/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
 </p>
 
-## Two routes: Parallels or UTM
+## Three routes: Parallels, UTM or VMware Fusion
 
 **Parallels Desktop is the recommended route**: Omarchy runs at native speed,
-on every display. **UTM is free** and gets almost everything else.
+on every display. **UTM is free** and gets almost everything else. **VMware
+Fusion is free too**, with every display, and the slowest in the browser
+(new, see below).
 
 | | Parallels Desktop | UTM |
 |---|---|---|

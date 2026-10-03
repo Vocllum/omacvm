@@ -15,7 +15,7 @@ Install: `curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main
 (clones to `~/.omacvm`, puts `omacvm` on the PATH, installs Xcode's command
 line tools first on a fresh Mac, which needs the person to click Install in
 macOS's window; `--no-start` keeps it from opening the interactive setup).
-Homebrew, Parallels or UTM are the person's to install (or `omacvm build`
+Homebrew, Parallels, UTM or VMware Fusion are the person's to install (or `omacvm build`
 offers it in a terminal); with `--yes` it stops with the exact command (exit 3).
 Everything goes through `./omacvm` (or `omacvm` once `install.sh` put it on
 the PATH). Without a terminal it never asks: give options, read `--json`.
@@ -26,14 +26,15 @@ UTM, or choose their password: hand those over, never work around them.
 
 - **New VM**:
   1. `omacvm vms --json` (what exists) and
-     `omacvm build --plan --json --vm-type parallels|utm [--feature scroll-momentum=on ...]`:
+     `omacvm build --plan --json --vm-type parallels|utm|fusion [--feature scroll-momentum=on ...]`:
      resources within the licence, `resource_tiers` (what each
      `--resources` tier gives on this Mac), features, `needs_human`, and
      `command`. The VM name defaults to "Omarchy", or the next free
      "Omarchy N" when a VM of that name exists in either app.
   2. Show the person the plan and explain the choices: Parallels (fast, every
-     display, paid: Standard 4 CPUs / 8 GB per VM) or UTM (free, one display,
-     slower); the resource tiers; each feature (`omacvm features --json` has
+     display, paid: Standard 4 CPUs / 8 GB per VM), UTM (free, one display,
+     slower) or VMware Fusion (free, every display, slowest in the browser,
+     about 15 more build minutes); the resource tiers; each feature (`omacvm features --json` has
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
@@ -111,7 +112,7 @@ GitHub.
 | `src/VERSION` | OmacVM's version; copied into the VM with `src/` (what `omacvm vms` reports per VM) |
 | `src/features.tsv` | **The feature list**: name, default (`on`/`off`/`notch`), sides, tags (`experimental`, `slow`, `notch`), needs, title, summary. Read by `src/lib/features.sh` (Mac, bash 3.2), `src/guest/install.sh` (VM), `features.sh`; a new feature also needs its case in `build.sh` (`feature_flag`, question), the VM installer and the checks |
 | `src/lib/vm.sh` | Finding VMs without starting UTM (`vms_list`: Parallels via prlctl, UTM via utmctl when it runs, else UTM's `Registry` preference, which knows VMs outside its folder), `vm_type` (running first, Parallels' "invalid" last), `resolve_vm` (no name: "Omarchy", else the only running VM), `vm_probe` (user, version, env, features set up before 2.0), `ssh_setup_command` |
-| `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels or UTM (waits until installed; UTM ≥ 5), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence), recommended settings or one question each, user/full name, summary, password. The macOS-native scroll momentum is asked separately (also with the recommended settings). Options: `--vm-type --vm-name --resources --cpus --memory-gb --disk-gb --user --full-name --hostname`, `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, `--parallels-edition standard|pro` (only while Parallels reports "No license installed", a fresh install whose trial starts with the first VM: the edition to size by; the questionnaire asks it, default standard), hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch) |
+| `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels, UTM or VMware Fusion (waits until installed; UTM ≥ 5, Fusion ≥ 13), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence), recommended settings or one question each, user/full name, summary, password. The macOS-native scroll momentum is asked separately (also with the recommended settings). Options: `--vm-type --vm-name --resources --cpus --memory-gb --disk-gb --user --full-name --hostname`, `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, `--parallels-edition standard|pro` (only while Parallels reports "No license installed", a fresh install whose trial starts with the first VM: the edition to size by; the questionnaire asks it, default standard), hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch) |
 | `src/cmd/check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL; `--json` (guest side `--tsv`) with `needs_human` per check. Add a line here for every new feature |
 | `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, Omanotch's Mac app), copies the bridge token and `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). No SSH access: exit 3 with the command for the VM's terminal |
 | `src/cmd/features.sh` | `features` (list, `--json`, or a checklist in a terminal), `enable`/`disable`; changes go through `apply.sh` |
@@ -334,7 +335,7 @@ guest's gateway is `.2`.
 - The VM never returns touched memory to the Mac while it runs (Parallels'
   balloon has no free-page reporting). Keep zram small and memory capped.
 - GRUB on Arch only boots kernels named `/boot/vmlinuz-*` with their initramfs.
-- A Linux guest gets no trackpad gestures from Parallels or UTM; they come from
+- A Linux guest gets no trackpad gestures from Parallels, UTM or Fusion; they come from
   MultitouchSupport on the Mac + uinput in the guest.
 - UTM: only one `virtio-gpu-gl` device is allowed, so no second accelerated
   display; QEMU's user-space interrupt controller makes cross-CPU wake-ups
