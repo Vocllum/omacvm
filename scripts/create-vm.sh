@@ -19,8 +19,10 @@ source "$HERE/vm-common.sh"
 vm_load "$VM_DIR"
 IFS= read -r PASSWORD || true
 [[ -n $PASSWORD ]] || die "no password on stdin"
+# OmacVM's Mac helpers and the clock format are built here with Apple's tools.
+clt_ok || die "Xcode's Command Line Tools are missing: run xcode-select --install, then build again"
 
-STEPS=6
+STEPS=7
 step() { echo "STEP $1/$STEPS $2"; }
 LOG=$VM_DIR/logs
 mkdir -p "$LOG"
@@ -40,8 +42,8 @@ key_b64=$(base64 < "$KEY.pub" | tr -d '\n')
 # Through UEFI, so the installer can register GRUB as a boot entry.
 qemu_headless live "${QEMU_UEFI[@]}" -kernel "$LIVE_KERNEL" -initrd "$LIVE_INITRD" \
   -append "root=/dev/vda rw rootwait console=ttyAMA0 loglevel=4 tryomarchy.ssh_access=1 systemd.set_credential_binary=ssh.authorized_keys.root:$key_b64" \
-  -drive "if=none,id=live,file=$LIVE_IMG,format=raw,cache=unsafe" -device virtio-blk-pci,drive=live \
-  -drive "if=none,id=disk,file=$VM_DIR/disk.img,format=raw,cache=writeback,discard=unmap" -device nvme,serial=omacvm,drive=disk
+  -drive "if=none,id=live,file=$(qe "$LIVE_IMG"),format=raw,cache=unsafe" -device virtio-blk-pci,drive=live \
+  -drive "$DISK_OPT" -device nvme,serial=omacvm,drive=disk
 wait_ssh 300 || die "the live system did not answer on SSH (log: $LOG/live-console.log)"
 
 # ---------- 2. Arch Linux ARM ----------
@@ -62,7 +64,7 @@ rm -f "$LIVE_IMG"
 # ---------- 3. first boot from the disk ----------
 step 3 "Starting the new system (UEFI, GRUB)"
 qemu_headless system "${QEMU_UEFI[@]}" \
-  -drive "if=none,id=disk,file=$VM_DIR/disk.img,format=raw,cache=writeback,discard=unmap" -device nvme,serial=omacvm,drive=disk,bootindex=0
+  -drive "$DISK_OPT" -device nvme,serial=omacvm,drive=disk,bootindex=0
 wait_ssh 300 || die "the new system did not answer on SSH (log: $LOG/system-console.log)"
 
 # ---------- 4. Omarchy ----------
@@ -72,14 +74,19 @@ run_logged "$LOG/omarchy-install.log" vssh "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s
   die "Omarchy did not install (log: $LOG/omarchy-install.log)"
 vssh "rm -f /root/omacvm.env"   # it holds the password hash
 
-# ---------- 5. OmacVM ----------
+# ---------- 5. OmacVM in the VM ----------
 step 5 "Adding OmacVM to the VM"
-run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
+run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" --no-mac ||
   die "OmacVM did not install (log: $LOG/omacvm-install.log)"
+touch "$VM_DIR/ready"   # the VM works from here on, Mac helpers or not
 
-# ---------- 6. done ----------
-step 6 "Shutting down"
+# ---------- 6. OmacVM on the Mac ----------
+step 6 "Adding OmacVM's helpers on the Mac"
+run_logged "$LOG/omacvm-mac.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
+  echo "WARN: the Mac helpers did not install (log: $LOG/omacvm-mac.log); the VM works without them"
+
+# ---------- 7. done ----------
+step 7 "Shutting down"
 vssh "systemctl poweroff" 2>/dev/null || true
 qemu_wait_exit 120 || qemu_quit
-touch "$VM_DIR/ready"
 echo "READY $NAME"

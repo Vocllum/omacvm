@@ -76,7 +76,7 @@ struct SetupView: View {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
     }
     private var canBuild: Bool {
-        userOK && !password.isEmpty && password == password2 && !state.config.name.isEmpty
+        userOK && !password.isEmpty && password == password2 && VMConfig.validName(state.config.name)
     }
 
     var body: some View {
@@ -86,6 +86,9 @@ struct SetupView: View {
                 .foregroundStyle(.secondary)
             Form {
                 TextField("VM name", text: $state.config.name)
+                if !state.config.name.isEmpty && !VMConfig.validName(state.config.name) {
+                    Text("Letters, digits, spaces, . _ and - only (64 at most).").font(.caption).foregroundStyle(.red)
+                }
                 TextField("User name", text: $state.config.user)
                 if !state.config.user.isEmpty && !userOK {
                     Text("Lower-case letters, digits, - and _ only.").font(.caption).foregroundStyle(.red)
@@ -148,6 +151,14 @@ struct SetupView: View {
     }
 
     private func build() {
+        guard Mac.commandLineToolsInstalled else {
+            locationProblem = "The build needs Xcode's Command Line Tools. macOS asks to install them now; build again when they are in."
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/xcode-select")
+            p.arguments = ["--install"]
+            try? p.run()
+            return
+        }
         if let p = VolumeCheck.problem(with: Paths.vmsRoot) {
             locationProblem = p
             return
@@ -190,7 +201,10 @@ struct BuildView: View {
             }
         }
         .onChange(of: creator.finished) { _, done in
-            if done { state.screen = .ready }
+            if done {
+                state.message = creator.warning
+                state.screen = .ready
+            }
         }
     }
 }
@@ -205,6 +219,10 @@ extension ReadyView {
         alert.addButton(withTitle: "Delete")
         alert.buttons[1].hasDestructiveAction = true
         guard alert.runModal() == .alertSecondButtonReturn else { return }
+        guard state.config.folderIsSafe else {
+            state.message = "Not deleted: \(state.config.folder.path) is not a VM folder of this app."
+            return
+        }
         do {
             try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
             let fresh = AppState()

@@ -2,6 +2,8 @@
 # runs QEMU without a window and talks to the VM over SSH.
 
 log() { printf '==> %s\n' "$*"; }
+# QEMU option values split at commas; a comma in a value is written twice.
+qe() { printf '%s' "${1//,/,,}"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 # Where things are: inside the app (Contents/Resources) or in the source tree.
@@ -35,13 +37,17 @@ vm_load() {
   VM_ID=$(printf '%s' "$VM_DIR" | shasum | cut -c1-8)
   QMP=$RUN_DIR/$VM_ID.qmp          # short: Unix socket paths stop at 104 bytes
   PIDFILE=$RUN_DIR/$VM_ID.pid
-  QEMU_UEFI=(-drive "if=pflash,format=raw,readonly=on,file=$FIRMWARE"
-             -drive "if=pflash,format=raw,file=$VM_DIR/efi-vars.fd")
+  QEMU_UEFI=(-drive "if=pflash,format=raw,readonly=on,file=$(qe "$FIRMWARE")"
+             -drive "if=pflash,format=raw,file=$(qe "$VM_DIR/efi-vars.fd")")
+  DISK_OPT="if=none,id=disk,file=$(qe "$VM_DIR/disk.img"),format=raw,cache=writeback,discard=unmap"
   if [[ ! -f $KEY ]]; then
     mkdir -p "$(dirname "$KEY")"; chmod 700 "$(dirname "$KEY")"
     ssh-keygen -t ed25519 -N "" -C omacvm -f "$KEY" -q
   fi
 }
+
+# Xcode's Command Line Tools (swiftc, clang), for OmacVM's Mac helpers.
+clt_ok() { xcode-select -p >/dev/null 2>&1 && xcrun -f swiftc >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; }
 
 # Grow (or create) a sparse file to SIZE bytes.
 truncate_file() { dd if=/dev/null of="$1" bs=1 seek="$2" 2>/dev/null; }
@@ -91,12 +97,12 @@ qemu_headless() {
   local name=$1; shift
   rm -f "$QMP"
   OMACVM_SLIRP_HOST_PORTS=$HOST_PORTS \
-  "$QEMU" -name "$NAME" -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off \
+  "$QEMU" -name "$(qe "$NAME")" -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off \
     -smp "$CPUS" -m "${MEM_MB}M" -nodefaults -display none -monitor none \
     -action reboot=reset,shutdown=poweroff \
-    -serial "file:$LOG/$name-console.log" \
+    -serial "file:$(qe "$LOG/$name-console.log")" \
     -netdev "user,id=net0,hostfwd=tcp:127.0.0.1:$SSH_PORT-:22" -device virtio-net-pci,netdev=net0,romfile= \
-    -device virtio-rng-pci -qmp "unix:$QMP,server=on,wait=off" "$@" \
+    -device virtio-rng-pci -qmp "unix:$(qe "$QMP"),server=on,wait=off" "$@" \
     > "$LOG/$name-qemu.log" 2>&1 &
   echo $! > "$PIDFILE"
   sleep 1

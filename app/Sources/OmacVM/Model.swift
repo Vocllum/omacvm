@@ -88,6 +88,19 @@ struct VMConfig: Equatable {
     var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=\(Mac.hasNotch ? "on" : "off") mac-clock=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
+
+    /// Like build.sh's VM names: letters, digits, space . _ -, at most 64,
+    /// no "." or ".." (the folder must stay inside the VMs folder).
+    static func validName(_ name: String) -> Bool {
+        name.range(of: "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$", options: .regularExpression) != nil
+            && !name.contains("..")
+    }
+
+    /// The folder is a VM folder of ours: directly inside the VMs folder, with vm.env.
+    var folderIsSafe: Bool {
+        folder.standardizedFileURL.deletingLastPathComponent().path == Paths.vmsRoot.standardizedFileURL.path
+            && FileManager.default.fileExists(atPath: folder.appendingPathComponent("vm.env").path)
+    }
     var disk: URL { folder.appendingPathComponent("disk.img") }
     var efiVars: URL { folder.appendingPathComponent("efi-vars.fd") }
     var readyMarker: URL { folder.appendingPathComponent("ready") }
@@ -202,6 +215,21 @@ enum Mac {
     }
 
     static var timeZone: String { TimeZone.current.identifier }
+
+    /// Xcode's Command Line Tools: the build compiles OmacVM's Mac helpers.
+    static var commandLineToolsInstalled: Bool {
+        func ok(_ tool: String, _ args: [String]) -> Bool {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: tool)
+            p.arguments = args
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            do { try p.run() } catch { return false }
+            p.waitUntilExit()
+            return p.terminationStatus == 0
+        }
+        return ok("/usr/bin/xcode-select", ["-p"]) && ok("/usr/bin/xcrun", ["-f", "swiftc"])
+    }
 
     /// Same rule as omacvm build: English unless the second preferred language says otherwise.
     static var language: String {
