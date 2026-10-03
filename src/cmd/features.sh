@@ -10,6 +10,8 @@
 # they need, then the VM. A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "needs", "title", "summary"}]}.
+# Without --vm it starts nothing: a running VM's state, else the defaults
+# ("vm": null).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -38,8 +40,13 @@ done
 [[ $MODE != features || ${#WANT[@]} == 0 ]] || usage "features takes no feature names (enable/disable do)"
 export OMA_KEY=~/.ssh/omacvm
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
-resolve_vm start
-probe=$(vm_probe "$IP") || true
+if [[ $MODE == features && -z $VM ]] && (( JSON )); then
+  resolve_vm soft || { VM=""; TYPE=""; IP=""; }
+  [[ -n $IP ]] || { VM=""; TYPE=""; }
+else
+  resolve_vm start
+fi
+probe=""; [[ -z $IP ]] || probe=$(vm_probe "$IP") || true
 version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 features_read_env "$probe"
 if [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
@@ -69,7 +76,8 @@ set_on() {
 }
 
 if (( JSON )); then
-  printf '{"vm": %s, "type": "%s", "ip": %s, "omacvm": %s, "features": [' "$(json_str "$VM")" "$TYPE" "$(json_str "$IP")" \
+  printf '{"vm": %s, "type": %s, "ip": %s, "omacvm": %s, "features": [' \
+    "$( [[ -n $VM ]] && json_str "$VM" || echo null)" "$( [[ -n $TYPE ]] && json_str "$TYPE" || echo null)" "$(json_str "$IP")" \
     "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
