@@ -248,7 +248,7 @@ struct ReadyView: View {
             Toggle("Start in full screen", isOn: $fullScreen)
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
             if Mac.hasNotch {
-                Toggle("Full screen uses the strip beside the notch (Omarchy's bar goes there)", isOn: $notch)
+                Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
             if !trusted {
