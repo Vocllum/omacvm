@@ -161,6 +161,10 @@ resolve_vm() {
     IP=$(vm_find_ip "$VM" "$TYPE" 30 2>/dev/null) || IP=""
   fi
   if [[ -z $IP && ${1:-} == start ]]; then
+    local other
+    if [[ $TYPE == app ]] && other=$(app_other_running "$VM"); then
+      die "OmacVM.app runs one VM at a time: stop '$other' first"
+    fi
     log "starting '$VM'" >&2
     IP=$(vm_boot "$VM" "$TYPE") || die "'$VM' did not get an address"
     wait_ssh "$IP" 300

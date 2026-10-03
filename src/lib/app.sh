@@ -6,6 +6,7 @@
 #   app_dir NAME        the VM's folder
 #   app_ip NAME         127.0.0.1:PORT while it runs
 #   app_start NAME      start it in the app (its window opens)
+#   app_other_running NAME  another app VM that runs, if any
 
 app_vms_root() {
   local r
@@ -56,6 +57,10 @@ app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
     sleep 2
   done
   return 1
+}
+
+app_other_running() {   # NAME -> another app VM that runs (the app runs one at a time)
+  app_list | awk -F'\t' -v n="$1" '$1 != n && $3 == "running" { print $1; f = 1; exit } END { exit !f }'
 }
 
 app_start() {
