@@ -64,6 +64,9 @@ curl -H "Authorization: Bearer $T" $B/state
  "can_share":true,"tx_rate_mbps":866,"phy_mode":"802.11ac","country_code":"CH","seq":3,"updated_at":"…"}
 ```
 
+`seq` counts the events that went out. Small Wi-Fi changes (signal, noise,
+rate) wait up to 30 s, so `/state` can show newer values under the same `seq`.
+
 - Disconnected or Wi-Fi off: the link fields are `null`. `connected: true`
   with `ssid: null` = Location Services missing.
 - `quality` 0–100 from RSSI (−90 dBm = 0, −30 dBm = 100).
@@ -151,7 +154,7 @@ panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 
 | event | when |
 |---|---|
-| `wifi` | power, SSID, BSSID, link, mode changes (CoreWLAN events, ~0.3 s); RSSI re-read every 5 s |
+| `wifi` | power, SSID, BSSID, link, mode changes (CoreWLAN events, ~0.3 s); RSSI re-read every 5 s while a client is connected, sent at once when the bar's signal level changes, else at most every 30 s |
 | `audio` | default device, volume, mute, devices added/removed (CoreAudio listeners) |
 | `display` | Night Shift (its own notification), True Tone, brightness |
 | `bluetooth` | power, devices connecting and disconnecting (IOBluetooth notifications), anything else within 5 s; battery re-read every minute while something is connected |
@@ -160,7 +163,9 @@ panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 
 `source`: `keys` = a media key caught while the VM was full screen, `api` = a
 request from the VM, `external` = anything else (macOS slider, AirPods, keys
-outside the VM). `: ping` every 15 s; `retry: 3000`.
+outside the VM). Volume and mute changes come as `external` always; brightness
+changes made on the Mac only to clients that asked with `GET /events?osd=external`
+(the Bridge then reads the brightness every 0.5 s). `: ping` every 15 s; `retry: 3000`.
 
 ### Wallpaper
 

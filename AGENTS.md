@@ -80,7 +80,7 @@ A build is done when all of this holds:
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN` shows 47830 (Gestures) and 47831
    (Bridge) on 10.211.55.2, 192.168.64.1 and/or the `.1` of Fusion's vmnet8
    (see "VMware Fusion settings" below); `launchctl list | grep omacvm`
-   shows bridge, gestures, clip-in.
+   shows bridge, gestures, clip-in (clip-in once a Parallels VM was set up).
 6. In the guest as the desktop user: `omacvm-bridge state` prints the Mac's
    Wi-Fi with an SSID (Location Services granted), `omacvm-bridge audio` the
    Mac's devices, `omacvm-bridge bluetooth` its Bluetooth devices; the bar

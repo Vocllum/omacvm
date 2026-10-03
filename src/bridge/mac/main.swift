@@ -59,6 +59,7 @@ func fusionHost() -> String? {
 let listenPort = UInt16(env["OMACVM_BRIDGE_PORT"] ?? "") ?? 47831
 let tickSeconds = 5.0        // RSSI refresh + listener check
 let pingSeconds = 15.0       // SSE keepalive when nothing changed
+let minorSeconds = 30.0      // Wi-Fi signal jitter alone: sent at most this often
 let recentScanSeconds = 10.0 // GET /scan reuses an active scan this young; scan-cache push throttle
 let maxClients = 64     // dead connections are only noticed on the next write
 
@@ -111,7 +112,8 @@ let wifi = WiFi()
 let audio = Audio()
 let bluetooth = BluetoothBridge()
 let hub = Hub([
-  Feed(event: "wifi", delay: 0.3, read: { wifi.state(locationOK: location.authorized) }, describe: describeWiFi),
+  Feed(event: "wifi", delay: 0.3, read: { wifi.state(locationOK: location.authorized) }, describe: describeWiFi,
+       coarse: coarseWiFi),
   Feed(event: "audio", delay: 0.05, read: { audio.state() }, describe: describeAudio),
   Feed(event: "display", delay: 0.1, read: { displayState() }, describe: describeDisplay),
   Feed(event: "bluetooth", delay: 0.3, read: { bluetooth.state() }, describe: describeBluetooth),
@@ -133,13 +135,13 @@ audio.start()
 location.start()
 bluetooth.start()
 hub.start()
+osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
-osdEvents.start()
 mediaKeys.start()
 if config.menuBarIcon { menuBar.show() }
 log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon)")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
-listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds)
+listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
 listenerTimer.setEventHandler { servers.forEach { $0.check() } }
 listenerTimer.resume()
 

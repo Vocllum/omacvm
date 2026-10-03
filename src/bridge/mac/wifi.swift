@@ -60,6 +60,15 @@ let phyNames = [1: "802.11a", 2: "802.11b", 3: "802.11g", 4: "802.11n", 5: "802.
 // 0..100 from RSSI: -90 dBm and below = 0, -30 dBm and above = 100.
 func quality(_ rssi: Int) -> Int { max(0, min(100, (rssi + 90) * 100 / 60)) }
 
+/// The Wi-Fi state without the signal's jitter: the bar's icon level (the
+/// guest's wifiIconFor: one of five) instead of the exact figures.
+func coarseWiFi(_ s: [String: Any]) -> [String: Any] {
+  var c = s
+  for k in ["rssi", "noise", "snr", "tx_rate_mbps"] { c[k] = nil }
+  if let q = s["quality"] as? Int { c["quality"] = max(0, min(4, (q + 19) / 20 - 1)) }
+  return c
+}
+
 func describeWiFi(_ old: [String: Any], _ s: [String: Any]) -> String? {
   let keys = ["power", "connected", "ssid", "bssid", "location_authorized", "channel"]
   guard keys.contains(where: { !same(old[$0], s[$0]) }) else { return nil }   // RSSI-only changes stay quiet

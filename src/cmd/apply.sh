@@ -100,6 +100,7 @@ if (( MAC )); then
   args=(--quiet)
   on bridge || args+=(--no-bridge)
   { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
+  [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   "$R/src/mac/install.sh" "${args[@]}"
   if on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then

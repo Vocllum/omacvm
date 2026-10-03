@@ -564,7 +564,6 @@ def bridge_token():
 
 def run(pad, keys, glide):
     with socket.create_connection((HOST, PORT), timeout=5) as s:
-        s.settimeout(0.002)        # also the glide's clock
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         # The Bridge's token: any VM on the Mac's VM networks can reach the
         # Mac's listener, so it lets in only VMs that know it.
@@ -573,7 +572,14 @@ def run(pad, keys, glide):
         print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         buf = b""
+        tick = -1          # forces the first settimeout (create_connection left 5 s)
         while True:
+            # A 2 ms tick (the glide's clock) only while a frame or a held
+            # touch waits; otherwise block, so an idle VM is not woken.
+            want = 0.002 if (pad.pending is not None or glide.held is not None or glide.touch.down) else None
+            if want != tick:
+                s.settimeout(want)
+                tick = want
             try:
                 data = s.recv(65536)
             except socket.timeout:

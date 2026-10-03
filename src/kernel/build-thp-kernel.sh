@@ -40,10 +40,15 @@ pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc pytho
 # Built in fresh folders of root's (root never follows a link the user put
 # there), under /home: root's snapshots (subvolume @) leave it out, so the
 # GBs of build files never end up in one. makepkg runs as the user; the
-# packages are copied to root's folder before pacman.
+# packages are copied to root's folder before pacman. makepkg's downloads
+# (the kernel tarball, about 160 MB) stay in $SRC, so a new pkgrel or point
+# release does not fetch it again.
 B=/home/.omacvm-kernel
 [[ -L $B ]] && rm -f "$B"
 install -d -o root -g root -m 755 "$B"
+SRC=$B/src
+[[ -L $SRC ]] && rm -f "$SRC"
+install -d -o "$U" -g "$U" "$SRC"
 W=$(mktemp -d "$B/build.XXXXXX"); P=$(mktemp -d "$B/pkg.XXXXXX")
 trap 'rm -rf "$W" "$P"' EXIT
 cd "$W"
@@ -54,7 +59,13 @@ done
 python3 "$here/thp-pkgbuild.py" "$W"
 chmod 755 "$W"; chown -R "$U:$U" "$W"
 # makepkg builds with one job unless told otherwise: use every vCPU.
-sudo -u "$U" env MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --cleanbuild
+sudo -u "$U" env MAKEFLAGS="-j$(nproc)" SRCDEST="$SRC" makepkg --noconfirm --cleanbuild
+# Keep only the downloads this PKGBUILD uses.
+keep=$(sudo -u "$U" makepkg --printsrcinfo | sed -n 's/^[[:space:]]*source = //p' | sed 's/::.*//; s#.*/##')
+for f in "$SRC"/*; do
+  [[ -e $f || -L $f ]] || continue
+  grep -qxF "$(basename "$f")" <<<"$keep" || rm -f "$f"
+done
 cp -P "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.* "$P"/
 for f in "$P"/*; do [[ -f $f && ! -L $f ]] || { echo "build-thp-kernel: $f is not a plain file" >&2; exit 1; }; done
 pacman -U --noconfirm "$P"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$P"/linux-aarch64-thp-headers-*.pkg.tar.*

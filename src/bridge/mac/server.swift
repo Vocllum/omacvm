@@ -66,11 +66,16 @@ final class Feed {
   let event: String, delay: Double
   let read: () -> [String: Any]
   let describe: (_ old: [String: Any], _ new: [String: Any]) -> String?   // log line for notable changes
-  fileprivate var compare = Data(), state: [String: Any] = [:], seq = 0, pending = false
+  /// What counts as a change worth sending at once; the rest (signal jitter)
+  /// goes out at most every `minorSeconds`. nil: every change counts.
+  let coarse: (([String: Any]) -> [String: Any])?
+  fileprivate var compare = Data(), coarseCompare = Data(), state: [String: Any] = [:], seq = 0, pending = false
+  fileprivate var sent = Date.distantPast, unsent = false
 
   init(event: String, delay: Double, read: @escaping () -> [String: Any],
-       describe: @escaping ([String: Any], [String: Any]) -> String?) {
-    self.event = event; self.delay = delay; self.read = read; self.describe = describe
+       describe: @escaping ([String: Any], [String: Any]) -> String?,
+       coarse: (([String: Any]) -> [String: Any])? = nil) {
+    self.event = event; self.delay = delay; self.read = read; self.describe = describe; self.coarse = coarse
   }
 }
 
@@ -78,15 +83,33 @@ final class Hub {
   private let q = DispatchQueue(label: "omacvm-bridge.hub")
   private let feeds: [Feed]
   private var clients: [Int32: String] = [:]
+  private var external = Set<Int32>()   // clients that asked for external OSD events
+  // One read source per client: a client never sends after its request, so
+  // readable means it closed (or reset). Without this a closed client stays
+  // counted until the next write fails, and writes are rare now.
+  private var watchers: [Int32: DispatchSourceRead] = [:]
+
+  private func drop(_ fd: Int32) {
+    guard let peer = clients.removeValue(forKey: fd) else { return }
+    external.remove(fd)
+    if let w = watchers.removeValue(forKey: fd) { w.cancel() } else { close(fd) }   // the cancel handler closes it
+    log("events: \(peer) disconnected (\(clients.count) left)")
+  }
   private var lastSend = Date()
   private var timer: DispatchSourceTimer?
+  /// Called (on the hub's queue) when the first client asks for external OSD
+  /// events, and when the last one is gone.
+  var onExternalOSD: ((Bool) -> Void)?
 
   init(_ feeds: [Feed]) { self.feeds = feeds }
 
   func start() {
     let t = DispatchSource.makeTimerSource(queue: q)
-    t.schedule(deadline: .now(), repeating: tickSeconds)
+    t.schedule(deadline: .now(), repeating: tickSeconds, leeway: .milliseconds(500))
     t.setEventHandler { [self] in
+      // Nobody listening: nothing to re-read (a new client and every request
+      // read the current state anyway).
+      guard !clients.isEmpty else { return }
       for f in feeds { refresh(f, "tick") }
       if Date().timeIntervalSince(lastSend) >= pingSeconds { write(": ping\n\n") }
     }
@@ -115,9 +138,13 @@ final class Hub {
 
   private func refresh(_ f: Feed, _ why: String) {
     let s = f.read(), cmp = jsonData(s)
-    guard cmp != f.compare else { return }
+    let due = f.unsent && Date().timeIntervalSince(f.sent) >= minorSeconds
+    guard cmp != f.compare || due else { return }
     let old = f.state
-    f.compare = cmp; f.state = s; f.seq += 1
+    f.compare = cmp; f.state = s   // always the latest for /state and new clients
+    let coarse = f.coarse.map { jsonData($0(s)) } ?? cmp
+    if coarse == f.coarseCompare && !due { f.unsent = true; return }
+    f.coarseCompare = coarse; f.seq += 1; f.sent = Date(); f.unsent = false
     if let line = f.describe(old, s) { log("\(f.event) (\(why)): \(line)") }
     broadcast(f.event, stamped(f))
   }
@@ -131,13 +158,12 @@ final class Hub {
   private func write(_ msg: String) {
     lastSend = Date()
     let data = Data(msg.utf8)
-    for (fd, peer) in clients where !writeAll(fd, data) {
-      close(fd); clients[fd] = nil
-      log("events: \(peer) disconnected (\(clients.count) left)")
-    }
+    let hadExternal = !external.isEmpty
+    for (fd, _) in clients where !writeAll(fd, data) { drop(fd) }
+    if hadExternal && external.isEmpty { onExternalOSD?(false) }
   }
 
-  func addClient(_ fd: Int32, peer: String) {
+  func addClient(_ fd: Int32, peer: String, externalOSD: Bool = false) {
     q.async { [self] in
       if clients.count >= maxClients { respond(fd, 503, ["error": "too many event clients"]); return }
       var first = "retry: 3000\n\n"
@@ -145,6 +171,20 @@ final class Hub {
       let head = httpHead(200, "text/event-stream", length: nil, extra: "X-Accel-Buffering: no\r\n")
       guard writeAll(fd, head + Data(first.utf8)) else { close(fd); return }
       clients[fd] = peer
+      let w = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
+      w.setEventHandler { [self] in
+        var b = [UInt8](repeating: 0, count: 256)
+        let n = recv(fd, &b, b.count, MSG_DONTWAIT)
+        if n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+          let hadExternal = !external.isEmpty
+          drop(fd)
+          if hadExternal && external.isEmpty { onExternalOSD?(false) }
+        }
+      }
+      w.setCancelHandler { close(fd) }
+      watchers[fd] = w
+      w.resume()
+      if externalOSD { external.insert(fd); if external.count == 1 { onExternalOSD?(true) } }
       log("events: \(peer) connected (\(clients.count) client\(clients.count == 1 ? "" : "s"))")
     }
   }
@@ -275,7 +315,7 @@ func handle(_ fd: Int32, peer: String) {
     catch let e as APIError { respond(fd, e.status, ["error": e.message]) }
     catch { respond(fd, 500, ["error": "\(error)"]) }
   case ("GET", "/events"):
-    hub.addClient(fd, peer: peer)
+    hub.addClient(fd, peer: peer, externalOSD: query.contains { $0.name == "osd" && $0.value == "external" })
   case ("POST", let p) where p.hasPrefix("/audio/") || p.hasPrefix("/display/"):
     guard let obj = (body.isEmpty ? [:] : try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
       respond(fd, 400, ["error": "body must be a JSON object"]); return

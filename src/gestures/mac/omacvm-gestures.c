@@ -143,6 +143,7 @@ static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
 int ns_event_type(CGEventRef e);  // scroll_ns.m
+void ns_on_app_activate(void (*f)(void));
 static int trackpad = 1;          // 0 with --keys-only
 static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
@@ -278,8 +279,22 @@ static int vmFullScreen(pid_t pid) {
   return found;
 }
 
+// The capture check runs every 0.2 s while a VM app is in front (to see its
+// window go full screen), else every 2 s plus on every app switch. The pointer
+// check runs at 120 Hz only while a full-screen VM is in front.
+static CFRunLoopTimerRef captureTimer, cursorTimer;
+static void updateCursor(CFRunLoopTimerRef t, void *info);
+
+static void cursorTimerOn(int on) {
+  static int running = -1;
+  if (!cursorTimer || on == running) return;
+  running = on;
+  if (!on) updateCursor(NULL, NULL);   // shows the pointer again
+  CFRunLoopTimerSetNextFireDate(cursorTimer, CFAbsoluteTimeGetCurrent() + (on ? 0 : 1e9));
+}
+
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
-  (void)t; (void)info;
+  (void)info;
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   // Parallels' VM window, UTM's, or VMware Fusion's.
@@ -288,6 +303,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int front = net >= 0 && vmFullScreen(pid);
   if (front) frontNet = net;
   frontPid = front ? pid : 0;
+  cursorTimerOn(front);
+  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -671,6 +688,8 @@ static void retryTrackpad(CFRunLoopTimerRef t, void *info) {
   if (trackpadStarted) CFRunLoopTimerInvalidate(t);
 }
 
+static void appActivated(void) { updateCapture(captureTimer, NULL); }
+
 int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
@@ -723,10 +742,13 @@ int main(int argc, char **argv) {
   }
 
 
-  CFRunLoopTimerRef timer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
-  CFRunLoopAddTimer(CFRunLoopGetCurrent(), timer, kCFRunLoopCommonModes);
-  CFRunLoopTimerRef cursorTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 1.0 / 120, 0, 0, updateCursor, NULL);
+  cursorTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 1e9, 1.0 / 120, 0, 0, updateCursor, NULL);
+  CFRunLoopTimerSetTolerance(cursorTimer, 0.001);
   CFRunLoopAddTimer(CFRunLoopGetCurrent(), cursorTimer, kCFRunLoopCommonModes);
+  captureTimer = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent(), 0.2, 0, 0, updateCapture, NULL);
+  CFRunLoopTimerSetTolerance(captureTimer, 0.02);
+  CFRunLoopAddTimer(CFRunLoopGetCurrent(), captureTimer, kCFRunLoopCommonModes);
+  ns_on_app_activate(appActivated);
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();

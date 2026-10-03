@@ -42,6 +42,7 @@ args=()
 launchctl print "gui/$(id -u)/org.omacvm.bridge" >/dev/null 2>&1 || args+=(--no-bridge)
 if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- --keys-only; then args+=(--no-gestures)
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
+launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
 if [[ -d $HOME/omanotch/.git && -d $HOME/Applications/Omanotch.app ]]; then

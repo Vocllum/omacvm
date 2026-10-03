@@ -2,9 +2,11 @@
 # OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display, wallpaper),
 # Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
-#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--force] [--quiet]
+#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--skip-clip] [--force] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
+# --skip-clip leaves the clipboard helper out (only Parallels VMs use it;
+# likewise kept when already installed).
 # --no-gestures installs it keys-only for every VM: macOS keeps its trackpad
 # gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
 # VM chooses for itself: gestures and scroll momentum are VM features.)
@@ -14,12 +16,13 @@
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1; FORCE=0; QUIET=0
+BRIDGE=1; GESTURES=1; CLIP=1; FORCE=0; QUIET=0
 for a in "$@"; do
   case $a in
     --no-bridge) BRIDGE=0 ;;
     --no-gestures) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
+    --skip-clip) CLIP=0 ;;
     --force) FORCE=1 ;;
     --quiet) QUIET=1 ;;
     *) echo "src/mac/install.sh: unknown option $a" >&2; exit 2 ;;
@@ -65,7 +68,7 @@ case $GESTURES in
   1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac ;;
   0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;
 esac
-install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
+(( CLIP )) && install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
 # The permissions macOS asks for now, once per app (they stay with later updates).
 if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
   printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'
