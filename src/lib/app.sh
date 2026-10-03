@@ -139,7 +139,7 @@ app_install_cmd() {   # VERSION
 }
 
 # curl sets no quarantine attribute (a browser does), so Gatekeeper does not
-# stop the ad hoc signed app. The zip's checksum comes from the same release.
+# stop the app, notarized or not. The zip's checksum comes from the same release.
 app_install() {   # VERSION [APP]
   local v=$1 dest=${2:-} url tmp want got new name
   url=$(app_zip_url "$v")

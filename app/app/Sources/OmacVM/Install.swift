@@ -37,8 +37,9 @@ enum Installer {
         UserDefaults.standard.set(app.standardizedFileURL.path, forKey: "installedPath")
     }
 
-    /// Copies this app to FOLDER/NAME.app with NAME as its name, signs it again
-    /// (ad hoc) and returns the new app.
+    /// Copies this app to FOLDER/NAME.app with NAME as its name and returns the
+    /// new app. Under another name it is signed again (ad hoc); under its own
+    /// it keeps its signature (a release's Developer ID).
     static func install(name: String, into folder: URL) throws -> URL {
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -50,6 +51,10 @@ enum Installer {
             try fm.trashItem(at: target, resultingItemURL: nil)
         }
         try fm.copyItem(at: Bundle.main.bundleURL, to: target)
+        if name == Product.name {
+            markInstalled(target)
+            return target
+        }
         let plist = target.appendingPathComponent("Contents/Info.plist")
         let data = try Data(contentsOf: plist)
         guard var info = try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any] else {

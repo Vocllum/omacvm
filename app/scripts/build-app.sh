@@ -2,7 +2,7 @@
 # Build OmacVM.app into dist/: the launcher, QEMU (built from source on the
 # first run and when its patches or build scripts change, about 70 seconds),
 # UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
-# lives in, as committed). Signed ad hoc.
+# lives in, as committed). Signed ad hoc, or with OMACVM_SIGN_ID (below).
 #   scripts/build-app.sh [--name NAME] [--release]
 #     --name     the app's name and Dock title (default OmacVM)
 #     --release  for a published zip: the whole repo must be committed
@@ -102,6 +102,8 @@ EOF
 
 # OMACVM_SIGN_ID: a Developer ID identity (name or SHA-1) signs for release,
 # with the hardened runtime and a timestamp; without it the build is signed ad hoc.
+# Under the hardened runtime the app (whose QEMU uses the microphone) needs
+# audio-input, as try-omarchy's app has it.
 if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   log "signing ($OMACVM_SIGN_ID)"
   SIGN=(--force --sign "$OMACVM_SIGN_ID" --options runtime --timestamp)
@@ -110,7 +112,8 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   done
   codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
-  codesign "${SIGN[@]}" --identifier org.omacvm.app "$APP"
+  codesign "${SIGN[@]}" --identifier org.omacvm.app \
+    --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
   log "signing (ad hoc)"
   for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
