@@ -31,7 +31,7 @@ else than the cause. Recipes and the general failure table are in
 | 19 | All | [Two VMs in one app both get the swipes and Cmd shortcuts](#19-all-routes-two-vms-in-one-app-both-get-the-swipes-and-cmd-shortcuts) |
 | 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
-| 22 | Fusion, app | [The microphone records nothing](#22-fusion-app-the-microphone-records-nothing) |
+| 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -400,20 +400,26 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
 - **Where:** `src/lib/mac.sh` (`utm_add_sound`, `fusion_add_sound`),
   `src/lib/vm.sh` (`vm_boot`), `src/cmd/build.sh`.
 
-## 22. Fusion, app: the microphone records nothing
+## 22. Parallels, Fusion, app: the microphone records nothing, or silence
 
-- **Symptom:** PipeWire lists the input, but `pw-record` gets no samples at
-  all (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`), not even
-  silence.
-- **Cause:** macOS's microphone permission. The process that records on the
-  Mac (`vmware-vmx`, OmacVM.app's QEMU) is a helper that cannot ask for it
-  itself: its `AudioQueueStart` fails with 268451843. vmware.log says
-  `SoundAQStartStream: Failed to start input audio queue, error: (no mapping)
-  (268451843)`; OmacVM.app's `logs/qemu.log` says `SDL_OpenAudioDevice for
-  recording failed: CoreAudio error (AudioQueueStart): 268451843`. UTM
-  worked on the same Mac because UTM had the permission already.
-- **Fix:** Fusion: allow VMware Fusion in System Settings › Privacy &
-  Security › Microphone (a person's step). OmacVM.app: the app now asks for
-  the microphone when it starts a VM, and QEMU records under its grant; the
-  Developer ID build has the `audio-input` entitlement for that.
-- **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`.
+- **Symptom:** PipeWire lists the input, but a recording is empty: on Fusion
+  and OmacVM.app `pw-record` gets no samples at all
+  (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`); on Parallels the
+  samples come but are all zero (`Capture` at 100 % and on).
+- **Cause:** macOS's microphone permission for the app that records on the
+  Mac. Fusion's `vmware-vmx` and OmacVM.app's QEMU are helpers that cannot
+  ask for it themselves: their `AudioQueueStart` fails with 268451843.
+  vmware.log says `SoundAQStartStream: Failed to start input audio queue,
+  error: (no mapping) (268451843)`; OmacVM.app's `logs/qemu.log` says
+  `SDL_OpenAudioDevice for recording failed: CoreAudio error
+  (AudioQueueStart): 268451843`. Parallels hands the VM silence instead. UTM
+  recorded the Mac's microphone on the same Mac because UTM had the
+  permission already.
+- **Fix:** Parallels and Fusion: allow Parallels Desktop or VMware Fusion in
+  System Settings › Privacy & Security › Microphone (a person's step), then
+  restart the VM. OmacVM.app: the app now asks for the microphone when it
+  starts a VM, and QEMU records under its grant; the Developer ID build has
+  the `audio-input` entitlement for that. `omacvm check` reads the Fusion and
+  app logs for the refusal.
+- **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`,
+  `src/cmd/check.sh`.
