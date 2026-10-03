@@ -28,6 +28,8 @@ else than the cause. Recipes and the general failure table are in
 | 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
 | 17 | All | [Security review of the Mac and guest sides; "another SSH host key"](#17-security-review-of-the-mac-and-guest-sides) |
 | 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
+| 19 | All | [Two VMs in one app both get the swipes and Cmd shortcuts](#19-all-routes-two-vms-in-one-app-both-get-the-swipes-and-cmd-shortcuts) |
+| 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -332,3 +334,36 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
 - **Where:** `src/kernel/stock-kernel.sh` (copy and hooks
   `/etc/pacman.d/hooks/zz-omacvm-stock-kernel*.hook`), `src/guest/install.sh`
   (`GRUB_TOP_LEVEL`), `src/guest/check.sh`.
+
+## 19. All routes: two VMs in one app both get the swipes and Cmd shortcuts
+
+- **Symptom:** with two OmacVM VMs running in UTM, a Cmd shortcut in the
+  full-screen one (Super+Return, Super+W) also reaches the other, and so do
+  swipes and scrolling. Found from the code during the UTM end-to-end test,
+  while a second UTM VM ran.
+- **Cause:** OmacVM Gestures knows which app is in front (UTM, Parallels or
+  Fusion), not which of its VMs. It sends keys and touches to every VM
+  connected from that app's network (`sendTo(frontNet, …)`); every app has one
+  network for all its VMs. On Parallels only the swipes and scrolling are
+  affected (Parallels passes Cmd itself).
+- **Fix:** none yet. It needs the front window's VM matched to a connected
+  VM (for example the window title through Accessibility, and the VM name in
+  the guest's hello). Until then, run one OmacVM VM per app at a time.
+- **Where:** `src/gestures/mac/omacvm-gestures.c` (`sendLine`, `forwardKey`).
+
+## 20. UTM: Cmd+W stops the VM
+
+- **Symptom:** the VM is gone after Cmd+W; the guest journal of that boot
+  just ends, without a shutdown.
+- **Cause:** when OmacVM Gestures does not take the key (VM not full screen,
+  trackpad handed back with ⌃⌥⌘Esc, or a key posted by a script below the
+  keyboard, such as System Events' `keystroke`), UTM gets Cmd+W and closes
+  the VM window. With UTM's "don't ask before quitting" setting
+  (`NoQuitConfirmation`), closing the window stops the VM at once.
+- **Fix:** in full screen with the trackpad captured, Cmd+W is Super+W in
+  Omarchy (tested: it closes the guest's window, UTM never sees it). To test
+  Cmd shortcuts from a script, post them at the HID level
+  (`CGEvent.post(tap: .cghidEventTap)` with a `.hidSystemState` source), not
+  with System Events.
+- **Where:** `src/gestures/mac/omacvm-gestures.c` (event tap at
+  `kCGHIDEventTap`).
