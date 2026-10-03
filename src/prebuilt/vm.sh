@@ -52,13 +52,14 @@ prebuilt_make_vm() {
       python3 "$R/src/prebuilt/vmconfig.py" utm-identity "$b/config.plist" "$VM" "$CPUS" $((MEM_GB * 1024))
       prebuilt_seed "$b/Data/omacvm-seed.iso"
       python3 "$R/src/prebuilt/vmconfig.py" utm-seed "$b/config.plist" omacvm-seed.iso
+      if (( DISK_GB > PB_DISK_GB )); then
+        python3 "$R/src/prebuilt/vmconfig.py" qcow2-grow "$b/Data/$(plutil -extract Drive.0.ImageName raw "$b/config.plist")" $((DISK_GB * 1024))
+      fi
       utm_tune_app
       pgrep -xq UTM || { open -a UTM; sleep 3; }
       utm_import "$b"
       rm -rf "$tmp"
       PB_SEED="$UTM_DOCS/$VM.utm/Data/omacvm-seed.iso"
-      (( DISK_GB > PB_DISK_GB )) && utm_resize_disk "$VM" $((DISK_GB * 1024))
-      utm_set_icon "$VM"
       info "set up in $(( $(date +%s) - t0 ))s"; PB_TIMES+=", unpack $(( $(date +%s) - t0 ))s"
       step "First boot: your user, keys, keyboard and timezone"
       t0=$(date +%s)
@@ -112,6 +113,7 @@ prebuilt_drop_seed() {
       ui_spin "The VM shuts down" utm_wait_stopped "$VM"
       utm_drop_live "$VM"
       rm -f "$PB_SEED"
+      utm_set_icon "$VM"   # after the last configuration change: UTM's scripting refuses custom icons
       utm_start "$VM" ;;
     fusion)
       ui_spin "The VM shuts down" fusion_wait_stopped "$VM"

@@ -12,6 +12,7 @@ config.plist, VMware Fusion .vmx). The VM must be stopped.
   vmconfig.py pvs-seed CONFIG ISO|-           attach the seed as CD (- detaches)
   vmconfig.py utm-seed CONFIG ISO_NAME|-      a read-only VirtIO disk in Data/ (- removes it)
   vmconfig.py vmx-seed VMX ISO|-
+  vmconfig.py qcow2-grow FILE MB              grow a qcow2 disk (UTM) in place, no snapshots
 """
 import plistlib
 import random
@@ -141,6 +142,10 @@ def utm_identity(path, name, cpus, mem):
     c["Information"]["UUID"] = new_uuid(False)
     for n in c.get("Network", []):
         n["MacAddress"] = "02:" + ":".join("%02X" % random.randrange(256) for _ in range(5))
+    # A built-in icon until OmacVM's own is set: UTM's scripting cannot update
+    # a VM with a custom icon.
+    c["Information"]["Icon"] = "arch-linux"
+    c["Information"]["IconCustom"] = False
     c["System"]["CPUCount"] = int(cpus)
     c["System"]["MemorySize"] = int(mem)
     plistlib.dump(c, open(path, "wb"))
@@ -231,6 +236,42 @@ def vmx_seed(path, iso):
     vmx_write(path, l)
 
 
+def qcow2_grow(path, mb):
+    """Raise the virtual size. The L1 table must already have room for it
+    within its clusters (one 64 KB cluster maps 4 TB), so nothing moves:
+    only the header's size and L1 length change."""
+    import struct
+    with open(path, "r+b") as f:
+        h = f.read(104)
+        if h[:4] != b"QFI\xfb":
+            sys.exit("qcow2-grow: not a qcow2 file")
+        version, = struct.unpack(">I", h[4:8])
+        cluster_bits, = struct.unpack(">I", h[20:24])
+        size, = struct.unpack(">Q", h[24:32])
+        crypt, l1_size = struct.unpack(">II", h[32:40])
+        l1_off, = struct.unpack(">Q", h[40:48])
+        nb_snap, = struct.unpack(">I", h[60:64])
+        incompat = struct.unpack(">Q", h[72:80])[0] if version >= 3 else 0
+        if crypt or nb_snap or incompat & ~0x1 & ~0x8 or version not in (2, 3):
+            sys.exit("qcow2-grow: encrypted, snapshots or unknown features")
+        new = int(mb) * 1048576
+        if new <= size:
+            return
+        cs = 1 << cluster_bits
+        per_l2 = cs * (cs // 8)
+        need = -(-new // per_l2)
+        room = (-(-l1_size * 8 // cs)) * cs // 8
+        if need > room:
+            sys.exit("qcow2-grow: the L1 table has no room for that size")
+        f.seek(l1_off + l1_size * 8)
+        if any(f.read((need - l1_size) * 8)):
+            sys.exit("qcow2-grow: unexpected data after the L1 table")
+        f.seek(24)
+        f.write(struct.pack(">Q", new))
+        f.seek(36)
+        f.write(struct.pack(">I", need))
+
+
 def main(a):
     if len(a) < 3:
         sys.exit(__doc__)
@@ -253,6 +294,8 @@ def main(a):
         pvs_save(tree, path)
     elif cmd == "utm-seed":
         utm_seed(path, None if rest[0] == "-" else rest[0])
+    elif cmd == "qcow2-grow":
+        qcow2_grow(path, rest[0])
     elif cmd == "vmx-seed":
         vmx_seed(path, None if rest[0] == "-" else rest[0])
     else:
