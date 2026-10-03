@@ -108,54 +108,75 @@ More in [With a coding agent](#with-a-coding-agent).
   <img src="docs/images/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
 </p>
 
-## Three routes: Parallels, UTM or VMware Fusion
+## Four ways: Parallels, UTM, VMware Fusion or OmacVM.app
 
-OmacVM builds the same Omarchy VM in any of these three apps. Everything in
-[What you get](#what-you-get) works on all three, except the display rows below.
-They differ in price, speed and displays.
+OmacVM builds the same Omarchy VM in Parallels Desktop, UTM or VMware Fusion.
+OmacVM.app, its own app that needs nothing else, is coming. Everything in
+[What you get](#what-you-get) works in all three apps, except where the table
+says otherwise.
 
-**Which one?** Want the fastest VM and fine with paying: Parallels. Want it free
-and use external displays: VMware Fusion. Want it free and open source, and one
-screen is enough: UTM.
+**Which one?** Fastest and least to set up, and fine with paying: Parallels.
+Free, with external displays and the longest battery life: VMware Fusion.
+Free and open source, one display: UTM.
 
-| | Parallels Desktop | UTM 5 | VMware Fusion 26 |
-|---|---|---|---|
-| **Best for** | speed, least to set up | free and open source, one screen | free, with external displays |
-| **Price** | | | |
-| Cost | paid | **free**, open source | **free**, also for work |
-| CPUs and memory per VM | Standard: 4 CPUs, 8 GB<br>Pro or trial: more | **no licence cap** | **no licence cap** |
-| **Speed** (the Mac itself = 100 %) | | | |
-| Web apps: Speedometer 3.1 in Chrome | **about 92 %**<br>(earlier measurement) | about 65 %<br>(earlier measurement) | 70 % |
-| **Graphics** | | | |
-| GPU path | virgl (OpenGL) | virgl (OpenGL) | vmwgfx (SVGA3D), with a Hyprland fix OmacVM builds |
-| GPU in Chrome (WebGL, page drawing) | ✓ | ✓ with UTM's default renderer | ✓ |
-| GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ |
-| **Displays** | | | |
-| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** |
-| Native Retina, 120 Hz | ✓ | ✓ | ✓ (120 Hz as reported by the guest) |
-| Resolution changes | **live** | fixed at boot, reboot to change | **live** |
-| **Mac integration** | | | |
-| Wi-Fi, Bluetooth, audio, Night Shift, True Tone, wallpaper (OmacVM Bridge) | ✓ | ✓ | ✓ |
-| Media keys with Omarchy's popup | ✓ | ✓ | ✓ |
-| Trackpad gestures, Omanotch | ✓ | ✓ | ✓ |
-| macOS-native scroll momentum *(experimental)* | ✓ most tested | ✓ | ✓ |
-| Copy and paste text, both ways | ✓ | ✓ | ✓ when the pointer enters or leaves the VM |
-| Cmd+Space and other Cmd shortcuts in full screen | ✓ after one Parallels setting | ✓ | ✓ |
-| Keyboard layout, memory tuning, snapshots | ✓ | ✓ | ✓ |
-| **Setup** | | | |
-| Get the app | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in |
-| Before first use | set *Send macOS system shortcuts* to Always | start UTM from the Dock or Spotlight, never in the background | allow Accessibility for Fusion |
-| Omarchy updates | as usual | as usual | each Hyprland update also rebuilds Hyprland (10 to 20 minutes) |
-| Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** |
-| Status | most tested | UTM 5 is still a beta | newest route |
+| | Parallels Desktop | UTM 5 | VMware Fusion 26 | OmacVM.app *(coming)* |
+|---|---|---|---|---|
+| **Best for** | least to set up | free and open source | free, external displays, battery | nothing else to install |
+| Cost | paid | **free**, open source | **free**, also for work | **free**, open source |
+| CPUs and memory per VM | Standard: 4 CPUs, 8 GB<br>Pro or trial: more | **no cap** | **no cap** | **no cap** |
+| **Speed** (the Mac itself = 100 %) | | | | |
+| CPU, all cores: Geekbench 7 | 96 % | 89 % | **99 %** | **99 %** |
+| CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
+| Web apps: Speedometer 3.1 | 67 % | 52 % | **71 %** | 70 % |
+| Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
+| 3D: glmark2 (score) | **7306** | 964 | 1813 | 1017 |
+| **Graphics and video** | | | | |
+| GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
+| GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
+| YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
+| GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
+| **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
+| Idle desktop | 5.7 W · 17 h | 15.2 W · 7 h | **5.5 W · 18 h** | 6.2 W · 16 h |
+| Reading, scrolling a page | 7.3 W · 14 h | 19.3 W · 5 h | **5.9 W · 17 h** | 6.8 W · 15 h |
+| YouTube 4K | 24.2 W · 4 h | 39.2 W · 2.6 h | **20.4 W · 5 h** | 21.3 W · 4.7 h |
+| Every CPU core busy | 72 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 71 W · 1.4 h |
+| **Displays** | | | | |
+| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** | not yet |
+| Native Retina, 120 Hz | ✓ | ✓ | ✓ | ✓ |
+| Resolution changes | **live** | fixed at boot | **live** | **live** |
+| **Mac integration** | | | | |
+| Wi-Fi, Bluetooth, audio, Night Shift, True Tone, wallpaper (OmacVM Bridge) | ✓ | ✓ | ✓ | coming |
+| Media keys, trackpad gestures, Cmd shortcuts | ✓ | ✓ | ✓ | coming |
+| The bar beside the notch | ✓ Omanotch | ✓ Omanotch | ✓ Omanotch | ✓ built in |
+| Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
+| **Setup** | | | | |
+| Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | download the app |
+| Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
+| Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
-Speed: VMware Fusion 26.0.1 measured on 2026-10-03 on a MacBook Pro M4 Max, 16
-CPUs and 48 GB, Google Chrome 154 on the Mac and in the VM (Speedometer 3.1:
-43.9 vs 62.9). Parallels and UTM are from an earlier measurement with Chrome on
-the same Mac (see [How fast](#how-fast)). New measurements of all three with
-one method, GPU tests included, are under way: [docs/benchmarks](docs/benchmarks/README.md).
-None of the three apps gives Linux Vulkan or OpenCL, so there is no GPU compute
-in any of them.
+<p align="center">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others." width="100%">
+</p>
+
+On the Mac itself, for the same loads: idle 6.1 W (16 h), reading 6.6 W
+(15 h), YouTube 4K 8.0 W (12.5 h, in hardware), every core busy 75 W (1.3 h).
+The difference for video is decoding: macOS decodes YouTube's 4K in hardware,
+and none of these apps gives Linux hardware video decoding.
+
+How we measured: a MacBook Pro 16" M4 Max (macOS 15.7, 100 Wh battery), 16
+CPUs and 48 GB per VM, one VM at a time in full screen on the built-in
+display, nothing else open, brightness at 50 %, Google Chrome 154 on the Mac
+and in each VM, OmacVM 2.3.0. Speedometer is the median of 3 runs, the rest
+single runs. Power is the whole Mac's draw from its battery telemetry, 3
+minutes per load. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
+
+- **UTM's idle draw** is a bug in UTM's QEMU: a virtual CPU spins instead of
+  sleeping when the guest's timer ticks every millisecond
+  ([finding 15](docs/troubleshooting.md#15-utm-uses-15-w-while-omarchy-sits-idle)).
+  OmacVM.app runs a newer QEMU without it.
+- **MotionMark** needs steady frame timing. On the three virgl routes Chrome's
+  frames come too unevenly, so every subtest stays at its minimum; on Fusion
+  it measures normally.
 
 ### About the Fusion route
 
@@ -434,22 +455,10 @@ in [docs/](docs/README.md).
 
 ## How fast
 
-Measured on a MacBook Pro M4 Max: Parallels Desktop Pro (trial) with 16 vCPUs and the memory-optimized kernel, UTM 5.0.6:
-
-| | Mac (macOS) | Parallels | UTM |
-|---|---|---|---|
-| Geekbench 7 multi-core | 26999 | 27201 | 24230 |
-| Geekbench 7 single-core | 3286 | 3270 | 3020 |
-| Speedometer 3.1, Chrome, headless | 46.3 | 46.1 | 36.7 |
-| Speedometer 3.1, Chrome on the desktop | | 42.7 | 29.5–31.6 |
-| Random reads over 1 GiB | 0.186 s | 0.22 s | |
-| Cross-CPU thread wake-up | | 24.8 µs | 46.6 µs |
-
-UTM's Speedometer numbers are with OmacVM's UTM setting (UTM's Vulkan driver
-off); out of the box UTM scored 24.8. Its Geekbench run was on an earlier
-Omarchy VM with the same 16 vCPUs. New runs of all three routes, with Google
-Chrome on both sides, are in progress; how they are measured, so you can run
-them yourself: [docs/benchmarks](docs/benchmarks/README.md).
+See [Four ways](#four-ways-parallels-utm-vmware-fusion-or-omacvmapp): the
+speed, graphics and battery of each route next to the Mac itself, measured on
+a MacBook Pro M4 Max. The raw numbers and how to run the same tests are in
+[docs/benchmarks](docs/benchmarks/README.md).
 
 ## With Omanotch: the bar beside the notch
 

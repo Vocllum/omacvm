@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""docs/benchmarks.svg from report.py's JSON: each route as a share of the Mac.
+"""docs/images/benchmarks.svg from report.py's JSON: each route as a share of the Mac.
 
-  chart.py results.json docs/benchmarks.svg "MacBook Pro M4 Max · macOS 15.7 · 16 CPUs, 48 GB per VM"
+  chart.py results.json docs/images/benchmarks.svg "MacBook Pro M4 Max · macOS 15.7 · 16 CPUs, 48 GB per VM"
 """
 import json, sys
 from xml.sax.saxutils import escape
@@ -13,14 +13,13 @@ ROUTES = [  # report.py names (file names), label, colour
     ("parallels", "Parallels", "#9ccfd8"),
     ("utm", "UTM", "#c4a7e7"),
     ("fusion", "VMware Fusion", "#f6c177"),
+    ("app", "OmacVM.app", "#ebbcba"),
 ]
 TESTS = [
     ("geekbench-cpu-single", "CPU, one core", "Geekbench 7"),
     ("geekbench-cpu-multi", "CPU, all cores", "Geekbench 7"),
     ("speedometer", "Web apps", "Speedometer 3.1"),
     ("motionmark", "Graphics in the browser", "MotionMark 1.3.1"),
-    ("aquarium", "3D in the browser", "WebGL Aquarium, 30,000 fish"),
-    ("geekbench-gpu", "GPU compute", "Geekbench 7"),
 ]
 
 
@@ -43,13 +42,11 @@ def main():
         for name, rl, _ in routes:
             v = med.get(name, {}).get(key)
             if v is None:
-                parts.append(f"{rl}: not available")
+                parts.append(f"{rl}: " + data.get("missing", {}).get(name, {}).get(key, "not available"))
             elif base and name != "mac":
                 parts.append(f"{rl}: {round(100 * v / base)} percent")
         desc.append(f"{label} ({bench}): " + ", ".join(parts))
     s.append(f'<desc id="d">{escape(". ".join(desc))}.</desc>')
-    s.append('<style>.b{transform-origin:left;transform:scaleX(0);animation:g 1.2s cubic-bezier(.2,.7,.2,1) forwards}'
-             '@keyframes g{to{transform:scaleX(1)}}@media (prefers-reduced-motion:reduce){.b{animation:none;transform:none}}</style>')
     s.append('<defs><pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse"><rect x="20" y="20" width="2" height="2" fill="#26233a"/></pattern></defs>')
     s.append(f'<rect width="{W}" height="{H}" fill="#191724"/><rect width="{W}" height="{H}" fill="url(#dots)"/>')
     s.append(f'<text x="{W/2}" y="40" text-anchor="middle" font-family="{FONT}" font-size="22" font-weight="600" fill="#e0def4">How fast is Omarchy in a VM?</text>')
@@ -71,10 +68,10 @@ def main():
             v = med.get(name, {}).get(key)
             by = y + i * row
             if v is None:
-                s.append(f'<text x="{left}" y="{by + 14}" font-family="{MONO}" font-size="12" fill="#6e6a86">not available</text>')
+                s.append(f'<text x="{left}" y="{by + 14}" font-family="{MONO}" font-size="12" fill="#6e6a86">{escape(data.get("missing", {}).get(name, {}).get(key, "not available"))}</text>')
                 continue
             w = max(2, barw * v / top_v)
-            s.append(f'<rect class="b" style="animation-delay:{delay:.2f}s" x="{left}" y="{by + 3}" width="{w:.1f}" height="14" rx="4" fill="{col}"/>')
+            s.append(f'<rect x="{left}" y="{by + 3}" width="{w:.1f}" height="14" rx="4" fill="{col}"/>')
             pct = "100 %" if name == "mac" else (f"{round(100 * v / base)} %" if base else f"{v:g}")
             s.append(f'<text x="{left + w + 8:.1f}" y="{by + 15}" font-family="{MONO}" font-size="12" fill="#e0def4">{pct}</text>')
             delay += 0.05
