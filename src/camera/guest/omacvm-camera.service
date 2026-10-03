@@ -1,0 +1,11 @@
+[Unit]
+Description=OmacVM: the Mac's camera as /dev/video42 (Mac Camera)
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/omacvm-camera
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

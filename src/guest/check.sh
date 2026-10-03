@@ -48,7 +48,7 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
-MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}
+MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -107,6 +107,34 @@ if [[ $BRIDGE == on ]]; then
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
   else skip "wallpaper" "off (chosen at setup)"; fi
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
+
+section "Camera and microphone"
+if [[ $CAMERA == on && $TYPE == parallels ]]; then
+  # Parallels' own camera sharing: a USB camera in the VM.
+  cams=$(cat /sys/class/video4linux/video*/name 2>/dev/null | sort -u | paste -sd, -)
+  if [[ -n $cams ]]; then ok "camera" "Parallels' own: $cams"
+  else bad "camera" "no camera in the VM: Parallels shares the Mac's camera (VM settings > Hardware > USB & Bluetooth > Share Mac camera with Linux; macOS asks Parallels for it)"; fi
+elif [[ $CAMERA == on ]]; then
+  if [[ $(cat /sys/class/video4linux/video42/name 2>/dev/null) == "Mac Camera" ]]; then ok "camera device" "/dev/video42, Mac Camera"
+  else bad "camera device" "no /dev/video42 (v4l2loopback not loaded: after a kernel update reboot, then omacvm apply)"; fi
+  if user_active omacvm-camera.service; then ok "camera service" "omacvm-camera, asks the Mac only while an app reads"
+  else bad "camera service" "omacvm-camera.service not running: omacvm apply"; fi
+  cs=$(as_user /usr/local/bin/omacvm-camera --status 2>/dev/null)
+  if [[ $TYPE == app ]]; then
+    if jq -e .port <<<"$cs" >/dev/null 2>&1; then ok "camera from the Mac" "OmacVM.app's camera port"
+    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update)"; fi
+  else
+    case $(jq -r '.permission // empty' <<<"$cs" 2>/dev/null) in
+      granted|test) ok "camera from the Mac" "OmacVM Bridge: $(jq -r '.camera // "no camera"' <<<"$cs"), $(jq -r 'if .on then "on, \(.readers) reading" else "off" end' <<<"$cs")" ;;
+      not-determined) skip "camera from the Mac" "macOS asks for OmacVM Bridge the first time a Linux app uses the camera" human ;;
+      denied|restricted) bad "camera from the Mac" "camera not allowed for OmacVM Bridge (System Settings > Privacy & Security > Camera)" human ;;
+      *) bad "camera from the Mac" "the Bridge does not answer /camera/status: $(jq -r '.error // "no answer"' <<<"$cs" 2>/dev/null) (omacvm update)" ;;
+    esac
+  fi
+else skip "camera" "off (chosen at setup)"; fi
+mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
+if [[ -n $mic ]]; then ok "microphone" "$mic"
+else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
 
 section "Trackpad and keyboard"
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super

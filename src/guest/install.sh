@@ -6,7 +6,7 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
 # --thp-kernel and --autologin still work.
@@ -203,6 +203,9 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
 fi
+# The Mac's camera: Parallels passes it itself; elsewhere /dev/video42.
+if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi
+"$R/camera/guest/install.sh" "$U" "$TYPE" "${F[camera]}" || log "camera: not set up (see above)"
 if [[ ${F[wallpaper]} == on ]]; then
   log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
 elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then

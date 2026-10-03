@@ -17,7 +17,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock camera idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+, UTM 5, VMware Fusion 13+ or OmacVM.app, and
 # Homebrew's zstd + e2fsprogs (not for OmacVM.app, which builds the VM with its
@@ -50,7 +50,7 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
@@ -63,6 +63,7 @@ feature_flag() {   # NAME on|off
     scroll-momentum|glide) GLIDE=$v ;;
     omanotch) OMANOTCH=$v ;;
     mac-clock) MAC_CLOCK=$v ;;
+    camera) CAMERA=$v ;;
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
@@ -325,7 +326,7 @@ esac
 fvar() {
   case $1 in
     bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
-    scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; idle-lock) echo IDLE_LOCK ;;
+    scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; camera) echo CAMERA ;; idle-lock) echo IDLE_LOCK ;;
     autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
   esac
 }
@@ -383,7 +384,7 @@ esac
 [[ -n $CHANNEL ]] || CHANNEL=$(omarchy_channel)
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
-       mac-clock "$MAC_CLOCK" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
+       mac-clock "$MAC_CLOCK" camera "$CAMERA" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
@@ -396,6 +397,13 @@ human_steps() {
     local what="the trackpad"
     [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
     echo "Allow $what: Accessibility and Input Monitoring for OmacVM Gestures."
+  fi
+  if (( CAMERA )); then
+    case $TYPE in
+      utm|fusion) echo "Allow the camera: macOS asks for OmacVM Bridge the first time a Linux app uses it." ;;
+      app) echo "Allow the camera: macOS asks for OmacVM.app the first time a Linux app uses it." ;;
+      parallels) echo "Allow the camera: macOS asks for Parallels Desktop the first time a Linux app uses it." ;;
+    esac
   fi
   case $TYPE in
   parallels)

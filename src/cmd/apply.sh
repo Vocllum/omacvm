@@ -99,7 +99,8 @@ info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i
 # ---------- the Mac side ----------
 if (( MAC )); then
   args=(--quiet)
-  on bridge || args+=(--no-bridge)
+  # The camera of UTM and Fusion VMs comes through the Bridge, also with its bar features off.
+  on bridge || { on camera && [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--no-bridge)
   { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
