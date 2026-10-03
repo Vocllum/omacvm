@@ -55,14 +55,37 @@ extension UInt16 {
     var nonZero: UInt16? { self == 0 ? nil : self }
 }
 
+/// What the controller keeps of each connected guest.
+final class GuestInfo {
+    let id: Int
+    /// The app whose VM it runs in, from its "hello" (nil: not said, any VM app).
+    var owner: String?
+    /// The VM's name in that app, from "vmname" (nil: not said).
+    var name: String?
+    /// On its lock screen (see StripView.locked).
+    var locked = false
+    var cursorImages: [String: (CGImage, CGPoint, Int)] = [:]
+    /// Its cursor size in logical px ("cursorsize"), nil if not sent.
+    var cursorLogicalSize: Int?
+
+    init(id: Int) { self.id = id }
+}
+
 final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private let settings = Settings()
-    private let stream = GuestStream()
     private var link: GuestLink!
     private var panel: StripPanel?
     private var view: StripView?
     private var geometry: StripGeometry?
-    private var parked = false
+    /// The guest the strip serves, and whether its bar is parked.
+    private var state = ParkState()
+    private var parked: Bool { state.parked }
+    private var guests: [Int: GuestInfo] = [:]
+    private var activeGuest: GuestInfo? { state.active.flatMap { guests[$0] } }
+    private var activeStream: GuestStream? { state.active.flatMap { link.stream(for: $0) } }
+    /// Title of the full-screen VM window: re-read on app and Space changes,
+    /// for another window, or after a few seconds.
+    private var titleCache: (window: CGWindowID, title: String?, at: Date)?
     /// The VM's full-screen window on the built-in display, tracked across Spaces.
     private var vmWindow: CGWindowID?
     private var misses = 0
@@ -88,15 +111,18 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil,
                                                queue: .main) { [weak self] _ in self?.cursorHider.stop() }
         link = GuestLink(port: settings.port, interfacePrefixes: settings.interfacePrefixes,
-                         subnets: settings.vmSubnets, onlyAddress: settings.listenHost, stream: stream)
-        link.onMessages = { [weak self] in self?.handle($0) }
-        link.onConnectionChange = { [weak self] connected in self?.connectionChanged(connected) }
+                         subnets: settings.vmSubnets, onlyAddress: settings.listenHost)
+        link.onMessages = { [weak self] id, messages in self?.handle(messages, from: id) }
+        link.onConnectionChange = { [weak self] id, connected in self?.connectionChanged(id, connected) }
         link.start()
 
         let ws = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.activeSpaceDidChangeNotification, NSWorkspace.didActivateApplicationNotification,
                      NSWorkspace.didTerminateApplicationNotification, NSWorkspace.didWakeNotification] {
-            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
+            ws.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                self?.titleCache = nil
+                self?.evaluate()
+            }
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification,
                                                object: nil, queue: .main) { [weak self] _ in self?.evaluate() }
@@ -125,10 +151,27 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     /// meanwhile, so the VM does not re-layout on every Space switch.
     private func evaluate() {
         cursorHider?.refresh()
-        let ready = link.isConnected && stream.hasImage
-        // Only the connected guest's own VM app counts, once it has said which.
-        let owners = guestOwner.map { settings.vmOwners.contains($0) ? [$0] : settings.vmOwners } ?? settings.vmOwners
-        let visibleNow = ready ? StripDetector.detect(vmOwners: owners) : nil
+        // The full-screen VM window on the built-in display, of an app the
+        // connected guests run in, and the guest for it.
+        var front: StripGeometry?
+        let connected = link.connectedIDs.compactMap { guests[$0] }
+        if !connected.isEmpty {
+            let owners = connected.contains { $0.owner == nil } ? settings.vmOwners : Set(connected.compactMap(\.owner))
+            front = StripDetector.detect(vmOwners: owners)
+        }
+        if let f = front {
+            let candidates = connected.map { GuestCandidate(id: $0.id, owner: $0.owner, name: $0.name) }
+            // One guest needs no title (and no Accessibility permission).
+            let title = candidates.count > 1 ? windowTitle(f) : nil
+            if let pick = GuestPicker.pick(candidates, front: FrontWindow(owner: f.owner, title: title),
+                                           current: state.active) {
+                activate(pick, title: title)
+            } else {
+                front = nil  // none of the guests runs in this app
+            }
+        }
+        let ready = state.active.map { link.isConnected($0) } == true && activeStream?.hasImage == true
+        let visibleNow = ready ? front : nil
 
         if let g = visibleNow {
             misses = 0
@@ -163,10 +206,51 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private func setParked(_ on: Bool) {
-        guard on != parked else { return }
-        parked = on
-        link.send("park \(on ? 1 : 0)")
+        let commands = state.setParked(on)
+        guard !commands.isEmpty else { return }
+        for c in commands { link.send(c.line, to: c.guest) }
         Log.info(on ? "strip shown, guest bar parked" : "strip hidden, guest bar restored")
+    }
+
+    /// The title of the full-screen VM window, cached per window.
+    private func windowTitle(_ g: StripGeometry) -> String? {
+        if let c = titleCache, c.window == g.windowID, Date().timeIntervalSince(c.at) < 3 { return c.title }
+        WindowTitle.askOnce()
+        let title = WindowTitle.title(pid: g.ownerPID, rect: g.windowRect)
+        titleCache = (g.windowID, title, Date())
+        return title
+    }
+
+    /// Serves another guest: the old one gets its bar back, the new one is
+    /// parked by the next evaluate().
+    private func activate(_ id: Int, title: String?) {
+        guard id != state.active else { return }
+        let old = state.active
+        for c in state.activate(id) { link.send(c.line, to: c.guest) }
+        let g = guests[id]
+        Log.info("strip serves guest \(id)\(g?.name.map { " (\"\($0)\")" } ?? "")"
+                 + (old.map { ", was guest \($0)" } ?? "") + (title.map { "; front window \"\($0)\"" } ?? ""))
+        vmWindow = nil
+        geometry = nil  // the new guest gets the geometry when its strip is shown
+        misses = 0
+        misfitSince = nil
+        pendingGuestCursor = false
+        lastBackground = nil
+        freshGuest = true
+        view?.locked = g?.locked ?? false
+        view?.targets = []
+        view?.arrowCursor = .arrow
+        view?.pointerCursor = .pointingHand
+        arrowCursor = nil
+        pointerCursor = nil
+        for name in g?.cursorImages.keys.sorted() ?? [] { buildCursor(name) }
+        link.send("targets", to: id)
+        showFrame()
+    }
+
+    /// Sends one command line to the guest the strip serves.
+    private func send(_ line: String) {
+        link.send(line, to: state.active)
     }
 
     private var beats = 0
@@ -178,11 +262,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         // does not match the Mac point for point.
         // Points and the strip's width: notchcast converts with the guest
         // display's own width (robust while its hidden output is resized).
-        link.send(String(format: "geom %.1f %.1f %.1f %.1f", g.notchLeft, g.notchRight, g.frame.height, g.frame.width))
+        send(String(format: "geom %.1f %.1f %.1f %.1f", g.notchLeft, g.notchRight, g.frame.height, g.frame.width))
         // Older notchcast builds only know these, converted here.
         let k = view?.guestPerPoint ?? 1
-        link.send("notch \(Int((g.notchLeft * k).rounded())) \(Int((g.notchRight * k).rounded()))")
-        link.send("strip \(Int((g.frame.height * k).rounded()))")
+        send("notch \(Int((g.notchLeft * k).rounded())) \(Int((g.notchRight * k).rounded()))")
+        send("strip \(Int((g.frame.height * k).rounded()))")
     }
 
     /// Re-asserts the parked state every two seconds. notchcast turns this
@@ -191,41 +275,51 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     /// notchcast only passes it on when it changed.
     private func heartbeat() {
         guard parked else { return }
-        link.send("park 1")
+        send("park 1")
         beats += 1
         if beats % 5 == 0, let g = geometry {
             sendGeometry(g)
         }
     }
 
-    private func connectionChanged(_ connected: Bool) {
-        parked = false
-        guestOwner = nil
-        guestLocked = false
-        view?.locked = false
-        if connected {
-            link.send("targets")
+    private func connectionChanged(_ id: Int, _ connected: Bool) {
+        // A new session (also a takeover from the same address) starts over:
+        // the guest starts unparked.
+        state.reset(id, gone: !connected)
+        guests[id] = connected ? GuestInfo(id: id) : nil
+        if id == state.active {
+            view?.locked = false
+            send("targets")
             if let g = geometry { sendGeometry(g) }
+        } else if !connected && state.active == nil {
+            // The served guest is gone: start over with the next one.
+            vmWindow = nil
+            geometry = nil
         }
         evaluate()
     }
 
-    private func handle(_ messages: [GuestMessage]) {
+    private func handle(_ messages: [GuestMessage], from id: Int) {
+        guard let guest = guests[id] else { return }
+        let active = id == state.active
         var gotFrame = false
+        var changed = false
         for m in messages {
             switch m {
             case .frame:
                 gotFrame = true
             case .text(let text):
-                handleText(text)
+                changed = handleText(text, from: guest, active: active) || changed
             case let .cursor(name, image, hotSpot, nominal):
-                setCursor(name: name, image: image, hotSpot: hotSpot, nominal: nominal)
+                setCursor(name: name, image: image, hotSpot: hotSpot, nominal: nominal, for: guest, active: active)
             }
         }
-        if gotFrame {
+        // Frames of the other guests only keep their image up to date.
+        if active && gotFrame {
             if panel == nil || geometry == nil { evaluate() }
             showFrame()
         }
+        if changed { evaluate() }
     }
 
     /// Since when frames have had a shape that does not fit the strip.
@@ -236,7 +330,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     /// a shape that does not fit the strip; the last good frame stays up for
     /// up to two seconds instead, so the strip does not visibly jump.
     private func showFrame(force: Bool = false) {
-        guard let view, let image = stream.makeImage() else { return }
+        guard let view, let stream = activeStream, let image = stream.makeImage() else { return }
+        // The first frame of a newly served guest is shown as it is.
+        let force = force || freshGuest
+        freshGuest = false
         if !force, view.bounds.width > 0, view.bounds.height > 0, view.hasImage {
             // In guest logical px: the strip's height at this image's width,
             // against the image's height. A few px off is whole-pixel rounding
@@ -262,35 +359,30 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         lastBackground = bg
     }
 
-    private var cursorImages: [String: (CGImage, CGPoint, Int)] = [:]
-    /// The guest cursor's size in logical px ("cursorsize"), nil if not sent.
-    private var cursorLogicalSize: Int?
-    /// The guest is on its lock screen (see StripView.locked).
-    private var guestLocked = false
-    /// The app whose VM the connected guest runs in, from its "hello"
-    /// (nil: not said, any VM app).
-    private var guestOwner: String?
+    /// The next frame is the first one of a newly served guest.
+    private var freshGuest = false
     private var arrowCursor: NSCursor?
     private var pointerCursor: NSCursor?
 
     /// Guest cursors are sized for its display (e.g. 48 px for 24 pt at 2x).
-    private func setCursor(name: String, image: CGImage, hotSpot: CGPoint, nominal: Int) {
-        Log.info("guest cursor \(name): \(image.width)x\(image.height) px (nominal \(nominal))")
-        cursorImages[name] = (image, hotSpot, nominal)
-        buildCursor(name)
+    private func setCursor(name: String, image: CGImage, hotSpot: CGPoint, nominal: Int, for guest: GuestInfo,
+                           active: Bool) {
+        Log.info("guest \(guest.id) cursor \(name): \(image.width)x\(image.height) px (nominal \(nominal))")
+        guest.cursorImages[name] = (image, hotSpot, nominal)
+        if active { buildCursor(name) }
     }
 
     /// The guest cursor as it looks in the VM window: N px at guest scale S
     /// are N/S guest logical px, which are N/(S*k) strip points.
     private func buildCursor(_ name: String) {
-        guard let (image, hotSpot, nominal) = cursorImages[name] else { return }
+        guard let guest = activeGuest, let (image, hotSpot, nominal) = guest.cursorImages[name] else { return }
         let k = view?.guestPerPoint ?? 1
         // px per strip point. With the guest's cursor size known: the image is
         // `nominal` px for `cursorLogicalSize` logical px (Hyprland scales the
         // theme image it picks to exactly that size), which are /k points.
         // Older guests: assume the image matches the output scale.
-        var d = stream.scale * k
-        if let size = cursorLogicalSize, size > 0, nominal > 0 {
+        var d = (activeStream?.scale ?? 2) * k
+        if let size = guest.cursorLogicalSize, size > 0, nominal > 0 {
             d = CGFloat(nominal) / CGFloat(size) * k
         }
         let cursor = NSCursor(image: NSImage(cgImage: image, size: NSSize(width: CGFloat(image.width) / d,
@@ -303,25 +395,34 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
     }
 
-    private func handleText(_ text: String) {
+    /// Returns whether the guest's owner or name changed.
+    private func handleText(_ text: String, from guest: GuestInfo, active: Bool) -> Bool {
         if text.hasPrefix("cursorsize "), let size = Int(text.dropFirst("cursorsize ".count)) {
-            cursorLogicalSize = size
-            for name in cursorImages.keys { buildCursor(name) }
+            guest.cursorLogicalSize = size
+            if active { for name in guest.cursorImages.keys { buildCursor(name) } }
         } else if text == "lock 1" || text == "lock 0" {
-            guestLocked = text == "lock 1"
-            view?.locked = guestLocked
-            Log.info(guestLocked ? "guest session locked: strip blank" : "guest session unlocked")
+            guest.locked = text == "lock 1"
+            if active { view?.locked = guest.locked }
+            Log.info("guest \(guest.id) " + (guest.locked ? "session locked" + (active ? ": strip blank" : "") : "session unlocked"))
         } else if text.hasPrefix("hello ") {
-            let hv = text.dropFirst("hello ".count)
-            guestOwner = hv == "parallels" ? "Parallels Desktop" : hv == "qemu" ? "UTM" : hv == "vmware" ? "VMware Fusion" : nil
-            Log.info("guest runs in \(hv) (\(guestOwner ?? "any VM app"))")
-            evaluate()
+            let hv = String(text.dropFirst("hello ".count))
+            // An app that is not a VM app here (vmOwners) could be any of them.
+            guest.owner = GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
+            Log.info("guest \(guest.id) runs in \(hv) (\(guest.owner ?? "any VM app"))")
+            return true
+        } else if text.hasPrefix("vmname ") {
+            guest.name = GuestPicker.vmName(base64: String(text.dropFirst("vmname ".count)))
+            Log.info("guest \(guest.id) is VM " + (guest.name.map { "\"\($0)\"" } ?? "(name not readable)"))
+            return true
+        } else if !active {
+            // targets: only the served guest's count
         } else if text.hasPrefix("targets ") {
             let json = Data(text.dropFirst("targets ".count).utf8)
             if let arr = try? JSONSerialization.jsonObject(with: json) as? [[Double]] {
                 view?.targets = arr.filter { $0.count == 4 }.map { CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) }
             }
         }
+        return false
     }
 
     // MARK: panel
@@ -333,12 +434,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             v.autoresizingMask = [.width, .height]
             v.input = self
             v.vmOwners = settings.vmOwners
-            v.locked = guestLocked
+            v.locked = activeGuest?.locked ?? false
             v.onGuestScaleChange = { [weak self] in
                 guard let self else { return }
                 Log.info(String(format: "guest bar: %.3f logical px per strip point", self.view?.guestPerPoint ?? 1))
                 // Cursors first: they must follow even while the strip is hidden.
-                for name in self.cursorImages.keys { self.buildCursor(name) }
+                for name in self.activeGuest?.cursorImages.keys.sorted() ?? [] { self.buildCursor(name) }
                 if let g = self.geometry { self.sendGeometry(g) }
             }
             if let arrowCursor { v.arrowCursor = arrowCursor }
@@ -346,10 +447,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             p.contentView = v
             panel = p
             view = v
-            if let image = stream.makeImage() {
+            if let stream = activeStream, let image = stream.makeImage() {
                 v.show(image: image, scale: stream.scale, background: stream.backgroundColor())
             }
-            link.send("targets")
+            send("targets")
         }
         panel?.setFrame(g.frame, display: true)
         panel?.orderFrontRegardless()
@@ -363,13 +464,13 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     // MARK: StripInputDelegate
 
     func stripClicked(x: CGFloat, y: CGFloat, button: Int) {
-        link.send(String(format: "click %.1f %.1f %d", x, y, button))
+        send(String(format: "click %.1f %.1f %d", x, y, button))
         // Widgets can change size after a click (e.g. a panel toggles an icon).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.link.send("targets") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.send("targets") }
     }
 
     func stripScrolled(x: CGFloat, y: CGFloat, steps: Int) {
-        link.send(String(format: "wheel %.1f %.1f %d", x, y, steps * 120))
+        send(String(format: "wheel %.1f %.1f %d", x, y, steps * 120))
     }
 
     func stripHoverChanged(_ inside: Bool, exit: (direction: String, x: CGFloat)?) {
@@ -377,9 +478,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         // is over the strip, where the helper shows the guest's cursor images.
         if inside {
             pendingGuestCursor = false
-            link.send("cursor 0")
+            send("cursor 0")
             cursorHider.pointerOnStrip(showAfter: 0.045)
-            link.send("targets")
+            send("targets")
         } else if exit != nil {
             // Show the guest cursor once the pointer lands in a VM window (at
             // that exact spot, see pointerEnteredVM). If it lands elsewhere,
@@ -388,11 +489,11 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
                 guard let self, self.pendingGuestCursor else { return }
                 self.pendingGuestCursor = false
-                self.link.send("cursor 1")
+                self.send("cursor 1")
             }
         } else {
             pendingGuestCursor = false
-            link.send("cursor 1")
+            send("cursor 1")
         }
     }
 
@@ -408,12 +509,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         let k = view?.guestPerPoint ?? 1
         if window.maxY == builtin.maxY {
             // Back into the built-in display's VM window, below the strip.
-            link.send(String(format: "cursor 1 down %.1f %.1f", x * k, (p.y - window.minY) * k))
+            send(String(format: "cursor 1 down %.1f %.1f", x * k, (p.y - window.minY) * k))
         } else if window.maxY <= builtin.minY {
             // Up to the display above.
-            link.send(String(format: "cursor 1 up %.1f %.1f", x * k, window.maxY - p.y))
+            send(String(format: "cursor 1 up %.1f %.1f", x * k, window.maxY - p.y))
         } else {
-            link.send("cursor 1")
+            send("cursor 1")
         }
     }
 }

@@ -60,16 +60,39 @@ struct VMInterface: Hashable {
     }
 }
 
-/// TCP server the guest's `notchcast` connects to. Only one guest is served;
-/// a new connection replaces the old one.
+/// TCP server the guests' `notchcast` connect to. Several guests (VMs) may be
+/// connected at once; the controller decides which one the strip serves. A
+/// new connection from a connected guest's address replaces the old one (a
+/// restarted notchcast or rebooted VM).
 ///
 /// It listens only on the Mac's side of VM shared networks (never on Wi-Fi,
 /// Ethernet, Internet Sharing or Thunderbolt bridges) and accepts a connection
 /// only from an address inside that network. The interfaces come and go with
 /// the VM apps, so they are re-scanned every few seconds.
 final class GuestLink {
-    var onMessages: (([GuestMessage]) -> Void)?
-    var onConnectionChange: ((Bool) -> Void)?
+    /// Messages from guest `id`.
+    var onMessages: ((Int, [GuestMessage]) -> Void)?
+    /// Guest `id` connected (true; also when a new connection from its
+    /// address took over: a new session) or went away (false).
+    var onConnectionChange: ((Int, Bool) -> Void)?
+
+    private final class Guest {
+        let id: Int
+        let peer: UInt32
+        let iface: VMInterface
+        var connection: NWConnection
+        let stream = GuestStream()
+        var isConnected = false
+
+        init(id: Int, peer: UInt32, iface: VMInterface, connection: NWConnection) {
+            self.id = id
+            self.peer = peer
+            self.iface = iface
+            self.connection = connection
+        }
+    }
+
+    static let maxGuests = 8
 
     private let port: UInt16
     private let prefixes: [String]
@@ -79,15 +102,12 @@ final class GuestLink {
     private let queue = DispatchQueue.main
     private var listeners: [VMInterface: NWListener] = [:]
     private var scanTimer: Timer?
-    private var connection: NWConnection?
-    private var connectionPeer: UInt32?
-    private var connectionIface: VMInterface?
-    private let stream: GuestStream
-
-    private(set) var isConnected = false
+    private var guests: [Int: Guest] = [:]
+    /// Guest ids grow with each new guest, so they give the connection order.
+    private var nextID = 1
 
     /// `onlyAddress`: listen on this one address instead of scanning.
-    init(port: UInt16, interfacePrefixes: [String], subnets: [String], onlyAddress: String?, stream: GuestStream) {
+    init(port: UInt16, interfacePrefixes: [String], subnets: [String], onlyAddress: String?) {
         self.port = port
         self.prefixes = interfacePrefixes
         self.subnets = subnets.compactMap { VMInterface.parseSubnet($0.trimmingCharacters(in: .whitespaces)) }
@@ -95,8 +115,15 @@ final class GuestLink {
         self.onlyAddress = raw.isEmpty ? nil : VMInterface.parse(raw)
         self.listenNowhere = !raw.isEmpty && self.onlyAddress == nil
         if listenNowhere { Log.info("listenHost '\(raw)' is not an IPv4 address: not listening") }
-        self.stream = stream
     }
+
+    /// The connected guests, first connected first.
+    var connectedIDs: [Int] { guests.values.filter(\.isConnected).map(\.id).sorted() }
+
+    func isConnected(_ id: Int) -> Bool { guests[id]?.isConnected == true }
+
+    /// The bar image as last sent by guest `id`.
+    func stream(for id: Int) -> GuestStream? { guests[id]?.stream }
 
     func start() {
         rescan()
@@ -112,10 +139,11 @@ final class GuestLink {
         }
         // A guest whose network is gone (VM app quit) is gone too, even if
         // its connection never closed.
-        if let iface = connectionIface, !now.contains(iface), let c = connection {
-            Log.info("dropping the guest on \(iface.name): network gone")
+        for g in guests.values where !now.contains(g.iface) {
+            Log.info("dropping guest \(g.id) on \(g.iface.name): network gone")
+            let c = g.connection
             c.cancel()
-            dropConnection(c)
+            drop(g, c)
         }
         for iface in now where listeners[iface] == nil {
             startListener(on: iface)
@@ -164,32 +192,40 @@ final class GuestLink {
             c.cancel()
             return
         }
-        // One guest at a time, and the first one keeps the strip: another VM
-        // running notchcast is turned away while this one is connected (TCP
-        // keepalive and the network check in rescan() notice a dead one). The
-        // same address may take over at once (a restarted notchcast or
-        // rebooted VM).
-        if connection != nil, isConnected, let current = connectionPeer, current != ip {
-            Log.info("another guest is connected; turning away \(c.endpoint)")
+        // The same address again takes over at once (a restarted notchcast or
+        // rebooted VM). TCP keepalive and the network check in rescan() notice
+        // a guest that vanished without closing.
+        if let g = guests.values.first(where: { $0.peer == ip && $0.iface == iface }) {
+            let old = g.connection
+            let takeover = g.isConnected
+            g.connection = c
+            g.stream.reset()
+            old.cancel()
+            run(c, for: g, takeover: takeover)
+            return
+        }
+        guard guests.count < Self.maxGuests else {
+            Log.info("\(guests.count) guests connected already; turning away \(c.endpoint)")
             c.cancel()
             return
         }
-        let takeover = connection != nil && isConnected
-        connection?.cancel()
-        connection = c
-        connectionPeer = ip
-        connectionIface = iface
-        stream.reset()
-        c.stateUpdateHandler = { [weak self, weak c] state in
-            guard let self, let c, c === self.connection else { return }
+        let g = Guest(id: nextID, peer: ip, iface: iface, connection: c)
+        nextID += 1
+        guests[g.id] = g
+        run(c, for: g, takeover: false)
+    }
+
+    private func run(_ c: NWConnection, for g: Guest, takeover: Bool) {
+        c.stateUpdateHandler = { [weak self, weak c, weak g] state in
+            guard let self, let c, let g, c === g.connection, self.guests[g.id] === g else { return }
             switch state {
             case .ready:
-                Log.info("guest connected: \(c.endpoint)")
+                Log.info("guest \(g.id) connected: \(c.endpoint)")
                 // Taking over from an old connection is a new session too.
-                if takeover && self.isConnected { self.onConnectionChange?(true) } else { self.setConnected(true) }
-                self.receive(on: c)
+                if takeover && g.isConnected { self.onConnectionChange?(g.id, true) } else { self.setConnected(g, true) }
+                self.receive(on: c, for: g)
             case .failed, .cancelled:
-                self.dropConnection(c)
+                self.drop(g, c)
             default:
                 break
             }
@@ -197,15 +233,15 @@ final class GuestLink {
         c.start(queue: queue)
     }
 
-    private func receive(on c: NWConnection) {
-        c.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, isComplete, error in
-            guard let self, c === self.connection else { return }
+    private func receive(on c: NWConnection, for g: Guest) {
+        c.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self, weak g] data, _, isComplete, error in
+            guard let self, let g, c === g.connection, self.guests[g.id] === g else { return }
             if let data, !data.isEmpty {
                 do {
-                    let messages = try self.stream.feed(data)
-                    if !messages.isEmpty { self.onMessages?(messages) }
+                    let messages = try g.stream.feed(data)
+                    if !messages.isEmpty { self.onMessages?(g.id, messages) }
                 } catch {
-                    Log.info("\(error); dropping guest connection")
+                    Log.info("\(error); dropping guest \(g.id)")
                     c.cancel()
                     return
                 }
@@ -214,28 +250,26 @@ final class GuestLink {
                 c.cancel()
                 return
             }
-            self.receive(on: c)
+            self.receive(on: c, for: g)
         }
     }
 
-    private func dropConnection(_ c: NWConnection) {
-        guard c === connection else { return }
-        connection = nil
-        connectionPeer = nil
-        connectionIface = nil
-        Log.info("guest disconnected")
-        setConnected(false)
+    private func drop(_ g: Guest, _ c: NWConnection) {
+        guard c === g.connection, guests[g.id] === g else { return }
+        guests[g.id] = nil
+        Log.info("guest \(g.id) disconnected")
+        setConnected(g, false)
     }
 
-    private func setConnected(_ v: Bool) {
-        guard v != isConnected else { return }
-        isConnected = v
-        onConnectionChange?(v)
+    private func setConnected(_ g: Guest, _ v: Bool) {
+        guard v != g.isConnected else { return }
+        g.isConnected = v
+        onConnectionChange?(g.id, v)
     }
 
-    /// Sends one command line to the guest (fire and forget).
-    func send(_ line: String) {
-        guard let c = connection, isConnected else { return }
-        c.send(content: Data((line + "\n").utf8), completion: .contentProcessed { _ in })
+    /// Sends one command line to guest `id` (fire and forget).
+    func send(_ line: String, to id: Int?) {
+        guard let id, let g = guests[id], g.isConnected else { return }
+        g.connection.send(content: Data((line + "\n").utf8), completion: .contentProcessed { _ in })
     }
 }
