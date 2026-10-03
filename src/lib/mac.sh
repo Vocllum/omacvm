@@ -212,9 +212,16 @@ fusion_ip() {   # <vm name> [seconds]: the address Fusion's DHCP gave the VM's M
 }
 
 fusion_start() {   # <vm name>
-  local x
+  # Right after a shutdown Fusion can still hold the VM's files and leave a
+  # start without effect (no error): check, and try again.
+  local x i
   x=$(fusion_vmx "$1") || die "no VMware Fusion VM named '$1'"
-  [[ $(fusion_state "$1") == running ]] || "$VMRUN" -T fusion start "$x" gui >/dev/null 2>&1 || die "VMware Fusion did not start '$1'"
+  for ((i = 0; i < 5; i++)); do
+    [[ $(fusion_state "$1") == running ]] && return 0
+    "$VMRUN" -T fusion start "$x" gui >/dev/null 2>&1 || true
+    sleep 3
+  done
+  [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"
 }
 
 fusion_wait_stopped() {   # <vm name>

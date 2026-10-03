@@ -442,7 +442,7 @@ elif [[ $TYPE == fusion ]]; then
   VMX=$(fusion_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" "$DISK_GB")
   mv "$LIVE" "$(fusion_bundle "$VM")/live.img"; LIVE="$(fusion_bundle "$VM")/live.img"
   sed -i '' "s|FLAT \".*\" 0|FLAT \"$LIVE\" 0|" "$(fusion_bundle "$VM")/live.vmdk"
-  "$VMRUN" -T fusion start "$VMX" gui >/dev/null || die "VMware Fusion did not start the VM"
+  fusion_start "$VM"
   ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
 else
   LIVE="$HOME/Library/Caches/omacvm/live/$VM-live.img"
@@ -480,7 +480,7 @@ elif [[ $TYPE == fusion ]]; then
   ui_spin "The live installer shuts down" fusion_wait_stopped "$VM"
   fusion_drop_live "$VM"
   rm -f "$LIVE"
-  "$VMRUN" -T fusion start "$VMX" gui >/dev/null || die "VMware Fusion did not start the VM"
+  fusion_start "$VM"
   sleep 20
   ui_spin_val IP "The new system starts and gets its address" fusion_ip "$VM" 300 || die "the new system got no IP address"
 else
