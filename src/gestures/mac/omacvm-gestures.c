@@ -49,7 +49,9 @@
 // 127.0.0.1, can connect; neither side ever sends the Bridge's token itself):
 //   C <guest nonce>                   from the guest: 32 hex digits
 //   M <mac nonce> <proof>             the Mac proves it knows the token: HMAC-SHA256(token,
-//                                     "omacvm-gestures mac <guest nonce> <mac nonce>"), hex
+//                                     "omacvm-gestures mac <addr> <guest nonce> <mac nonce>"), hex;
+//                                     <addr>: the Mac address it accepted on, so a proof that
+//                                     a listener on 127.0.0.1 fetched from 10.211.55.2 fails
 //   R <gestures 0|1> <glide 0|1> <proof> [<name>]   from the guest once the Mac's proof
 //                                     holds: what this VM wants, its own proof (as above
 //                                     with "vm") and the VM's name in base64 (omacvm apply
@@ -686,10 +688,11 @@ static int isHex(const char *s, size_t n) {
   return 1;
 }
 
-// HMAC-SHA256(token, "omacvm-gestures <who> <guest nonce> <mac nonce>") in hex.
-static void proof(const char *tok, size_t tl, const char *who, const char *gn, const char *mn, char out[65]) {
+// HMAC-SHA256(token, "omacvm-gestures <who> <addr> <guest nonce> <mac nonce>") in hex.
+static void proof(const char *tok, size_t tl, const char *who, const char *addr, const char *gn, const char *mn,
+                  char out[65]) {
   char msg[160]; unsigned char d[CC_SHA256_DIGEST_LENGTH];
-  int n = snprintf(msg, sizeof msg, "omacvm-gestures %s %s %s", who, gn, mn);
+  int n = snprintf(msg, sizeof msg, "omacvm-gestures %s %s %s %s", who, addr, gn, mn);
   CCHmac(kCCHmacAlgSHA256, tok, tl, msg, (size_t)n, d);
   for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(out + 2 * i, 3, "%02x", d[i]);
 }
@@ -810,15 +813,18 @@ static void *greet(void *arg) {
     char tok[160], mn[33], mine[65], want[65], got[72] = "", out[160];
     size_t tl = readToken(tok);
     why = !tl ? "no Bridge token on this Mac" : "wrong proof";
+    // Both proofs name the address this came in on (the VM checks it is its own).
+    struct sockaddr_in me; socklen_t ml = sizeof me; char at[INET_ADDRSTRLEN] = "";
+    if (getsockname(c, (struct sockaddr *)&me, &ml) || !inet_ntop(AF_INET, &me.sin_addr, at, sizeof at)) tl = 0;
     if (tl && isHex(gn, 32)) {
       unsigned char r[16]; arc4random_buf(r, sizeof r);
       for (int i = 0; i < 16; i++) snprintf(mn + 2 * i, 3, "%02x", r[i]);
-      proof(tok, tl, "mac", gn, mn, mine);
+      proof(tok, tl, "mac", at, gn, mn, mine);
       int k = snprintf(out, sizeof out, "M %s %s\n", mn, mine);
       tv.tv_sec = 3; setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
       if (send(c, out, (size_t)k, MSG_NOSIGNAL) == k && recvLine(c, line, sizeof line) > 0 && line[0] == 'R' &&
           sscanf(line + 1, "%d %d %71s %359s", &gestures, &glide, got, name64) >= 3) {
-        proof(tok, tl, "vm", gn, mn, want);
+        proof(tok, tl, "vm", at, gn, mn, want);
         ok = sameText(got, want);
       }
     }

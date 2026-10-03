@@ -65,6 +65,9 @@ def env_floats(name, default):
 
 
 HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") or "10.211.55.2"
+# The Mac address the helper must have accepted on (both proofs name it):
+# OmacVM.app's 10.0.2.2 is the Mac's 127.0.0.1.
+MAC_ADDR = "127.0.0.1" if os.environ.get("OMACVM_VM_TYPE") == "app" else HOST
 PORT = int(env_float("OMACVM_GESTURES_PORT", 47830))
 # The VM's feature choices (/etc/omacvm/env, loaded by the service).
 GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
@@ -576,8 +579,11 @@ def bridge_token():
 
 
 def proof(tok, who, gn, mn):
-    """HMAC-SHA256(token, "omacvm-gestures <who> <guest nonce> <mac nonce>"), hex."""
-    return hmac.new(tok.encode(), f"omacvm-gestures {who} {gn} {mn}".encode(), hashlib.sha256).hexdigest().encode()
+    """HMAC-SHA256(token, "omacvm-gestures <who> <Mac address> <guest nonce> <mac nonce>"), hex.
+    With the address, a listener on 127.0.0.1 cannot pass on a proof it got from
+    the helper on 10.211.55.2."""
+    msg = f"omacvm-gestures {who} {MAC_ADDR} {gn} {mn}"
+    return hmac.new(tok.encode(), msg.encode(), hashlib.sha256).hexdigest().encode()
 
 
 def run(pad, keys, glide):
