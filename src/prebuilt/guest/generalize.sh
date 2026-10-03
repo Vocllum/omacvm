@@ -17,13 +17,24 @@ while (( $# )); do
   esac
 done
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
-[[ $(id -u "$U" 2>/dev/null) == 1000 ]] || { echo "generalize.sh: $U is not user 1000" >&2; exit 1; }
-H=$(getent passwd "$U" | cut -d: -f6)
 P=/var/lib/omacvm/prebuilt
+# Run again after a stop: the user may be gone already, its home in $P/home.
+if id "$U" >/dev/null 2>&1; then
+  [[ $(id -u "$U") == 1000 ]] || { echo "generalize.sh: $U is not user 1000" >&2; exit 1; }
+  H=$(getent passwd "$U" | cut -d: -f6)
+else
+  [[ -d $P/home ]] || { echo "generalize.sh: no user $U and no home template" >&2; exit 1; }
+  H=""
+fi
 
 [[ -d /usr/lib/parallels-tools || -e /etc/init.d/prltoolsd || -e /usr/lib/systemd/system/prltoolsd.service ]] &&
   { echo "generalize.sh: Parallels Tools are installed; an image must not contain them" >&2; exit 1; }
 
+# Omanotch's build tools (Mac-independent): omacvm apply only has to clone
+# and build it when the Mac has a notch.
+pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1 || true
+
+if [[ -n $H ]]; then
 log "stopping $U's session"
 loginctl terminate-user "$U" 2>/dev/null || true
 for _ in $(seq 10); do pgrep -u "$U" >/dev/null || break; sleep 1; done
@@ -52,7 +63,9 @@ find "$T" -name '*.log' -path '*/.local/*' -delete 2>/dev/null || true
 userdel "$U"
 getent group "$U" >/dev/null && groupdel "$U"
 rm -rf "$H" "/var/spool/mail/$U" "/var/lib/systemd/linger/$U" "/var/lib/AccountsService/users/$U" \
-  /var/lib/sddm/state.conf /etc/sddm.conf.d/20-omacvm-autologin.conf
+  /etc/sddm.conf.d/20-omacvm-autologin.conf
+if [[ -f /var/lib/sddm/state.conf ]]; then sed -i "s/^User=.*/User=$U/" /var/lib/sddm/state.conf; fi
+fi
 sed -i "s/^OMACVM_USER=.*/OMACVM_USER=$U/" /etc/omacvm/env 2>/dev/null || true
 
 log "root's key, SSH host keys, machine id, network secrets"
@@ -85,7 +98,8 @@ L=$(mktemp)
 base64 -d <<<"$AUDIT" | awk 'length($0) >= 4' > "$L"
 roots=(/etc /root /home /var /opt /srv /usr/local /boot)
 [[ -d /.snapshots ]] && roots+=(/.snapshots)
-if [[ -s $L ]] && hits=$(grep -rIlF -f "$L" "${roots[@]}" 2>/dev/null); then
+# /usr/local/share/omacvm is OmacVM's public source (it names its GitHub owner).
+if [[ -s $L ]] && hits=$(grep -rIlF -f "$L" "${roots[@]}" 2>/dev/null | grep -v '^/usr/local/share/omacvm/'); then
   echo "$hits" | head -40 >&2
   echo "generalize.sh: the files above contain the build Mac's user, names, keys or token" >&2
   exit 1
@@ -93,6 +107,20 @@ fi
 rm -f "$L"
 echo "files naming the placeholder user (expected: the home template and OmacVM's own):"
 grep -rIlF "$U" /etc /root /var /opt /srv /usr/local /boot 2>/dev/null | grep -v "^$P/home/" | head -20 || true
+
+rm -rf /root/omacvm-prebuilt
+# omarchy-mac's factory-reset baseline (@factory, a snapshot of @ from the
+# install) still has the build's user and key: take it again from this state.
+# A factory reset then lands at the first-boot setup.
+top=/run/omacvm-top; mkdir -p "$top"
+if mount -o subvolid=5 "$(findmnt -no SOURCE / | sed 's/\[.*//')" "$top" 2>/dev/null; then
+  if [[ -d $top/@factory ]]; then
+    log "factory-reset baseline (@factory) from this state"
+    btrfs subvolume delete "$top/@factory" >/dev/null
+    btrfs subvolume snapshot -r "$top/@" "$top/@factory" >/dev/null
+  fi
+  umount "$top"
+fi
 
 log "zeroing free space, so the disk compacts"
 for d in / /boot; do
@@ -103,6 +131,5 @@ for d in / /boot; do
 done
 sync
 fstrim -av 2>/dev/null || true
-rm -rf /root/omacvm-prebuilt
 log "image ready, powering off"
 systemd-run --on-active=3 --quiet systemctl poweroff

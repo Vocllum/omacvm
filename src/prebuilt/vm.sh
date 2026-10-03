@@ -25,7 +25,7 @@ prebuilt_make_vm() {
   case $TYPE in
     parallels)
       tmp="$VM_DIR/.omacvm-unpack-$$"
-      ui_spin "Unpacking" prebuilt_unpack "$tmp"
+      ui_spin "Unpacking" prebuilt_unpack "$tmp" || die "could not unpack the image (free disk space?)"
       PVM="$VM_DIR/$VM.pvm"
       mv "$tmp/$PB_BUNDLE" "$PVM"; rmdir "$tmp"
       (( DISK_GB > PB_DISK_GB )) && /usr/local/bin/prl_disk_tool resize --hdd "$PVM/omarchy.hdd" --size "${DISK_GB}G" >/dev/null
@@ -46,7 +46,7 @@ prebuilt_make_vm() {
       ui_spin_val IP "The VM starts and gets its address" vm_ip "$PVM" 300 || die "the VM got no IP address" ;;
     utm)
       tmp="$PREBUILT_CACHE/unpack-$$"
-      ui_spin "Unpacking" prebuilt_unpack "$tmp"
+      ui_spin "Unpacking" prebuilt_unpack "$tmp" || die "could not unpack the image (free disk space?)"
       b="$tmp/$VM.utm"
       mv "$tmp/$PB_BUNDLE" "$b"
       python3 "$R/src/prebuilt/vmconfig.py" utm-identity "$b/config.plist" "$VM" "$CPUS" $((MEM_GB * 1024))
@@ -67,7 +67,7 @@ prebuilt_make_vm() {
     fusion)
       mkdir -p "$FUSION_DIR"
       tmp="$FUSION_DIR/.omacvm-unpack-$$"
-      ui_spin "Unpacking" prebuilt_unpack "$tmp"
+      ui_spin "Unpacking" prebuilt_unpack "$tmp" || die "could not unpack the image (free disk space?)"
       b=$(fusion_bundle "$VM")
       mv "$tmp/$PB_BUNDLE" "$b"; rmdir "$tmp"
       mv "$b/$PREBUILT_NAME.vmx" "$b/$VM.vmx"

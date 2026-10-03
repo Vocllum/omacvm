@@ -48,27 +48,43 @@ if [[ -n $seed ]]; then
   NAME=$(val USER); FULL=$(val FULLNAME); HASH=$(val HASH); KEY=$(val ROOT_KEY)
   HOST=$(val HOSTNAME); KB=$(val KEYBOARD); TZ=$(val TIMEZONE); LANGV=$(val LANG); MODE=$(val DISPLAY); NET=$(val NET)
   umount "$M"
-else
-  # ---------- console setup ----------
+  : "${HOST:=omarchy}" "${KB:=us}" "${TZ:=UTC}" "${LANGV:=en_US.UTF-8}"
+fi
+
+# Root's key and SSH from the Mac first: sshd runs alongside.
+if [[ -n $KEY ]]; then
+  log "root's SSH key (from the Mac)"
+  install -d -m700 /root/.ssh
+  printf '%s\n' "$KEY" > /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys
+fi
+if [[ $NET =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0/24$ ]]; then
+  ufw allow from "$NET" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+fi
+
+if [[ -z $NAME ]]; then
+  # ---------- console setup (no seed, or one without a user) ----------
+  T=${OMACVM_FIRSTBOOT_TTY:-/dev/tty1}
   export TERM=linux
+  stty sane < "$T" 2>/dev/null || true
   plymouth quit 2>/dev/null || true
   chvt 1 2>/dev/null || true
   G=$(command -v gum)
   ask() {   # PROMPT DEFAULT [--password]
     local a
     if [[ -n $G ]]; then
-      a=$("$G" input --prompt "$1: " --value "$2" ${3:+--password} --width 60 < /dev/tty1 2>/dev/tty1) || a=""
+      a=$("$G" input --prompt "$1: " --value "$2" ${3:+--password} --width 60 < $T 2>$T) || a=""
     else
-      if [[ -n ${3:-} ]]; then read -r -s -p "$1: " a < /dev/tty1; echo
-      else read -r -e -p "$1 [$2]: " a < /dev/tty1; fi
+      if [[ -n ${3:-} ]]; then read -r -s -p "$1: " a < $T; echo
+      else read -r -e -p "$1 [$2]: " a < $T; fi
       [[ -n $a ]] || a=$2
     fi
     printf '%s' "$a"
   }
   pick() {   # PROMPT DEFAULT < choices
     local a
-    if [[ -n $G ]]; then a=$("$G" filter --placeholder "$1 (type to search)" --value "$2" --height 15 < /dev/stdin 2>/dev/tty1) || a=""
-    else read -r -e -p "$1 [$2]: " a < /dev/tty1; fi
+    # the default first, so Return keeps it
+    if [[ -n $G ]]; then a=$({ echo "$2"; grep -vx -- "$2"; } | "$G" filter --header "$1 (type to search, Return picks)" --height 15 2>$T) || a=""
+    else read -r -e -p "$1 [$2]: " a < $T; fi
     printf '%s' "${a:-$2}"
   }
   clear
@@ -88,7 +104,8 @@ else
     echo "  the passwords differ or are empty"
   done
   HASH=$(printf '%s' "$p1" | openssl passwd -6 -stdin); unset p1 p2
-  KB=$(sed -n '/^! layout/,/^$/p' /usr/share/X11/xkb/rules/base.lst 2>/dev/null | awk 'NR > 1 && NF { print $1 }' | pick "keyboard layout" us)
+  layouts=$(sed -n '/^! layout/,/^$/p' /usr/share/X11/xkb/rules/base.lst 2>/dev/null | awk 'NR > 1 && NF { l = $1; $1 = ""; printf "%-8s%s\n", l, $0 }')
+  KB=$(pick "keyboard layout" "$(grep -m1 '^us ' <<<"$layouts" || echo us)" <<<"$layouts" | awk '{ print $1 }')
   TZ=$(timedatectl list-timezones 2>/dev/null | pick "timezone" UTC)
   HOST=$(ask "hostname" omarchy)
 fi
@@ -111,14 +128,15 @@ G2=/home/$NAME/.gitconfig
 chown -R "$NAME:$NAME" "/home/$NAME"
 chmod 700 "/home/$NAME"
 sed -i "s/^OMACVM_USER=.*/OMACVM_USER=$NAME/" /etc/omacvm/env 2>/dev/null || true
-
-if [[ -n $KEY ]]; then
-  log "root's SSH key (from the Mac)"
-  install -d -m700 /root/.ssh
-  printf '%s\n' "$KEY" > /root/.ssh/authorized_keys; chmod 600 /root/.ssh/authorized_keys
-fi
-if [[ $NET =~ ^[0-9]+\.[0-9]+\.[0-9]+\.0/24$ ]]; then
-  ufw allow from "$NET" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+# Omarchy's login screen logs in as SDDM's last user.
+if [[ -d /var/lib/sddm ]]; then
+  st=/var/lib/sddm/state.conf
+  if grep -q '^User=' "$st" 2>/dev/null; then sed -i "s/^User=.*/User=$NAME/" "$st"
+  else
+    sess=/usr/share/wayland-sessions/hyprland-uwsm.desktop
+    { echo "[Last]"; [[ -f $sess ]] && echo "Session=$sess"; echo "User=$NAME"; } > "$st"
+  fi
+  chown sddm:sddm "$st" 2>/dev/null || true
 fi
 
 log "hostname $HOST"

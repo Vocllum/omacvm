@@ -2,7 +2,7 @@
 Description=OmacVM: first boot of a prebuilt VM (user, keys, keyboard, timezone)
 ConditionPathExists=/var/lib/omacvm/prebuilt/pending
 After=local-fs.target systemd-udevd.service systemd-tmpfiles-setup.service
-Before=display-manager.service sddm.service systemd-user-sessions.service getty@tty1.service sshd.service
+Before=display-manager.service sddm.service systemd-user-sessions.service getty@tty1.service
 
 [Service]
 Type=oneshot

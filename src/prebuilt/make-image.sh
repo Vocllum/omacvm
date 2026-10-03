@@ -27,7 +27,7 @@ ROUTE=${1:-}; shift || true
 case $ROUTE in parallels|utm|fusion) ;; *) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 2 ;; esac
 STAGES=("$@"); (( ${#STAGES[@]} )) || STAGES=(build generalize package)
 VERSION=$(cat "$R/src/VERSION")
-VM="OmacVM Image $(tr '[:lower:]' '[:upper:]' <<<"${ROUTE:0:1}")${ROUTE:1}"
+case $ROUTE in parallels) VM="OmacVM Image Parallels" ;; utm) VM="OmacVM Image UTM" ;; fusion) VM="OmacVM Image Fusion" ;; esac
 OUT=${OMACVM_PREBUILT_OUT:-$HOME/Library/Caches/omacvm/prebuilt-out}/$ROUTE
 WORK=$OUT/work
 TAG=${OMACVM_PREBUILT_TAG:-prebuilt-$VERSION}
@@ -73,9 +73,12 @@ stage_generalize() {
     for k in "$HOME"/.ssh/*.pub; do awk '{ print $2 }' "$k"; done
     cat "$HOME/Library/Application Support/omacvm-bridge/token" 2>/dev/null; echo
   } | awk 'length($0) >= 4' | sort -u | base64)
-  gssh "$ip" "d=/home/$PREBUILT_USER/.local/share/omarchy; echo \"\$(cat \$d/version) (omarchy-mac \$(git -c safe.directory='*' -C \$d rev-parse --short HEAD))\"" \
+  [[ -s $OUT/omarchy-version ]] || gssh "$ip" "d=/home/$PREBUILT_USER/.local/share/omarchy; echo \"\$(cat \$d/version) (omarchy-mac \$(git -c safe.directory='*' -C \$d rev-parse --short HEAD))\"" \
     < /dev/null > "$OUT/omarchy-version"
   log "Omarchy $(cat "$OUT/omarchy-version")"
+  gssh "$ip" "LC_ALL=C pacman -Qi | awk -F' *: ' '/^Name/ { n = \$2 } /^Version/ { v = \$2 } /^Licenses/ { print n, v, \$2 }'" \
+    < /dev/null > "$OUT/packages.txt"
+  log "$(wc -l < "$OUT/packages.txt" | tr -d ' ') packages"
   log "generalize $VM at $ip"
   COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src/prebuilt/guest" -czf - . |
     gssh "$ip" "rm -rf /root/omacvm-prebuilt && mkdir -p /root/omacvm-prebuilt && tar --no-same-owner -C /root/omacvm-prebuilt -xzf -"
@@ -132,6 +135,7 @@ stage_package() {
     --disk-gb "$PREBUILT_DISK_GB" "$OUT/$base".tar.zst.part-*
   (cd "$OUT" && shasum -a 256 "$base".tar.zst.part-* "$base.json" > "$base.sha256")
   cp "$R/src/prebuilt/SOURCES.md" "$OUT/SOURCES.md"
+  cp "$OUT/packages.txt" "$OUT/$base-packages.txt"
   rm -rf "$WORK"
   ls -lh "$OUT"
 }
@@ -146,7 +150,7 @@ stage_upload() {
       --notes "Prebuilt Omarchy VMs for OmacVM $VERSION. Use them with: omacvm build --prebuilt. See docs/prebuilt.md and SOURCES.md." >/dev/null
   fi
   log "uploading $base to $TAG"
-  gh release upload "$TAG" -R "$PREBUILT_REPO" --clobber "$OUT/$base".tar.zst.part-* "$OUT/$base.json" "$OUT/$base.sha256" "$OUT/SOURCES.md"
+  gh release upload "$TAG" -R "$PREBUILT_REPO" --clobber "$OUT/$base".tar.zst.part-* "$OUT/$base.json" "$OUT/$base.sha256" "$OUT/$base-packages.txt" "$OUT/SOURCES.md"
 }
 
 stage_clean() {

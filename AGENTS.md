@@ -41,6 +41,9 @@ UTM, or choose their password: hand those over, never work around them.
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
      is experimental and off by default: offer
      it, do not decide it.
+     `prebuilt.available` in the plan: a prebuilt VM exists for this version
+     and app; offer it (`--prebuilt`: a few GB download, then about 10
+     minutes) or a build here (`--build`, the default with `--yes`).
   3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, Fusion 45-85:
      `minutes` in the plan; run it in the background and follow its output). Exit 3 = something to install first.
   4. Hand over the `needs_human` steps, then `omacvm check --vm NAME --json`
@@ -124,6 +127,7 @@ GitHub.
 | `src/cmd/update.sh`, `vms.sh`, `home.sh` | `update`: git pull (clean clone only, then re-exec), Mac side as installed, Omanotch's clone when clean, `apply --no-mac` on every running OmacVM VM. `vms`: table or `--json`. `home.sh`: the menu |
 | `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper; an app whose sources and options are unchanged since its install is skipped (stamps in `~/Library/Application Support/omacvm/installed`, `--force`). `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
 | `src/guest/install.sh` | Guest side, root, idempotent. Detects the VM type (DMI vendor Parallels/QEMU), writes `/etc/omacvm/env`, runs the shared features and the per-type ones |
+| `src/prebuilt/` | Prebuilt VMs (`docs/prebuilt.md`): `make-image.sh ROUTE [build generalize package upload clean]` makes one (`omacvm build --image`: placeholder user `omacvmuser`, nothing of the Mac, no Parallels Tools), `guest/generalize.sh` strips it in the VM, `guest/omacvm-firstboot` + its service (before SDDM: grows the disk, user from the OMACVM-SEED ISO or console questions, home from `/var/lib/omacvm/prebuilt/home`), `lib.sh` (lookup on GitHub releases `prebuilt-VERSION[-*]`, download, unpack, seed ISO), `vm.sh` (`omacvm build --prebuilt`: unpack, new ids/MACs, seed, first boot, `apply`, seed removed), `vmconfig.py` (config.pvs/config.plist/.vmx edits), `manifest.py` |
 | `src/vm/live/` | Temporary live installer (from vincenzopalazzo/omarchy-parallels, MIT): try-omarchy → bootable ARM64 Linux with SSH; a Parallels VM, or `--raw-image` for UTM |
 | `src/vm/base-install.sh` | In the live system: GPT + btrfs on the NVMe disk, pacstrap, locale/keyboard/user, GRUB |
 | `src/vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |

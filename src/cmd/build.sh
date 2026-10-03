@@ -94,7 +94,8 @@ while (( $# )); do
     --parallels-edition) P_PLAN=$2; shift 2
       [[ $P_PLAN == standard || $P_PLAN == pro ]] || usage "--parallels-edition standard or pro" ;;
     --channel) CHANNEL=$2; shift 2 ;;          # rc|stable|edge, for testing omarchy-mac
-    --image) IMAGE=1; YES=1; shift ;;           # a VM for a prebuilt image (src/prebuilt/make-image.sh)
+    --image) IMAGE=1; YES=1; shift ;;
+    --no-mac) NO_MAC=1; shift ;;                # tests: leave this Mac's apps as they are           # a VM for a prebuilt image (src/prebuilt/make-image.sh)
     --prebuilt) SOURCE=prebuilt; shift ;;
     --build) SOURCE=build; shift ;;
     --yes|-y) YES=1; shift ;;
@@ -663,7 +664,8 @@ fi
 # ---------- 5. OmacVM ----------
 step "OmacVM: the Mac side, then the VM side"
 args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
-(( IMAGE )) && args+=(--no-mac --no-token)   # nothing of this Mac in an image
+(( IMAGE )) && args+=(--no-mac --no-token --no-tools)   # nothing of this Mac in an image
+(( ${NO_MAC:-0} )) && args+=(--no-mac)
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do
   args+=(--feature "${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)")
 done

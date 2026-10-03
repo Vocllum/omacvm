@@ -20,7 +20,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 features_load
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1
 SETN=(); SETV=()
 set_feature() {   # NAME on|off
   feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
@@ -39,6 +39,7 @@ while (( $# )); do
     --no-mac) MAC=0; shift ;;
     --reset-host-key) export OMA_PIN_RESET=1; shift ;;
     --no-token) TOKEN=0; shift ;;   # prebuilt images: no Bridge token in the VM
+    --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --mac-wallpaper) set_feature wallpaper on; shift ;;       # 1.x names
     --no-mac-wallpaper) set_feature wallpaper off; shift ;;
@@ -125,7 +126,7 @@ fi
 
 # ---------- the VM side ----------
 # Parallels Tools: a prebuilt VM comes without them (they are Parallels' own).
-if (( MAC )) && [[ $TYPE == parallels ]] && ! gssh "$IP" "systemctl cat prltoolsd >/dev/null 2>&1" < /dev/null; then
+if (( TOOLS )) && [[ $TYPE == parallels ]] && ! gssh "$IP" "systemctl cat prltoolsd >/dev/null 2>&1" < /dev/null; then
   log "Parallels Tools (from this Mac's Parallels Desktop)"
   parallels_tools_install "$IP"
 fi
