@@ -138,7 +138,8 @@ SRC="${DMG_PATH:-$DMG}"
 if [[ ! -f "$SRC" ]]; then
   log "downloading try-omarchy $RELEASE (~1.4 GB)"
   URL="https://github.com/${REPO}/releases/download/${RELEASE}/TryOmarchy.dmg"
-  curl -fL --retry 3 -o "$DMG" "$URL"
+  curl -fL --retry 3 -o "$DMG.part" "$URL"   # a broken download is never taken for the DMG
+  mv -f "$DMG.part" "$DMG"
   SRC="$DMG"
 else
   log "using existing DMG: $SRC"
