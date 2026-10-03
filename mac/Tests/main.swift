@@ -69,6 +69,10 @@ check(pick([g(1, P, nil), g(2, P, nil)], P, "Omarchy", current: 2), 2, "two old 
 
 // Names that match nothing: a guest that did not say its name may be the one.
 check(pick([g(1, P, "Alpha"), g(2, P, nil)], P, "Beta", current: 1), 2, "unnamed old guest over a named mismatch")
+check(pick([g(1, U, "Omarchy"), g(2, U, nil)], U, "UTM – Omarchy 2", current: 1), 2, "a name inside another is no match")
+check(pick([g(1, U, "Omarchy"), g(2, U, nil)], U, "UTM – Omarchy", current: 2), 1, "UTM title")
+check(pick([g(1, P, "Omarchy"), g(2, P, nil)], P, "Omarchy - Parallels Desktop", current: 2), 1, "name first")
+check(pick([g(1, P, "Omarchy"), g(2, P, nil)], P, "QEMU (Omarchy)", current: 2), 1, "name in brackets")
 check(pick([g(1, P, "Alpha"), g(2, P, "Beta")], P, "Gamma", current: 2), 2, "no match: keep the current one")
 check(pick([g(1, P, "Alpha"), g(2, P, "Beta")], P, "Gamma", current: nil), 1, "no match, nothing served: first")
 check(pick([g(1, P, ""), g(2, P, "Beta")], P, "Beta", current: 1), 2, "empty name never matches")

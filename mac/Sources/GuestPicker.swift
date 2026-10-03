@@ -25,9 +25,9 @@ enum GuestPicker {
     /// `guests` in connection order (first connected first). Returns nil when
     /// no guest can run in the window's app.
     ///
-    /// The name that is the title wins, else the longest name in it ("Omarchy
-    /// 2" over "Omarchy"). Without a match, a guest that has not said its name
-    /// may be the one, one that has is not. Ties (and no title): the current
+    /// The name that is the title wins, else the longest name that is a part
+    /// of it ("UTM – Omarchy 2": "Omarchy 2", not "Omarchy"). Without a match,
+    /// a guest that has not said its name may be the one, one that has is not. Ties (and no title): the current
     /// guest if it runs in the front app, else the first one that does, else
     /// the current one, else the first connected.
     static func pick(_ guests: [GuestCandidate], front: FrontWindow, current: Int?) -> Int? {
@@ -36,7 +36,7 @@ enum GuestPicker {
         if let title = front.title, !title.isEmpty {
             let exact = fits.filter { $0.name == title }
             if !exact.isEmpty { return choose(exact, front: front, current: current) }
-            let inTitle = fits.filter { g in g.name.map { !$0.isEmpty && title.contains($0) } ?? false }
+            let inTitle = fits.filter { g in g.name.map { !$0.isEmpty && isPart($0, of: title) } ?? false }
             if let longest = inTitle.map({ $0.name!.count }).max() {
                 return choose(inTitle.filter { $0.name!.count == longest }, front: front, current: current)
             }
@@ -52,6 +52,15 @@ enum GuestPicker {
     static func needsTitle(_ guests: [GuestCandidate], front owner: String) -> Bool {
         let fits = guests.filter { $0.owner == nil || $0.owner == owner }
         return fits.count > 1 && fits.contains { !($0.name ?? "").isEmpty }
+    }
+
+    /// `name` is the title, or a part of it between separators ("UTM – NAME",
+    /// "NAME - App", "App (NAME)"); "Omarchy" is not a part of "Omarchy 2".
+    static func isPart(_ name: String, of title: String) -> Bool {
+        if title == name || title.contains("(\(name))") { return true }
+        return [" – ", " — ", " - ", ": "].contains { sep in
+            title.hasSuffix(sep + name) || title.hasPrefix(name + sep) || title.contains(sep + name + sep)
+        }
     }
 
     private static func choose(_ set: [GuestCandidate], front: FrontWindow, current: Int?) -> Int {
