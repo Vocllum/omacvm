@@ -7,6 +7,7 @@
 #    X11-only and sizes the pointer wrong under Hyprland) and the QEMU guest
 #    agent (utmctl ip-address / exec / file push)
 #  * virtio-gpu workarounds for Hyprland
+#  * the GPU for Chrome and other Chromium browsers (virgl-msaa.c)
 #  * a fixed display mode from boot: UTM's GPU path goes blank when the mode
 #    changes while running, and "preferred" is only 1280x800
 set -euo pipefail
@@ -26,6 +27,14 @@ if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
 fi
 install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
 
+# GPU in Chrome and other Chromium browsers: see virgl-msaa.c. Built here, as
+# the kernel headers it needs come with the VM.
+pacman -S --needed --noconfirm gcc >/dev/null 2>&1
+L=/usr/local/lib/omacvm/virgl-msaa.so
+install -d /usr/local/lib/omacvm
+gcc -shared -fPIC -O2 -o "$L.new" virgl-msaa.c -ldl && mv -f "$L.new" "$L"
+grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >> /etc/ld.so.preload
+
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
 cat > "$M" <<LUA
@@ -40,4 +49,4 @@ hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
 hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
 LUA
 chown "$U:$U" "$M"
-echo "UTM: guest tools, virtio-gpu settings, display $MODE"
+echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE"
