@@ -1,6 +1,6 @@
 #!/bin/bash
 # omacvm-bridge (guest side): small client for the OmacVM Bridge on the Mac.
-#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events [--external]
+#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | battery | events [--external]
 #     (--external: osd events also for brightness changed on the Mac itself)
 #   omacvm-bridge volume +5 | -5 | 40        percent; +/- = relative, unmutes when raising
 #   omacvm-bridge mute [on|off|toggle]       default: toggle
@@ -61,6 +61,7 @@ case ${1:-} in
   scan) [[ ${2:-} == --cached ]] && req "$URL/scan?cached=1" || req "$URL/scan" ;;
   audio) req "$URL/audio" ;;
   display) req "$URL/display" ;;
+  battery) req "$URL/battery" ;;
   bluetooth)
     case ${2:-} in
       "") req "$URL/bluetooth" ;;
