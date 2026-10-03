@@ -92,14 +92,18 @@ before=("${FV[@]}"); features_fix
 for ((i = 0; i < ${#FN[@]}; i++)); do
   [[ ${before[$i]} != "${FV[$i]}" ]] && info "${FTITLE[$i]}: off (it needs ${FNEEDS[$i]})"
 done
+# Parallels shows the Mac's battery itself.
+[[ $TYPE == parallels ]] && FV[$(feature_index battery)]=off
 on() { [[ ${FV[$(feature_index "$1")]} == on ]]; }
+# UTM and Fusion get the Mac's battery from OmacVM Bridge (OmacVM.app passes it itself).
+battery_via_bridge() { on battery && [[ $TYPE == utm || $TYPE == fusion ]]; }
 log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
 
 # ---------- the Mac side ----------
 if (( MAC )); then
   args=(--quiet)
-  on bridge || args+=(--no-bridge)
+  { on bridge || battery_via_bridge; } || args+=(--no-bridge)
   { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
@@ -126,7 +130,7 @@ fi
 # ---------- the VM side ----------
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
-if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
+if (( MAC )) && { on bridge || battery_via_bridge; }; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
 # The gestures daemon says it too (on UTM, Fusion and OmacVM.app it always
 # runs; OmacVM.app's VMs show it on 127.0.0.1 even without the Bridge).
 { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } && bridge_token_ensure
@@ -135,7 +139,7 @@ if [[ -f $T ]]; then
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
     install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
-elif on bridge; then
+elif on bridge || battery_via_bridge; then
   die "no bridge token yet: the Mac side did not install (run omacvm apply without --no-mac)"
 fi
 log "OmacVM -> $IP:/usr/local/share/omacvm"

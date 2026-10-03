@@ -163,6 +163,28 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
       || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+# The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
+# passes it on its own port; Parallels gives the VM its own.
+if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
+  if [[ $TYPE == app ]]; then
+    pid=$(app_pid_dir "$(app_dir "$VM")" 2>/dev/null)
+    if [[ -n $pid ]] && ps -o args= -p "$pid" | grep -q 'name=org.omacvm.battery'; then ok "battery (Mac)" "OmacVM.app passes it (virtio port)"
+    else bad "battery (Mac)" "this OmacVM.app does not pass the battery: omacvm update, then shut the VM down and start it again"; fi
+  elif ! running org.omacvm.bridge; then
+    bad "battery (Mac)" "OmacVM Bridge is not running: it serves the battery to $TYPE VMs (omacvm apply)"
+  else
+    T=~/Library/Application\ Support/omacvm-bridge/token b=""
+    # The token only to this user's Bridge (as above).
+    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1; then
+      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831/battery")
+    fi
+    case $(jq -r '.present | tostring' <<<"$b" 2>/dev/null) in
+      true) ok "battery (Mac)" "the Bridge serves it: $(jq -r '"\(.percentage) %, \(.state)"' <<<"$b")" ;;
+      false) skip "battery (Mac)" "this Mac has no battery" ;;
+      *) bad "battery (Mac)" "the Bridge does not answer /battery (older than the battery: omacvm update)" ;;
+    esac
+  fi
+fi
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
