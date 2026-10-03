@@ -260,3 +260,23 @@ enum Mac {
         return from
     }
 }
+
+/// The launcher's own preferences.
+enum Settings {
+    static var startFullScreen: Bool {
+        get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
+    }
+    /// Full screen also covers the strip beside the notch; Omarchy's bar goes there.
+    static var useNotch: Bool {
+        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
+        set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
+    }
+}
+
+extension Mac {
+    /// The built-in display has a camera housing.
+    static var hasNotch: Bool {
+        NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+    }
+}

@@ -36,7 +36,7 @@ final class Runner {
             "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:\(c.sshPort)-:22",
             "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56,romfile=",
             "-device", "virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile=",
-            "-display", "cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=off,full-grab=on,immersive=on,swap-opt-cmd=off",
+            "-display", "cocoa,gl=on,show-cursor=on,zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
             "-object", "rng-random,id=rng0,filename=/dev/urandom",
@@ -50,6 +50,13 @@ final class Runner {
             "-monitor", "none",
             "-qmp", "unix:\(c.qmpSocket.path),server=on,wait=off",
         ]
+        // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
+        if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+            let k = s.backingScaleFactor
+            let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
+            let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
+            a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
+        }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(console.replacingOccurrences(of: ",", with: ",,"))",
@@ -71,6 +78,7 @@ final class Runner {
         var env = ProcessInfo.processInfo.environment
         env["OMACVM_PRODUCT_NAME"] = Product.name
         if let icon = Paths.icon { env["OMACVM_ICON"] = icon.path }
+        env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
@@ -89,13 +97,17 @@ final class Runner {
         observeSleep()
     }
 
-    /// Asks the guest to shut down (the power button). Omarchy powers off.
+    /// Asks the guest to shut down: the power button, then the guest agent
+    /// if Omarchy is still up after 20 seconds.
     func powerDown() {
-        Task.detached { [socket = config.qmpSocket.path] in
-            if let qmp = try? QMPConnection(socketPath: socket, identifierPrefix: "omacvm-power") {
+        let qmpPath = config.qmpSocket.path, agentPath = config.agentSocket.path
+        Task.detached {
+            if let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-power") {
                 _ = try? qmp.execute("system_powerdown")
                 qmp.close()
             }
+            try? await Task.sleep(nanoseconds: 20_000_000_000)
+            GuestAgent.shutdown(socketPath: agentPath)
         }
     }
 

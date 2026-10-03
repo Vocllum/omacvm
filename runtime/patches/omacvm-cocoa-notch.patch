@@ -7,17 +7,19 @@ omacvm-cocoa-quit-powerdown.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -787,9 +787,19 @@
-     return fixed;
- }
+@@ -785,11 +785,21 @@
+     }
  
+     return fixed;
++}
++
 +/* OmacVM: with OMACVM_NOTCH=1, full screen covers the strip beside the notch too. */
 +static bool omacvm_notch_mode(void)
 +{
 +    const char *v = getenv("OMACVM_NOTCH");
 +    return v && !strcmp(v, "1");
-+}
-+
+ }
+ 
  - (NSSize) screenSafeAreaSize
  {
      NSSize size = [[[self window] screen] frame].size;
@@ -27,7 +29,42 @@ omacvm-cocoa-quit-powerdown.patch.
      NSEdgeInsets insets = [[[self window] screen] safeAreaInsets];
      size.width -= insets.left + insets.right;
      size.height -= insets.top + insets.bottom;
-@@ -1810,6 +1820,9 @@
+@@ -1673,8 +1683,25 @@
+ - (void)openDocumentation:(NSString *)filename;
+ - (IBAction) do_about_menu_item: (id) sender;
+ - (void)adjustSpeed:(id)sender;
++@end
++
++/*
++ * OmacVM: AppKit keeps windows below the menu bar and the notch. In notch
++ * mode the full-screen window may cover the strip beside the notch too.
++ */
++@interface QemuWindow : NSWindow
+ @end
+ 
++@implementation QemuWindow
++- (NSRect)constrainFrameRect:(NSRect)frameRect toScreen:(NSScreen *)screen
++{
++    if (omacvm_notch_mode() && ([self styleMask] & NSWindowStyleMaskFullScreen)) {
++        return frameRect;
++    }
++    return [super constrainFrameRect:frameRect toScreen:screen];
++}
++@end
++
+ static NSRect cocoa_initial_window_frame(void)
+ {
+     NSScreen *hostScreen = [NSScreen mainScreen];
+@@ -1719,7 +1746,7 @@
+         }
+ 
+         // create a window
+-        window = [[NSWindow alloc] initWithContentRect:frame
++        window = [[QemuWindow alloc] initWithContentRect:frame
+             styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
+             backing:NSBackingStoreBuffered defer:NO];
+         if(!window) {
+@@ -1810,6 +1837,9 @@
  - (void)windowDidEnterFullScreen:(NSNotification *)notification
  {
      [fullScreenMenuItem setTitle:@"Exit Full Screen"];
