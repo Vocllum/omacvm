@@ -186,8 +186,13 @@ esac
 # Homebrew and its zstd, e2fsprogs and OpenSSL (installed after asking), for
 # the routes that build the disk here. OmacVM.app brings its own tools.
 (( DRY )) || [[ $TYPE == app ]] || ensure_brew_tools
+# OmacVM.app also takes at most 64 characters and no '..' (VMConfig.validName).
+NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]*$'
+[[ $TYPE == app ]] && NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$'
+app_name_bad() { [[ $TYPE == app && $1 == *..* ]]; }
 [[ $VM =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]] || usage "--vm-name: letters, digits, spaces, dots, _ and - only (got '$VM')"
-[[ $TYPE != app || ${#VM} -le 64 ]] || usage "--vm-name: at most 64 characters for OmacVM.app"
+[[ $VM =~ $NAME_RE ]] || usage "--vm-name: at most 64 characters for OmacVM.app"
+app_name_bad "$VM" && usage "--vm-name: no '..' for OmacVM.app"
 # A name is taken in any app: omacvm --vm NAME has to find one VM.
 vm_taken() {
   [[ -e "$HOME/Parallels/$1.pvm" || -e $(fusion_bundle "$1") ]] || vms_list | awk -F'\t' -v n="$1" '$1 == n { f = 1 } END { exit !f }'
@@ -202,7 +207,9 @@ fi
 if vm_taken "$VM"; then
   hd "You already have a VM named '$VM'"
   while :; do
-    VM=$(ask_value "name for the new VM" "$VM $n" '^[A-Za-z0-9][A-Za-z0-9 ._-]*$')
+    name=$(ask_value "name for the new VM" "$VM $n" "$NAME_RE")
+    app_name_bad "$name" && { say "    OmacVM.app takes no '..' in a name"; continue; }
+    VM=$name
     vm_taken "$VM" || break
     say "    '$VM' exists too"
   done
