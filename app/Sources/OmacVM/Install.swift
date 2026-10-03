@@ -123,6 +123,7 @@ struct InstallView: View {
             let app = try Installer.install(name: name, into: folder)
             let config = NSWorkspace.OpenConfiguration()
             config.createsNewApplicationInstance = true
+            config.arguments = ["--installed-by", String(ProcessInfo.processInfo.processIdentifier)]
             NSWorkspace.shared.openApplication(at: app, configuration: config) { _, error in
                 DispatchQueue.main.async {
                     if let error {
