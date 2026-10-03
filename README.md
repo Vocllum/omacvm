@@ -391,8 +391,9 @@ password) stay with you; the agent hands them over.
 </p>
 
 The VM and the Mac talk over the VM's private network: the Mac is `10.211.55.2`
-for Parallels and `192.168.64.1` for UTM. Nothing listens anywhere else, and
-the VM needs a token.
+for Parallels, `192.168.64.1` for UTM and the `.1` of Fusion's NAT network
+(Fusion picks it when installed). Nothing listens anywhere else, and the VM
+needs a token.
 
 - **OmacVM Bridge** (`src/bridge/`) is a small menu-bar app. It reads the Mac's
   Wi-Fi (CoreWLAN), Bluetooth (IOBluetooth), audio (CoreAudio) and display
