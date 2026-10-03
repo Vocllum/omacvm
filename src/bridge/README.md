@@ -32,6 +32,10 @@ private `IOBluetoothPreferenceSetControllerPowerState` and
 | Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
 | Bluetooth | connecting, disconnecting, forgetting and switching from the VM (without it the devices are listed read-only, from macOS's system report) | prompt on first start; Privacy & Security › Bluetooth |
 | Camera | the Mac's camera for UTM and VMware Fusion VMs (`GET /camera`) | prompt the first time a Linux app in such a VM uses the camera; Privacy & Security › Camera |
+
+A UTM or Fusion VM with the camera on gets the Bridge also with the Bridge
+feature off. Then only the camera needs a permission: the other prompts can
+be answered with no.
 | Keychain (per request) | the Wi-Fi password for QR sharing | macOS asks for an administrator's approval every time |
 
 The menu-bar icon shows both grants and links to the settings. Permissions

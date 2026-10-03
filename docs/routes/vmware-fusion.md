@@ -66,7 +66,7 @@ building it.
 | Window mode: Omarchy follows the window size | ✓ |
 | Retina resolution, 120 Hz | ✓, 120 Hz as reported by the guest |
 | OmacVM Bridge: Wi-Fi, Bluetooth, audio, Night Shift, wallpaper | ✓ |
-| The Mac's camera, as *Mac Camera* | ✓ through OmacVM Bridge (`GET /camera`), as on UTM |
+| The Mac's camera, as *Mac Camera* | ✓ through OmacVM Bridge (`GET /camera`), as on UTM; the Bridge is installed for it also with the Bridge feature off |
 | Sound, the Mac's microphone | ✓ HD Audio card (playback and capture); recording needs the microphone permission for VMware Fusion ([finding 22](../troubleshooting.md#22-parallels-fusion-app-the-microphone-records-nothing-or-silence)) |
 | Media keys and trackpad gestures in full screen | ✓ |
 | Cmd shortcuts in full screen | ✓ (through OmacVM Gestures) |
