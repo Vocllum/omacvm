@@ -23,17 +23,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(1)
             }
         }
-        // One launcher at a time: a second one hands over to the first.
+        // One launcher at a time: a second one hands over to the first (a
+        // start request too: `open -n ... --args --start --vm NAME`).
         let me = NSRunningApplication.current
         if let id = Bundle.main.bundleIdentifier,
            let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: { $0 != me }) {
-            // The VM's window belongs to QEMU; bring that forward if it runs.
-            let qemu = NSWorkspace.shared.runningApplications.first {
-                $0.executableURL?.path.hasSuffix("/runtime/bin/OmacVM") == true
+            if CommandLine.arguments.contains("--start") {
+                let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
+                DistributedNotificationCenter.default().postNotificationName(
+                    Self.startRequest, object: vm, userInfo: nil, deliverImmediately: true)
             }
-            (qemu ?? other).activate()
+            (Self.qemuApp ?? other).activate()
             NSApp.terminate(nil)
             return
+        }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.startRequest, object: nil, queue: .main) { [weak self] note in
+            let name = note.object as? String ?? ""
+            MainActor.assumeIsolated { self?.startRequested(name) }
         }
         state.startVM = { [weak self] in self?.startVM() }
         buildMenu()
@@ -44,11 +51,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static let startRequest = Notification.Name("org.omacvm.app.start")
+    /// The VM's window belongs to QEMU's process.
+    static var qemuApp: NSRunningApplication? {
+        NSWorkspace.shared.runningApplications.first {
+            $0.executableURL?.path.hasSuffix("/runtime/bin/OmacVM") == true
+        }
+    }
+
+    /// Another launcher (or `omacvm`) asks to start a VM.
+    private func startRequested(_ name: String) {
+        if runner?.isRunning == true { Self.qemuApp?.activate(); return }
+        if !name.isEmpty, let c = VMConfig.named(name) { state.config = c; state.screen = c.isReady ? .ready : .setup }
+        if state.config.isReady { startVM() } else { showWindow() }
+    }
+
+    private var quitting = false
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if runner?.isRunning == true {
-            // Quitting the launcher shuts the VM down cleanly.
+            // Quit, logout and restart shut the VM down first and wait for it
+            // (QEMU waits the same way); a VM that hangs is stopped after 90 s.
+            quitting = true
             runner?.powerDown()
-            return .terminateCancel
+            DispatchQueue.main.asyncAfter(deadline: .now() + 90) { [weak self] in
+                guard let self, self.quitting else { return }
+                self.runner?.forceStop()
+                NSApp.reply(toApplicationShouldTerminate: true)
+            }
+            return .terminateLater
         }
         if state.screen == .building {
             state.creator.cancel()
@@ -57,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if runner?.isRunning != true { showWindow() }
+        if runner?.isRunning == true { Self.qemuApp?.activate() } else { showWindow() }
         return true
     }
 
@@ -81,7 +111,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         r.onExit = { [weak self] status in
             guard let self else { return }
             self.runner = nil
-            if status == 0 {
+            if self.quitting {
+                self.quitting = false
+                NSApp.reply(toApplicationShouldTerminate: true)
+            } else if status == 0 {
                 NSApp.terminate(nil)
             } else {
                 self.state.message = "The VM stopped unexpectedly (QEMU exit \(status)). Log: \(self.state.config.folder.path)/logs/qemu.log"
