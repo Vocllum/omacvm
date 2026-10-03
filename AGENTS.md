@@ -295,6 +295,16 @@ guest's gateway is `.2`.
 6. `src/cmd/apply.sh` with every feature explicit: Mac side, token, `src/`,
    `src/guest/install.sh` (Omanotch included), icon; reboot.
 
+`--prebuilt` (`src/prebuilt/vm.sh`) replaces steps 2-5: download the image
+(GitHub release `prebuilt-VERSION[-*]`, parts checked by SHA-256), unpack into
+the VM folder, new VM id/MACs/name/resources, grow the disk, a seed ISO
+(OMACVM-SEED: user, hash, root key, hostname, keyboard, timezone, language,
+display mode, the Mac's network) attached, first boot (`omacvm-firstboot`
+before SDDM), host key pinned, then step 6 (Parallels Tools from the Mac's
+Parallels in `apply`), power off, seed detached and deleted, start.
+Images: `src/prebuilt/make-image.sh ROUTE` (`docs/prebuilt.md`); run it from
+a copy of the checkout, not from one you edit (bash reads scripts as it goes).
+
 ## 6. Standard procedures
 
 - **Build**: `./omacvm build [--vm-type utm]` or unattended with `OMACVM_PASSWORD=… ./omacvm build --yes …` (`--plan --json` first).
