@@ -31,6 +31,7 @@
 //                          sends {"type":"start"|"stop"} lines, the Bridge 1280x720 NV12 frames
 //                          while started (macOS asks for the camera permission the first time)
 //   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
+//                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
