@@ -22,6 +22,9 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
   Brave and Firefox (`virgl (Apple M4 Max)`), no flags.
 - Quit or the window's close button shuts Omarchy down cleanly. The Mac's
   sleep pauses the VM.
+- Full screen beside the notch (option): the window covers the whole built-in
+  display, Omarchy's bar takes the strip beside the camera (32 pt on a 14"),
+  windows start below it. Native resolution and 120 Hz.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
@@ -37,8 +40,6 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 
 - Bridge and Gestures: the Mac side listens on 127.0.0.1 too (branch
   app-route), not installed yet.
-- Full screen beside the notch: Omarchy's bar part works (it takes the strip's
-  height); the Mac part waits for a test (the Mac was locked).
 - One display only; no external displays.
 - The app needs Xcode's Command Line Tools on the Mac that builds it.
 
