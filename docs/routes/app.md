@@ -33,15 +33,24 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 ## Not done yet
 
 - Bridge and Gestures: the Mac side listens on 127.0.0.1 too (branch
-  app-route), not installed by the app yet.
+  app-route), not installed yet.
 - Full screen beside the notch: Omarchy's bar part works (it takes the strip's
-  height); the Mac part is not tested yet.
+  height); the Mac part waits for a test (the Mac was locked).
 - One display only; no external displays.
 - No clipboard between Mac and Omarchy yet.
 - The app needs Xcode's Command Line Tools on the Mac that builds it.
 
 ## How it talks to the Mac
 
-QEMU's user network: the Mac is `10.0.2.2` for the VM and reaches the VM's
-SSH on `127.0.0.1:<port>`. Anything listening on the Mac's 127.0.0.1 is
-reachable from the VM, so the Bridge keeps its token.
+QEMU's user network: the Mac is `10.0.2.2` for the VM, and the Mac reaches
+the VM's SSH on `127.0.0.1:<port>`.
+
+- The VM reaches only two of the Mac's local ports through `10.0.2.2`:
+  47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
+  127.0.0.1 (dev servers, databases) is refused, like on the other routes.
+  The app's QEMU carries a libslirp patch for that
+  (`OMACVM_SLIRP_HOST_PORTS`).
+- Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
+  program could connect. So both want the Bridge's token there: the Bridge on
+  every request (as before), Gestures in its hello. The app makes the token
+  when the Bridge has not, and puts it into the VM.
