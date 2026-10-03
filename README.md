@@ -187,7 +187,8 @@ layout and copy and paste. Everything about the route:
   ([omarchy-arm-utm#7](https://github.com/ggalancs/omarchy-arm-utm/issues/7)).
   Already have 4.7 from Homebrew? `brew uninstall --cask utm && brew install --cask utm@beta`
   (your VMs stay). OmacVM uses UTM 5's OpenGL path (VirGL), which renders
-  Linux desktops, unlike its new Vulkan one.
+  Linux desktops, unlike its new Vulkan one, and UTM's default renderer, which
+  gives Chrome in the VM the GPU (OmacVM sets both).
 - Or VMware Fusion 13 or newer (free, also for work; tested with 26.0.1).
   Broadcom asks you to sign in to download it: support.broadcom.com > My
   Downloads > VMware Fusion > the newest version (for example 26H1u1). Drag it
@@ -240,6 +241,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
    | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
+   | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
