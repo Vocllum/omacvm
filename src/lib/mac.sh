@@ -30,12 +30,13 @@ gssh() {
 # remembered for it.
 hostkey_changed() {
   [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
-  local _h t k seen=0
+  local _h t k seen=0 ip=$1 port=22
+  [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }   # OmacVM.app: 127.0.0.1:PORT
   while read -r _h t k; do
     [[ -n $k ]] || continue
     seen=1
     grep -qF " $t $k" "$OMA_PIN" && return 1
-  done < <(ssh-keyscan -T 5 "$1" 2>/dev/null)
+  done < <(ssh-keyscan -T 5 -p "$port" "$ip" 2>/dev/null)
   (( seen ))
 }
 
