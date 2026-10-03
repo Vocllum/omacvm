@@ -419,7 +419,8 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   System Settings › Privacy & Security › Microphone (a person's step), then
   restart the VM. OmacVM.app: the app now asks for the microphone when it
   starts a VM, and QEMU records under its grant; the Developer ID build has
-  the `audio-input` entitlement for that. `omacvm check` reads the Fusion and
-  app logs for the refusal.
+  the `audio-input` entitlement for that. The VM does not wait for the
+  answer: if QEMU tried to record before it, restart the VM once. `omacvm
+  check` reads the Fusion and app logs for the refusal (and says to restart).
 - **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`,
   `src/cmd/check.sh`.
