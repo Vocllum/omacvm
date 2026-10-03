@@ -38,6 +38,11 @@ fi
 # be the kernel's own version: from the repository when it has that version,
 # else from pacman's cache.
 pacman -S --needed --noconfirm dkms make gcc >/dev/null 2>&1 || true
+for t in dkms make gcc; do
+  command -v $t >/dev/null && continue
+  say "not installed: pacman could not install $t (no network, or omarchy update first), then omacvm apply"
+  exit 1
+done
 headers() {   # KERNEL_PACKAGE
   local k=$1 have want f
   have=$(pacman -Q "$k" 2>/dev/null | awk '{ print $2 }') || return 0
