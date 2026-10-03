@@ -299,8 +299,37 @@ apply_preferred_modes() {
       printf 'omacvm-display-sync: Hyprland rejected %s for %s: %s\n' \
         "$mode" "$output" "$response" >&2
     fi
+    notch_bar "$mode" "$scale"
   done
   shopt -u nullglob
+}
+
+# OmacVM.app: when the window covers the strip beside the notch (full screen
+# in notch mode), Omarchy's bar gets that strip's height, so nothing but the
+# bar sits beside the camera. Elsewhere the bar keeps its own size. Writes only
+# lines marked "omacvm-notch" in ~/.config/omarchy/shell.toml (watched live).
+notch_bar() {
+  local mode=$1 scale=$2 w h want="" f=${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/shell.toml
+  read -r _ _ w _ _ _ h _ <<<"$mode"
+  local OMACVM_NOTCH="" OMACVM_SCREEN=""
+  [[ -r /run/omacvm/host.env ]] && source /run/omacvm/host.env
+  if [[ -n $OMACVM_NOTCH && $OMACVM_SCREEN == "${w}x${h}" ]]; then
+    want=$(python3 -c "import math,sys; print(math.ceil(float(sys.argv[1]) / float(sys.argv[2])))" "$OMACVM_NOTCH" "$scale" 2>/dev/null || true)
+  fi
+  [[ -f $f ]] || { [[ -n $want ]] || return 0; mkdir -p "$(dirname "$f")"; : > "$f"; }
+  local tmp; tmp=$(mktemp)
+  grep -v 'omacvm-notch' "$f" > "$tmp" || true
+  if [[ -n $want ]]; then
+    if grep -q '^\[bar\]' "$tmp"; then
+      grep -q '^size-horizontal' "$tmp" && { rm -f "$tmp"; return 0; }   # the user set a size: keep it
+      sed -i "/^\[bar\]/a size-horizontal = $want  # omacvm-notch" "$tmp"
+    else
+      printf '[bar]  # omacvm-notch\nsize-horizontal = %s  # omacvm-notch\n' "$want" >> "$tmp"
+    fi
+  fi
+  cmp -s "$tmp" "$f" || cat "$tmp" > "$f"
+  rm -f "$tmp"
+  [[ -s $f ]] || rm -f "$f"
 }
 
 reload_on_display_change() {
