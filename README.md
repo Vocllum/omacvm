@@ -91,7 +91,7 @@ More in [With a coding agent](#with-a-coding-agent).
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
-| **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](#how-it-works)) |
+| **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](#how-it-works)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, Option takes small steps, as in Omarchy |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
 | **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](docs/troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](docs/troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
@@ -158,7 +158,7 @@ Free and open source, one display: UTM.
 | Media keys, trackpad gestures, Cmd shortcuts | ✓ | ✓ | ✓ | coming |
 | The bar beside the notch | ✓ Omanotch | ✓ Omanotch | ✓ Omanotch | ✓ built in |
 | Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
-| The Mac's camera | ✓ Parallels' own | ✓ through OmacVM Bridge | ✓ through OmacVM Bridge | ✓ built in |
+| The Mac's camera | ✓ Parallels' own | ✓ through OmacVM Bridge (installed for it also with the Bridge off) | ✓ through OmacVM Bridge (likewise) | ✓ built in |
 | Sound and the Mac's microphone | ✓, the microphone once macOS allows Parallels it | ✓ | ✓, the microphone once macOS allows Fusion it | ✓, the microphone once macOS allows OmacVM it |
 | **Setup** | | | | |
 | Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
@@ -275,7 +275,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
-   | The Mac's camera as *Mac Camera*, on only while a Linux app uses it | on |
+   | The Mac's camera as *Mac Camera*, on only while a Linux app uses it (UTM and Fusion: through OmacVM Bridge, also with the Bridge off) | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
@@ -301,7 +301,10 @@ When it is done, once on the Mac:
    Fusion), *OmacVM* (the app) or *Parallels Desktop*. The microphone belongs
    to the VM's app: UTM asks the first time, OmacVM.app when it starts the VM;
    for Parallels Desktop and VMware Fusion check System Settings › Privacy &
-   Security › Microphone, or the VM records silence or nothing.
+   Security › Microphone, or the VM records silence or nothing. With the
+   Bridge off but the camera on (UTM, Fusion), *OmacVM Bridge* is still
+   installed for the camera and asks for Location Services, Accessibility and
+   Bluetooth too: say no, the camera does not need them.
 2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
    Cmd+C/V/X into Ctrl before the VM sees them; the build empties it when no VM
    is running (otherwise: quit Parallels Desktop and run

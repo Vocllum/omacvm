@@ -9,7 +9,7 @@ gestures	on	mac,vm	-	-	Trackpad gestures	3/4-finger swipes and pinch in Omarchy 
 scroll-momentum	off	mac,vm	experimental	gestures	macOS-native scroll momentum	two-finger scrolling with your Mac's own acceleration and momentum, passed through
 omanotch	notch	mac,vm	notch	-	Omanotch	Omarchy's bar beside the MacBook's notch
 mac-clock	on	mac,vm	-	-	The Mac's clock	the clock at the far right of the bar, formatted like the Mac's menu bar
-camera	on	mac,vm	-	-	The Mac's camera	Linux apps and video calls in the browser see it as Mac Camera; it is on only while one of them uses it
+camera	on	mac,vm	-	-	The Mac's camera	Linux apps and video calls in the browser see it as Mac Camera; it is on only while one of them uses it (UTM and VMware Fusion: through OmacVM Bridge, installed for it also with the Bridge off)
 idle-lock	on	vm	-	-	Screensaver and lock	Omarchy's own, after idle in the VM (off: the Mac's lock protects the VM)
 autologin	off	vm	-	-	Autologin	straight into Omarchy, without its login screen
 thp-kernel	off	vm	slow	-	Memory-optimized kernel	Arch Linux ARM's kernel with transparent huge pages and MGLRU, for memory-heavy work (about 10 minutes per build and update)

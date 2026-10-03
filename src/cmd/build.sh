@@ -392,6 +392,8 @@ human_steps() {
     echo "Allow Wi-Fi names: Location Services for OmacVM Bridge (macOS asks)."
     echo "Allow media keys: Accessibility for OmacVM Bridge."
     echo "Allow Bluetooth devices: Bluetooth for OmacVM Bridge (macOS asks)."
+  elif (( CAMERA )) && [[ $TYPE == utm || $TYPE == fusion ]]; then
+    echo "The camera comes through OmacVM Bridge, so it is installed although its bar features are off. On its first start macOS asks for Location Services, Accessibility and Bluetooth for it: say no, the camera does not need them."
   fi
   if (( GESTURES )) || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
     local what="the trackpad"
