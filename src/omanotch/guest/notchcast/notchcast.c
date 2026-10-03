@@ -766,8 +766,8 @@ static int is_number(const char *s) {
 #define BEAT_EVERY_MS 4000
 static int bar_parked = -1;
 static double bar_beat_ms;
-static char want_notch_l[32], want_notch_r[32], want_strip[32];
-static char sent_notch_l[32], sent_notch_r[32], sent_strip[32];
+static char want_notch_l[32], want_notch_r[32], want_strip[32], want_bar[32];
+static char sent_notch_l[32], sent_notch_r[32], sent_strip[32], sent_bar[32];
 
 // The helper's geometry in Mac points (`geom L R H W`, W = strip width).
 // Converted here with the built-in display's own logical width, which stays
@@ -776,6 +776,9 @@ static char sent_notch_l[32], sent_notch_r[32], sent_strip[32];
 // `notch`/`strip` already converted; those are ignored once `geom` arrived.
 static double mac_l, mac_r, mac_h, mac_w;
 static int have_geom;
+// The bar's own height in Mac points (`bar H`, Omanotch's flush setting: the
+// camera housing's height); 0: the bar fills the strip.
+static double mac_bar;
 
 static double screen_logical_width(void) {
     char *j = hypr_request("j/monitors all");
@@ -797,6 +800,7 @@ static void apply_mac_geometry(void) {
     snprintf(want_notch_l, sizeof want_notch_l, "%.0f", mac_l * k);
     snprintf(want_notch_r, sizeof want_notch_r, "%.0f", mac_r * k);
     snprintf(want_strip, sizeof want_strip, "%.0f", mac_h * k);
+    snprintf(want_bar, sizeof want_bar, "%.0f", mac_bar > 0 ? mac_bar * k : 0);
     int h = (int)(mac_h * k + 0.5);
     if (h >= 10 && h <= 200) atomic_store(&strip_height, h);
     sync_geometry(0);
@@ -812,6 +816,10 @@ static void sync_geometry(int always) {
     if (*want_strip && (always || strcmp(want_strip, sent_strip))) {
         free(ipc_call(0, "setNotchHeight", want_strip, NULL, NULL));
         snprintf(sent_strip, sizeof sent_strip, "%s", want_strip);
+    }
+    if (*want_bar && (always || strcmp(want_bar, sent_bar))) {
+        free(ipc_call(0, "setNotchBarHeight", want_bar, NULL, NULL));
+        snprintf(sent_bar, sizeof sent_bar, "%s", want_bar);
     }
 }
 
@@ -868,6 +876,10 @@ static void handle_command(char *line) {
         mac_h = strtod(argv[3], NULL);
         mac_w = strtod(argv[4], NULL);
         have_geom = mac_w > 0 && mac_h >= 10 && mac_h <= 200;
+        apply_mac_geometry();
+    } else if (!strcmp(c, "bar") && argc == 2 && is_number(argv[1])) {
+        double b = strtod(argv[1], NULL);
+        mac_bar = b >= 10 && b <= 200 ? b : 0;
         apply_mac_geometry();
     } else if (!strcmp(c, "regeom") && argc == 1) {
         apply_mac_geometry();  // the built-in display changed size

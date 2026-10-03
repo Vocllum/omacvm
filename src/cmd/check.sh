@@ -192,7 +192,11 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
-pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running (omacvm update)"
+if pgrep -xq omanotch; then
+  # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
+  [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
+  ok "Omanotch (Mac)" "running, bar height: $h"
+else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"

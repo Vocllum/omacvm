@@ -18,6 +18,10 @@ enum Log {
 struct Settings {
     let defaults = UserDefaults.standard  // domain ch.gillesgoetsch.omanotch (bundle id)
 
+    /// Flush: the bar is exactly as tall as the camera housing; the few points
+    /// of the strip below it show the wallpaper. Off (default): the bar fills
+    /// the strip, as tall as macOS's menu bar.
+    var flush: Bool { defaults.bool(forKey: "flush") }
     /// Listen on this one address instead of every VM network interface.
     var listenHost: String? { defaults.string(forKey: "listenHost") }
     var port: UInt16 { UInt16(defaults.integer(forKey: "port")).nonZero ?? 47811 }
@@ -270,6 +274,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     }
 
     private var beats = 0
+    private var flush = false
 
     /// Tells the guest where the camera housing is and how tall the strip is,
     /// so the hidden output (and the bar in it) fill the strip exactly.
@@ -283,6 +288,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         let k = view?.guestPerPoint ?? 1
         send("notch \(Int((g.notchLeft * k).rounded())) \(Int((g.notchRight * k).rounded()))")
         send("strip \(Int((g.frame.height * k).rounded()))")
+        // The bar's height in points (0: the whole strip); older notchcast
+        // builds ignore it.
+        flush = settings.flush
+        send(String(format: "bar %.1f", flush && g.notchHeight > 0 ? min(g.notchHeight, g.frame.height) : 0))
     }
 
     /// Re-asserts the parked state every two seconds. notchcast turns this
@@ -293,7 +302,10 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         guard parked else { return }
         send("park 1")
         beats += 1
-        if beats % 5 == 0, let g = geometry {
+        // The flush setting is read again here, so `defaults write` takes
+        // effect within two seconds, without a restart.
+        if let g = geometry, beats % 5 == 0 || settings.flush != flush {
+            if settings.flush != flush { Log.info("bar height: " + (settings.flush ? "the notch's (flush)" : "the menu bar's")) }
             sendGeometry(g)
         }
     }

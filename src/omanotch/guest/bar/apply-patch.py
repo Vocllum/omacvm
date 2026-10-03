@@ -24,7 +24,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 12
+VERSION = 13
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -94,6 +94,10 @@ def main():
   // helper would have to fill, and the wallpaper can show through when the
   // bar is hidden. 0 until the helper reports it.
   property real notchHeight: 0
+  // Omanotch's flush setting: the NOTCH copy of the bar is only this tall
+  // (the camera housing's height) and the wallpaper shows in the rest of the
+  // strip below it. 0: the bar fills the strip.
+  property real notchBarHeight: 0
   property real notchLastBeat: 0
   // Bumped by the helper's capture program: repaints every bar surface once,
   // so a new capture session gets a frame without waiting for a change.
@@ -213,6 +217,10 @@ def main():
       root.notchHeight = height > 0 && height < 200 ? height : 0
       return String(root.notchHeight)
     }
+    function setNotchBarHeight(height: real): string {
+      root.notchBarHeight = height > 0 && height < 200 ? height : 0
+      return String(root.notchBarHeight)
+    }
     function poke(): string {
       root.notchPokeSerial++
       return String(root.notchPokeSerial)
@@ -241,7 +249,7 @@ def main():
     }
     function state(): string {
       return JSON.stringify({ parked: root.notchParked, screen: root.notchParkedScreen,
-                              notch: [root.notchLeft, root.notchRight], notchHeight: root.notchHeight, barSize: root.barSize,
+                              notch: [root.notchLeft, root.notchRight], notchHeight: root.notchHeight, notchBarHeight: root.notchBarHeight, barSize: root.barSize,
                               beatAgeMs: root.notchLastBeat ? Date.now() - root.notchLastBeat : -1,
                               bars: notchBarVariants.instances.map(function(p) {
                                 return [p.screen ? String(p.screen.name) : "", p.notchRole, p.parked, p.parkedSize, p.height]
@@ -318,9 +326,14 @@ def main():
     // content in it.
     // It fills the whole NOTCH output, whose height notchcast rounds up to
     // whole pixels at fractional scales: nothing may show below the bar.
+    // Flush (notchBarHeight): only the camera housing's height, the wallpaper
+    // below it; over fullscreen the whole strip again, to paint it black.
+    readonly property int notchFullSize: Math.max(root.barSize, Math.round(root.notchHeight),
+                                                  screen ? Math.ceil(screen.height) : 0)
     readonly property int parkedSize: notchRole === "parked" ? 1
-      : notchRole === "notch" ? Math.max(root.barSize, Math.round(root.notchHeight),
-                                         screen ? Math.ceil(screen.height) : 0) : root.barSize
+      : notchRole === "notch" ? (root.notchBarHeight > 0 && !notchBlack
+                                 ? Math.max(root.barSize, Math.min(Math.round(root.notchBarHeight), notchFullSize))
+                                 : notchFullSize) : root.barSize
     readonly property int notchPadTop: notchRole === "notch" ? Math.floor((parkedSize - root.barSize) / 2) : 0
     readonly property int notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
