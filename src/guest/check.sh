@@ -193,7 +193,8 @@ esac
 section "Speed and safety"
 k=$(uname -r)
 [[ -n $THP_KERNEL ]] || { [[ $k == *thp* ]] && THP_KERNEL=on || THP_KERNEL=off; }
-if [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
+if [[ $k == *thp* && $THP_KERNEL == off ]]; then bad "kernel" "$k: the memory-optimized kernel is off but still running (reboot)"
+elif [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
 elif [[ $THP_KERNEL == off ]]; then ok "kernel" "$k (Arch Linux ARM's own; memory-optimized kernel not chosen)"
 elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (the memory-optimized kernel needs GRUB)"
 else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after apply.sh?)"; fi

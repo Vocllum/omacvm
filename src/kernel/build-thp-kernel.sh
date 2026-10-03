@@ -13,10 +13,28 @@ U=${1:?usage: build-thp-kernel.sh <desktop-user>}
 ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux-aarch64
 W=$(getent passwd "$U" | cut -d: -f6)/.cache/omacvm/linux-aarch64-thp
 
-latest=$(curl -fsSL "$ALARM/PKGBUILD" | sed -n 's/^pkgver=//p; s/^pkgrel=//p' | paste -sd- -)
+G=/etc/default/grub
+# GRUB boots the THP kernel by default (also after a disable that only
+# pointed GRUB back at the stock kernel).
+grub_default_thp() {
+  grep -qx 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' $G && return 0
+  sed -i '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64\(-thp\)\{0,1\}"$/d' $G
+  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' >> $G
+  grep -q '^GRUB_DISABLE_LINUX_UUID=' $G || echo 'GRUB_DISABLE_LINUX_UUID=false' >> $G
+  grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -2
+}
+
+latest=$(curl -fsSL "$ALARM/PKGBUILD" | sed -n 's/^pkgver=//p; s/^pkgrel=//p' | paste -sd- -) || latest=""
 have=$(pacman -Q linux-aarch64-thp 2>/dev/null | awk '{ print $2 }' || true)   # none yet: build
-if [[ -n $latest && $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
+if [[ -z $latest && -n $have ]]; then
+  echo "could not reach GitHub to check for a newer kernel: keeping linux-aarch64-thp $have"
+  grub_default_thp
+  exit 0
+fi
+[[ -n $latest ]] || { echo "could not reach GitHub for the kernel's PKGBUILD" >&2; exit 1; }
+if [[ $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
   echo "linux-aarch64-thp $have is ALARM's current kernel: nothing to build"
+  grub_default_thp
   exit 0
 fi
 pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel >/dev/null 2>&1
@@ -32,9 +50,5 @@ chown -R "$U:$U" "$W"
 sudo -u "$U" env MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --cleanbuild
 pacman -U --noconfirm "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.*
 
-# GRUB: boot the THP kernel by default.
-G=/etc/default/grub
-grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' >> $G
-grep -q '^GRUB_DISABLE_LINUX_UUID=' $G || echo 'GRUB_DISABLE_LINUX_UUID=false' >> $G
-grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -2
+grub_default_thp
 echo "linux-aarch64-thp installed; reboot to use it"
