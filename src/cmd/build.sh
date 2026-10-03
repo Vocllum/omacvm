@@ -336,6 +336,7 @@ if (( ! YES )); then
   FULL=$(ask_value "full name" "$FULL" '.')
 fi
 [[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || usage "--user '$U': lower-case letters, digits, - and _ only"
+[[ $HOST =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || usage "--hostname '$HOST': letters, digits and - only (not first or last), up to 63"
 
 KB_NOTE=$("$R/src/keyboard/mac-layout.sh" 2>&1 >/dev/null)
 KB=$("$R/src/keyboard/mac-layout.sh" 2>/dev/null)
@@ -379,7 +380,9 @@ human_steps() {
   esac
 }
 if (( PLAN && JSON )); then
-  cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $HOST"
+  cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $(printf %q "$HOST")"
+  # No licence yet: the edition the limits were planned for.
+  [[ -n ${P_PLANNED:-} ]] && cmd+=" --parallels-edition $P_EDITION"
   [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
   [[ -n ${GFX_GB:-} ]] && cmd+=" --graphics-gb $GFX_GB"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
