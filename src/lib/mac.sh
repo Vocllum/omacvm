@@ -11,9 +11,11 @@ LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 # every later connection: OMA_PIN is that VM's file (vm_pin, vm.sh), and
 # OMA_PIN_NEW=1 lets a connection record the key when there is none yet. A VM
 # without a remembered key (and OMA_PIN_NEW unset) is reached as before.
+# IP:PORT for OmacVM.app's VMs (127.0.0.1 and the VM's SSH port).
 OMA_PINS="$HOME/Library/Application Support/omacvm/known_hosts"
 gssh() {
-  local ip=$1; shift
+  local ip=$1 port=22; shift
+  [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }
   local hk=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
   if [[ -n ${OMA_PIN:-} ]] && [[ -s $OMA_PIN || ${OMA_PIN_NEW:-} == 1 ]]; then
     [[ -s $OMA_PIN ]] || { mkdir -p "$(dirname "$OMA_PIN")" && chmod 700 "$(dirname "$OMA_PIN")"; }
@@ -21,7 +23,7 @@ gssh() {
         -o "UserKnownHostsFile=\"$OMA_PIN\"" -o HostKeyAlias=omacvm-vm -o CheckHostIP=no)
   fi
   ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
-    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
+    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -p "$port" "root@$ip" "$@"
 }
 
 # hostkey_changed IP: the VM answers, with other host keys than the one
@@ -335,6 +337,7 @@ vm_network_ok() {
         printf 'The VMware Fusion VM is at %s, outside Fusion'"'"'s NAT network (the Mac at %s), which OmacVM needs: give the VM the "Share with my Mac" network.\n' "$2" "$a" >&2
         return 1
       fi ;;
+    app) ;;   # OmacVM.app: QEMU's user network, the Mac is always 127.0.0.1
     *) return 1 ;;
   esac
   return 0

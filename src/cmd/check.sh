@@ -2,7 +2,7 @@
 # omacvm check: is every OmacVM feature in place and working, on the Mac and
 # in a running VM (Parallels, UTM or VMware Fusion)? Read-only; run it after a build or an
 # apply, or whenever something seems off:
-#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME] [--key PRIVATE_KEY] [--json]
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY] [--json]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
 # per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
 # must be logged in to the VM.
@@ -54,7 +54,9 @@ case $TYPE in
        [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || stop 1 "no IP for UTM VM '$VM' (is it running?)" ;;
   fusion) HOST=$(fusion_host)
           [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || stop 1 "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
-  *) stop 2 "--vm-type parallels, utm or fusion" ;;
+  app) HOST=127.0.0.1   # OmacVM.app: the VM reaches the Mac's 127.0.0.1 as 10.0.2.2
+       [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running" ;;
+  *) stop 2 "--vm-type parallels, utm, fusion or app" ;;
 esac
 export OMA_KEY=$KEY
 
@@ -145,7 +147,7 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
-      g=$(grep "guest connected: $IP " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
@@ -185,7 +187,21 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
-pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
+if [[ $TYPE == app ]]; then
+  # The app's own notch mode follows the omanotch feature (omacvm apply sets it).
+  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
+  if [[ $(feat omanotch off) == on ]]; then
+    [[ $n == 1 ]] && ok "notch mode (app)" "full screen covers the strip beside the notch" \
+      || bad "notch mode (app)" "off in OmacVM.app (omacvm apply --vm \"$VM\" turns it on)"
+  else [[ $n == 1 ]] && skip "notch mode (app)" "on in the app, off for this VM" || skip "notch mode (app)" "off"; fi
+  # QEMU's full grab sends Cmd shortcuts to Omarchy only with Accessibility.
+  d=$(app_dir "$VM")
+  if grep -q "Could not create event tap" "$d/logs/qemu.log" 2>/dev/null; then
+    bad "Cmd shortcuts as Super" "allow OmacVM.app under System Settings > Privacy & Security > Accessibility, then restart the VM" human
+  else ok "Cmd shortcuts as Super" "OmacVM.app has Accessibility"; fi
+else
+  pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
+fi
 (( fails )) && mac_failed=1 || mac_failed=0
 
 if (( JSON )); then

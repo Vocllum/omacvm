@@ -216,7 +216,8 @@ in_session() {
     HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
-if [[ ${F[omanotch]} == on ]]; then
+# OmacVM.app has its own notch mode (app/guest): no Omanotch there.
+if [[ ${F[omanotch]} == on && $TYPE != app ]]; then
   # An empty notchcast is a broken install (seen once): build it again.
   [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
   if [[ ! -x $H/.local/bin/notchcast ]]; then

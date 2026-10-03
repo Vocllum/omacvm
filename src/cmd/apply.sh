@@ -2,7 +2,7 @@
 # omacvm apply: put OmacVM onto a running VM (Parallels, UTM or VMware Fusion), or bring it up
 # to this version: the Mac side the VM's features need, then the VM side. Also
 # for an Omarchy you installed by hand from omarchy-mac.
-#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME]
+#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
 #                [--reset-host-key]
@@ -64,7 +64,7 @@ if [[ -n $IP ]]; then
 else
   resolve_vm start
 fi
-case $TYPE in parallels|utm|fusion) ;; *) echo "omacvm apply: --vm-type parallels, utm or fusion" >&2; exit 2 ;; esac
+case $TYPE in parallels|utm|fusion|app) ;; *) echo "omacvm apply: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;; esac
 vm_network_ok "$TYPE" "$IP" || exit 3
 ssh_ok=0; (wait_ssh "$IP" 120) >/dev/null 2>&1 || ssh_ok=$?
 (( ssh_ok != 3 )) || { hostkey_error; exit 3; }
@@ -102,7 +102,11 @@ if (( MAC )); then
   { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   "$R/src/mac/install.sh" "${args[@]}"
-  if on omanotch; then
+  if [[ $TYPE == app ]]; then
+    # OmacVM.app draws the notch strip itself: its full screen covers it and
+    # Omarchy's bar moves there. The omanotch feature switches that.
+    defaults write org.omacvm.app useNotch -bool "$(on omanotch && echo true || echo false)"
+  elif on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then
       log "Omanotch on the Mac"
       git clone -q https://github.com/gillesgoetsch/omanotch.git "$HOME/omanotch"
@@ -126,8 +130,9 @@ fi
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
 if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
-# The gestures daemon says it too (on UTM and Fusion it always runs).
-{ on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } && bridge_token_ensure
+# The gestures daemon says it too (on UTM, Fusion and OmacVM.app it always
+# runs; OmacVM.app's VMs show it on 127.0.0.1 even without the Bridge).
+{ on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } && bridge_token_ensure
 if [[ -f $T ]]; then
   log "bridge token -> $IP"
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)

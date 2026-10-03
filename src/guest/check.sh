@@ -163,6 +163,25 @@ EOF
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
   check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
   check "GPU for browsers" "virgl-msaa.so preloaded" bash -c 'test -s /usr/local/lib/omacvm/virgl-msaa.so && grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload' ;;
+app)
+  section "OmacVM.app"
+  check "display follows the window" "omacvm-display-sync" pgrep -u "$U" -f omacvm-display-sync
+  check "QEMU guest agent" "clean shutdown fallback" systemctl is-active -q qemu-guest-agent
+  check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+  if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
+  else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
+  if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
+  else bad "sound" "no PipeWire sink: omacvm apply"; fi
+  if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then
+    ok "display" "$(as_user hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height) @\(.refreshRate | floor) Hz, scale \(.scale)"')"
+  fi
+  r=$(as_user glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p')
+  [[ -z $r ]] && r=$(as_user eglinfo -B 2>/dev/null | sed -n 's/^OpenGL core profile renderer: //p;s/^OpenGL renderer: //p' | head -1)
+  case $r in
+    *virgl*) ok "GPU" "$r" ;;
+    "") skip "GPU" "no glxinfo/eglinfo to ask (mesa-utils)" ;;
+    *) bad "GPU" "software rendering: $r" ;;
+  esac ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
@@ -231,7 +250,14 @@ if [[ $MAC_CLOCK == on ]]; then
 fi
 
 section "Omanotch"
-if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+if [[ $TYPE == app ]]; then
+  # OmacVM.app's own notch mode: its full screen covers the strip, the bar goes there.
+  if [[ $OMANOTCH == on ]]; then
+    if [[ -x /usr/local/bin/omacvm-app-host && -r /run/omacvm/host.env ]] && grep -q '^OMACVM_NOTCH=' /run/omacvm/host.env; then
+      ok "notch strip" "OmacVM.app's full screen covers it, Omarchy's bar moves there"
+    else bad "notch strip" "the app did not pass the notch (restart the VM from OmacVM.app after omacvm apply)"; fi
+  else skip "notch strip" "off (omacvm enable omanotch, on a MacBook with a notch)"; fi
+elif [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
