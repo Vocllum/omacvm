@@ -48,7 +48,13 @@ python3 "$here/thp-pkgbuild.py" "$W"
 chown -R "$U:$U" "$W"
 # makepkg builds with one job unless told otherwise: use every vCPU.
 sudo -u "$U" env MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --cleanbuild
-pacman -U --noconfirm "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.*
+cp -P "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.* "$P"/
+for f in "$P"/*; do [[ -f $f && ! -L $f ]] || { echo "build-thp-kernel: $f is not a plain file" >&2; exit 1; }; done
+pacman -U --noconfirm "$P"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$P"/linux-aarch64-thp-headers-*.pkg.tar.*
+# Builds before this one were kept in the user's cache (several GB, partly
+# root's): gone, unless a link is on the way there.
+C=$(getent passwd "$U" | cut -d: -f6)/.cache
+if [[ ! -L $C && ! -L $C/omacvm && -d $C/omacvm/linux-aarch64-thp ]]; then rm -rf "$C/omacvm/linux-aarch64-thp" || true; fi
 
 grub_default_thp
 echo "linux-aarch64-thp installed; reboot to use it"
