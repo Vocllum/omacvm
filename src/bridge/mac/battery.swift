@@ -181,8 +181,8 @@ func watchPowerSources(_ changed: @escaping () -> Void) {
 func batteryState() -> [String: Any] { HostBatterySnapshot.capture().dictionary }
 
 /// What a change sent at once is about; the battery's own readings
-/// (voltage, charge in µAh) move all the time and go out at most every
-/// `minorSeconds`.
+/// (voltage, charge in µAh, time left) move all the time and go out at
+/// most every `minorSeconds`.
 func coarseBattery(_ s: [String: Any]) -> [String: Any] {
   s.filter { !["voltageMicroV", "chargeNowMicroAh", "timeToEmptySeconds", "timeToFullSeconds"].contains($0.key) }
 }
