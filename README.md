@@ -128,6 +128,7 @@ screen is enough: UTM.
 | Web apps: Speedometer 3.1 in Chrome | **about 92 %**<br>(earlier measurement) | about 65 %<br>(earlier measurement) | 70 % |
 | **Graphics** | | | |
 | GPU path | virgl (OpenGL) | virgl (OpenGL) | vmwgfx (SVGA3D), with a Hyprland fix OmacVM builds |
+| GPU in Chrome (WebGL, page drawing) | ✓ | ✓ with UTM's default renderer | ✓ |
 | GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ |
 | **Displays** | | | |
 | External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** |
@@ -155,10 +156,6 @@ the same Mac (see [How fast](#how-fast)). New measurements of all three with
 one method, GPU tests included, are under way: [docs/benchmarks](docs/benchmarks/README.md).
 None of the three apps gives Linux Vulkan or OpenCL, so there is no GPU compute
 in any of them.
-
-On UTM, Chrome and other Chromium browsers still draw without the GPU: UTM
-reports no multisampling to Linux, and Chrome then turns its GPU off. The fix
-comes in 2.2.1.
 
 ### About the Fusion route
 
