@@ -86,14 +86,27 @@ cat > "$C/Info.plist" <<EOF
 </plist>
 EOF
 
-log "signing (ad hoc)"
-for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
-  codesign --force --sign - "$f" 2>/dev/null
-done
-# The designated requirement names the identifier, not the binary's hash, so
-# macOS keeps Accessibility and other grants across rebuilds (as OmacVM's helpers).
-codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
-  --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
-codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
+# OMACVM_SIGN_ID: a Developer ID identity (name or SHA-1) signs for release,
+# with the hardened runtime and a timestamp; without it the build is signed ad hoc.
+if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
+  log "signing ($OMACVM_SIGN_ID)"
+  SIGN=(--force --sign "$OMACVM_SIGN_ID" --options runtime --timestamp)
+  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
+    codesign "${SIGN[@]}" "$f"
+  done
+  codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
+    --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
+  codesign "${SIGN[@]}" --identifier org.omacvm.app "$APP"
+else
+  log "signing (ad hoc)"
+  for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
+    codesign --force --sign - "$f" 2>/dev/null
+  done
+  # The designated requirement names the identifier, not the binary's hash, so
+  # macOS keeps Accessibility and other grants across rebuilds (as OmacVM's helpers).
+  codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
+    --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
+  codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 log "built $APP ($(du -sh "$APP" | cut -f1))"
