@@ -36,11 +36,18 @@ def apply(force=False):
     rows = [r.split() for r in out.splitlines() if len(r.split()) == 5]
     if not rows or (rows == last and not force):
         return
+    # Fusion's layout is in pixels, Hyprland's positions in logical points.
+    # With one scale for every output, pixels / scale keeps the arrangement
+    # (on a Retina Mac the displays otherwise drift apart: the external
+    # display ended 1200 points above the built-in one, not 43).
+    scales = {scale_for(int(w)) for _, _, _, w, _ in rows}
+    div = float(scales.pop()) if len(scales) == 1 else 1.0
     for name, x, y, w, h in rows:
-        rule = f'hl.monitor{{output="{name}", mode="{w}x{h}", position="{x}x{y}", scale={scale_for(int(w))}}}'
+        px, py = round(int(x) / div), round(int(y) / div)
+        rule = f'hl.monitor{{output="{name}", mode="{w}x{h}", position="{px}x{py}", scale={scale_for(int(w))}}}'
         subprocess.run(["hyprctl", "eval", rule], capture_output=True, timeout=10)
     last = rows
-    log("layout: " + ", ".join(f"{n} {w}x{h} at {x},{y}" for n, x, y, w, h in rows))
+    log("layout: " + ", ".join(f"{n} {w}x{h} at {round(int(x) / div)},{round(int(y) / div)}" for n, x, y, w, h in rows))
 
 def hypr_events():
     sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", "")

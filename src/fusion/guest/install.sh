@@ -58,6 +58,15 @@ install -m644 "$here/omacvm-fusion-clipboard.service" /etc/systemd/user/omacvm-f
 systemctl --global disable omacvm-fusion-clipboard.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" enable omacvm-fusion-clipboard.service >/dev/null 2>&1
 
+# Chrome and Chromium block VMware's GPU driver (SVGA3D) and draw everything
+# in software: WebGL off, slow pages. The GPU works fine, so skip the blocklist.
+for f in chromium-flags.conf chrome-flags.conf; do
+  c=$H/.config/$f
+  [[ -f $c ]] || [[ $f == chromium-flags.conf ]] || continue
+  grep -qx -- '--ignore-gpu-blocklist' "$c" 2>/dev/null || echo '--ignore-gpu-blocklist' >> "$c"
+  chown "$U:$U" "$c"
+done
+
 M=$H/.config/hypr/monitors.lua
 # Ours already: only the first mode changes, the rest stays as you left it.
 if head -1 "$M" 2>/dev/null | grep -q '^-- OmacVM, VMware Fusion'; then
