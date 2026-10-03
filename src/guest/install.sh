@@ -171,9 +171,9 @@ case $TYPE in
 esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super,
-# so it stays (OmacVM.app's QEMU sends Cmd itself).
-if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
+# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd
+# shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
@@ -217,8 +217,9 @@ in_session() {
     HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
-# OmacVM.app has its own notch mode (app/guest): no Omanotch there.
-if [[ ${F[omanotch]} == on && $TYPE != app ]]; then
+# OmacVM.app too: its full screen sits below the notch like the other routes'
+# (its own notch-strip mode is an opt-in; Omanotch then leaves the strip alone).
+if [[ ${F[omanotch]} == on ]]; then
   # An empty notchcast is a broken install (seen once): build it again.
   [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
   if [[ ! -x $H/.local/bin/notchcast ]]; then
@@ -238,7 +239,9 @@ if [[ ${F[omanotch]} == on && $TYPE != app ]]; then
   # The Mac's address, so notchcast does not have to guess it (on VMware
   # Fusion the gateway is Fusion's NAT, not the Mac).
   install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
-  printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST" > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  # OmacVM.app: its display sync already follows the window.
+  { printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST"
+    [[ $TYPE == app ]] && printf 'Environment=NOTCHBAR_FOLLOW_MODE=0\n'; } > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   user_ctl daemon-reload 2>/dev/null || true
   user_ctl try-restart notchcast.service 2>/dev/null || true

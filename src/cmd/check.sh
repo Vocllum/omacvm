@@ -138,7 +138,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup)"; fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
@@ -187,18 +187,12 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
+pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
 if [[ $TYPE == app ]]; then
-  # The notch strip is the app's own switch (on its start screen).
+  # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
   n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  [[ $n == 1 ]] && skip "notch strip (app)" "full screen covers it (no Space of its own)" \
-    || skip "notch strip (app)" "off: full screen in its own Space, below the notch"
-  # QEMU's full grab sends Cmd shortcuts to Omarchy only with Accessibility.
-  d=$(app_dir "$VM")
-  if grep -q "Could not create event tap" "$d/logs/qemu.log" 2>/dev/null; then
-    bad "Cmd shortcuts as Super" "allow OmacVM.app under System Settings > Privacy & Security > Accessibility, then restart the VM" human
-  else ok "Cmd shortcuts as Super" "OmacVM.app has Accessibility"; fi
-else
-  pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
+  [[ $n == 1 ]] && skip "notch strip (app)" "the app's full screen covers it (no Space of its own)" \
+    || skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
 

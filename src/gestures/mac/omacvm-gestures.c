@@ -565,9 +565,10 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
-        // UTM and VMware Fusion keep Cmd shortcuts like Cmd+Space for macOS:
-        // in full screen they go to Omarchy as Super, through the guest daemon.
-        if (type == kCGEventKeyDown && capturing && (frontNet == NET_UTM || frontNet == NET_FUSION) &&
+        // UTM, VMware Fusion and OmacVM.app (without Accessibility for it) keep
+        // Cmd shortcuts like Cmd+Space for macOS: in full screen they go to
+        // Omarchy as Super, through the guest daemon.
+        if (type == kCGEventKeyDown && capturing && (frontNet == NET_UTM || frontNet == NET_FUSION || frontNet == NET_APP) &&
             (f & kCGEventFlagMaskCommand) && haveClient()) {
           forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
           forwarded[kc] = 1;

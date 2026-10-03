@@ -100,14 +100,12 @@ info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i
 if (( MAC )); then
   args=(--quiet)
   on bridge || args+=(--no-bridge)
-  { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
+  { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   "$R/src/mac/install.sh" "${args[@]}"
-  if [[ $TYPE == app ]]; then
-    # OmacVM.app: covering the notch strip is the app's own switch (its full
-    # screen then has no Space of its own), so apply leaves it alone.
-    :
-  elif on omanotch; then
+  # OmacVM.app: Omanotch as for the other routes (the app's own notch-strip
+  # mode is a separate switch in the app, which apply leaves alone).
+  if on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then
       log "Omanotch on the Mac"
       git clone -q https://github.com/gillesgoetsch/omanotch.git "$HOME/omanotch"

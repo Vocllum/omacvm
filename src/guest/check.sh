@@ -109,7 +109,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Trackpad and keyboard"
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then   # on UTM and Fusion the daemon also types Cmd as Super
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
@@ -129,7 +129,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
-if [[ $TYPE == utm || $TYPE == fusion ]]; then
+if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
@@ -250,14 +250,7 @@ if [[ $MAC_CLOCK == on ]]; then
 fi
 
 section "Omanotch"
-if [[ $TYPE == app ]]; then
-  # OmacVM.app's own notch mode: its full screen covers the strip, the bar goes there.
-  if [[ $OMANOTCH == on ]]; then
-    if [[ -x /usr/local/bin/omacvm-app-host && -r /run/omacvm/host.env ]] && grep -q '^OMACVM_NOTCH=' /run/omacvm/host.env; then
-      ok "notch strip" "OmacVM.app's full screen covers it, Omarchy's bar moves there"
-    else bad "notch strip" "the app did not pass the notch (restart the VM from OmacVM.app after omacvm apply)"; fi
-  else skip "notch strip" "off (omacvm enable omanotch, on a MacBook with a notch)"; fi
-elif [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then

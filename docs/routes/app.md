@@ -23,9 +23,13 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen beside the notch (option): the window covers the whole built-in
-  display, Omarchy's bar takes the strip beside the camera (32 pt on a 14"),
-  windows start below it. Native resolution and 120 Hz.
+- Full screen in its own Space, below the notch, like Parallels; Omanotch puts
+  Omarchy's bar into the strip beside the notch, as on the other routes.
+- ⌘ shortcuts (⌘Space too) go to Omarchy as Super in full screen, through
+  OmacVM Gestures, as on UTM: the app needs no Accessibility of its own.
+- Optional notch-strip mode (a switch in the app): the window covers the
+  strip itself and Omarchy's bar moves there, but that full screen has no
+  Space of its own (macOS 15 keeps full-screen Spaces below the notch).
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
@@ -33,9 +37,8 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 
 ## What needs a person
 
-- Accessibility for the app (System Settings > Privacy & Security), so ⌘
-  shortcuts go to Omarchy as Super.
 - The password for Omarchy, typed in the setup.
+- The permissions OmacVM's Mac helpers ask for (as on the other routes).
 
 ## Not done yet
 
