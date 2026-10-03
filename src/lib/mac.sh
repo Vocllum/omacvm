@@ -55,6 +55,14 @@ bridge_token_ensure() {
   (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
 }
 
+# Omanotch on this Mac serves OmacVM.app's VMs (on 127.0.0.1) only from the
+# version that knows the app's QEMU: 0 it does, 1 too old, 2 not installed.
+omanotch_serves_app() {
+  local b=$HOME/Applications/Omanotch.app/Contents/MacOS
+  [[ -d $b ]] || return 2
+  grep -aqF /Contents/Resources/runtime/bin/OmacVM "$b"/* 2>/dev/null || return 1
+}
+
 # Gestures lets daemons from before the token in only from these VMs (MAC
 # addresses, one per line); src/mac/install.sh writes the list once.
 GESTURES_LEGACY="$HOME/Library/Application Support/omacvm/gestures-legacy"

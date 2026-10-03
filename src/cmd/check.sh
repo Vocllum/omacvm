@@ -193,6 +193,10 @@ utm)
   esac ;;
 esac
 pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
+if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
+  rc=0; omanotch_serves_app || rc=$?
+  (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
+fi
 if [[ $TYPE == app ]]; then
   # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
   n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)

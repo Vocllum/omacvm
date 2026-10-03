@@ -255,6 +255,7 @@ if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
+  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 

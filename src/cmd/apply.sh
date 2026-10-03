@@ -125,6 +125,12 @@ if (( MAC )); then
   fi
 fi
 
+# An Omanotch from before OmacVM.app listens only on the other routes' networks.
+if on omanotch && [[ $TYPE == app ]]; then
+  rc=0; omanotch_serves_app || rc=$?
+  (( rc != 1 )) || info "Omanotch on this Mac is too old for OmacVM.app's VMs (it does not serve 127.0.0.1): the strip beside the notch stays empty until it is updated (omacvm update)"
+fi
+
 # ---------- the VM side ----------
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
