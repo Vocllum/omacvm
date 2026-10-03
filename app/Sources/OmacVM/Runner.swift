@@ -53,7 +53,10 @@ final class Runner {
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(console.replacingOccurrences(of: ",", with: ",,"))",
-              "-device", "virtconsole,bus=vser0.0,nr=0,chardev=hvc0"]
+              "-device", "virtconsole,bus=vser0.0,nr=0,chardev=hvc0",
+              // QEMU guest agent: a clean shutdown even when the power key is ignored.
+              "-chardev", "socket,id=qga0,path=\(c.agentSocket.path),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0"]
         return a
     }
 
