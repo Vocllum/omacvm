@@ -127,7 +127,7 @@ wait_ssh() {   # [seconds]
 run_logged() {
   local f=$1 rc; shift
   set +e
-  "$@" 2>&1 | tee "$f" | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
+  "$@" 2>&1 | tee "$f" | sed -l 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
   rc=${PIPESTATUS[0]}
   set -e
   return "$rc"

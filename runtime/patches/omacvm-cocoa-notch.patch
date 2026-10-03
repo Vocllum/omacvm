@@ -1,0 +1,39 @@
+From: OmacVM
+Subject: [PATCH] cocoa: full screen beside the notch
+
+With OMACVM_NOTCH=1, full screen uses the whole display, the strip beside
+the notch included; the guest puts its bar there. Applies after
+omacvm-cocoa-quit-powerdown.patch.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -787,9 +787,19 @@
+     return fixed;
+ }
+ 
++/* OmacVM: with OMACVM_NOTCH=1, full screen covers the strip beside the notch too. */
++static bool omacvm_notch_mode(void)
++{
++    const char *v = getenv("OMACVM_NOTCH");
++    return v && !strcmp(v, "1");
++}
++
+ - (NSSize) screenSafeAreaSize
+ {
+     NSSize size = [[[self window] screen] frame].size;
++    if (omacvm_notch_mode()) {
++        return size;
++    }
+     NSEdgeInsets insets = [[[self window] screen] safeAreaInsets];
+     size.width -= insets.left + insets.right;
+     size.height -= insets.top + insets.bottom;
+@@ -1810,6 +1820,9 @@
+ - (void)windowDidEnterFullScreen:(NSNotification *)notification
+ {
+     [fullScreenMenuItem setTitle:@"Exit Full Screen"];
++    if (omacvm_notch_mode()) {
++        [[cocoaView window] setFrame:[[[cocoaView window] screen] frame] display:YES];
++    }
+     [cocoaView updateScale];
+     [cocoaView updateUIInfo];
+     [cocoaView grabMouse];
