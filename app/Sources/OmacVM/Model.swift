@@ -304,9 +304,11 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// Full screen also covers the strip beside the notch; Omarchy's bar goes there.
+    /// Full screen also covers the strip beside the notch; Omarchy's bar goes
+    /// there. Off by default: that full screen has no Space of its own (macOS
+    /// keeps full-screen Spaces below the notch).
     static var useNotch: Bool {
-        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? Mac.hasNotch }
+        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
     }
 }
