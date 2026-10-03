@@ -16,5 +16,5 @@ done
 tccutil reset Accessibility org.omacvm.gestures >/dev/null 2>&1 || true
 tccutil reset ListenEvent org.omacvm.gestures >/dev/null 2>&1 || true
 rm -rf "$HOME/Library/Application Support/omacvm/installed"
-[[ -n $PURGE ]] && rm -rf "$HOME/.local/share/omacvm"
+[[ -n $PURGE ]] && rm -rf "$HOME/.local/share/omacvm" "$HOME/Library/Application Support/omacvm"   # also the VMs' SSH host keys
 echo "OmacVM removed from this Mac"

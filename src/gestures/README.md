@@ -50,8 +50,8 @@ Install / remove on the Mac: `mac/install.sh`, `mac/uninstall.sh` (or
 in the VM; `omacvm apply` runs it).
 
 Protocol (TCP, one line each): see the header of `mac/omacvm-gestures.c`
-(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `H <gestures> <glide>` from
-it).
+(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `H <gestures> <glide> <token>`
+from it: the Bridge's token, which every listener checks).
 
 Verified on macOS 15.7.4, Parallels 27.0.2, MacBook Pro M4 Max: 4-finger and
 3-finger swipes switch workspaces, pinch zooms in Chrome, macOS Spaces swipes

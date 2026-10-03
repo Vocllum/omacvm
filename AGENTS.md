@@ -119,7 +119,7 @@ GitHub.
 | `src/lib/vm.sh` | Finding VMs without starting UTM (`vms_list`: Parallels via prlctl, UTM via utmctl when it runs, else UTM's `Registry` preference, which knows VMs outside its folder, and Fusion's VM folders), `vm_type` (running first, Parallels' "invalid" last), `resolve_vm` (no name: "Omarchy", else the only running VM), `vm_probe` (user, version, env, features set up before 2.0), `ssh_setup_command` |
 | `src/cmd/build.sh` | Nothing → finished VM. Interactive questionnaire (`src/lib/setup.sh`, bash 3.2, reads `/dev/tty`): Parallels, UTM or VMware Fusion (waits until installed; UTM ≥ 5, Fusion ≥ 13), VM name if taken, resources Low/Balanced/High/Best (`tier_values`: Best leaves max(8 GB, ¼) for macOS + GPU; capped by the Parallels licence; custom values also ask Fusion's graphics memory), where the VM goes (Parallels, Fusion), one checklist of every feature in `features.tsv` (defaults on, experimental ones marked), user/full name, summary, password. Options: `--vm-type --vm-name --vm-dir --resources --cpus --memory-gb --disk-gb --graphics-gb --user --full-name --hostname` (`--graphics-gb`: Fusion only, 1-8 GB of the VM's memory) (`--vm-dir`: Parallels and Fusion only; the drive must be APFS or Mac OS Extended with 30 GB free), `--feature NAME=on|off` / `--FEATURE` / `--no-FEATURE`, `--yes --dry-run --plan --json`, `--parallels-edition standard|pro` (only while Parallels reports "No license installed", a fresh install whose trial starts with the first VM: the edition to size by; the questionnaire asks it, default standard), hidden `--channel` (default: omarchy-mac's `stable` lane once published, else `rc`); `OMACVM_PASSWORD` for `--yes`. Ends with one `apply` call (Mac side, VM side, Omanotch) |
 | `src/cmd/check.sh` + `src/guest/check.sh` | Read-only feature check, Mac side then guest side over SSH (`bash -s` of `src/guest/check.sh`, so it works on VMs with an older copy). One line per feature, exit 1 on any FAIL; `--json` (guest side `--tsv`) with `needs_human` per check. Add a line here for every new feature |
-| `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, Omanotch's Mac app), copies the bridge token and `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). No SSH access: exit 3 with the command for the VM's terminal |
+| `src/cmd/apply.sh` | OmacVM onto a running VM (a stopped one is started): reads the VM (`vm_probe`), merges `--feature` changes (dependencies via `features_fix`), installs the Mac side those features need (`src/mac/install.sh --quiet`, Omanotch's Mac app), copies the bridge token and `src/` to `/usr/local/share/omacvm` (same layout there, without `src/`), runs `src/guest/install.sh` with every feature explicit, Dock icon (Parallels). No SSH access: exit 3 with the command for the VM's terminal; another SSH host key than the one remembered: exit 3 (`--reset-host-key` after a rebuild) |
 | `src/cmd/features.sh` | `features` (list, `--json`, or a checklist in a terminal), `enable`/`disable`; changes go through `apply.sh` |
 | `src/cmd/update.sh`, `vms.sh`, `home.sh` | `update`: git pull (clean clone only, then re-exec), Mac side as installed, Omanotch's clone when clean, `apply --no-mac` on every running OmacVM VM. `vms`: table or `--json`. `home.sh`: the menu |
 | `src/mac/install.sh`, `src/mac/uninstall.sh` | Mac side: bridge, gestures, clipboard helper; an app whose sources and options are unchanged since its install is skipped (stamps in `~/Library/Application Support/omacvm/installed`, `--force`). `src/mac/parallels-shortcuts.sh`: empty Parallels' Linux keyboard profile (opt-in, app-wide) |
@@ -177,8 +177,15 @@ Omanotch.app (separate) :47811          ◀────────── notchc
   (Parallels), `UTM` or `VMware Fusion`, and its window covers a display (the strip beside the
   notch excepted).
 - Gestures protocol (one line each, `src/gestures/mac/omacvm-gestures.c`
-  header): the guest says `H <gestures> <glide>` right after connecting (a 1.x
-  daemon says nothing: gestures on, scroll momentum off). The helper captures the
+  header): the guest says `H <gestures> <glide> <token>` right after connecting
+  (the Bridge's token, which the Mac checks on every listener). Daemons from
+  before the token (no token; a 1.x daemon says nothing: gestures on, scroll
+  momentum off) are let in only from MAC addresses in `~/Library/Application
+  Support/omacvm/gestures-legacy` (written once by `src/mac/install.sh`,
+  `omacvm apply` takes each VM off).
+- SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
+  the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
+  another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`. The helper captures the
   trackpad only for a network whose connected daemons all want it, and the scroll momentum
   (macOS's continuous scroll events dropped, `A`/`W`/`P` sent, every
   two-finger frame forwarded) only when they all want that.

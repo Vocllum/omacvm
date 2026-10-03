@@ -26,6 +26,7 @@ else than the cause. Recipes and the general failure table are in
 | 14 | UTM | [Chrome has no GPU, then WebGL comes out empty](#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty) |
 | 15 | UTM | [UTM uses 15 W while Omarchy sits idle](#15-utm-uses-15-w-while-omarchy-sits-idle) |
 | 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
+| 17 | All | [Security review of the Mac and guest sides; "another SSH host key"](#17-security-review-of-the-mac-and-guest-sides) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -279,3 +280,32 @@ on the branch.
   come too unevenly for that, even at the lowest complexity. Animations and
   scrolling still look smooth in use; the benchmark can't settle.
 - **Where:** `src/bench/browser-bench.py` prints the subtest breakdown.
+
+## 17. Security review of the Mac and guest sides
+
+- **Symptom:** `omacvm apply`, `check` or a build stops with "answers with
+  another SSH host key than the one OmacVM remembered".
+- **Cause:** OmacVM remembers each VM's SSH host key the first time it sets the
+  VM up (build, apply) and refuses another one later. A rebuilt or reinstalled
+  VM has a new key; anything else answering at the VM's address does too.
+- **Fix:** after a rebuild, `omacvm apply --vm NAME --reset-host-key`.
+- **Where:** `src/lib/mac.sh` (`gssh`, `hostkey_changed`), `src/lib/vm.sh`
+  (`vm_pin`); the keys are in `~/Library/Application Support/omacvm/known_hosts/`.
+
+What the review found, and the fixes:
+
+| What | Fix | Where |
+|---|---|---|
+| No host-key check; `omacvm update` sent the Bridge token to any running VM that said it had OmacVM | host keys remembered per VM (above); `update` only updates VMs OmacVM set up from this Mac (a remembered key, or OmacVM's note or icon on the VM), others need `omacvm update --vm NAME` once | `src/lib/mac.sh`, `src/lib/vm.sh` (`vm_marked`), `src/cmd/update.sh` |
+| Gestures let any VM on the VM networks connect (trackpad frames, Cmd keys, capture off) | every listener wants the Bridge token in the hello; daemons from before it are let in only from the VMs OmacVM had set up (their MAC addresses, listed once in `~/Library/Application Support/omacvm/gestures-legacy`), until apply or update replaces them | `src/gestures/mac/omacvm-gestures.c`, `src/gestures/guest/omacvm-gestures`, `src/mac/gestures-legacy.sh` |
+| A quote in a UTM VM's name ran AppleScript | the name goes in as an argument | `src/lib/mac.sh` (`utm_ip`) |
+| The clipboard helper followed links in the folder the guest writes | only a plain file, never through a link, at most 4 MiB | `src/clipboard/mac/omacvm-clip-in` |
+| A full name with `"`, `$` or a backtick ran in the install script; the hostname was not checked | values written with `printf %q`; hostname `^[a-z0-9][a-z0-9-]{0,62}$` | `src/vm/omarchy-install.sh`, `src/cmd/build.sh` |
+| Root followed links in the user's home (`chown`, `monitors.lua`, the notchcast drop-in, the kernel build) | `chown -h`; those files written as the user; the kernel built in a folder of root's and installed from a copy root owns | guest installers, `src/kernel/build-thp-kernel.sh` |
+| The Bridge: a slow client held a thread, a negative `Content-Length` crashed it | a deadline for the whole request, at most 32 requests at a time (16 per address), 400 for a bad length | `src/bridge/mac/server.swift` |
+
+Left open: the Mac apps are signed ad hoc with a requirement that names only
+their identifier, so another program signed the same way could keep their
+privacy permissions (signing releases with a Developer ID fixes that); the
+try-omarchy image, Omanotch and Arch Linux ARM's kernel recipe are not pinned
+to a checksum or commit.
