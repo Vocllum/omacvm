@@ -1,6 +1,6 @@
-// Media keys (stage 1c): while Parallels shows the VM full screen, the volume,
-// brightness and keyboard-backlight keys are swallowed (no macOS popup) and
-// applied here; every change, ours or not, goes out as an "osd" event so the VM
+// Media keys (stage 1c): while the VM is full screen, the volume, brightness
+// and keyboard-backlight keys are swallowed (no macOS popup) and applied here
+// (Shift + brightness: the keyboard backlight, as in Omarchy); every change, ours or not, goes out as an "osd" event so the VM
 // can draw its own popup. Plus the config file and the menu-bar switch.
 import AppKit
 import ApplicationServices
@@ -232,10 +232,16 @@ final class MediaKeys {
   func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
     guard config.captureKeys, type.rawValue == 14, let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
     let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
-    guard let key = MediaKey(rawValue: code) else { return false }
+    guard var key = MediaKey(rawValue: code) else { return false }
     vmFullScreen = parallelsFullScreen()
+    // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
+    // no keys of its own for it), Option + brightness keys = small steps.
+    let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
+    if shift && !option {
+      if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
+    }
     guard vmFullScreen, canApply(key) else { return false }   // macOS handles it as usual
-    let fine = event.flags.contains(.maskShift) && event.flags.contains(.maskAlternate)
+    let fine = option
     if down { work.async { self.apply(key, fine: fine) } }   // key-up is swallowed too
     return true
   }
