@@ -1,6 +1,7 @@
 # Benchmarks
 
-How OmacVM measures the three routes against the Mac itself, so anyone can run
+How OmacVM measures the four ways (Parallels, UTM, VMware Fusion, OmacVM.app)
+against the Mac itself, so anyone can run
 the same tests and get numbers that compare. The results so far are at the
 end. The tools are in [`src/bench/`](../../src/bench).
 
@@ -15,9 +16,10 @@ end. The tools are in [`src/bench/`](../../src/bench).
 | Geekbench 7 GPU | GPU compute | ✓ (Metal) | ✗ see below |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
 
-**GPU compute is not possible in any of the three VMs.** Geekbench's GPU test
-needs Vulkan or OpenCL, and none of Parallels, UTM or VMware Fusion offers
-either to a Linux guest. `bench.sh` records that as "not available in this VM".
+**GPU compute is not possible in any of the VMs.** Geekbench's GPU test
+needs Vulkan or OpenCL, and none of Parallels, UTM, VMware Fusion or
+OmacVM.app offers either to a Linux guest. `bench.sh` records that as "not
+available in this VM".
 The browser tests (MotionMark, WebGL Aquarium) and glmark2 measure graphics
 instead, not raw compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
@@ -35,7 +37,7 @@ Do all of this, or the numbers won't compare:
 | No screensaver | Omarchy's screensaver and lock off: `omacvm disable idle-lock --vm NAME`. It can start in the middle of a run otherwise |
 | Google Chrome everywhere | Google Chrome on the Mac and in the VM. Arch's Chromium is much slower than Chrome (Parallels: 35.4 with Chromium 153 vs about 45 with Chrome), so it would not compare |
 | Chrome's flags | in a VM, `bench.sh` starts Chrome with the flags in `/etc/chrome-flags.conf` and Omarchy's `~/.config/chrome-flags.conf`. On Fusion one of them must have `--ignore-gpu-blocklist` (OmacVM puts it in `/etc`), or Chrome draws in software ([why](../troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
-| Runs | 3 of each test, report the median. Single runs land within 2 to 3 % of each other |
+| Runs | 3 of each test (`bench.sh`'s default), report the median. Single runs land within 2 to 3 % of each other. The published [results](#results) say where they are single runs |
 
 ## Run it
 
@@ -74,7 +76,8 @@ OmacVM copies its tools into the VM, so they are in
    it prints `results:`. Chrome opens and closes by itself.
 
 4. Copy the file to the Mac. Name it after the route (`parallels`, `utm`,
-   `fusion`), because the report and chart use the file names:
+   `fusion`, `app` for OmacVM.app), because the report and chart use the file
+   names (OmacVM.app's SSH is `-P 52222 root@127.0.0.1`):
 
    ```bash
    scp -i ~/.ssh/omacvm root@<vm-ip>:/home/<user>/fusion.jsonl ~/bench/
@@ -139,7 +142,7 @@ On the Mac, with all files in one folder:
 
 ```bash
 cd ~/bench
-~/.omacvm/src/bench/report.py mac.jsonl parallels.jsonl utm.jsonl fusion.jsonl --json results.json
+~/.omacvm/src/bench/report.py mac.jsonl parallels.jsonl utm.jsonl fusion.jsonl app.jsonl --json results.json
 ~/.omacvm/src/bench/chart.py results.json ~/.omacvm/docs/images/benchmarks.svg \
   "MacBook Pro M4 Max · macOS 15.7 · 16 CPUs, 48 GB per VM"
 ```
@@ -160,15 +163,17 @@ does not work. Your results are public on Geekbench's site.
 2026-10-03, MacBook Pro 16" M4 Max, macOS 15.7.4, 16 CPUs and 48 GB per VM, in
 full screen on the built-in display (3456x2160 at 120 Hz), Google Chrome 154,
 OmacVM 2.3.0. Parallels Desktop 27.0.2 (Pro trial), UTM 5.0.6, VMware Fusion
-26.0.1, OmacVM.app (preview, QEMU 11.1.1 from try-omarchy).
+26.0.1, OmacVM.app (preview, QEMU 11.1.1 from try-omarchy). Speedometer is
+the median of 3 runs; Geekbench, MotionMark and glmark2 are single runs, so a
+median of 3 may differ a little.
 
 | | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
 |---|---|---|---|---|---|
-| Geekbench 7 single-core | 3267 | 3164 | 2944 | 3054 | 3183 |
-| Geekbench 7 multi-core | 27290 | 26218 | 24414 | 27037 | 26984 |
+| Geekbench 7 single-core (single run) | 3267 | 3164 | 2944 | 3054 | 3183 |
+| Geekbench 7 multi-core (single run) | 27290 | 26218 | 24414 | 27037 | 26984 |
 | Speedometer 3.1 (median of 3) | 62.9 | 42.4 | 32.9 | 44.4 | 43.8 |
-| MotionMark 1.3.1 | 5865 | no stable result | no stable result | 2368 | no stable result |
-| glmark2 | no macOS version | 7306 | 964 | 1813 | 1017 |
+| MotionMark 1.3.1 (single run) | 5865 | no stable result | no stable result | 2368 | no stable result |
+| glmark2 (single run) | no macOS version | 7306 | 964 | 1813 | 1017 |
 | Geekbench 7 GPU | 207885 (Metal) | ✗ | ✗ | ✗ | ✗ |
 | YouTube 4K decoder | AV1, hardware | VP9, CPU | VP9, CPU | VP9, CPU (1.6 % dropped) | VP9, CPU |
 
