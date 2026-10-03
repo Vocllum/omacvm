@@ -4,7 +4,7 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
-#                    [--vm-name-b64 NAME]
+#                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
@@ -85,12 +85,13 @@ if [[ -z $TYPE ]]; then
 fi
 case $TYPE in
   parallels) HOST=10.211.55.2 ;;
+  app) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=10.0.2.2}" ;;   # OmacVM.app: QEMU's user network
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
   fusion) HOST=${HOST_GIVEN:-}   # from the Mac (apply.sh): the gateway's network may not be Fusion's
           [[ $HOST =~ ^[0-9]+\.[0-9]+\.[0-9]+\.1$ ]] || { echo "guest/install.sh: VMware Fusion needs --host (the Mac's address on Fusion's network)" >&2; exit 2; }
           [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
-  *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
+  *) echo "guest/install.sh: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;;
 esac
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
@@ -163,13 +164,15 @@ case $TYPE in
     log "clipboard";  "$R/clipboard/guest/install.sh" "$U" ;;
   utm)
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
+  app)
+    log "OmacVM.app"; "$R/app/guest/install.sh" "$U" ;;
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
+# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
