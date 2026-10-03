@@ -85,7 +85,7 @@ if [[ -z $TYPE ]]; then
 fi
 case $TYPE in
   parallels) HOST=10.211.55.2 ;;
-  app) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=10.0.2.2}" ;;   # OmacVM.app: QEMU's user network
+  app) HOST=10.0.2.2 ;;   # OmacVM.app: QEMU's user network always puts the Mac there
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
   fusion) HOST=${HOST_GIVEN:-}   # from the Mac (apply.sh): the gateway's network may not be Fusion's
