@@ -91,7 +91,7 @@ info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i
 if (( MAC )); then
   args=(--quiet)
   on bridge || args+=(--no-bridge)
-  { on gestures || [[ $TYPE == utm ]]; } || args+=(--skip-gestures)   # on UTM it also types Cmd as Super
+  { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   "$R/src/mac/install.sh" "${args[@]}"
   if on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then

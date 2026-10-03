@@ -115,7 +115,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup)"; fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
-if [[ $GESTURES == on || $TYPE == utm ]]; then
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"

@@ -339,9 +339,9 @@ human_steps() {
     echo "Allow media keys: Accessibility for OmacVM Bridge."
     echo "Allow Bluetooth devices: Bluetooth for OmacVM Bridge (macOS asks)."
   fi
-  if (( GESTURES )) || [[ $TYPE == utm ]]; then
+  if (( GESTURES )) || [[ $TYPE == utm || $TYPE == fusion ]]; then
     local what="the trackpad"
-    [[ $TYPE == utm ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
+    [[ $TYPE == utm || $TYPE == fusion ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
     echo "Allow $what: Accessibility and Input Monitoring for OmacVM Gestures."
   fi
   case $TYPE in

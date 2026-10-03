@@ -148,8 +148,8 @@ case $TYPE in
 esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM the gestures daemon also types Cmd shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm ]]; then
+# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
@@ -208,6 +208,13 @@ if [[ ${F[omanotch]} == on ]]; then
       log "Omanotch: installs at the first login"
     fi
   fi
+  # The Mac's address, so notchcast does not have to guess it (on VMware
+  # Fusion the gateway is Fusion's NAT, not the Mac).
+  install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
+  printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST" > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  user_ctl daemon-reload 2>/dev/null || true
+  user_ctl try-restart notchcast.service 2>/dev/null || true
 elif [[ -x $H/.local/bin/notchcast ]]; then
   log "Omanotch: off"
   systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true

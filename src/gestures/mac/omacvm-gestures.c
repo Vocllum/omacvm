@@ -433,7 +433,10 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
-        if (type == kCGEventKeyDown && capturing && frontNet == NET_UTM && (f & kCGEventFlagMaskCommand) && haveClient(NET_UTM)) {
+        // UTM and VMware Fusion keep Cmd shortcuts like Cmd+Space for macOS:
+        // in full screen they go to Omarchy as Super, through the guest daemon.
+        if (type == kCGEventKeyDown && capturing && (frontNet == NET_UTM || frontNet == NET_FUSION) &&
+            (f & kCGEventFlagMaskCommand) && haveClient(frontNet)) {
           forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
           forwarded[kc] = 1;
           return NULL;
@@ -444,6 +447,16 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     }
     if (type == kCGEventKeyUp) return e;
     if (CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat)) return NULL;
+    // Only the real keyboard: apps that post key events (VM apps among them)
+    // must not hand the trackpad back to macOS.
+    int64_t srcPid = CGEventGetIntegerValueField(e, kCGEventSourceUnixProcessID);
+    int64_t srcState = CGEventGetIntegerValueField(e, kCGEventSourceStateID);
+    if (srcState != kCGEventSourceStateHIDSystemState) {
+      char who[64] = "";
+      if (srcPid > 0) proc_name((pid_t)srcPid, who, sizeof who);
+      logf_("escape combo ignored: posted by pid %lld (%s), state %lld", srcPid, who, srcState);
+      return e;
+    }
     escaped = !escaped;
     capturing = frontIsVM && !escaped;
     logf_("escape combo: capture %s", capturing ? "ON" : "off");
