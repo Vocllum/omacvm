@@ -1,6 +1,6 @@
 [Unit]
 Description=Omanotch: stream the Omarchy bar to the macOS notch helper
-Documentation=https://github.com/gillesgoetsch/omanotch
+Documentation=https://github.com/gillesgoetsch/omacvm/tree/main/src/omanotch
 After=graphical-session.target
 PartOf=graphical-session.target
 

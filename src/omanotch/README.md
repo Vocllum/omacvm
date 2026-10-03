@@ -5,7 +5,7 @@
 <p align="center">The real Omarchy bar, right where Parallels (or UTM) leaves a black hole.</p>
 
 <p align="center">
-  <b>Part of the <a href="https://github.com/gillesgoetsch/omacvm">OmacVM</a> experience</b>: OmacVM builds the whole Omarchy VM on your Mac in one command and sets Omanotch up with it, along with trackpad gestures, macOS-like scrolling and the Mac's Wi-Fi, audio and keys in Omarchy.<br>
+  <b>Part of <a href="../../README.md">OmacVM</a></b> (it lives in OmacVM's <code>src/omanotch</code> now): OmacVM builds the whole Omarchy VM on your Mac in one command and sets Omanotch up with it, along with trackpad gestures, macOS-like scrolling and the Mac's Wi-Fi, audio and keys in Omarchy.<br>
   <code>curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash</code>
 </p>
 
@@ -125,7 +125,11 @@ monitors too: [some numbers](docs/why-parallels.md).</sub>
 
 ## Install
 
-In the VM, as your normal user, from a checkout of this repository:
+With OmacVM nothing to do: the `omanotch` feature (on by default on a MacBook
+with a notch, `omacvm enable omanotch` otherwise) installs both sides.
+
+By hand, from `src/omanotch` of an OmacVM checkout. In the VM, as your normal
+user:
 
 ```bash
 ./guest/install.sh
