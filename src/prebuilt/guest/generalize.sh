@@ -68,6 +68,9 @@ rm -rf "$H" "/var/spool/mail/$U" "/var/lib/systemd/linger/$U" "/var/lib/Accounts
 if [[ -f /var/lib/sddm/state.conf ]]; then sed -i "s/^User=.*/User=$U/" /var/lib/sddm/state.conf; fi
 fi
 sed -i "s/^OMACVM_USER=.*/OMACVM_USER=$U/" /etc/omacvm/env 2>/dev/null || true
+# omacvm apply gives a VM fresh from the image the default features
+# (guest/install.sh writes the file anew, without this line).
+grep -q '^OMACVM_PREBUILT_FRESH=' /etc/omacvm/env || echo OMACVM_PREBUILT_FRESH=1 >> /etc/omacvm/env
 
 log "root's key, SSH host keys, machine id, network secrets"
 rm -rf /root/.ssh /root/.cache /root/.bash_history /root/.lesshst /root/.viminfo /root/omacvm.env /root/omacvm.pub

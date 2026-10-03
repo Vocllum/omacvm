@@ -85,7 +85,9 @@ had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
-if [[ -z $had ]]; then   # new to OmacVM: the defaults, Omanotch with a notch
+# New to OmacVM (or a prebuilt VM before its first apply): the defaults,
+# Omanotch with a notch.
+if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
 for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
