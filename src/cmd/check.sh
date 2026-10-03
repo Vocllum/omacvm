@@ -146,6 +146,18 @@ if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
   running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
     || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
 fi
+# The microphone: the VM's app records only with macOS's permission, and its
+# recording helper cannot ask (docs/troubleshooting.md, finding 22). Its log says so.
+miclog=""
+case $TYPE in
+  fusion) x=$(fusion_vmx "$VM" 2>/dev/null) && miclog="$(dirname "$x")/vmware.log"; micapp="VMware Fusion" ;;
+  app) d=$(app_dir "$VM" 2>/dev/null) && miclog="$d/logs/qemu.log"; micapp="OmacVM" ;;
+esac
+if [[ -n $miclog && -f $miclog ]]; then
+  if grep -q -e "Failed to start input audio queue" -e "SDL_OpenAudioDevice for recording failed" "$miclog"; then
+    bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
+  else ok "microphone" "no refusal in $micapp's log"; fi
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then

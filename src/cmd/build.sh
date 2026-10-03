@@ -398,6 +398,12 @@ human_steps() {
     [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
     echo "Allow $what: Accessibility and Input Monitoring for OmacVM Gestures."
   fi
+  case $TYPE in
+    utm) echo "Allow the microphone: macOS asks for UTM the first time a Linux app records." ;;
+    fusion) echo "Allow the microphone: VMware Fusion in System Settings > Privacy & Security > Microphone (without it the VM records nothing)." ;;
+    app) echo "Allow the microphone: macOS asks for OmacVM when it starts the VM." ;;
+    parallels) echo "Allow the microphone: macOS asks for Parallels Desktop the first time a Linux app records." ;;
+  esac
   if (( CAMERA )); then
     case $TYPE in
       utm|fusion) echo "Allow the camera: macOS asks for OmacVM Bridge the first time a Linux app uses it." ;;
