@@ -156,6 +156,10 @@ one method, GPU tests included, are under way: [docs/benchmarks](docs/benchmarks
 None of the three apps gives Linux Vulkan or OpenCL, so there is no GPU compute
 in any of them.
 
+On UTM, Chrome and other Chromium browsers still draw without the GPU: UTM
+reports no multisampling to Linux, and Chrome then turns its GPU off. The fix
+comes in 2.2.1.
+
 ### About the Fusion route
 
 Stock Omarchy shows a black screen on Fusion. Fusion's GPU driver (`vmwgfx`)
