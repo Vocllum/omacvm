@@ -2,8 +2,8 @@
 
 Status: increments 1, 2, 4 and 5 done (a full `omacvm build --vm-type fusion` passed
 `omacvm check` in 24 minutes; the display follows the Mac's mode after a reboot);
-3: the Bridge and the media keys in full screen verified on a Mac (mini, no
-trackpad); trackpad gestures not tried yet.
+3: the Bridge, the media keys and trackpad gestures (Magic Trackpad) in full screen
+verified on a Mac.
 This file is the plan; the code follows it.
 
 ## Why
