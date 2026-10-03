@@ -147,6 +147,8 @@ fusion_install_help() {
   say "      1. support.broadcom.com: sign in (or create a free account)"
   say "      2. My Downloads > VMware Fusion > the newest version > download"
   say "      3. open the .dmg, drag VMware Fusion into Applications"
+  say "      4. on its first start it asks for Accessibility: click OK and turn"
+  say "         VMware Fusion on in System Settings > Privacy & Security > Accessibility"
 }
 
 # The welcome: this Mac, and what the build needs.

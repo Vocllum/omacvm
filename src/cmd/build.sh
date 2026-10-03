@@ -349,6 +349,7 @@ human_steps() {
   utm)
     echo "UTM: put the VM in full screen on the built-in display (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
   fusion)
+    echo "VMware Fusion asks for Accessibility on its first start: click OK, then turn on VMware Fusion in System Settings > Privacy & Security > Accessibility (keyboard and mouse in the VM)."
     echo "VMware Fusion: put the VM in full screen (View > Full Screen; gestures and media keys need it)." ;;
   esac
 }

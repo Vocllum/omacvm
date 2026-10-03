@@ -178,8 +178,12 @@ lightest setup. The plan and the test results:
   Already have 4.7 from Homebrew? `brew uninstall --cask utm && brew install --cask utm@beta`
   (your VMs stay). OmacVM uses UTM 5's OpenGL path (VirGL), which renders
   Linux desktops, unlike its new Vulkan one.
-- Or VMware Fusion 13 or newer (free, also for work; Broadcom asks you to sign
-  in to download it at support.broadcom.com; tested with 26.0.1), see above.
+- Or VMware Fusion 13 or newer (free, also for work; tested with 26.0.1).
+  Broadcom asks you to sign in to download it: support.broadcom.com > My
+  Downloads > VMware Fusion > the newest version (for example 26H1u1). Drag it
+  into Applications. On its first start it asks for Accessibility: click OK
+  and turn VMware Fusion on in System Settings > Privacy & Security >
+  Accessibility.
 - Xcode Command Line Tools (`xcode-select --install`), [Homebrew](https://brew.sh)
   and its `zstd` and `e2fsprogs` (`brew install zstd e2fsprogs`).
 - About 30 GB of free disk space for the build (a finished VM takes 10–12 GB and
