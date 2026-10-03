@@ -89,8 +89,13 @@ def main(a):
         v = json.load(open(a[2])).get(a[3], "")
         print(v)
     elif cmd == "parts":
-        for p in json.load(open(a[2]))["parts"]:
-            print(p["name"], p["size"], p["sha256"])
+        m = json.load(open(a[2]))
+        # The names become file paths on the Mac: only our own part names.
+        ok = re.compile(r"^omacvm-prebuilt-[0-9]+\.[0-9]+\.[0-9]+-(parallels|utm|fusion)\.tar\.zst\.part-[a-z]{2,4}$")
+        for p in m["parts"]:
+            if not ok.match(str(p["name"])) or not re.fullmatch(r"[0-9a-f]{64}", str(p["sha256"])) or int(p["size"]) <= 0:
+                sys.exit("manifest.py: unexpected part %r" % p.get("name"))
+            print(p["name"], int(p["size"]), p["sha256"])
     elif cmd == "release":
         # The newest image for this route with the same major version and a
         # version up to ours (the first omacvm apply brings the guest side
