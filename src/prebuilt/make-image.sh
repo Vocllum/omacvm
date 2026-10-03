@@ -96,10 +96,17 @@ stage_package() {
   name=$PREBUILT_NAME
   case $ROUTE in
     parallels)
-      log "compacting the disk"
-      /usr/local/bin/prl_disk_tool compact --hdd "$b/omarchy.hdd" >/dev/null
-      stage="$WORK/$name.pvm"; mkdir -p "$stage"
-      cp -cR "$b/omarchy.hdd" "$stage/"
+      stage="$WORK/$name.pvm"; mkdir -p "$stage/omarchy.hdd"
+      # OmacVM's disks are plain (a raw file): copy it with the zeroed space
+      # left out (holes), which prl_disk_tool cannot compact.
+      log "copying the disk without its free space"
+      for f in "$b/omarchy.hdd"/*; do
+        case $f in
+          *.hds) dd if="$f" of="$stage/omarchy.hdd/$(basename "$f")" bs=4m conv=sparse status=none ;;
+          *.Backup) ;;
+          *) cp "$f" "$stage/omarchy.hdd/" ;;
+        esac
+      done
       [[ -f $b/NVRAM.dat ]] && cp -c "$b/NVRAM.dat" "$stage/"
       cp "$b/config.pvs" "$stage/config.pvs"
       python3 "$R/src/prebuilt/vmconfig.py" pvs-generalize "$stage/config.pvs" "$name" ;;
