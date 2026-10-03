@@ -35,6 +35,10 @@ source "$R/src/lib/features.sh"
 source "$R/src/lib/ui.sh"
 source "$R/src/lib/prereq.sh"
 features_load
+# Bash 3.2 gives the EXIT trap status 0 after a set -u abort: only DONE=1 (set
+# right before each successful exit) counts as success.
+DONE=0
+trap 'rc=$?; (( rc || DONE )) || rc=1; ui_restore; exit $rc' EXIT
 
 # The Linux user name suggested from the Mac's: lower case, letters, digits,
 # - and _ only, starting with a letter ("Gilles.Goetsch" -> "gillesgoetsch").
@@ -66,8 +70,7 @@ feature_flag() {   # NAME on|off
   [[ $2 == on || $2 == off ]] || usage "--feature $1=$2: on or off"
 }
 while (( $# )); do
-  # A missing value is a usage error (set -u would end the build with exit 0
-  # on macOS's bash 3.2, because of the EXIT trap).
+  # A missing value is a usage error, not a set -u abort.
   case $1 in
     --vm-type|--vm-name|--vm-dir|--graphics-gb|--resources|--cpus|--memory-gb|--disk-gb|--user|--full-name|--hostname|--feature|--parallels-edition|--channel)
       [[ $# -ge 2 ]] || usage "$1 needs a value" ;;
@@ -92,7 +95,7 @@ while (( $# )); do
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0"; DONE=1; exit 0 ;;
     --no-*) feature_flag "${1#--no-}" off; shift ;;
     --*) feature_flag "${1#--}" on; shift ;;
     *) usage "unknown option $1 (see --help)" ;;
@@ -201,7 +204,7 @@ if [[ $TYPE == parallels && $CAP_CPUS -le 4 ]]; then
     LIMITED="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1} allows $CAP_CPUS CPUs / $CAP_MEM_GB GB per VM; Pro raises this to 18 CPUs / 128 GB."
   fi
 fi
-case ${RES:-balanced} in low) tier=0 ;; balanced) tier=1 ;; high) tier=2 ;; best) tier=3 ;; *) die "--resources low|balanced|high|best" ;; esac
+case ${RES:-balanced} in low) tier=0 ;; balanced) tier=1 ;; high) tier=2 ;; best) tier=3 ;; *) usage "--resources low|balanced|high|best" ;; esac
 tier_values 0; low="$T_CPUS/$T_MEM"; tier_values 3
 if [[ $low == "$T_CPUS/$T_MEM" && -n $LIMITED ]]; then
   (( YES )) || { hd "Resources"; say "    $LIMITED"; say "    The VM gets that: $T_CPUS CPUs, $T_MEM GB memory."; }
@@ -224,9 +227,9 @@ if (( ${custom:-0} )); then
   MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$MEM_GB" '^[0-9]+$')
   DISK_GB=$(ask_value "disk size limit in GB (64 or more; it only takes what it holds)" "$DISK_GB" '^[0-9]+$')
 fi
-(( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
-(( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
-(( DISK_GB >= 64 )) || die "disk: at least 64 GB"
+[[ $CPUS =~ ^[0-9]+$ ]] && (( CPUS >= 1 && CPUS <= CAP_CPUS )) || usage "--cpus: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
+[[ $MEM_GB =~ ^[0-9]+$ ]] && (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || usage "--memory-gb: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
+[[ $DISK_GB =~ ^[0-9]+$ ]] && (( DISK_GB >= 64 )) || usage "--disk-gb: at least 64"
 # VMware Fusion: the GPU's memory comes out of the VM's own. A quarter of it,
 # up to Fusion's 8 GB (two Retina displays need several GB).
 if [[ $TYPE == fusion ]]; then
@@ -235,7 +238,7 @@ if [[ $TYPE == fusion ]]; then
     GFX_GB=$(ask_value "graphics memory in GB, part of the VM's memory (1-8)" "$gfx_auto" '^[0-9]+$')
   fi
   : "${GFX_GB:=$gfx_auto}"
-  (( GFX_GB >= 1 && GFX_GB <= 8 && GFX_GB < MEM_GB )) || die "graphics memory: 1 to 8 GB, less than the VM's memory"
+  [[ $GFX_GB =~ ^[0-9]+$ ]] && (( GFX_GB >= 1 && GFX_GB <= 8 && GFX_GB < MEM_GB )) || usage "--graphics-gb: 1 to 8, less than the VM's memory"
 fi
 
 # ---------- where the VM goes ----------
@@ -332,7 +335,7 @@ if (( ! YES )); then
   U=$(ask_value "user name" "$U" '^[a-z_][a-z0-9_-]{0,31}$')
   FULL=$(ask_value "full name" "$FULL" '.')
 fi
-[[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "user name '$U': lower-case letters, digits, - and _ only"
+[[ $U =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || usage "--user '$U': lower-case letters, digits, - and _ only"
 
 KB_NOTE=$("$R/src/keyboard/mac-layout.sh" 2>&1 >/dev/null)
 KB=$("$R/src/keyboard/mac-layout.sh" 2>/dev/null)
@@ -410,7 +413,7 @@ if (( PLAN && JSON )); then
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0
   done < <(echo "Choose the password for $U in Omarchy (OMACVM_PASSWORD for --yes)."; human_steps)
   printf '\n  ],\n  "command": %s\n}\n' "$(json_str "$cmd")"
-  exit 0
+  DONE=1; exit 0
 fi
 # What the VM runs in, for the summary.
 if [[ $TYPE == parallels ]]; then
@@ -434,7 +437,7 @@ while IFS= read -r l; do box+=("${l#    }"); done < <(explain_features)
 if (( UI_FANCY )) && ! (( YES )); then ui_box "${box[@]}"
 else printf '\n'; for l in "${box[@]}"; do printf '  %s\n' "$l"; done; fi
 echo
-if (( DRY )); then echo "  $( ((PLAN)) && echo Plan || echo "Dry run"): nothing was built."; exit 0; fi
+if (( DRY )); then echo "  $( ((PLAN)) && echo Plan || echo "Dry run"): nothing was built."; DONE=1; exit 0; fi
 if (( ! YES )); then
   ask_yn "Go ahead?" y || exit 1
 fi
@@ -474,9 +477,7 @@ exec > >(tee -a "$BUILD_LOG") 2>&1
 UI_LOG=$BUILD_LOG
 build_end() {
   local rc=$1
-  # Bash 3.2 reports 0 here after a set -u abort: only the end of the script
-  # counts as done.
-  (( rc == 0 && ${BUILD_DONE:-0} )) && return
+  (( rc == 0 && DONE )) && return
   (( rc )) || rc=1
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
   printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \
@@ -624,4 +625,4 @@ $mac_steps
   Check everything: omacvm check --vm "$VM"
   Switch features later: omacvm features --vm "$VM"
 EOF
-BUILD_DONE=1
+DONE=1
