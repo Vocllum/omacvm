@@ -150,6 +150,10 @@ vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts
   # Full screen on every Mac display (VMs from before 2.2 lack it); Parallels
   # reads config.pvs when the VM starts.
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vm/pvs.py" "$2/config.pvs" displays 2>/dev/null || true
+  # OMACVM_HEADLESS=1 (image builds, tests): no window (Pro and trial editions).
+  if [[ ${OMACVM_HEADLESS:-} == 1 ]]; then
+    "$PRLCTL" set "$1" --startup-view headless >/dev/null 2>&1 && "$PRLCTL" start "$1" >/dev/null 2>&1 && return 0
+  fi
   open -a "Parallels Desktop" "$2"
   for ((i = 0; i < 60; i += 3)); do [[ $(vm_state "$1") == running ]] && return 0; sleep 3; done
   "$PRLCTL" start "$1" >/dev/null 2>&1 && return 0      # Pro/Business editions
@@ -209,7 +213,7 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
   pgrep -xq UTM || { open -a UTM; sleep 3; }
   local try i
   for try in 1 2; do
-    [[ $(utm_state "$1") == started ]] || "$UTMCTL" start "$1" >/dev/null 2>&1 || true
+    [[ $(utm_state "$1") == started ]] || "$UTMCTL" start ${OMACVM_HEADLESS:+--hide} "$1" >/dev/null 2>&1 || true
     for ((i = 0; i < 60; i += 3)); do [[ $(utm_state "$1") == started ]] && return 0; sleep 3; done
     # After a long session UTM can stop answering start requests (they time out
     # with OSStatus -1712); restarting the app clears it. Never while another
@@ -306,7 +310,7 @@ fusion_start() {   # <vm name>
   x=$(fusion_vmx "$1") || die "no VMware Fusion VM named '$1'"
   for ((i = 0; i < 5; i++)); do
     [[ $(fusion_state "$1") == running ]] && return 0
-    "$VMRUN" -T fusion start "$x" gui >/dev/null 2>&1 || true
+    "$VMRUN" -T fusion start "$x" "$([[ ${OMACVM_HEADLESS:-} == 1 ]] && echo nogui || echo gui)" >/dev/null 2>&1 || true
     sleep 3
   done
   [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"

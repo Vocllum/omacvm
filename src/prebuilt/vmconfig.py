@@ -71,6 +71,7 @@ def pvs_generalize(path, name):
         settext(n, "MAC", "")        # Parallels makes new ones on register
         settext(n, "HostMAC", "")
     pvs_seed(r, None)
+    settext(r, "Settings/Startup/WindowMode", 0)   # a window (image builds run headless)
     pvs_save(tree, path)
 
 
