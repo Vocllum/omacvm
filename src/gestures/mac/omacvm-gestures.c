@@ -349,6 +349,16 @@ static int vmWindowAt(CGPoint p, pid_t pid) {
     CFStringRef name = CFDictionaryGetValue(w, kCGWindowOwnerName);
     if (name) CFStringGetCString(name, hitOwner, sizeof hitOwner, kCFStringEncodingUTF8);
     hit = owner == pid && hitLayer == 0;
+    // Only a window that fills its display: the VM's full-screen window, not
+    // another window of the same app (VMware Fusion's library, say).
+    CGRect r;
+    CFDictionaryRef b = CFDictionaryGetValue(w, kCGWindowBounds);
+    if (hit && b && CGRectMakeWithDictionaryRepresentation(b, &r)) {
+      CGDirectDisplayID d; uint32_t nd = 0;
+      CGGetDisplaysWithPoint(CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r)), 1, &d, &nd);
+      CGRect s = nd ? CGDisplayBounds(d) : CGRectNull;
+      hit = nd && r.size.width >= s.size.width - 1 && r.size.height >= s.size.height - 80;
+    }
   }
   CFRelease(wins);
   return hit;
