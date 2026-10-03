@@ -84,8 +84,8 @@ final class Runner {
         env["OMACVM_PRODUCT_NAME"] = Product.name
         if let icon = Paths.icon { env["OMACVM_ICON"] = icon.path }
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
-        // ports: Gestures and Bridge (patched libslirp).
-        env["OMACVM_SLIRP_HOST_PORTS"] = "47830,47831"
+        // ports: Omanotch, Gestures and Bridge (patched libslirp).
+        env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
         env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
