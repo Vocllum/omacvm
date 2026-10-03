@@ -183,9 +183,9 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   # Omarchy's own night light indicator, as it was before the Bridge.
   NL=$H/.local/state/omacvm/nightlight-indicator C=$H/.config/omarchy/shell.json
   if [[ -f $NL && -f $C ]]; then
-    tmp=$(mktemp)
+    tmp=$(mktemp "$C.XXXXXX")
     jq --argjson items "$(cat "$NL")" '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (if $items == null then del(.items) else .items = $items end)' "$C" > "$tmp" &&
-      install -o "$U" -g "$U" -m600 "$tmp" "$C"
+      chmod --reference="$C" "$tmp" && chown "$U:$U" "$tmp" && mv -f "$tmp" "$C"
     rm -f "$tmp" "$NL"
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password

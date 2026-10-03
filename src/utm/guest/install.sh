@@ -38,7 +38,10 @@ if [[ -f $L ]]; then grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >
 
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
-cat > "$M" <<LUA
+# Written next to it and moved into place, only when it changes: Hyprland
+# reloads on every write.
+tmp=$(mktemp "$M.XXXXXX")
+cat > "$tmp" <<LUA
 -- OmacVM, UTM: the Mac's built-in display below the notch, fixed from boot.
 -- UTM's virtio-gpu (virgl) goes blank when the mode changes while running, so
 -- do not switch modes live; edit and reboot instead. Omarchy's scaling menu
@@ -49,5 +52,5 @@ local omarchy_monitor_scale = ${scale:-2}
 hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
 hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
 LUA
-chown "$U:$U" "$M"
+if cmp -s "$tmp" "$M"; then rm -f "$tmp"; else chmod 644 "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$M"; fi
 echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE"

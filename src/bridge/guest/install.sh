@@ -61,9 +61,11 @@ if [[ -f $C ]] && jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators"
     jq -c '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | .items] | first' "$C" > "$MARK"
     chown "$U:$U" "$MARK"
   fi
-  tmp=$(mktemp)
+  # Next to it and renamed into place, only when it changes (the shell reads it).
+  tmp=$(mktemp "$C.XXXXXX")
   jq '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (.items = ((.items // ["Dictation", "ScreenRecording", "Reminder", "NightLight", "Dnd", "StayAwake"]) - ["NightLight"]))' "$C" > "$tmp"
-  install -o "$U" -g "$U" -m600 "$tmp" "$C"; rm -f "$tmp"
+  if cmp -s "$tmp" "$C"; then rm -f "$tmp"
+  else chmod --reference="$C" "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$C"; fi
 fi
 
 echo "omacvm-bridge guest side installed for $U"
