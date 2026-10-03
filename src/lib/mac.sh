@@ -43,6 +43,36 @@ hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) c
     "${OMA_PIN_ARGS:-}" >&2
 }
 
+# The Bridge's token (the Bridge makes it on its first start). The VMs' gestures
+# daemons say it too, so it is made here when Gestures comes without the Bridge.
+BRIDGE_TOKEN="$HOME/Library/Application Support/omacvm-bridge/token"
+bridge_token_ensure() {
+  [[ $(tr -d '[:space:]' < "$BRIDGE_TOKEN" 2>/dev/null | wc -c) -ge 32 ]] && return 0
+  mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
+  (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
+}
+
+# Gestures lets daemons from before the token in only from these VMs (MAC
+# addresses, one per line); src/mac/install.sh writes the list once.
+GESTURES_LEGACY="$HOME/Library/Application Support/omacvm/gestures-legacy"
+mac_norm() {   # aa:b:cc:.. or AABBCC.. -> aabbcc.. (12 hex digits), else nothing
+  local m out="" p
+  m=$(tr 'A-F' 'a-f' <<<"$1")
+  if [[ $m == *:* ]]; then
+    for p in $(tr ':' ' ' <<<"$m"); do (( ${#p} == 1 )) && p=0$p; out+=$p; done
+  else
+    out=$m
+  fi
+  [[ $out =~ ^[0-9a-f]{12}$ ]] && echo "$out"
+}
+gestures_legacy_forget() {   # IP: that VM's daemon sends the token now
+  local m
+  [[ -s $GESTURES_LEGACY ]] || return 0
+  m=$(mac_norm "$(arp -n "$1" 2>/dev/null | awk '{ print $4 }')") || return 0
+  grep -vx "$m" "$GESTURES_LEGACY" > "$GESTURES_LEGACY.new" || true
+  mv -f "$GESTURES_LEGACY.new" "$GESTURES_LEGACY"
+}
+
 wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
   local i
   for ((i = 0; i < ${2:-600}; i += 5)); do

@@ -46,7 +46,8 @@
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
 // and from the guest, once after connecting:
-//   H <gestures 0|1> <glide 0|1>      what this VM wants
+//   H <gestures 0|1> <glide 0|1> <token>   what this VM wants, and the Bridge's
+//                                     token (any VM on these networks can connect)
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -56,6 +57,9 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <math.h>
+#include <net/if_dl.h>
+#include <net/route.h>
+#include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
@@ -65,6 +69,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -89,7 +94,9 @@ extern void MTDeviceStart(MTDeviceRef, int);
 extern bool MTDeviceIsBuiltIn(MTDeviceRef);
 extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1/100 mm
 
+#ifndef PORT
 #define PORT 47830
+#endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
 // its subnet at install time, the Mac is .1; empty without Fusion). One
@@ -507,6 +514,65 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   return capturing && gesturesOn(frontNet) ? NULL : e;   // a gesture event type
 }
 
+// ---- who may connect ----
+// Any VM on these networks can reach the listeners, so a VM's daemon says the
+// Bridge's token in its hello. Constant time.
+static int bridgeTokenOK(const char *given) {
+  char path[1024], tok[160] = "";
+  snprintf(path, sizeof path, "%s/Library/Application Support/omacvm-bridge/token", getenv("HOME"));
+  FILE *f = fopen(path, "r");
+  if (!f) return 0;
+  if (!fgets(tok, sizeof tok, f)) tok[0] = 0;
+  fclose(f);
+  tok[strcspn(tok, "\r\n")] = 0;
+  size_t n = strlen(tok);
+  if (n < 32 || strlen(given) != n) return 0;
+  unsigned char diff = 0;
+  for (size_t i = 0; i < n; i++) diff |= (unsigned char)(tok[i] ^ given[i]);
+  return diff == 0;
+}
+
+// The peer's MAC address from the Mac's ARP table, as 12 hex digits.
+#define SA_ROUNDUP(a) ((a) > 0 ? (1 + (((a) - 1) | (sizeof(uint32_t) - 1))) : sizeof(uint32_t))
+static int peerMac(struct in_addr a, char out[13]) {
+  int mib[6] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO };
+  size_t n = 0;
+  if (sysctl(mib, 6, NULL, &n, NULL, 0) < 0 || !n) return 0;
+  char *buf = malloc(n);
+  if (!buf || sysctl(mib, 6, buf, &n, NULL, 0) < 0) { free(buf); return 0; }
+  int found = 0;
+  for (char *p = buf; p + sizeof(struct rt_msghdr) <= buf + n && !found; ) {
+    struct rt_msghdr *rtm = (struct rt_msghdr *)p;
+    if (rtm->rtm_msglen == 0) break;
+    struct sockaddr_inarp *sin = (struct sockaddr_inarp *)(rtm + 1);
+    struct sockaddr_dl *sdl = (struct sockaddr_dl *)((char *)sin + SA_ROUNDUP(sin->sin_len));
+    if (sin->sin_addr.s_addr == a.s_addr && sdl->sdl_family == AF_LINK && sdl->sdl_alen == 6) {
+      const unsigned char *m = (const unsigned char *)LLADDR(sdl);
+      snprintf(out, 13, "%02x%02x%02x%02x%02x%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
+      found = 1;
+    }
+    p += rtm->rtm_msglen;
+  }
+  free(buf);
+  return found;
+}
+
+// Daemons from before the token send none. Until omacvm update or apply gives
+// a VM the new one, it is let in by its MAC address: the VMs OmacVM had set up
+// when this version came (src/mac/install.sh writes the list once, apply
+// takes each VM off it).
+static int legacyOK(struct in_addr a) {
+  char mac[13], path[1024], line[64];
+  if (!peerMac(a, mac)) return 0;
+  snprintf(path, sizeof path, "%s/Library/Application Support/omacvm/gestures-legacy", getenv("HOME"));
+  FILE *f = fopen(path, "r");
+  if (!f) return 0;
+  int ok = 0;
+  while (!ok && fgets(line, sizeof line, f)) { line[strcspn(line, " \t\r\n")] = 0; ok = !strcmp(line, mac); }
+  fclose(f);
+  return ok;
+}
+
 // ---- server: one guest connection at a time ----
 static void *serverThread(void *arg) {
   int net = (int)(intptr_t)arg;
@@ -529,13 +595,23 @@ static void *serverThread(void *arg) {
       setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
       setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
       char ip[32]; inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip);
-      // The guest's hello: what this VM wants. Daemons from before it send
-      // nothing (gestures on, Glide off).
+      // The guest's hello: what this VM wants, and the token. Daemons from
+      // before it send nothing (gestures on, Glide off).
       int gestures = 1, glide = 0;
       struct timeval tv = { .tv_sec = 1 };
       setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-      char hello[64]; ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
-      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d", &gestures, &glide); }
+      char hello[256], given[160] = ""; ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
+      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d %159s", &gestures, &glide, given); }
+      if (given[0] ? !bridgeTokenOK(given) : !legacyOK(peer.sin_addr)) {
+        static char lastIp[32]; static time_t lastLog;   // a refused daemon retries every 2 s
+        if (strcmp(lastIp, ip) || time(NULL) - lastLog >= 60) {
+          logf_("refused %s on %s: %s", ip, addr, given[0] ? "wrong token"
+                : "no token (omacvm update gives the VM a daemon that sends it)");
+          snprintf(lastIp, sizeof lastIp, "%s", ip); lastLog = time(NULL);
+        }
+        close(c);
+        continue;
+      }
       pthread_mutex_lock(&sendLock);
       int slot = -1;
       for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection

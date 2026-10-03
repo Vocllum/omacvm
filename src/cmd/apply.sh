@@ -122,9 +122,11 @@ if (( MAC )); then
 fi
 
 # ---------- the VM side ----------
-T=~/Library/Application\ Support/omacvm-bridge/token
+T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
 if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
+# The gestures daemon says it too (on UTM and Fusion it always runs).
+{ on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } && bridge_token_ensure
 if [[ -f $T ]]; then
   log "bridge token -> $IP"
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
@@ -142,6 +144,7 @@ for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; d
 [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
 on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
+gestures_legacy_forget "$IP"   # its daemon says the token now
 
 if [[ $TYPE == parallels ]]; then
   PVM=$(vm_bundle "$VM")
