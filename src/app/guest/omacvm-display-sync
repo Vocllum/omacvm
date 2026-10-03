@@ -260,6 +260,12 @@ raise SystemExit(1)
 PY
 }
 
+# A rule in monitors.lua that names OUTPUT (not in a comment).
+user_rule() {
+  [[ -r $monitor_config ]] &&
+    sed 's/--.*$//' "$monitor_config" | grep -qE "output[[:space:]]*=[[:space:]]*[\"']$1[\"']"
+}
+
 apply_preferred_modes() {
   local connector
   local connector_name
@@ -288,12 +294,20 @@ apply_preferred_modes() {
     # the stale mode cache; an explicit scale calculated from the fresh EDID
     # avoids using the stale fullscreen dimensions for Hyprland's auto scale.
     # Hyprland's Lua config parser requires eval instead of the legacy keyword
-    # command. Update Omarchy's single-output catch-all mode and dynamic scale;
-    # its placement, color, and other policy remain intact, while an explicit
-    # per-output user rule still wins.
+    # command.
     # OmacVM: this output only, at 0x0. A catch-all rule ("", auto position)
     # also hit Omanotch's hidden NOTCH output; the screen then sat to the
     # right of NOTCH, NOTCH followed it, and both kept moving right.
+    # A rule naming this output would replace the user's own for it (it comes
+    # later): with one in monitors.lua, the user's rule stays and the screen no
+    # longer follows the window.
+    if user_rule "$output"; then
+      if [[ -z ${said_user_rule:-} ]]; then
+        printf 'omacvm-display-sync: %s has its own rule in %s; not following the window\n' "$output" "$monitor_config" >&2
+        said_user_rule=1
+      fi
+      continue
+    fi
     rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"0x0\", scale = \"$scale\" })"
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
