@@ -270,7 +270,7 @@ final class MediaKeys {
 
   private func apply(_ key: MediaKey, fine: Bool) {
     let steps: Float = fine ? 64 : 16   // macOS: 16 steps, Shift+Option = quarter steps
-    func step(_ v: Float, _ up: Bool) -> Float { ((v * steps).rounded() + (up ? 1 : -1)) / steps }
+    func step(_ v: Float, _ up: Bool) -> Float { max(0, min(1, ((v * steps).rounded() + (up ? 1 : -1)) / steps)) }
     var result = "failed"
     switch key {
     case .volumeUp, .volumeDown:
