@@ -86,7 +86,7 @@ while (( $# )); do
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --no-*) feature_flag "${1#--no-}" off; shift ;;
     --*) feature_flag "${1#--}" on; shift ;;
     *) usage "unknown option $1 (see --help)" ;;
