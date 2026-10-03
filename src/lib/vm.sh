@@ -37,6 +37,45 @@ PY
   done < <(fusion_list)
 }
 
+# vm_pin NAME TYPE: gssh checks that VM's remembered SSH host key from now on
+# (OMA_PIN_RESET=1: forget it first, once).
+vm_pin() {
+  OMA_PIN="$OMA_PINS/$2-$(printf %s "$1" | tr -c 'A-Za-z0-9._-' _)-$(printf %s "$1" | cksum | cut -d' ' -f1)"
+  OMA_PIN_ARGS=$(printf -- '--vm %q' "$1")
+  if [[ ${OMA_PIN_RESET:-} == 1 ]]; then rm -f "$OMA_PIN"; OMA_PIN_RESET=0; fi
+  export OMA_PIN OMA_PIN_ARGS
+}
+
+# vm_marked NAME TYPE: OmacVM built this VM (its description says so) or set
+# it up (OmacVM's icon on a Parallels VM, in UTM's library).
+vm_marked() {
+  local b x
+  case $2 in
+    parallels) b=$(vm_bundle "$1")
+               grep -q "built by OmacVM" "$b/config.pvs" 2>/dev/null || [[ -f $b/Icon$'\r' ]] ;;
+    utm) b=$(utm_bundle "$1") && { grep -q "built by OmacVM" "$b/config.plist" || [[ -f $b/Data/omacvm.png ]]; } ;;
+    fusion) x=$(fusion_vmx "$1") && grep -q "built by OmacVM" "$x" ;;
+    *) return 1 ;;
+  esac
+}
+
+utm_bundle() {   # NAME -> its .utm (UTM's registry also knows VMs outside UTM's folder)
+  local b
+  b=$(python3 - "$UTM_PREFS" "$1" <<'PY' 2>/dev/null
+import os, plistlib, sys
+for e in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
+    p = (e.get("Package") or {}).get("Path", "")
+    try:
+        if plistlib.load(open(os.path.join(p, "config.plist"), "rb"))["Information"]["Name"] == sys.argv[2]:
+            print(p); break
+    except Exception:
+        pass
+PY
+)
+  [[ -n $b ]] || b="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm"
+  [[ -f $b/config.plist ]] && echo "$b"
+}
+
 vm_find_ip() {   # NAME TYPE [seconds]
   case $2 in
     parallels) vm_ip "$(vm_bundle "$1")" "${3:-1}" ;;
@@ -98,6 +137,7 @@ resolve_vm() {
     fi
   fi
   [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM or VMware Fusion VM named '$VM'" >&2; exit 2; }
+  vm_pin "$VM" "$TYPE"
   IP=""
   # DHCP leases outlive a stopped VM: only a running one has an address.
   if vms_list | awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && $2 == t && $3 == "running" { f = 1 } END { exit !f }'; then

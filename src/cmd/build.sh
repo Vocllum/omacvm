@@ -543,6 +543,10 @@ else
   utm_start "$VM"
   ui_spin_val IP "The live installer gets its address" utm_ip "$VM" 300 || die "the live installer got no IP address"
 fi
+# SSH host keys: the live installer's is remembered for this step only, the
+# new system's for good (from its first start on).
+export OMA_PIN_NEW=1 OMA_PIN
+OMA_PIN=$(mktemp -t omacvm-live)
 ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 3. Arch Linux ARM onto the NVMe disk ----------
@@ -595,6 +599,8 @@ vm_start "$VM" "$PVM"
 sleep 20
 ui_spin_val IP "The new system starts and gets its address" vm_ip "$PVM" 300 || die "the new system got no IP address"
 fi
+rm -f "$OMA_PIN"
+OMA_PIN_RESET=1 vm_pin "$VM" "$TYPE"   # a VM of that name before this one: its key goes
 ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------

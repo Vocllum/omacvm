@@ -5,12 +5,14 @@
 #   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
+#                [--reset-host-key]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
 # VM has (new to OmacVM: the defaults). --no-mac leaves the Mac side alone.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
 # started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
 # Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
-# the notch (no built-in display: the main one).
+# the notch (no built-in display: the main one). The VM's SSH host key is
+# remembered the first time; --reset-host-key forgets it (a rebuilt VM).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (see the message).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -35,11 +37,12 @@ while (( $# )); do
     --keyboard) KB=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
     --no-mac) MAC=0; shift ;;
+    --reset-host-key) export OMA_PIN_RESET=1; shift ;;
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --mac-wallpaper) set_feature wallpaper on; shift ;;       # 1.x names
     --no-mac-wallpaper) set_feature wallpaper off; shift ;;
     --no-*) set_feature "${1#--no-}" off; shift ;;
-    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --*) f=${1#--}; feature_index "$f" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
          set_feature "$f" on; shift ;;
     *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
@@ -52,15 +55,20 @@ export OMA_KEY=$KEY
 NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
 # ---------- which VM ----------
+# Its SSH host key: remembered now when there is none yet, checked after that.
+export OMA_PIN_NEW=1
 if [[ -n $IP ]]; then
   [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
-  [[ -n $VM ]] || VM="the VM at $IP"
+  if [[ -n $VM ]]; then vm_pin "$VM" "$TYPE"
+  else VM="the VM at $IP"; vm_pin "ip-$IP" "$TYPE"; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; fi
 else
   resolve_vm start
 fi
 case $TYPE in parallels|utm|fusion) ;; *) echo "omacvm apply: --vm-type parallels, utm or fusion" >&2; exit 2 ;; esac
 vm_network_ok "$TYPE" "$IP" || exit 3
-if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
+ssh_ok=0; (wait_ssh "$IP" 120) >/dev/null 2>&1 || ssh_ok=$?
+(( ssh_ok != 3 )) || { hostkey_error; exit 3; }
+if (( ssh_ok )); then
   printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
   printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
   exit 3

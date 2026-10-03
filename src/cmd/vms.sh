@@ -27,6 +27,7 @@ while IFS=$'\t' read -r name type state; do
   ip=""; version=""; reach=false; feats=""
   if [[ $state == running ]]; then
     ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || ip=""
+    vm_pin "$name" "$type"
     if [[ -n $ip ]] && probe=$(vm_probe "$ip") && [[ -n $probe ]]; then
       reach=true
       version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")

@@ -6,17 +6,50 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
-# SSH into the guest as root with the OmacVM key. VMs get rebuilt, so
-# their host keys are not remembered.
+# SSH into the guest as root with the OmacVM key. Each VM's host key is
+# remembered the first time OmacVM sets the VM up (build, apply) and checked on
+# every later connection: OMA_PIN is that VM's file (vm_pin, vm.sh), and
+# OMA_PIN_NEW=1 lets a connection record the key when there is none yet. A VM
+# without a remembered key (and OMA_PIN_NEW unset) is reached as before.
+OMA_PINS="$HOME/Library/Application Support/omacvm/known_hosts"
 gssh() {
   local ip=$1; shift
+  local hk=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+  if [[ -n ${OMA_PIN:-} ]] && [[ -s $OMA_PIN || ${OMA_PIN_NEW:-} == 1 ]]; then
+    [[ -s $OMA_PIN ]] || { mkdir -p "$(dirname "$OMA_PIN")" && chmod 700 "$(dirname "$OMA_PIN")"; }
+    hk=(-o "StrictHostKeyChecking=$([[ -s $OMA_PIN ]] && echo yes || echo accept-new)"
+        -o "UserKnownHostsFile=\"$OMA_PIN\"" -o HostKeyAlias=omacvm-vm -o CheckHostIP=no)
+  fi
   ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
+    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
 }
 
-wait_ssh() {   # <ip> [seconds]
+# hostkey_changed IP: the VM answers, with other host keys than the one
+# remembered for it.
+hostkey_changed() {
+  [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
+  local _h t k seen=0
+  while read -r _h t k; do
+    [[ -n $k ]] || continue
+    seen=1
+    grep -qF " $t $k" "$OMA_PIN" && return 1
+  done < <(ssh-keyscan -T 5 "$1" 2>/dev/null)
+  (( seen ))
+}
+
+hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) come from vm_pin
+  printf '\033[1;31merror:\033[0m %s answers with another SSH host key than the one OmacVM remembered for it.\n' "${VM:-the VM}" >&2
+  printf 'If you rebuilt or reinstalled it, forget the old key:\n\n  omacvm apply %s --reset-host-key\n\nIf not, something else may answer at its address: do not go on.\n' \
+    "${OMA_PIN_ARGS:-}" >&2
+}
+
+wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
   local i
-  for ((i = 0; i < ${2:-600}; i += 5)); do gssh "$1" true 2>/dev/null && return 0; sleep 5; done
+  for ((i = 0; i < ${2:-600}; i += 5)); do
+    gssh "$1" true 2>/dev/null && return 0
+    hostkey_changed "$1" && { hostkey_error; return 3; }
+    sleep 5
+  done
   die "no SSH on $1 after ${2:-600} s"
 }
 

@@ -21,6 +21,7 @@ while IFS=$'\t' read -r name type state; do
   kind=stopped; v=""
   if [[ $state == running ]]; then
     kind=locked
+    vm_pin "$name" "$type"
     if ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) && probe=$(vm_probe "$ip") && [[ -n $probe ]]; then
       v=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
       [[ -n $v ]] && kind=omacvm || kind=plain
