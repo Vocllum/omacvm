@@ -11,6 +11,9 @@
 #   video  YouTube 4K in Chrome (video-bench.py: also reports the decoder)
 #   cpu    every CPU core busy
 #   gpu    WebGL Aquarium with 30,000 fish in Chrome
+# The display stays on (caffeinate) at 50 % brightness, set before each load
+# and read after it ("brightness" in each line: if it moved, the Mac's
+# automatic brightness is on; turn it off in System Settings > Displays).
 # In a VM it needs Google Chrome (install-chrome.sh) and this folder in
 # /opt/omacvm-bench; SSH as root with ~/.ssh/omacvm. Measures with power.sh,
 # so don't touch the Mac meanwhile, and keep other programs quiet.
@@ -27,6 +30,9 @@ while [[ ${1:-} == --* ]]; do
 done
 OUT=${1:-$PWD/power-${VM:+vm-}$(date +%Y%m%d-%H%M).jsonl}
 want() { [[ ,$ONLY, == *,$1,* ]]; }
+BR=$(mktemp -d)/brightness
+swiftc -O -o "$BR" "$here/brightness.swift" 2>/dev/null || BR=""
+caffeinate -d -i -w $$ &
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 K=(-i "$HOME/.ssh/omacvm" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
 CHROME_MAC="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
@@ -51,8 +57,12 @@ chrome_stop() {
   sleep 3
 }
 measure() {   # label: settle, then power.sh; prints and appends one JSON line
+  [[ -n $BR ]] && "$BR" 0.5 >/dev/null
   sleep 30
-  "$here/power.sh" "$SECS" "$1" | sed "s/^{/{\"where\": \"${VM:-mac}\", /" | tee -a "$OUT"
+  local line b
+  line=$("$here/power.sh" "$SECS" "$1")
+  b=$([[ -n $BR ]] && "$BR" || echo null)
+  sed "s/^{/{\"where\": \"${VM:-mac}\", \"brightness\": $b, /" <<<"$line" | tee -a "$OUT"
 }
 serve_reading() {   # -> URL of pages/reading.html where Chrome runs
   if [[ -n $VM ]]; then echo "file:///opt/omacvm-bench/pages/reading.html"
