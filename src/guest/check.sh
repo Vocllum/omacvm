@@ -160,7 +160,8 @@ EOF
   elif [[ $tab == "$w" ]]; then ok "pointer range" "${tab} px, the whole screen"
   else bad "pointer range" "tablet $tab px vs screen $w px"; fi
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
-  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf ;;
+  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
+  check "GPU for Chrome" "virgl-msaa.so preloaded" grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx

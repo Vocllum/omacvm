@@ -57,8 +57,10 @@ utm_set_icon() {
 
 # UTM-wide settings that make the guest faster (from the UTM measurements in
 # AGENTS.md): no Vulkan driver, so UTM stops forcing a 4K stage-2 page size
-# (2x slower on memory-heavy work); no App Nap for UTM.
+# (2x slower on memory-heavy work); the default renderer (ANGLE on Metal):
+# with "Apple Core OpenGL" Chrome in the guest gets no GPU; no App Nap for UTM.
 utm_tune_app() {
   defaults write com.utmapp.UTM QEMUVulkanDriver -int 1
+  defaults write com.utmapp.UTM QEMURendererBackend -int 0
   defaults write com.utmapp.UTM NSAppSleepDisabled -bool YES
 }

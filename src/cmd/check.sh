@@ -158,7 +158,11 @@ parallels)
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
 utm)
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
-    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)" ;;
+    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
+  case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
+    0|2) ok "UTM renderer" "ANGLE on Metal (GPU in Chrome)" ;;
+    *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
+  esac ;;
 esac
 pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
 (( fails )) && mac_failed=1 || mac_failed=0
