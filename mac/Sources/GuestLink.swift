@@ -70,7 +70,9 @@ struct VMInterface: Hashable {
 /// TCP server the guests' `notchcast` connect to. Several guests (VMs) may be
 /// connected at once; the controller decides which one the strip serves. A
 /// new connection from a connected guest's address replaces the old one (a
-/// restarted notchcast or rebooted VM).
+/// restarted notchcast or rebooted VM). On 127.0.0.1 all of OmacVM.app's VMs
+/// share one address, so there each connection is a guest of its own; one
+/// that says the token and the name of a connected guest replaces that one.
 ///
 /// It listens only on the Mac's side of VM shared networks (never on Wi-Fi,
 /// Ethernet, Internet Sharing or Thunderbolt bridges) and accepts a connection
@@ -93,6 +95,8 @@ final class GuestLink {
         /// On 127.0.0.1 a guest counts only after "auth <token>" (any Mac
         /// program can connect there); elsewhere the network is the check.
         var authorized: Bool
+        /// Its "vmname" as sent (127.0.0.1 only).
+        var vmName: String?
 
         init(id: Int, peer: UInt32, iface: VMInterface, connection: NWConnection) {
             self.id = id
@@ -211,17 +215,14 @@ final class GuestLink {
         }
         // The same address again takes over at once (a restarted notchcast or
         // rebooted VM). TCP keepalive and the network check in rescan() notice
-        // a guest that vanished without closing.
-        if let g = guests.values.first(where: { $0.peer == ip && $0.iface == iface }) {
+        // a guest that vanished without closing. Not on 127.0.0.1: there it
+        // would be any VM of OmacVM.app (or any Mac program).
+        if iface != VMInterface.omacvmApp,
+           let g = guests.values.first(where: { $0.peer == ip && $0.iface == iface }) {
             let old = g.connection
             let takeover = g.isConnected
             g.connection = c
             g.stream.reset()
-            // On 127.0.0.1 every new connection says the token again.
-            if iface == VMInterface.omacvmApp && g.authorized {
-                g.authorized = false
-                setConnected(g, false)
-            }
             old.cancel()
             run(c, for: g, takeover: takeover)
             return
@@ -235,6 +236,14 @@ final class GuestLink {
         nextID += 1
         guests[g.id] = g
         run(c, for: g, takeover: false)
+        if !g.authorized {
+            // A connection that never says the token does not keep its slot.
+            queue.asyncAfter(deadline: .now() + 10) { [weak g] in
+                guard let g, !g.authorized, g.connection === c else { return }
+                Log.info("guest \(g.id) on 127.0.0.1 sent no token in time; dropping it")
+                c.cancel()
+            }
+        }
     }
 
     private func run(_ c: NWConnection, for g: Guest, takeover: Bool) {
@@ -274,6 +283,7 @@ final class GuestLink {
                         messages.removeFirst()
                         self.setConnected(g, true)
                     }
+                    if g.iface == VMInterface.omacvmApp { self.replaceSameName(g, messages) }
                     if !messages.isEmpty { self.onMessages?(g.id, messages) }
                 } catch {
                     Log.info("\(error); dropping guest \(g.id)")
@@ -286,6 +296,21 @@ final class GuestLink {
                 return
             }
             self.receive(on: c, for: g)
+        }
+    }
+
+    /// An OmacVM.app guest that says the name of another one is that VM again
+    /// (a rebooted VM whose old connection never closed): the old one goes.
+    private func replaceSameName(_ g: Guest, _ messages: [GuestMessage]) {
+        for case let .text(t) in messages where t.hasPrefix("vmname ") {
+            let name = String(t.dropFirst("vmname ".count))
+            g.vmName = name
+            for o in guests.values where o !== g && o.iface == g.iface && o.vmName == name {
+                Log.info("guest \(g.id) is VM \(o.id) again; dropping \(o.id)")
+                let oc = o.connection
+                oc.cancel()
+                drop(o, oc)
+            }
         }
     }
 
