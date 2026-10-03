@@ -7,8 +7,14 @@
 #   app_ip NAME         127.0.0.1:PORT while it runs
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
+#   app_bundle          the installed OmacVM.app (any name it was installed under)
+#   app_create DIR KEY=VALUE...  a new VM in DIR through the app's own create
+#                       script (the password on stdin), as when built in the app
 # omacvm apply writes guest-pointer ("omarchy") into the folder once the VM
 # draws Omarchy's own pointer: the app hides the Mac's pointer only then.
+
+# Where OmacVM.app is published.
+APP_RELEASES=https://github.com/gillesgoetsch/omacvm-app/releases
 
 app_vms_root() {
   local r
@@ -69,4 +75,38 @@ app_start() {
   # -n: a new launcher passes the request on when one already runs.
   open -n -b org.omacvm.app --args --start --vm "$1" || return 1
   app_ip "$1" 60
+}
+
+app_bundle() {   # in /Applications or ~/Applications, by its bundle id
+  local a
+  for a in /Applications/*.app "$HOME"/Applications/*.app; do
+    [[ -f $a/Contents/Resources/scripts/create-vm.sh ]] || continue
+    [[ $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null) == org.omacvm.app ]] && { echo "$a"; return 0; }
+  done
+  return 1
+}
+
+app_version() { defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/dev/null; }
+
+app_free_port() {   # the VM's SSH port: free now, and in no other VM's vm.env
+  local d p used=" "
+  for d in "$(app_vms_root)"/*; do used+="$(app_env "$d" SSH_PORT) "; done
+  for ((p = 52222; p < 52422; p++)); do
+    [[ $used == *" $p "* ]] && continue
+    nc -z -G1 127.0.0.1 "$p" >/dev/null 2>&1 || { echo "$p"; return 0; }
+  done
+  return 1
+}
+
+# vm.env as the app writes it (single quotes, so the app reads it back too).
+# KEY=VALUE: NAME CPUS MEM_MB DISK_GB SSH_PORT VM_USER VM_FULLNAME VM_HOSTNAME
+# VM_TZ VM_LANG KEYBOARD FEATURES ("bridge=on wallpaper=on ...").
+app_create() {
+  local dir=$1 a kv v q="'"; shift
+  a=$(app_bundle) || return 1
+  mkdir -p "$dir"
+  for kv in "$@"; do
+    v=${kv#*=}; printf "%s='%s'\n" "${kv%%=*}" "${v//$q/$q\\$q$q}"
+  done > "$dir/vm.env"
+  /bin/bash "$a/Contents/Resources/scripts/create-vm.sh" "$dir"
 }
