@@ -2,7 +2,7 @@
 # Build and install Hyprland with the vmwgfx fix (hyprland-vmwgfx-dmabuf.patch):
 # without it no GPU client survives on VMware Fusion, SDDM's greeter included,
 # and the VM shows a black screen. Run as root inside the VM.
-#   build-hyprland.sh [--hook]
+#   build-hyprland.sh [--hook] [desktop-user]
 # Builds the exact source commit the installed hyprland package was built
 # from (its binary says which), checked after the download, as the desktop
 # user; only the install runs as root. The package's own binary is kept beside
@@ -12,12 +12,12 @@
 # minutes on 4 vCPUs. OMACVM_REBUILD_HYPRLAND=1 builds anyway.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
-HOOK=0; [[ ${1:-} == --hook ]] && HOOK=1
+HOOK=0; [[ ${1:-} == --hook ]] && { HOOK=1; shift; }
 BIN=/usr/bin/Hyprland
 STATE=/var/lib/omacvm/hyprland-vmwgfx      # "<package version> <sha256 of the patched binary>"
 W=/var/cache/omacvm/hyprland-vmwgfx
 DEPS=(base-devel git cmake ninja hyprwayland-scanner hyprland-protocols glaze)
-U=$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env 2>/dev/null | tail -1)
+U=${1:-$(sed -n 's/^OMACVM_USER=//p' /etc/omacvm/env 2>/dev/null | tail -1)}
 [[ -n $U ]] && id "$U" >/dev/null 2>&1 || { echo "build-hyprland: no desktop user in /etc/omacvm/env" >&2; exit 1; }
 
 pkg=$(pacman -Q hyprland 2>/dev/null | awk '{ print $2 }')
