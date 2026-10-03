@@ -7,7 +7,7 @@
 #   /usr/local/bin/omarchy-toggle-nightlight (Super+Ctrl+N drives the Mac's Night Shift)
 #   /usr/local/bin/omarchy-network-{qr,password} (Omarchy's Wi-Fi QR card shares the Mac's network)
 #   user service omacvm-bridge-osd (Omarchy OSD for the Mac's media keys)
-#   PipeWire's ALSA/PulseAudio/JACK clients, the VM's own volume pinned at 100 %
+#   the VM's own volume pinned at 100 %
 #   the bar widgets in ../plugins (omacvm.bluetooth, omacvm.wifi, omacvm.audio,
 #   omacvm.nightshift)
 #   Omarchy's own night light out of the way (indicator hidden, hyprsunset
@@ -28,15 +28,8 @@ systemctl --user -M "$U@" daemon-reload
 systemctl --user -M "$U@" enable omacvm-bridge-osd.service >/dev/null 2>&1
 systemctl --user -M "$U@" restart omacvm-bridge-osd.service
 
-# Audio: PipeWire with ALSA, PulseAudio and JACK clients, so apps share the
-# Parallels sound card and Omarchy's input meter works. The Mac owns loudness
-# (the bridge sets the Mac's volume), so the VM's own levels stay at full.
-if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack >/dev/null 2>&1; then
-  pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
-  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack >/dev/null 2>&1
-fi
-systemctl --user -M "$U@" restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
-sleep 1
+# Audio (PipeWire's parts come from ../../guest/install.sh): the Mac owns
+# loudness (the bridge sets the Mac's volume), so the VM's own levels stay at full.
 # Microphone likewise: Parallels hands the Mac's input over at the Mac's level,
 # so the VM's source stays at 100 % (it starts out far lower).
 amixer -q -c0 sset Master 0dB unmute 2>/dev/null || true

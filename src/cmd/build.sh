@@ -637,12 +637,14 @@ if [[ $TYPE == utm ]]; then
   ui_spin "The live installer shuts down" utm_wait_stopped "$VM"
   utm_drop_live "$VM"
   utm_set_icon "$VM"
+  utm_add_sound "$VM"
   utm_start "$VM"
   sleep 20
   ui_spin_val IP "The new system starts and gets its address" utm_ip "$VM" 300 || die "the new system got no IP address"
 elif [[ $TYPE == fusion ]]; then
   ui_spin "The live installer shuts down" fusion_wait_stopped "$VM"
   fusion_drop_live "$VM"
+  fusion_add_sound "$VM"
   rm -f "$LIVE"
   fusion_start "$VM"
   sleep 20

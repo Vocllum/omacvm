@@ -115,8 +115,8 @@ vm_probe() {
 vm_boot() {   # NAME TYPE
   case $2 in
     parallels) vm_start "$1" "$(vm_bundle "$1")" >&2; vm_ip "$(vm_bundle "$1")" 300 ;;
-    utm) utm_start "$1" >&2; utm_ip "$1" 300 ;;
-    fusion) fusion_start "$1" >&2; fusion_ip "$1" 300 ;;
+    utm) utm_add_sound "$1" >&2; utm_start "$1" >&2; utm_ip "$1" 300 ;;
+    fusion) fusion_add_sound "$1" >&2; fusion_start "$1" >&2; fusion_ip "$1" 300 ;;
     app) app_start "$1" ;;
     *) return 1 ;;
   esac
