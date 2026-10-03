@@ -27,7 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let me = NSRunningApplication.current
         if let id = Bundle.main.bundleIdentifier,
            let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: { $0 != me }) {
-            other.activate()
+            // The VM's window belongs to QEMU; bring that forward if it runs.
+            let qemu = NSWorkspace.shared.runningApplications.first {
+                $0.executableURL?.path.hasSuffix("/runtime/bin/OmacVM") == true
+            }
+            (qemu ?? other).activate()
             NSApp.terminate(nil)
             return
         }
