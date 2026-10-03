@@ -14,8 +14,15 @@ struct VMInterface: Hashable {
         "\(address >> 24).\((address >> 16) & 255).\((address >> 8) & 255).\(address & 255)"
     }
 
-    /// A peer in this network, other than the Mac's own address.
-    func contains(_ ip: UInt32) -> Bool { ip & netmask == address & netmask && ip != address }
+    /// A peer in this network, other than the Mac's own address. On the
+    /// loopback (OmacVM.app's VMs) the peer is the Mac's 127.0.0.1 itself.
+    func contains(_ ip: UInt32) -> Bool {
+        if self == Self.omacvmApp { return ip == address }
+        return ip & netmask == address & netmask && ip != address
+    }
+
+    /// OmacVM.app's VMs reach the Mac's 127.0.0.1 (QEMU's user network).
+    static let omacvmApp = VMInterface(name: "lo0", address: 0x7F00_0001, netmask: 0xFF00_0000)
 
     static func parse(_ s: String) -> UInt32? {
         var a = in_addr()
@@ -83,12 +90,16 @@ final class GuestLink {
         var connection: NWConnection
         let stream = GuestStream()
         var isConnected = false
+        /// On 127.0.0.1 a guest counts only after "auth <token>" (any Mac
+        /// program can connect there); elsewhere the network is the check.
+        var authorized: Bool
 
         init(id: Int, peer: UInt32, iface: VMInterface, connection: NWConnection) {
             self.id = id
             self.peer = peer
             self.iface = iface
             self.connection = connection
+            self.authorized = iface != VMInterface.omacvmApp
         }
     }
 
@@ -99,6 +110,8 @@ final class GuestLink {
     private let subnets: [(UInt32, UInt32)]
     private let onlyAddress: UInt32?
     private let listenNowhere: Bool
+    /// Also serve OmacVM.app's VMs on 127.0.0.1 (defaults key omacvmApp).
+    private let omacvmApp = UserDefaults.standard.object(forKey: "omacvmApp") as? Bool ?? true
     private let queue = DispatchQueue.main
     private var listeners: [VMInterface: NWListener] = [:]
     private var scanTimer: Timer?
@@ -122,6 +135,9 @@ final class GuestLink {
 
     func isConnected(_ id: Int) -> Bool { guests[id]?.isConnected == true }
 
+    /// Guest `id` runs in OmacVM.app (came in on 127.0.0.1).
+    func viaOmacVMApp(_ id: Int) -> Bool { guests[id]?.iface == VMInterface.omacvmApp }
+
     /// The bar image as last sent by guest `id`.
     func stream(for id: Int) -> GuestStream? { guests[id]?.stream }
 
@@ -131,7 +147,8 @@ final class GuestLink {
     }
 
     private func rescan() {
-        let now = listenNowhere ? [] : Set(VMInterface.scan(prefixes: prefixes, subnets: subnets, onlyAddress: onlyAddress))
+        var now = listenNowhere ? [] : Set(VMInterface.scan(prefixes: prefixes, subnets: subnets, onlyAddress: onlyAddress))
+        if !listenNowhere && onlyAddress == nil && omacvmApp { now.insert(VMInterface.omacvmApp) }
         for (iface, l) in listeners where !now.contains(iface) {
             Log.info("VM network gone: \(iface.name) \(iface.addressString)")
             l.cancel()
@@ -200,6 +217,11 @@ final class GuestLink {
             let takeover = g.isConnected
             g.connection = c
             g.stream.reset()
+            // On 127.0.0.1 every new connection says the token again.
+            if iface == VMInterface.omacvmApp && g.authorized {
+                g.authorized = false
+                setConnected(g, false)
+            }
             old.cancel()
             run(c, for: g, takeover: takeover)
             return
@@ -222,7 +244,9 @@ final class GuestLink {
             case .ready:
                 Log.info("guest \(g.id) connected: \(c.endpoint)")
                 // Taking over from an old connection is a new session too.
-                if takeover && g.isConnected { self.onConnectionChange?(g.id, true) } else { self.setConnected(g, true) }
+                if !g.authorized {
+                    // waits for "auth" (receive)
+                } else if takeover && g.isConnected { self.onConnectionChange?(g.id, true) } else { self.setConnected(g, true) }
                 self.receive(on: c, for: g)
             case .failed, .cancelled:
                 self.drop(g, c)
@@ -238,7 +262,18 @@ final class GuestLink {
             guard let self, let g, c === g.connection, self.guests[g.id] === g else { return }
             if let data, !data.isEmpty {
                 do {
-                    let messages = try g.stream.feed(data)
+                    var messages = try g.stream.feed(data)
+                    if !g.authorized, !messages.isEmpty {
+                        guard case let .text(t) = messages[0], t.hasPrefix("auth "),
+                              OmacVMApp.tokenMatches(String(t.dropFirst(5))) else {
+                            Log.info("guest \(g.id) on 127.0.0.1 sent no valid token; dropping it")
+                            c.cancel()
+                            return
+                        }
+                        g.authorized = true
+                        messages.removeFirst()
+                        self.setConnected(g, true)
+                    }
                     if !messages.isEmpty { self.onMessages?(g.id, messages) }
                 } catch {
                     Log.info("\(error); dropping guest \(g.id)")

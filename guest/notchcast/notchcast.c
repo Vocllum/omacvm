@@ -544,12 +544,31 @@ static int vm_name_b64(char *out, size_t size) {
     return found;
 }
 
+// OmacVM.app's VMs reach the helper on the Mac's 127.0.0.1, where any Mac
+// program could connect, so the helper wants OmacVM's Bridge token as the
+// first message ("auth <token>"); other helpers ignore it. Caller holds lock.
+static void send_auth_locked(void) {
+    const char *home = getenv("HOME");
+    if (!home) return;
+    char path[512], tok[160] = "", authmsg[200];
+    snprintf(path, sizeof path, "%s/.config/omacvm-bridge/token", home);
+    FILE *t = fopen(path, "r");
+    if (!t) return;
+    if (!fgets(tok, sizeof tok, t)) tok[0] = 0;
+    fclose(t);
+    tok[strcspn(tok, "\r\n")] = 0;
+    if (strlen(tok) < 32 || strspn(tok, "0123456789abcdefABCDEF") != strlen(tok)) return;
+    snprintf(authmsg, sizeof authmsg, "auth %s", tok);
+    send_text_locked(authmsg);
+}
+
 // Tells the helper which hypervisor this guest runs in, so it only takes this
 // VM app's full-screen window for the strip ("hello qemu", "hello parallels"),
 // and the VM's name, so it can tell several VMs of one app apart by their
 // window titles ("vmname <base64>"; older helpers ignore it).
 static void send_hello(void) {
     char vendor[64] = "", msg[96], name[400], namemsg[420];
+
     FILE *f = fopen("/sys/class/dmi/id/sys_vendor", "r");
     if (f) {
         if (!fgets(vendor, sizeof vendor, f)) vendor[0] = 0;
@@ -886,6 +905,7 @@ static void *net_thread(void *unused) {
 
         pthread_mutex_lock(&lock);
         sock_fd = fd;
+        send_auth_locked();
         if (session_locked) send_text_locked("lock 1");
         else if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
         pthread_mutex_unlock(&lock);

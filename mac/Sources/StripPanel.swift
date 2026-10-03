@@ -219,7 +219,7 @@ final class StripView: NSView {
     }
 
     /// Owner names of the VM windows (set by the controller).
-    var vmOwners: Set<String> = ["Parallels Desktop", "UTM", "VMware Fusion"]
+    var vmOwners: Set<String> = ["Parallels Desktop", "UTM", "VMware Fusion", OmacVMApp.owner]
     /// The VM app whose guest feeds the strip (it draws its own cursor).
     var activeOwner: String?
 
@@ -237,7 +237,7 @@ final class StripView: NSView {
             else { continue }
             if (w[kCGWindowAlpha as String] as? Double ?? 1) == 0 { continue }
             if w[kCGWindowOwnerName as String] as? String == "Omanotch" { continue }
-            return vmOwners.contains(w[kCGWindowOwnerName as String] as? String ?? "") && layer == 0
+            return vmOwners.contains(OmacVMApp.ownerName(w) ?? "") && layer == 0
         }
         return false
     }

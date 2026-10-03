@@ -29,11 +29,11 @@ struct Settings {
     var vmSubnets: [String] {
         defaults.stringArray(forKey: "vmSubnets") ?? ["192.168.64.0/24", "10.211.55.0/24", "10.37.129.0/24"] + [Settings.fusionSubnet()].compactMap { $0 }
     }
-    /// Owner names (app names) of the VM windows: Parallels Desktop, UTM, VMware Fusion.
+    /// Owner names (app names) of the VM windows: Parallels Desktop, UTM, VMware Fusion, OmacVM (OmacVM.app).
     var vmOwners: Set<String> {
         if let list = defaults.stringArray(forKey: "vmOwners"), !list.isEmpty { return Set(list) }
         if let one = defaults.string(forKey: "vmOwner") { return [one] }
-        return ["Parallels Desktop", "UTM", "VMware Fusion"]
+        return ["Parallels Desktop", "UTM", "VMware Fusion", OmacVMApp.owner]
     }
 
     /// VMware Fusion's NAT network (vmnet8) as "a.b.c.0/24": the first
@@ -407,7 +407,9 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         } else if text.hasPrefix("hello ") {
             let hv = String(text.dropFirst("hello ".count))
             // An app that is not a VM app here (vmOwners) could be any of them.
-            guest.owner = GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
+            // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1.
+            guest.owner = link.viaOmacVMApp(guest.id) ? OmacVMApp.owner
+                : GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
             Log.info("guest \(guest.id) runs in \(hv) (\(guest.owner ?? "any VM app"))")
             return true
         } else if text.hasPrefix("vmname ") {

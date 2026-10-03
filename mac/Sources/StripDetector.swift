@@ -45,7 +45,7 @@ enum StripDetector {
                                                        : [.optionAll, .excludeDesktopElements]
         guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else { return nil }
         for w in list {
-            guard let owner = w[kCGWindowOwnerName as String] as? String, vmOwners.contains(owner),
+            guard let owner = OmacVMApp.ownerName(w), vmOwners.contains(owner),
                   (w[kCGWindowLayer as String] as? Int) == 0,
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict)

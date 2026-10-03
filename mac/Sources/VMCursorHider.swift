@@ -110,7 +110,7 @@ final class VMCursorHider {
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict), r.contains(p)
             else { continue }
-            let owner = w[kCGWindowOwnerName as String] as? String
+            let owner = OmacVMApp.ownerName(w)
             if owner == ownOwner { return false }
             return owner == activeOwner && layer == 0
         }
@@ -134,7 +134,7 @@ final class VMCursorHider {
                 as? [[String: Any]] else { return [] }
         var out: [CGRect] = []
         for w in list {
-            guard let owner = w[kCGWindowOwnerName as String] as? String, vmOwners.contains(owner),
+            guard let owner = OmacVMApp.ownerName(w), vmOwners.contains(owner),
                   (w[kCGWindowLayer as String] as? Int) == 0,
                   let dict = w[kCGWindowBounds as String] as? NSDictionary,
                   let r = CGRect(dictionaryRepresentation: dict)
