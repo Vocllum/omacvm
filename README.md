@@ -113,9 +113,12 @@ More in [With a coding agent](#with-a-coding-agent).
 ## Four ways: Parallels, UTM, VMware Fusion or OmacVM.app
 
 OmacVM builds the same Omarchy VM in Parallels Desktop, UTM or VMware Fusion.
-OmacVM.app, its own app that needs nothing else, is coming. Everything in
-[What you get](#what-you-get) works in all three apps, except where the table
-says otherwise.
+OmacVM.app, its own app that needs nothing else, is coming. Once it is
+installed, `omacvm build` offers it as the fourth choice (or
+`--vm-type app`): the app builds the VM with its own steps, then OmacVM is
+applied as on the other routes ([docs/routes/app.md](docs/routes/app.md)).
+Everything in [What you get](#what-you-get) works in all three apps, except
+where the table says otherwise.
 
 **Which one?** Fastest and least to set up, and fine with paying: Parallels.
 Free, with external displays and the longest battery life: VMware Fusion.
