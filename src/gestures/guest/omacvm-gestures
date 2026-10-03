@@ -5,8 +5,9 @@ pinch/rotate like on a real Apple touchpad; on UTM it also types the Mac's Cmd
 shortcuts as Super.
 
 Connects to the Mac helper (gestures/mac) at the Mac's address on the VM
-network (/etc/omacvm/env), says what this VM wants ("H <gestures> <glide>",
-from the feature choices in the same file) and reads lines:
+network (/etc/omacvm/env), says what this VM wants ("H <gestures> <glide>
+<token> <name>": the feature choices and the VM's name from the same file, the
+name so the Mac can tell two VMs of one app apart) and reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
   O <natural> <w> <h>               the Mac's scrolling direction, trackpad size (1/100 mm)
@@ -63,6 +64,11 @@ GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
 # (scroll-momentum was called glide in the experiment)
 GLIDE_ON = GESTURES and (os.environ.get("OMACVM_FEATURE_scroll_momentum")
                          or os.environ.get("OMACVM_FEATURE_glide", "off")) == "on"
+# The VM's name in its app, base64 (omacvm apply): the Mac sends to the VM whose
+# name is in the front window's title.
+NAME = os.environ.get("OMACVM_VM_NAME_B64", "")
+if not NAME.isascii() or not all(c.isalnum() or c in "+/=" for c in NAME):
+    NAME = ""
 USER = os.environ.get("OMACVM_GESTURES_USER", "")   # default: whoever owns the Wayland session
 # Built-in MacBook Pro 16" trackpad: 156 x 96 mm; 100 units per mm. The real
 # trackpad maps onto the middle of a much larger virtual one, so Glide's
@@ -568,7 +574,9 @@ def run(pad, keys, glide):
         # The Bridge's token: any VM on the Mac's VM networks can reach the
         # Mac's listener, so it lets in only VMs that know it.
         tok = bridge_token()
-        s.sendall(f"H {int(GESTURES)} {int(GLIDE_ON)}{' ' + tok if tok else ''}\n".encode())
+        # The name only after a token (the Mac reads the fields in order).
+        s.sendall(f"H {int(GESTURES)} {int(GLIDE_ON)}{' ' + tok if tok else ''}"
+                  f"{' ' + NAME if tok and NAME else ''}\n".encode())
         print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
         buf = b""

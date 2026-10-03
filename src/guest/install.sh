@@ -4,6 +4,7 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
+#                    [--vm-name-b64 NAME]
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
@@ -11,11 +12,13 @@
 # --thp-kernel and --autologin still work.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
 # --display (UTM: the fixed mode, from display/mac-display.swift) is required on UTM.
+# --vm-name-b64: the VM's name in its app, base64 (kept in /etc/omacvm/env): the
+# gestures daemon says it, so the Mac tells two VMs of one app apart.
 # Idempotent: run it again after an update of this repository.
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""
+U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""; NAME64=""
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -30,6 +33,7 @@ while (( $# )); do
     --display) MODE=$2; shift 2 ;;
     --host) HOST_GIVEN=$2; shift 2 ;;
     --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
+    --vm-name-b64) NAME64=$2; shift 2 ;;
     --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
     --no-thp-kernel) SET[thp-kernel]=off; shift ;;
     --thp-kernel) SET[thp-kernel]=on; shift ;;
@@ -49,7 +53,9 @@ AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
 # Set up before choices were kept:
 [[ -f $AUTOLOGIN_CONF ]] && F[autologin]=on
 [[ -x $H/.local/bin/notchcast ]] && F[omanotch]=on
+[[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
+  [[ -n $NAME64 ]] || NAME64=$(sed -n 's/^OMACVM_VM_NAME_B64=//p' "$ENV" | tail -1)
   # scroll-momentum was called glide in the experiment
   v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
   for f in "${FEATURES[@]}"; do
@@ -91,6 +97,7 @@ esac
 if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
 {
   printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\nOMACVM_USER=%s\n' "$TYPE" "$HOST" "$U"
+  [[ -z $NAME64 ]] || printf 'OMACVM_VM_NAME_B64=%s\n' "$NAME64"
   for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
 } | install -Dm644 /dev/stdin "$ENV"
 log "$TYPE VM, the Mac is $HOST"
