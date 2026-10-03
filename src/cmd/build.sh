@@ -412,7 +412,7 @@ human_steps() {
   case $TYPE in
     utm) echo "Allow the microphone: macOS asks for UTM the first time a Linux app records." ;;
     fusion) echo "Allow the microphone: VMware Fusion in System Settings > Privacy & Security > Microphone (without it the VM records nothing)." ;;
-    app) echo "Allow the microphone: macOS asks for OmacVM when it starts the VM." ;;
+    app) echo "Allow the microphone: macOS asks for OmacVM when it starts the VM (if a Linux app records nothing right after, restart the VM once)." ;;
     parallels) echo "Allow the microphone: Parallels Desktop in System Settings > Privacy & Security > Microphone (without it the VM records silence)." ;;
   esac
   if (( CAMERA )); then
