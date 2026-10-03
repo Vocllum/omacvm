@@ -20,7 +20,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 features_load
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1
 SETN=(); SETV=()
 set_feature() {   # NAME on|off
   feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
@@ -60,7 +60,7 @@ export OMA_PIN_NEW=1
 if [[ -n $IP ]]; then
   [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
   if [[ -n $VM ]]; then vm_pin "$VM" "$TYPE"
-  else VM="the VM at $IP"; OMA_PIN=""; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; export OMA_PIN OMA_PIN_ARGS; fi   # an address is no identity (DHCP reuses it): no key kept
+  else VM="the VM at $IP"; NAMED=0; OMA_PIN=""; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; export OMA_PIN OMA_PIN_ARGS; fi   # an address is no identity (DHCP reuses it): no key kept
 else
   resolve_vm start
 fi
@@ -144,6 +144,8 @@ fargs=""
 for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
 [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
 on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
+# Its name, so the Mac's gestures helper tells it from another VM in the same app.
+(( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 gestures_legacy_forget "$IP"   # its daemon says the token now
 

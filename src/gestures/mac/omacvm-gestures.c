@@ -46,8 +46,12 @@
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
 // and from the guest, once after connecting:
-//   H <gestures 0|1> <glide 0|1> <token>   what this VM wants, and the Bridge's
-//                                     token (any VM on these networks can connect)
+//   H <gestures 0|1> <glide 0|1> <token> [<name>]   what this VM wants, the Bridge's
+//                                     token (any VM on these networks can connect) and
+//                                     the VM's name in base64 (omacvm apply tells the VM)
+// Two VMs in one app share its network: F, K, A, W, P and S on/esc go only to
+// the VM whose name is in the title of the app's front window; without such a
+// match (VMs from before the name, a renamed VM) to every VM of that app.
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
 #include <CoreFoundation/CoreFoundation.h>
@@ -137,8 +141,9 @@ static pid_t frontPid;   // the full-screen VM app in front, else 0
 // 1 = UTM, 2 = Fusion, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
-static struct { int fd, net, gestures, glide; char ip[32]; } clients[MAX_CLIENTS];
+static struct { int fd, net, gestures, glide, target; char ip[32], name[256]; } clients[MAX_CLIENTS];
 static volatile int frontNet = -1;
+static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
 static int verbose;
@@ -157,50 +162,106 @@ static void logf_(const char *fmt, ...) {
   fflush(stdout);
 }
 
-// net < 0: every client.
-static void sendTo(int net, const char *line, size_t len) {
-  pthread_mutex_lock(&sendLock);
+// ---- which VM is in front ----
+// Every VM of an app connects from the app's one network, so the network tells
+// the app, not the VM. The VM is told by its name (from its hello) in the title
+// of the app's front window: Parallels, UTM and VMware Fusion put the VM's name
+// there, in a window or full screen. The name that is the title wins, else the
+// longest name in it ("Omarchy 2" over "Omarchy"). No match: every VM on the
+// front app's network, as before VMs said their name.
+static int nameIs(int i, int exact) {
+  const char *n = clients[i].name;
+  return n[0] && (exact ? !strcmp(frontTitle, n) : strstr(frontTitle, n) != NULL);
+}
+
+// The front VM's clients (clients[].target); sendLock held. Returns the
+// targets as a bit mask.
+static unsigned pickTargets(void) {
+  int exact = 0; size_t best = 0;
   for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (clients[i].fd < 0 || (net >= 0 && clients[i].net != net)) continue;
+    if (clients[i].fd < 0 || clients[i].net != frontNet) continue;
+    if (nameIs(i, 1)) exact = 1;
+    else if (nameIs(i, 0) && strlen(clients[i].name) > best) best = strlen(clients[i].name);
+  }
+  unsigned mask = 0;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    int on = clients[i].fd >= 0 && clients[i].net == frontNet &&
+             (exact ? nameIs(i, 1) : best ? nameIs(i, 0) && strlen(clients[i].name) == best : 1);
+    clients[i].target = on;
+    if (on) mask |= 1u << i;
+  }
+  return mask;
+}
+
+// After the front window, the front app or the connected VMs changed; sendLock
+// held. While capturing (states), a VM that stops being the front one gets
+// "S off" (it lets go of held fingers and keys) and a new one "S on".
+static void retargetLocked(int states) {
+  static unsigned last;
+  unsigned mask = pickTargets();
+  if (mask == last) return;
+  char who[256] = ""; size_t n = 0; int named = 0;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (!(mask & 1u << i)) continue;
+    named |= nameIs(i, 0);
+    n += (size_t)snprintf(who + n, n < sizeof who ? sizeof who - n : 0, "%s%s", n ? ", " : "", clients[i].ip);
+    if (n >= sizeof who) n = sizeof who - 1;
+  }
+  logf_("front window \"%s\": %s%s", frontTitle, named ? "" : "every VM of the app, ", mask ? who : "no VM connected");
+  for (int i = 0; states && i < MAX_CLIENTS; i++) {
+    if (clients[i].fd < 0 || !((mask ^ last) & 1u << i)) continue;
+    const char *st = mask & 1u << i ? "S on\n" : "S off\n";
+    send(clients[i].fd, st, strlen(st), MSG_NOSIGNAL);
+  }
+  last = mask;
+}
+
+// all: every client; else the front VM's.
+static void sendTo(int all, const char *line, size_t len) {
+  pthread_mutex_lock(&sendLock);
+  int dropped = 0;
+  for (int i = 0; i < MAX_CLIENTS; i++) {
+    if (clients[i].fd < 0 || (!all && !clients[i].target)) continue;
     if (send(clients[i].fd, line, len, MSG_NOSIGNAL) < 0) {
       logf_("guest disconnected: %s", clients[i].ip);
-      close(clients[i].fd); clients[i].fd = -1;
+      close(clients[i].fd); clients[i].fd = -1; dropped = 1;
     }
   }
+  if (dropped) retargetLocked(capturing);
   pthread_mutex_unlock(&sendLock);
 }
 
-static int haveClient(int net) {
+static int haveClient(void) {
   int found = 0;
   pthread_mutex_lock(&sendLock);
-  for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].net == net) found = 1;
+  for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].target) found = 1;
   pthread_mutex_unlock(&sendLock);
   return found;
 }
 
-// What the VMs on a network want: every connected one must agree (two VMs in
-// Parallels share its network, and either may be the one in front), so a VM
-// that does not use a feature never loses macOS's own handling to it.
-static int wants(int net, int glide) {
+// What the front VM wants. Without a name match these are all VMs of the front
+// app, and every one must agree (either may be the one in front), so a VM that
+// does not use a feature never loses macOS's own handling to it.
+static int wants(int glide) {
   int any = 0, all = 1;
   pthread_mutex_lock(&sendLock);
   for (int i = 0; i < MAX_CLIENTS; i++) {
-    if (clients[i].fd < 0 || clients[i].net != net) continue;
+    if (clients[i].fd < 0 || !clients[i].target) continue;
     any = 1;
     if (!(glide ? clients[i].glide && clients[i].gestures : clients[i].gestures)) all = 0;
   }
   pthread_mutex_unlock(&sendLock);
   return trackpad && any && all;
 }
-static int gesturesOn(int net) { return net >= 0 && wants(net, 0); }
-static int glideOn(int net) { return net >= 0 && wants(net, 1); }
+static int gesturesOn(void) { return frontNet >= 0 && wants(0); }
+static int glideOn(void) { return frontNet >= 0 && wants(1); }
 
-static void sendLine(const char *line, size_t len) { sendTo(frontNet, line, len); }
+static void sendLine(const char *line, size_t len) { sendTo(0, line, len); }
 
-// "on"/"esc" concern the frontmost VM; "off" goes to every VM.
+// "on"/"esc" concern the front VM; "off" goes to every VM.
 static void sendState(const char *s) {
   char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s);
-  sendTo(strcmp(s, "off") ? frontNet : -1, b, (size_t)n);
+  sendTo(!strcmp(s, "off"), b, (size_t)n);
 }
 
 // ---- touch forwarding ----
@@ -223,8 +284,8 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
     for (int i = 0; i < k; i++) { sx += c[i]->normalized.pos.x; sy += 1.0f - c[i]->normalized.pos.y; }
     fprintf(rec, "F\t%.4f\t%d\t%.5f\t%.5f\t%d\n", unixNow(), k, sx / k, sy / k, capturing);
   }
-  if (capturing && gesturesOn(frontNet)) {
-    if (k >= 3 || (k == 2 && glideOn(frontNet))) send = 1;
+  if (capturing && gesturesOn()) {
+    if (k >= 3 || (k == 2 && glideOn())) send = 1;
     else if (k == 2) {
       float dx = c[0]->normalized.pos.x - c[1]->normalized.pos.x, dy = c[0]->normalized.pos.y - c[1]->normalized.pos.y;
       float d = sqrtf(dx * dx + dy * dy);
@@ -293,6 +354,28 @@ static void cursorTimerOn(int on) {
   CFRunLoopTimerSetNextFireDate(cursorTimer, CFAbsoluteTimeGetCurrent() + (on ? 0 : 1e9));
 }
 
+// The title of the VM app's focused window (its main window when none has
+// focus), through Accessibility, which this helper has for its event tap
+// anyway; the window list would need Screen Recording for window names.
+static void windowTitle(pid_t pid, char *out, size_t cap) {
+  static AXUIElementRef app; static pid_t appPid;
+  out[0] = 0;
+  if (pid != appPid || !app) {
+    if (app) CFRelease(app);
+    app = AXUIElementCreateApplication(pid); appPid = pid;
+    if (app) AXUIElementSetMessagingTimeout(app, 0.1f);   // a hung VM app must not stall the event tap
+  }
+  if (!app) return;
+  CFTypeRef win = NULL, title = NULL;
+  if (AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute, &win) != kAXErrorSuccess || !win)
+    if (AXUIElementCopyAttributeValue(app, kAXMainWindowAttribute, &win) != kAXErrorSuccess) win = NULL;
+  if (win && AXUIElementCopyAttributeValue(win, kAXTitleAttribute, &title) == kAXErrorSuccess && title &&
+      CFGetTypeID(title) == CFStringGetTypeID())
+    CFStringGetCString(title, out, (CFIndex)cap, kCFStringEncodingUTF8);
+  if (title) CFRelease(title);
+  if (win) CFRelease(win);
+}
+
 static void updateCapture(CFRunLoopTimerRef t, void *info) {
   (void)info;
   ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
@@ -301,7 +384,19 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
           : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
   int front = net >= 0 && vmFullScreen(pid);
-  if (front) frontNet = net;
+  if (front) {
+    // Which of the app's VMs: its window title, on this check (every 0.2 s
+    // while a VM app is full screen in front) and on every app switch.
+    char title[sizeof frontTitle];
+    windowTitle(pid, title, sizeof title);
+    pthread_mutex_lock(&sendLock);
+    if (net != frontNet || strcmp(title, frontTitle)) {
+      frontNet = net;
+      memcpy(frontTitle, title, sizeof frontTitle);
+      retargetLocked(capturing);
+    }
+    pthread_mutex_unlock(&sendLock);
+  }
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
   if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
@@ -470,7 +565,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
         // UTM and VMware Fusion keep Cmd shortcuts like Cmd+Space for macOS:
         // in full screen they go to Omarchy as Super, through the guest daemon.
         if (type == kCGEventKeyDown && capturing && (frontNet == NET_UTM || frontNet == NET_FUSION) &&
-            (f & kCGEventFlagMaskCommand) && haveClient(frontNet)) {
+            (f & kCGEventFlagMaskCommand) && haveClient()) {
           forwardKey(kc, f, CGEventGetIntegerValueField(e, kCGKeyboardEventAutorepeat) ? 2 : 1);
           forwarded[kc] = 1;
           return NULL;
@@ -508,7 +603,7 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   if (type == kCGEventScrollWheel) {
     // Glide: continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it,
     // goes to the guest; a wheel mouse's discrete steps pass to the VM app.
-    if (!(capturing && glideOn(frontNet))) return e;
+    if (!(capturing && glideOn())) return e;
     if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
     double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
     double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
@@ -523,12 +618,27 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn(frontNet) && ns_event_type(e) == 30) {
+  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn() && ns_event_type(e) == 30) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
   }
-  return capturing && gesturesOn(frontNet) ? NULL : e;   // a gesture event type
+  return capturing && gesturesOn() ? NULL : e;   // a gesture event type
+}
+
+// The VM's name from its hello: base64, so a name may hold spaces. Anything
+// else gives no name.
+static void base64Name(const char *in, char *out, size_t cap) {
+  static const char abc[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  unsigned v = 0; int bits = 0; size_t n = 0;
+  for (; *in && *in != '='; in++) {
+    const char *p = strchr(abc, *in);
+    if (!p) { n = 0; break; }
+    v = (v << 6 | (unsigned)(p - abc)) & 0xffff; bits += 6;
+    if (bits >= 8) { bits -= 8; if (n + 1 < cap) out[n++] = (char)(v >> bits & 0xff); }
+  }
+  out[n] = 0;
+  for (size_t i = 0; i < n; i++) if ((unsigned char)out[i] < 32) { out[0] = 0; break; }   // no control characters (the log)
 }
 
 // ---- who may connect ----
@@ -617,8 +727,10 @@ static void *serverThread(void *arg) {
       int gestures = 1, glide = 0;
       struct timeval tv = { .tv_sec = 1 };
       setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-      char hello[256], given[160] = ""; ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
-      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d %159s", &gestures, &glide, given); }
+      char hello[640], given[160] = "", name64[360] = "", name[256];
+      ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
+      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d %159s %359s", &gestures, &glide, given, name64); }
+      base64Name(name64, name, sizeof name);
       if (given[0] ? !bridgeTokenOK(given) : !legacyOK(peer.sin_addr)) {
         static char lastIp[32]; static time_t lastLog;   // a refused daemon retries every 2 s
         if (strcmp(lastIp, ip) || time(NULL) - lastLog >= 60) {
@@ -638,9 +750,13 @@ static void *serverThread(void *arg) {
       clients[slot].fd = c; clients[slot].net = net;
       clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
       snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
+      snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
+      logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s)", ip, gestures ? "on" : "off",
+            glide ? "on" : "off", name[0] ? ", VM \"" : "", name, name[0] ? "\"" : "");
+      retargetLocked(capturing);
+      int front = clients[slot].target;
       pthread_mutex_unlock(&sendLock);
-      logf_("guest connected: %s (gestures %s, scroll momentum %s)", ip, gestures ? "on" : "off", glide ? "on" : "off");
-      const char *st = capturing && net == frontNet ? "on\n" : "off\n";
+      const char *st = capturing && front ? "on\n" : "off\n";
       char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
       send(c, b, (size_t)n, MSG_NOSIGNAL);
       // The Mac's scrolling direction and the trackpad's size, so the guest
