@@ -1,24 +1,35 @@
 #!/bin/bash
 # Build OmacVM.app into dist/: the launcher, QEMU (built from source on the
 # first run and when its patches or build scripts change, about 70 seconds),
-# UEFI firmware, the VM scripts and OmacVM's VM side. Signed ad hoc.
-#   scripts/build-app.sh [--name NAME]   (default OmacVM: the app's name and Dock title)
+# UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
+# lives in, as committed). Signed ad hoc.
+#   scripts/build-app.sh [--name NAME] [--release]
+#     --name     the app's name and Dock title (default OmacVM)
+#     --release  for a published zip: the whole repo must be committed
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-NAME=OmacVM
+REPO=$(cd "$ROOT/.." && pwd)
+NAME=OmacVM; RELEASE=0
 while (( $# )); do
   case $1 in
     --name) NAME=$2; shift 2 ;;
-    *) echo "usage: build-app.sh [--name NAME]" >&2; exit 2 ;;
+    --release) RELEASE=1; shift ;;
+    *) echo "usage: build-app.sh [--name NAME] [--release]" >&2; exit 2 ;;
   esac
 done
 log() { printf '==> %s\n' "$*"; }
 
-# OmacVM as pinned by this repository (the submodule commit), nothing else.
-PIN=$(git -C "$ROOT" ls-tree HEAD vendor/omacvm | awk '{ print $3 }')
-[[ -n $PIN ]] || { echo "vendor/omacvm is not pinned" >&2; exit 1; }
-if [[ $(git -C "$ROOT/vendor/omacvm" rev-parse HEAD) != "$PIN" || -n $(git -C "$ROOT/vendor/omacvm" status --porcelain) ]]; then
-  echo "vendor/omacvm is not at its pinned commit $PIN, or has changes: commit them and the pin first" >&2
+# OmacVM's VM side as committed (git archive of HEAD), so the app always says
+# which commit it carries. Uncommitted changes in src/ would not be in it:
+# stop. A release build takes nothing that is not committed.
+COMMIT=$(git -C "$REPO" rev-parse HEAD)
+if [[ -n $(git -C "$REPO" status --porcelain -- src) ]]; then
+  echo "src/ has uncommitted changes: commit them first (the app takes OmacVM as committed)" >&2
+  exit 1
+fi
+if (( RELEASE )) && [[ -n $(git -C "$REPO" status --porcelain) ]]; then
+  echo "a release build needs a clean tree: commit or stash first" >&2
+  git -C "$REPO" status --short >&2
   exit 1
 fi
 RT=$ROOT/runtime/.build
@@ -44,7 +55,7 @@ ICON=$ROOT/.build/OmacVM.icns
 if [[ ! -f $ICON ]]; then
   log "icon"
   mkdir -p "$ROOT/.build"
-  "$ROOT/vendor/omacvm/src/icon/make-icns.sh" "$ICON"
+  "$REPO/src/icon/make-icns.sh" "$ICON"
 fi
 
 APP=$ROOT/dist/$NAME.app
@@ -58,13 +69,15 @@ ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" "$C/Resources/scripts/"
-git -C "$ROOT/vendor/omacvm" archive "$PIN" src | tar -x -C "$C/Resources/omacvm"
+git -C "$REPO" archive "$COMMIT" src | tar -x -C "$C/Resources/omacvm"
+echo "$COMMIT" > "$C/Resources/omacvm/COMMIT"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"
 install -m644 "$RT/firmware/edk2-licenses.txt" "$C/Resources/licenses/"
 
-VERSION=$(cat "$ROOT/VERSION")
+# The app carries the version of the OmacVM it is part of.
+VERSION=$(cat "$REPO/src/VERSION")
 cat > "$C/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -78,6 +91,7 @@ cat > "$C/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
+  <key>OmacVMCommit</key><string>$COMMIT</string>
   <key>LSMinimumSystemVersion</key><string>15.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>

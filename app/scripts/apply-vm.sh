@@ -10,9 +10,11 @@ source "$HERE/vm-common.sh"
 vm_load "$VM_DIR"
 vssh true < /dev/null 2>/dev/null || die "the VM is not running (or has no SSH yet)"
 
-# A copy: the Mac installers build next to their sources, never inside the app.
+# A copy of src/ only: the Mac installers build next to their sources, never
+# inside the app (or the source tree).
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-cp -R "$(dirname "$OMACVM_SRC")" "$tmp/omacvm"
+mkdir "$tmp/omacvm"
+cp -R "$OMACVM_SRC" "$tmp/omacvm/src"
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
 for f in ${FEATURES:-}; do args+=(--feature "$f"); done
 [[ ${2:-} == --no-mac ]] && args+=(--no-mac)

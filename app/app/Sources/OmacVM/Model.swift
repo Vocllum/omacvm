@@ -256,9 +256,10 @@ enum Mac {
         return out.isEmpty ? "us" : out
     }
 
+    /// OmacVM's VM side: a copy in the app, the repo's own src/ in the source tree.
     static var omacvmSrc: String {
-        FileManager.default.fileExists(atPath: Paths.resources.appendingPathComponent("vendor/omacvm/src").path)
-            ? "vendor/omacvm/src" : "omacvm/src"
+        FileManager.default.fileExists(atPath: Paths.resources.appendingPathComponent("omacvm/src").path)
+            ? "omacvm/src" : "../src"
     }
 
     static var linuxUserName: String {

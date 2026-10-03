@@ -6,13 +6,14 @@ log() { printf '==> %s\n' "$*"; }
 qe() { printf '%s' "${1//,/,,}"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-# Where things are: inside the app (Contents/Resources) or in the source tree.
+# Where things are: inside the app (Contents/Resources) or in the source tree
+# (app/ of the omacvm repo, OmacVM's VM side in ../src).
 _root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 if [[ -d $_root/runtime/.build/qemu-gpu-runtime ]]; then
   QEMU=$_root/runtime/.build/qemu-gpu-runtime/bin/qemu-system-aarch64
   ZSTD=$_root/runtime/.build/qemu-gpu-runtime/bin/zstd
   FIRMWARE=$_root/runtime/.build/firmware/edk2-aarch64-code.fd
-  OMACVM_SRC=$_root/vendor/omacvm/src
+  OMACVM_SRC=$(cd "$_root/.." && pwd)/src
 else
   QEMU=$_root/runtime/bin/OmacVM
   ZSTD=$_root/runtime/bin/zstd

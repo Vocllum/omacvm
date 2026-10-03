@@ -4,19 +4,34 @@ Omarchy in a VM on an Apple Silicon Mac, in one app. No Parallels, UTM or
 VMware Fusion: the app brings its own QEMU (Apple's Hypervisor framework,
 GPU through VirGL).
 
-Work in progress, not released.
+Part of [OmacVM](../README.md): this folder is the app, `../src` is OmacVM's
+VM side the app carries. Get the app with `omacvm build --vm-type app`, or
+as `OmacVM-<version>.zip` from OmacVM's
+[releases](https://github.com/gillesgoetsch/omacvm/releases).
 
 ## Build
 
 Needs macOS 15 and Xcode's Command Line Tools.
 
 ```sh
-git clone --recurse-submodules <this repo> && cd omacvm-app
+git clone https://github.com/gillesgoetsch/omacvm && cd omacvm/app
 scripts/build-app.sh          # dist/OmacVM.app
 open dist/OmacVM.app
 ```
 
-The first build compiles QEMU (about 70 seconds).
+The first build compiles QEMU (about 70 seconds). The app takes `../src` as
+committed: the build stops when `src/` has uncommitted changes.
+
+## Release
+
+```sh
+scripts/build-app.sh --release      # stops unless the whole repo is committed
+scripts/package-release.sh          # dist/OmacVM-<version>.zip and .sha256
+```
+
+The version is OmacVM's (`../src/VERSION`). Upload both files to the GitHub
+release `v<version>`: `omacvm build --vm-type app` and `omacvm update`
+download them from there.
 
 ## Status
 
@@ -50,6 +65,9 @@ The VM is a normal install: `omarchy update` and snapshots work.
 | `app/` | the launcher (Swift) |
 | `scripts/create-vm.sh` | builds a VM, headless |
 | `scripts/build-app.sh` | builds the app |
-| `vendor/omacvm` | OmacVM (submodule): the installers and the VM side, `app` route |
+| `scripts/package-release.sh` | zips the built app for a release |
+| `../src` | OmacVM: the installers and the VM side, `app` route |
 
-Licences: `THIRD_PARTY_NOTICES.md`.
+Licences: `THIRD_PARTY_NOTICES.md`. QEMU is GPL-2.0: its build scripts and
+every patch the app's QEMU is built with are in `runtime/` of this public
+repo, which is the source offer for the QEMU in the app.
