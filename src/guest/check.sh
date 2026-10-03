@@ -131,7 +131,7 @@ elif [[ $BATTERY == on ]]; then
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
     ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
-  if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "Omarchy warns; the VM never suspends for it"
+  if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "the VM never suspends for it"
   else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
