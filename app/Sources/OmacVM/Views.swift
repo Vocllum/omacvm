@@ -1,0 +1,184 @@
+import AppKit
+import SwiftUI
+
+/// What the launcher window shows.
+enum Screen: Equatable {
+    case setup
+    case building
+    case ready
+}
+
+@MainActor
+final class AppState: ObservableObject {
+    @Published var screen: Screen = .setup
+    @Published var config: VMConfig
+    @Published var message: String?
+    let creator = Creator()
+    var startVM: () -> Void = {}
+
+    init() {
+        if let existing = VMConfig.existing() {
+            config = existing
+            screen = existing.isReady ? .ready : .setup
+        } else {
+            var c = VMConfig()
+            let t = Mac.tier(1)
+            c.cpus = t.cpus
+            c.memoryMB = t.memoryGB * 1024
+            c.user = Mac.linuxUserName
+            c.fullName = NSFullUserName()
+            c.timeZone = Mac.timeZone
+            c.language = Mac.language
+            c.keyboard = Mac.keyboard
+            config = c
+        }
+    }
+}
+
+struct RootView: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        Group {
+            switch state.screen {
+            case .setup: SetupView(state: state)
+            case .building: BuildView(state: state, creator: state.creator)
+            case .ready: ReadyView(state: state)
+            }
+        }
+        .frame(width: 520)
+        .padding(24)
+    }
+}
+
+struct SetupView: View {
+    @ObservedObject var state: AppState
+    @State private var password = ""
+    @State private var password2 = ""
+    @State private var tier = 1
+    @State private var location = Paths.vmsRoot.path
+
+    private var userOK: Bool {
+        state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
+    }
+    private var canBuild: Bool {
+        userOK && !password.isEmpty && password == password2 && !state.config.name.isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("New Omarchy VM").font(.title2.bold())
+            Text("\(Product.name) installs Arch Linux ARM and Omarchy into a new VM. It takes 20 to 60 minutes and downloads a few GB.")
+                .foregroundStyle(.secondary)
+            Form {
+                TextField("VM name", text: $state.config.name)
+                TextField("User name", text: $state.config.user)
+                if !state.config.user.isEmpty && !userOK {
+                    Text("Lower-case letters, digits, - and _ only.").font(.caption).foregroundStyle(.red)
+                }
+                TextField("Full name", text: $state.config.fullName)
+                SecureField("Password", text: $password)
+                SecureField("Password again", text: $password2)
+                if !password2.isEmpty && password != password2 {
+                    Text("The passwords differ.").font(.caption).foregroundStyle(.red)
+                }
+                Picker("Resources", selection: $tier) {
+                    ForEach(0..<4) { t in
+                        let v = Mac.tier(t)
+                        Text("\(["Low", "Balanced", "High", "Best"][t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
+                    }
+                }
+                Picker("Disk", selection: $state.config.diskGB) {
+                    ForEach([64, 128, 256, 512], id: \.self) { Text("\($0) GB (grows as it fills)").tag($0) }
+                }
+                HStack {
+                    Text("Location")
+                    Spacer()
+                    Text(location).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
+                    Button("Change…") { chooseLocation() }
+                }
+            }
+            HStack {
+                Text("Keyboard \(state.config.keyboard), \(state.config.timeZone), \(state.config.language) (from the Mac)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Build") { build() }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!canBuild)
+            }
+        }
+    }
+
+    private func chooseLocation() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use This Folder"
+        panel.message = "Where the VM's disk goes. An external drive works too (APFS)."
+        if panel.runModal() == .OK, let url = panel.url {
+            UserDefaults.standard.set(url.path, forKey: "vmsRoot")
+            location = url.path
+        }
+    }
+
+    private func build() {
+        let t = Mac.tier(tier)
+        state.config.cpus = t.cpus
+        state.config.memoryMB = t.memoryGB * 1024
+        state.config.sshPort = Mac.freePort(from: 52222)
+        state.config.hostname = "omarchy"
+        state.screen = .building
+        state.creator.start(config: state.config, password: password)
+        password = ""; password2 = ""
+    }
+}
+
+struct BuildView: View {
+    @ObservedObject var state: AppState
+    @ObservedObject var creator: Creator
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Building \(state.config.name)").font(.title2.bold())
+            ProgressView(value: Double(max(creator.step - 1, 0)), total: Double(creator.steps))
+            Text(creator.step > 0 ? "Step \(creator.step) of \(creator.steps): \(creator.title)" : creator.title)
+            Text(creator.detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            if let error = creator.failed {
+                Text(error).foregroundStyle(.red).textSelection(.enabled)
+                HStack {
+                    Button("Show Log") {
+                        NSWorkspace.shared.open(state.config.folder.appendingPathComponent("create.log"))
+                    }
+                    Spacer()
+                    Button("Back") { state.screen = .setup }
+                }
+            } else {
+                Text("You can use your Mac meanwhile. Keep it awake and online.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: creator.finished) { _, done in
+            if done { state.screen = .ready }
+        }
+    }
+}
+
+struct ReadyView: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(state.config.name).font(.title2.bold())
+            Text("\(state.config.cpus) CPUs, \(state.config.memoryMB / 1024) GB memory, \(state.config.diskGB) GB disk, user \(state.config.user)")
+                .foregroundStyle(.secondary)
+            if let m = state.message { Text(m).foregroundStyle(.red) }
+            HStack {
+                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
+                Spacer()
+                Button("Start") { state.startVM() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+}
