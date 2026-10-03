@@ -161,7 +161,7 @@ Free and open source, one display: UTM.
 | Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
 | The Mac's battery in the bar | ✓ Parallels' own | ✓ through OmacVM Bridge | ✓ through OmacVM Bridge | ✓ built in |
 | The Mac's camera | ✓ Parallels' own | ✓ through OmacVM Bridge | ✓ through OmacVM Bridge | ✓ built in |
-| Sound and the Mac's microphone | ✓ | ✓ | ✓ once macOS allows Fusion the microphone | ✓ once macOS allows OmacVM the microphone |
+| Sound and the Mac's microphone | ✓, the microphone once macOS allows Parallels it | ✓ | ✓, the microphone once macOS allows Fusion it | ✓, the microphone once macOS allows OmacVM it |
 | **Setup** | | | | |
 | Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
 | Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
@@ -301,9 +301,9 @@ When it is done, once on the Mac:
    and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures*. The camera
    is asked for the first time a Linux app uses it: for *OmacVM Bridge* (UTM,
    Fusion), *OmacVM* (the app) or *Parallels Desktop*. The microphone belongs
-   to the VM's app: UTM and Parallels ask the first time, OmacVM.app when it
-   starts the VM; for VMware Fusion turn it on yourself in System Settings ›
-   Privacy & Security › Microphone, or the VM records nothing.
+   to the VM's app: UTM asks the first time, OmacVM.app when it starts the VM;
+   for Parallels Desktop and VMware Fusion check System Settings › Privacy &
+   Security › Microphone, or the VM records silence or nothing.
 2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
    Cmd+C/V/X into Ctrl before the VM sees them; the build empties it when no VM
    is running (otherwise: quit Parallels Desktop and run

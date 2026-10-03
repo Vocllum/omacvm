@@ -52,7 +52,7 @@ OmacVM's version.
   port, not the network).
 - Sound through the Mac (QEMU's HDA card; PipeWire in the VM), and the Mac's
   microphone: the app asks for it when it starts a VM, because QEMU cannot
-  ask itself and records nothing without it ([finding 22](../troubleshooting.md#22-fusion-app-the-microphone-records-nothing)).
+  ask itself and records nothing without it ([finding 22](../troubleshooting.md#22-parallels-fusion-app-the-microphone-records-nothing-or-silence)).
 - The Mac's camera as *Mac Camera* (`/dev/video42`): QEMU has a virtio port
   `org.omacvm.camera`, the launcher serves it with the Bridge's camera code
   (`src/bridge/mac/camera.swift`) and turns the camera on only while a Linux

@@ -119,7 +119,7 @@ if [[ $CAMERA == on && $TYPE == parallels ]]; then
   # Parallels' own camera sharing: a USB camera in the VM.
   cams=$(cat /sys/class/video4linux/video*/name 2>/dev/null | sort -u | paste -sd, -)
   if [[ -n $cams ]]; then ok "camera" "Parallels' own: $cams"
-  else bad "camera" "no camera in the VM: Parallels shares the Mac's camera (VM settings > Hardware > USB & Bluetooth > Share Mac camera with Linux; macOS asks Parallels for it)"; fi
+  else bad "camera" "no camera in the VM: turn on camera sharing in the VM's settings in Parallels Desktop (it shares the Mac's camera as a USB camera)"; fi
 elif [[ $CAMERA == on ]]; then
   if [[ $(cat /sys/class/video4linux/video42/name 2>/dev/null) == "Mac Camera" ]]; then ok "camera device" "/dev/video42, Mac Camera"
   else bad "camera device" "no /dev/video42 (v4l2loopback not loaded: after a kernel update reboot, then omacvm apply)"; fi
