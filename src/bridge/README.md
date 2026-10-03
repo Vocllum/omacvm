@@ -183,7 +183,7 @@ held at the limit) or `unknown`. `chargeLimit`: the limit set in macOS
 | `display` | Night Shift (its own notification), True Tone, brightness |
 | `bluetooth` | power, devices connecting and disconnecting (IOBluetooth notifications), anything else within 5 s; battery re-read every minute while something is connected |
 | `scan` | an active scan finished, or macOS refreshed its scan cache (≤ every 10 s) |
-| `battery` | charge, charging, the charger, time left (IOKit notifications); voltage and charge in µAh at most every 30 s |
+| `battery` | charge, charging, the charger (IOKit notifications); time left, voltage and charge in µAh alone at most every 30 s |
 | `osd` | `{"type":"osd","kind":"volume"\|"mute"\|"brightness"\|"keyboard","value":0-100,"muted":bool,"source":"keys"\|"api"\|"external","device":"…"}` |
 
 `source`: `keys` = a media key caught while the VM was full screen, `api` = a
