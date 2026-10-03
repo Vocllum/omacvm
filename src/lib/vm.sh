@@ -47,12 +47,13 @@ vm_pin() {
 }
 
 # vm_marked NAME TYPE: OmacVM built this VM (its description says so) or set
-# it up (OmacVM's icon on a Parallels VM, in UTM's library).
+# it up (OmacVM's icon in UTM's library). Any custom Finder icon on a Parallels
+# VM is no proof: only the description counts there.
 vm_marked() {
   local b x
   case $2 in
     parallels) b=$(vm_bundle "$1")
-               grep -q "built by OmacVM" "$b/config.pvs" 2>/dev/null || [[ -f $b/Icon$'\r' ]] ;;
+               grep -q "built by OmacVM" "$b/config.pvs" 2>/dev/null ;;
     utm) b=$(utm_bundle "$1") && { grep -q "built by OmacVM" "$b/config.plist" || [[ -f $b/Data/omacvm.png ]]; } ;;
     fusion) x=$(fusion_vmx "$1") && grep -q "built by OmacVM" "$x" ;;
     *) return 1 ;;

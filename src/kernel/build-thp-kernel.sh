@@ -11,7 +11,6 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 U=${1:?usage: build-thp-kernel.sh <desktop-user>}
 ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux-aarch64
-W=$(getent passwd "$U" | cut -d: -f6)/.cache/omacvm/linux-aarch64-thp
 
 G=/etc/default/grub
 # GRUB boots the THP kernel by default (also after a disable that only
@@ -38,14 +37,22 @@ if [[ $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
   exit 0
 fi
 pacman -S --needed --noconfirm xmlto docbook-xsl kmod inetutils bc git dtc python pahole cpio base-devel >/dev/null 2>&1
-rm -rf "$W"; install -d -o "$U" -g "$U" "$W"
+# Built in fresh folders of root's (root never follows a link the user put
+# there), under /home: root's snapshots (subvolume @) leave it out, so the
+# GBs of build files never end up in one. makepkg runs as the user; the
+# packages are copied to root's folder before pacman.
+B=/home/.omacvm-kernel
+[[ -L $B ]] && rm -f "$B"
+install -d -o root -g root -m 755 "$B"
+W=$(mktemp -d "$B/build.XXXXXX"); P=$(mktemp -d "$B/pkg.XXXXXX")
+trap 'rm -rf "$W" "$P"' EXIT
 cd "$W"
 curl -fsSL "$ALARM/PKGBUILD" -o PKGBUILD
 for f in linux.preset linux-aarch64.install $(sed -n "/^source=(/,/)/p" PKGBUILD | grep -o "'[^':]*'" | tr -d "'"); do
   curl -fsSL "$ALARM/$f" -o "$f"
 done
 python3 "$here/thp-pkgbuild.py" "$W"
-chown -R "$U:$U" "$W"
+chmod 755 "$W"; chown -R "$U:$U" "$W"
 # makepkg builds with one job unless told otherwise: use every vCPU.
 sudo -u "$U" env MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --cleanbuild
 cp -P "$W"/linux-aarch64-thp-[0-9]*.pkg.tar.* "$W"/linux-aarch64-thp-headers-*.pkg.tar.* "$P"/

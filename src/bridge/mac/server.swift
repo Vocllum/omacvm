@@ -208,8 +208,8 @@ func handle(_ fd: Int32, peer: String) {
   var deadline = Date().addingTimeInterval(5)
   func readMore() -> Bool {
     let left = deadline.timeIntervalSinceNow
-    guard left > 0 else { return false }
-    var tv = timeval(tv_sec: Int(left), tv_usec: Int32((left - left.rounded(.down)) * 1_000_000))
+    guard left > 0.001 else { return false }   // {0, 0} would mean no timeout at all
+    var tv = timeval(tv_sec: Int(left), tv_usec: max(1, Int32((left - left.rounded(.down)) * 1_000_000)))
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     let n = read(fd, &chunk, chunk.count)
     if n > 0 { buf.append(contentsOf: chunk[0..<n]) }

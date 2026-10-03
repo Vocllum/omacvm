@@ -60,7 +60,7 @@ export OMA_PIN_NEW=1
 if [[ -n $IP ]]; then
   [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
   if [[ -n $VM ]]; then vm_pin "$VM" "$TYPE"
-  else VM="the VM at $IP"; vm_pin "ip-$IP" "$TYPE"; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; fi
+  else VM="the VM at $IP"; OMA_PIN=""; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; export OMA_PIN OMA_PIN_ARGS; fi   # an address is no identity (DHCP reuses it): no key kept
 else
   resolve_vm start
 fi

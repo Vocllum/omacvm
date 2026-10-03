@@ -182,13 +182,13 @@ Omanotch.app (separate) :47811          ◀────────── notchc
   before the token (no token; a 1.x daemon says nothing: gestures on, scroll
   momentum off) are let in only from MAC addresses in `~/Library/Application
   Support/omacvm/gestures-legacy` (written once by `src/mac/install.sh`,
-  `omacvm apply` takes each VM off).
-- SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
-  the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
-  another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`. The helper captures the
-  trackpad only for a network whose connected daemons all want it, and the scroll momentum
+  `omacvm apply` takes each VM off). The helper captures the trackpad only
+  for a network whose connected daemons all want it, and the scroll momentum
   (macOS's continuous scroll events dropped, `A`/`W`/`P` sent, every
   two-finger frame forwarded) only when they all want that.
+- SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
+  the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
+  another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
 - Scroll momentum in the guest (feature `scroll-momentum`, called Glide in the code and
   the experiment: the `Glide` class, `glide.sh`, `omacvm_glide.lua`, `OMACVM_GLIDE_*`): two-finger frames go through a One Euro
   filter (rigid spacing, so libinput never reads a pinch); below 80 mm/s the
