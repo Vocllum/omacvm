@@ -46,7 +46,7 @@ install_clt() {
   /usr/sbin/softwareupdate -l > "$list" 2>&1 &
   spin_until "Looking for them in software update" bash -c "! kill -0 $! 2>/dev/null"
   label=$(grep -B 1 -E 'Command Line Tools' "$list" | awk -F'*' '/^ *\*/ { print $2 }' |
-          sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1)
+          sed -e 's/^ *Label: //' -e 's/^ *//' | sort -V | tail -n1) || label=""
   rm -f "$list"
   if [[ -n $label ]]; then
     echo "    installing \"$label\" (your Mac password):"
