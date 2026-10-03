@@ -10,16 +10,19 @@ final class Config {
   let path = supportDir + "/config.json"
   var captureKeys = true       // media keys go to the VM while it is full screen
   var menuBarIcon = true
+  var keyboardLowSteps = true  // keyboard light: KeyboardLight.lowSteps below macOS's lowest step
 
   init() {
     guard let d = FileManager.default.contents(atPath: path),
           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { save(); return }
     captureKeys = o["capture_keys"] as? Bool ?? captureKeys
     menuBarIcon = o["menu_bar_icon"] as? Bool ?? menuBarIcon
+    keyboardLowSteps = o["keyboard_low_steps"] as? Bool ?? keyboardLowSteps
+    if o["keyboard_low_steps"] == nil { save() }   // shows the switch in the file
   }
 
   func save() {
-    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon]
+    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps]
     if let d = try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys]) {
       FileManager.default.createFile(atPath: path, contents: d)
     }
@@ -76,6 +79,18 @@ enum KeyboardLight {
     return (ids.first { builtIn?(c, sel, $0.uint64Value) ?? true } ?? ids.first)?.uint64Value
   }()
   private static var lastOn: Float = 0.5   // for the toggle key
+  /// Below macOS's lowest step (1/16). Measured on a MacBook Pro M4 Max
+  /// (macOS 15.7): each value is kept and lights the keys at its own level
+  /// (backlightLevelForKeyboard: 0.25, 0.39, 0.68 against 1.01 at 1/16).
+  /// Whether the LEDs flicker that low only a person can see:
+  /// "keyboard_low_steps": false in config.json switches them off.
+  static let lowSteps: [Float] = [0.01, 0.02, 0.04]
+
+  /// The next level up or down: 0, lowSteps, then macOS's 16 steps.
+  static func step(_ v: Float, up: Bool, low: Bool) -> Float {
+    let levels = [0] + (low ? lowSteps : []) + (1...16).map { Float($0) / 16 }
+    return up ? levels.first { $0 > v + 0.001 } ?? 1 : levels.last { $0 < v - 0.001 } ?? 0
+  }
 
   static func get() -> Float? {
     guard let c = client, let k = keyboard else { return nil }
@@ -284,8 +299,10 @@ final class MediaKeys {
         osdEvents.brightnessSet(source: "keys"); result = "\(step(v, key == .brightnessUp))"
       }
     case .keyboardUp, .keyboardDown:
-      if let v = KeyboardLight.get(), KeyboardLight.set(step(v, key == .keyboardUp)) {
-        osdEvents.keyboardSet(source: "keys"); result = "\(step(v, key == .keyboardUp))"
+      // Option: 1/64 steps as before; else macOS's 1/16 steps and the low ones below.
+      if let v = KeyboardLight.get() {
+        let to = fine ? step(v, key == .keyboardUp) : KeyboardLight.step(v, up: key == .keyboardUp, low: config.keyboardLowSteps)
+        if KeyboardLight.set(to) { osdEvents.keyboardSet(source: "keys"); result = "\(to)" }
       }
     case .keyboardToggle:
       if KeyboardLight.toggle() { osdEvents.keyboardSet(source: "keys"); result = "toggled" }

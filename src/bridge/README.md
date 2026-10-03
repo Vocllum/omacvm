@@ -10,7 +10,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
 | Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network), `192.168.64.1` (UTM's) and the `.1` of VMware Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in `/Library/Preferences/VMware Fusion/networking`), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
-| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
+| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon`, `keyboard_low_steps` |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`, and goes only to a Bridge that proved it knows it, see API) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Shared event stream | `guest/omacvm-bridge-events`, user socket `omacvm-bridge-events.socket` (`$XDG_RUNTIME_DIR/omacvm-bridge-events.sock`): one `/events` connection to the Mac per VM; `omacvm-bridge events` reads from it, so the widgets and the OSD keep their interface (see Events) |
@@ -216,7 +216,15 @@ up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
 and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
 VM is not full screen, passes through untouched. Switch it off in the
-menu-bar icon or with `"capture_keys": false`. macOS 15 has no public way to
+menu-bar icon or with `"capture_keys": false`.
+
+The keyboard light has three more steps below macOS's lowest (1/16): 0.01,
+0.02 and 0.04. Measured on a MacBook Pro M4 Max (macOS 15.7.4): each value is
+kept, and the backlight reports its own level for each
+(`backlightLevelForKeyboard`: 0.25, 0.39 and 0.68 against 1.01 at 1/16), so
+they are on by default. Whether the keys flicker that low has not been seen
+yet (only a person can): if they do, `"keyboard_low_steps": false` in
+`config.json` and a restart of the Bridge bring back macOS's steps. macOS 15 has no public way to
 show its own volume popup on demand, so the VM draws it.
 
 ## Tested
