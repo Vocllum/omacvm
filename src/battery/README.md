@@ -66,3 +66,14 @@ cat /sys/devices/platform/omacvm-battery/state
 journalctl -u omacvm-battery
 omacvm-bridge battery          # UTM, Fusion: what the Bridge sends
 ```
+
+## Tested
+
+MacBook Pro M4 Max, macOS 15.7.4, Arch Linux ARM's kernel 7.2.8, upower
+1.91.4, dkms 3.4.3: a UTM 5 VM (through the Bridge) and an OmacVM.app VM
+(virtio port) show the Mac's battery (100 %, on the charger, full) in UPower and in
+Omarchy's bar; `omacvm check` passes the battery rows; `omacvm disable
+battery` removes module, agent and DKMS entry, `enable` brings them back;
+reinstalling the kernel headers makes pacman's DKMS hook rebuild the module.
+Not tested yet: a VMware Fusion VM (the same path as UTM), and the Mac on
+battery power (discharging, time left, the low-battery warning).
