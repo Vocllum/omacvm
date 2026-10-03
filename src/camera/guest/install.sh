@@ -28,7 +28,7 @@ fi
 # repository when it has that version, else from pacman's cache (as
 # battery/guest/install.sh, from try-omarchy). The memory-optimized kernel
 # brings its own (kernel/build-thp-kernel.sh).
-pacman -S --needed --noconfirm python dkms >/dev/null
+pacman -S --needed --noconfirm python dkms >/dev/null 2>&1
 headers() {   # KERNEL_PACKAGE
   local k=$1 have want f
   have=$(pacman -Q "$k" 2>/dev/null | awk '{ print $2 }') || return 0
@@ -43,7 +43,7 @@ headers() {   # KERNEL_PACKAGE
   echo "camera: no $k-headers $have to build v4l2loopback with (Arch Linux ARM has ${want:-none}): omarchy update, reboot, then omacvm apply" >&2
 }
 headers linux-aarch64
-pacman -S --needed --noconfirm v4l2loopback-dkms >/dev/null
+pacman -S --needed --noconfirm v4l2loopback-dkms >/dev/null 2>&1
 # Headers that came after the module (or a new kernel): build it for them too.
 [[ -n $(modinfo -k "$(uname -r)" -F filename v4l2loopback 2>/dev/null) ]] ||
   dkms autoinstall -k "$(uname -r)" >/dev/null 2>&1 || true
