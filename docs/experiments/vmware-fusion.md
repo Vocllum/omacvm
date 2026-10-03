@@ -94,7 +94,7 @@ Each one ends with `omacvm check` passing on a real Fusion VM.
    disk on SATA, drop it), public DNS in the guest, resources, prerequisite screen.
 5. **Display and docs**: display mode at install, README and AGENTS.md tables.
 
-Out of scope for now: clipboard, more than one display, Omanotch on Fusion (separate repo).
+Out of scope for now: clipboard, more than one display, Omanotch on Fusion (then a separate repo).
 
 ## Speed
 

@@ -68,7 +68,7 @@ building it.
 | Media keys and trackpad gestures in full screen | ✓ |
 | Cmd shortcuts in full screen | ✓ (through OmacVM Gestures) |
 | Copy and paste text, both ways | ✓, Fusion syncs when the pointer enters or leaves the VM |
-| Omanotch | ✓ (Omanotch's main branch; [finding 4](../troubleshooting.md#4-fusion-no-hover-or-clicks-on-omanotchs-strip), [5](../troubleshooting.md#5-fusion-omanotch-cannot-find-the-mac)) |
+| Omanotch | ✓ ([finding 4](../troubleshooting.md#4-fusion-no-hover-or-clicks-on-omanotchs-strip), [5](../troubleshooting.md#5-fusion-omanotch-cannot-find-the-mac)) |
 | `omacvm check` | every line passes |
 | GPU compute (Vulkan, OpenCL) | ✗ Fusion offers neither to Linux. Same on Parallels and UTM |
 

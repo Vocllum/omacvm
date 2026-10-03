@@ -70,10 +70,10 @@ the VM's SSH on `127.0.0.1:<port>`.
   The app makes the token when the Bridge has not, and puts it into the VM.
 - Not covered yet, so the token is not safe from Mac programs on this route:
   VMs set up before the proof still send the token straight away (to
-  whatever listens) until their next `omacvm apply`; and with Omanotch on,
-  its notchcast sends the token itself (`auth <token>`) to 47811, so any
-  program on the Mac's 127.0.0.1:47811 gets it. Omanotch should move to the
-  same proof.
+  whatever listens) until their next `omacvm apply`, and so does an
+  Omanotch installed before it came with OmacVM (its notchcast sends
+  `auth <token>` to 47811). The Omanotch in `src/omanotch` proves it the same
+  way (`mac/Sources/GuestAuth.swift`).
 - Omanotch (47811) needs a version that serves 127.0.0.1; `omacvm apply` and
   `omacvm check` say when the one on the Mac is older.
 - `omacvm apply` writes `guest-pointer` into the VM's folder once the VM

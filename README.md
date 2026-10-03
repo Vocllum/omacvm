@@ -5,7 +5,7 @@
 <p align="center">One command builds the VM, in Parallels Desktop, UTM or VMware Fusion. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
-  <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
+  <b>With <a href="src/omanotch/README.md">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ fast, but out of the box it feels like a guest:
 
 **OmacVM** fixes all of that and builds the VM for you: Arch Linux ARM,
 [omarchy-mac](https://github.com/omacom/omarchy-mac) and the glue on both sides
-of the VM, with [Omanotch](https://github.com/gillesgoetsch/omanotch) putting
+of the VM, with [Omanotch](src/omanotch/README.md) putting
 Omarchy's bar beside the notch.
 
 > [!NOTE]
@@ -85,7 +85,7 @@ More in [With a coding agent](#with-a-coding-agent).
 
 | Feature | What it does |
 |---|---|
-| **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. OmacVM.app does it on its own |
+| **The bar beside the notch** | With [Omanotch](src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. OmacVM.app does it on its own |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
@@ -406,6 +406,9 @@ needs a token.
   Hyprland turns them into real gestures. Each VM tells it what it wants, so a
   VM without gestures keeps macOS's own. Over the full-screen VM it also hides
   the Mac's pointer, so only Omarchy's shows.
+- **Omanotch** (`src/omanotch/`, on a MacBook with a notch): `notchcast` in the
+  VM streams Omarchy's bar to Omanotch.app on the Mac, which shows it beside
+  the notch. [How it works](src/omanotch/README.md).
 
 <p align="center">
   <img src="docs/images/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
@@ -468,11 +471,14 @@ a MacBook Pro M4 Max. The raw numbers and how to run the same tests are in
 ## With Omanotch: the bar beside the notch
 
 On a notched MacBook, the full-screen VM sits *below* the camera housing and
-leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
+leaves a black strip across the top. **[Omanotch](src/omanotch/README.md)**
 streams Omarchy's real bar into that strip and gives the space back to your
-windows; the graphics on this page show the two together. It is a separate
-project for Parallels, UTM and VMware Fusion; OmacVM sets it up as a feature on a MacBook
-with a notch (`omacvm enable omanotch` on an existing VM).
+windows; the graphics on this page show the two together. It is part of
+OmacVM (`src/omanotch/`, with its own history; it used to be a separate repo)
+and works on Parallels, UTM, VMware Fusion and OmacVM.app. OmacVM sets it up as
+a feature on a MacBook with a notch (`omacvm enable omanotch` on an existing
+VM): Omanotch.app on the Mac next to the Bridge and Gestures, `notchcast` in
+the VM.
 
 ## Troubleshooting
 
