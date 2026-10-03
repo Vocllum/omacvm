@@ -140,6 +140,11 @@ if [[ $BRIDGE == on ]]; then
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
+  c=~/Library/Application\ Support/omacvm-bridge/config.json
+  if [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
+    skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
+  else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
 else skip "Bridge" "off (chosen at setup)"; fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.

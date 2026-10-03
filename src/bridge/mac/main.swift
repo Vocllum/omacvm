@@ -143,7 +143,7 @@ osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
 mediaKeys.start()
 if config.menuBarIcon { menuBar.show() }
-log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon)")
+log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps)")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
 listenerTimer.setEventHandler { servers.forEach { $0.check() } }
