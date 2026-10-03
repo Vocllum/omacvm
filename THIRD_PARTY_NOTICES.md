@@ -10,6 +10,12 @@ each file taken from them:
   `NativeClipboardBridge.swift` (`app/app/Sources/OmacVM`), and the VM's
   `omacvm-clipboard` and `omacvm-display-sync` (`src/app/guest`). Its release
   is also downloaded at build time as the temporary live system.
+  The Mac's battery in the VM: the kernel module
+  `src/battery/guest/module/omacvm-battery.c` (GPL-2.0-only, as its original
+  file says), its `Makefile` and `dkms.conf`, the agent
+  `src/battery/guest/omacvm-battery`, UPower's setting `90-omacvm-battery.conf`,
+  and the Mac's side in `src/bridge/mac/battery.swift` and OmacVM.app's
+  `HostBattery.swift` and `NativeBatteryBridge.swift`.
 - **omarchy-parallels** (github.com/vincenzopalazzo/omarchy-parallels), MIT,
   (c) Vincenzo Palazzo, `src/vm/live/LICENSE`: the live image builder in
   `src/vm/live`.

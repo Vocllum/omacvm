@@ -54,6 +54,7 @@ building it.
 | Browsers on the GPU | Chromium, Chrome and Brave blocklist VMware's GPU; Firefox counts vmwgfx as software GL. OmacVM allows the GPU in all four ([finding 2](../troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) | `src/fusion/guest/install.sh` |
 | Public DNS during the install | Fusion's NAT DNS drops lookups under load ([finding 8](../troubleshooting.md#8-fusion-no-such-host-during-the-build)) | `src/fusion/guest/dns.sh` |
 | Cmd shortcuts as Super | Fusion keeps Cmd+Space and friends for macOS; OmacVM Gestures forwards them in full screen ([finding 6](../troubleshooting.md#6-fusion-cmdspace-opens-spotlight-not-omarchy)) | `src/gestures/mac/omacvm-gestures.c` |
+| The Mac's battery | Fusion gives a Linux VM no battery. OmacVM Bridge sends the Mac's and a small kernel module shows it as BAT0, so Omarchy's bar shows it | `src/battery/`, `src/bridge/mac/battery.swift` |
 | The Mac's address | the Mac is `.1` on Fusion's NAT network, the gateway `.2` is Fusion. The Mac reads it from Fusion's `networking` file and passes it to the guest | `src/lib/mac.sh` (`fusion_host`), `src/cmd/apply.sh` |
 
 ## What works
@@ -68,6 +69,7 @@ building it.
 | Media keys and trackpad gestures in full screen | ✓ |
 | Cmd shortcuts in full screen | ✓ (through OmacVM Gestures) |
 | Copy and paste text, both ways | ✓, Fusion syncs when the pointer enters or leaves the VM |
+| The Mac's battery in the bar | the same path as on UTM, where it is tested; not yet tested on Fusion |
 | Omanotch | ✓ ([finding 4](../troubleshooting.md#4-fusion-no-hover-or-clicks-on-omanotchs-strip), [5](../troubleshooting.md#5-fusion-omanotch-cannot-find-the-mac)) |
 | `omacvm check` | every line passes |
 | GPU compute (Vulkan, OpenCL) | ✗ Fusion offers neither to Linux. Same on Parallels and UTM |

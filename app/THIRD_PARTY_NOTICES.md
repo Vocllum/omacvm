@@ -10,8 +10,12 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   own source is at gitlab.com/qemu-project/qemu (commit c3d48b7d).
 - **try-omarchy** (github.com/omacom/try-omarchy), MIT: the runtime build
   scripts and patches, `QMPConnection.swift`, `VMHostSleepController.swift`,
-  `NativeBridgeSocket.swift`, `NativeClipboardBridge.swift`, and the display
-  sync and clipboard scripts in the VM. `runtime/LICENSE.try-omarchy`.
+  the clipboard and battery bridges (`NativeBridgeSocket.swift`,
+  `NativeClipboardBridge.swift`, `NativeBatteryBridge.swift`,
+  `HostBattery.swift`) and the display sync script. `runtime/LICENSE.try-omarchy`.
+  In the VM, the battery's kernel module (GPL-2.0-only, as try-omarchy's
+  original file) and agent, in OmacVM's `src/battery/` (see the
+  repository's `THIRD_PARTY_NOTICES.md`).
   Its release is also downloaded at build time as the temporary live system.
 - **edk2** UEFI firmware as built by the QEMU project: BSD-2-Clause-Patent,
   with OpenSSL (Apache-2.0) and others, see `edk2-licenses.txt`.
