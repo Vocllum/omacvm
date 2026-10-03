@@ -158,7 +158,7 @@ struct SetupView: View {
         state.config.sshPort = Mac.freePort(from: 52222)
         state.config.hostname = "omarchy"
         let on = { (b: Bool) in b ? "on" : "off" }
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=\(on(Mac.hasNotch)) mac-clock=on idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
         state.creator.start(config: state.config, password: password)
         password = ""; password2 = ""
