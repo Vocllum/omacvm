@@ -65,6 +65,9 @@ struct SetupView: View {
     @State private var password = ""
     @State private var password2 = ""
     @State private var tier = 1
+    @State private var bridge = true
+    @State private var gestures = true
+    @State private var autologin = false
     @State private var location = Paths.vmsRoot.path
     @State private var locationProblem: String?
 
@@ -98,6 +101,9 @@ struct SetupView: View {
                         Text("\(["Low", "Balanced", "High", "Best"][t]): \(v.cpus) CPUs, \(v.memoryGB) GB").tag(t)
                     }
                 }
+                Toggle("OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio and media keys in Omarchy's bar", isOn: $bridge)
+                Toggle("Trackpad gestures in full screen", isOn: $gestures)
+                Toggle("Log in automatically (the Mac's own lock protects Omarchy)", isOn: $autologin)
                 Picker("Disk", selection: $state.config.diskGB) {
                     ForEach([64, 128, 256, 512], id: \.self) { Text("\($0) GB (grows as it fills)").tag($0) }
                 }
@@ -150,6 +156,8 @@ struct SetupView: View {
         state.config.memoryMB = t.memoryGB * 1024
         state.config.sshPort = Mac.freePort(from: 52222)
         state.config.hostname = "omarchy"
+        let on = { (b: Bool) in b ? "on" : "off" }
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
         state.creator.start(config: state.config, password: password)
         password = ""; password2 = ""
