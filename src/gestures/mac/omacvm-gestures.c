@@ -98,14 +98,25 @@ static char listenAddrs[3][16] = { "10.211.55.2", "192.168.64.1", "" };
 #define NET_UTM 1
 #define NET_FUSION 2
 
+// The first VNET_8_HOSTONLY_SUBNET line, and only a private address (as
+// fusion_host in src/lib/mac.sh and the Bridge read it).
 static void readFusionHost(void) {
   FILE *f = fopen("/Library/Preferences/VMware Fusion/networking", "r");
-  char line[256], a, b, c;
-  unsigned o1, o2, o3;
+  char line[256], net[32];
+  struct in_addr a;
   if (!f) return;
-  while (fgets(line, sizeof line, f))
-    if (sscanf(line, "answer VNET_8_HOSTONLY_SUBNET %u.%u.%u%c%c%c", &o1, &o2, &o3, &a, &b, &c) >= 4 && a == '.')
-      snprintf(listenAddrs[NET_FUSION], sizeof listenAddrs[NET_FUSION], "%u.%u.%u.1", o1, o2, o3);
+  while (fgets(line, sizeof line, f)) {
+    if (sscanf(line, "answer VNET_8_HOSTONLY_SUBNET %31s", net) != 1) continue;
+    if (inet_pton(AF_INET, net, &a) == 1) {
+      uint32_t h = ntohl(a.s_addr);
+      int priv = (h >> 24) == 10 || (h >> 20) == 0xAC1 || (h >> 16) == 0xC0A8;
+      char host[16];
+      snprintf(host, sizeof host, "%u.%u.%u.1", h >> 24, (h >> 16) & 255, (h >> 8) & 255);
+      if (priv && strcmp(host, listenAddrs[0]) && strcmp(host, listenAddrs[NET_UTM]))
+        snprintf(listenAddrs[NET_FUSION], sizeof listenAddrs[NET_FUSION], "%s", host);
+    }
+    break;
+  }
   fclose(f);
 }
 #define ESC_KEYCODE 53
@@ -481,7 +492,9 @@ static void *serverThread(void *arg) {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
     struct sockaddr_in a = { .sin_family = AF_INET, .sin_port = htons(PORT) };
-    inet_pton(AF_INET, addr, &a.sin_addr);
+    if (inet_pton(AF_INET, addr, &a.sin_addr) != 1 || a.sin_addr.s_addr == INADDR_ANY) {
+      close(s); logf_("not listening on '%s': not an address", addr); return NULL;   // never 0.0.0.0
+    }
     if (bind(s, (struct sockaddr *)&a, sizeof a) < 0 || listen(s, 2) < 0) {
       close(s); sleep(5); continue;   // that VM network is not up (yet)
     }

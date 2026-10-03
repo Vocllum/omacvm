@@ -190,11 +190,22 @@ fusion_state() {   # <vm name> -> running|stopped
 }
 
 # The Mac's address on Fusion's NAT network (vmnet8). Fusion picks the subnet
-# at install time; the Mac is .1 there (the guests' gateway is .2).
+# at install time; the Mac is .1 there (the guests' gateway is .2). The first
+# VNET_8_HOSTONLY_SUBNET line, and only a private address (the Bridge and
+# Gestures read it the same way).
 fusion_host() {
   local net
-  net=$(awk '$1 == "answer" && $2 == "VNET_8_HOSTONLY_SUBNET" { print $3 }' "$FUSION_NETWORKING" 2>/dev/null)
-  [[ -n $net ]] && echo "${net%.*}.1"
+  net=$(awk '$1 == "answer" && $2 == "VNET_8_HOSTONLY_SUBNET" { print $3; exit }' "$FUSION_NETWORKING" 2>/dev/null)
+  private_ipv4 "$net" || return 1
+  [[ ${net%.*}.1 != 192.168.64.1 ]] || return 1   # UTM's
+  echo "${net%.*}.1"
+}
+private_ipv4() {   # 10/8, 172.16/12 or 192.168/16, each part 0-255
+  local a b c d
+  [[ ${1:-} =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]} c=${BASH_REMATCH[3]} d=${BASH_REMATCH[4]}
+  (( a <= 255 && b <= 255 && c <= 255 && d <= 255 )) || return 1
+  (( a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) ))
 }
 
 fusion_ip() {   # <vm name> [seconds]: the address Fusion's DHCP gave the VM's MAC
@@ -249,8 +260,12 @@ vm_network_ok() {
         return 1
       fi ;;
     fusion)
-      if [[ -z $(fusion_host) ]]; then
+      a=$(fusion_host) || {
         printf 'VMware Fusion has no NAT network (vmnet8) on this Mac: open VMware Fusion > Settings > Network.\n' >&2
+        return 1
+      }
+      if [[ -n ${2:-} && ${2%.*} != "${a%.*}" ]]; then
+        printf 'The VMware Fusion VM is at %s, outside Fusion'"'"'s NAT network (the Mac at %s), which OmacVM needs: give the VM the "Share with my Mac" network.\n' "$2" "$a" >&2
         return 1
       fi ;;
     *) return 1 ;;

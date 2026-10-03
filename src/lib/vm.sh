@@ -74,7 +74,7 @@ ssh_setup_command() {
   case $1 in
     parallels) net=10.211.55.0/24 ;;
     utm) net=192.168.64.0/24 ;;
-    fusion) h=$(fusion_host); net=${h%.*}.0/24 ;;
+    fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
   esac
   printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && pacman -S --needed --noconfirm openssh >/dev/null && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"

@@ -43,13 +43,16 @@ let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? (["10.211.55.2", "192.168.64.1"
   .joined(separator: ",")).split(separator: ",").map(String.init)
 
 /// Fusion picks its NAT subnet at install time; the Mac is .1 there (the guests' gateway is .2).
+/// The first VNET_8_HOSTONLY_SUBNET line, and only a private address (as fusion_host in src/lib/mac.sh).
 func fusionHost() -> String? {
   guard let s = try? String(contentsOfFile: "/Library/Preferences/VMware Fusion/networking", encoding: .utf8) else { return nil }
   for line in s.split(separator: "\n") {
-    let f = line.split(separator: " ")
-    guard f.count == 3, f[0] == "answer", f[1] == "VNET_8_HOSTONLY_SUBNET" else { continue }
-    let o = f[2].split(separator: ".")
-    return o.count == 4 ? o.prefix(3).joined(separator: ".") + ".1" : nil
+    let f = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+    guard f.count >= 3, f[0] == "answer", f[1] == "VNET_8_HOSTONLY_SUBNET" else { continue }
+    let o = f[2].split(separator: ".").compactMap { UInt8($0) }
+    guard o.count == 4, o[0] == 10 || (o[0] == 172 && (16...31).contains(o[1])) || (o[0] == 192 && o[1] == 168) else { return nil }
+    let host = "\(o[0]).\(o[1]).\(o[2]).1"
+    return ["10.211.55.2", "192.168.64.1"].contains(host) ? nil : host
   }
   return nil
 }
