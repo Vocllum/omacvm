@@ -26,7 +26,8 @@
 //   POST /bluetooth/connect    {"address": "AA:BB:CC:DD:EE:FF"}   (also /disconnect, /forget)
 //   POST /bluetooth/settings   opens the Mac's Bluetooth settings (pairing)
 //   POST /wallpaper        image body: the Mac's wallpaper (and lock-screen background)
-//   GET  /events           Server-Sent Events: "wifi", "audio", "display" and "bluetooth" on every change
+//   GET  /battery          the Mac's battery (battery.swift), for UTM and VMware Fusion VMs
+//   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
 //                          light changes (keys.swift), ": ping" every 15 s
@@ -121,6 +122,7 @@ let hub = Hub([
   Feed(event: "audio", delay: 0.05, read: { audio.state() }, describe: describeAudio),
   Feed(event: "display", delay: 0.1, read: { displayState() }, describe: describeDisplay),
   Feed(event: "bluetooth", delay: 0.3, read: { bluetooth.state() }, describe: describeBluetooth),
+  Feed(event: "battery", delay: 0.3, read: { batteryState() }, describe: describeBattery, coarse: coarseBattery),
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
@@ -134,6 +136,7 @@ wifi.onEvent = { why in why == "scan-cache" ? scanner.cacheUpdated() : hub.chang
 audio.onChange = { why in hub.changed("audio", why: why); osdEvents.audioChanged() }
 NightShift.onChange { hub.changed("display", why: "night-shift") }
 bluetooth.onChange = { why in hub.changed("bluetooth", why: why) }
+watchPowerSources { hub.changed("battery", why: "power") }
 wifi.start()
 audio.start()
 location.start()
@@ -158,6 +161,7 @@ ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .ma
   for delay in [2.0, 10.0] {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
       hub.changed("wifi", why: "wake"); hub.changed("audio", why: "wake"); hub.changed("bluetooth", why: "wake")
+      hub.changed("battery", why: "wake")
     }
   }
 }
