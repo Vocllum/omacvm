@@ -68,8 +68,8 @@ A build is done when all of this holds:
    was chosen (`--thp-kernel`).
 2. `ssh -i ~/.ssh/omacvm root@<ip>` works (key only; ufw allows 22 from the VM
    network's /24).
-3. `/etc/omacvm/env` names the VM type, the Mac's address and the feature
-   choices (`OMACVM_FEATURE_<name>=on|off`, every feature of
+3. `/etc/omacvm/env` names the VM type, the Mac's address, the VM's name
+   (`OMACVM_VM_NAME_B64`) and the feature choices (`OMACVM_FEATURE_<name>=on|off`, every feature of
    `src/features.tsv`); `/usr/local/share/omacvm/VERSION` = `src/VERSION`;
    `omacvm check --vm <name>` passes.
 4. Display: Parallels: `hyprctl monitors` matches the Mac (native pixels,
@@ -177,15 +177,21 @@ Omanotch.app (separate) :47811          ◀────────── notchc
   (Parallels), `UTM` or `VMware Fusion`, and its window covers a display (the strip beside the
   notch excepted).
 - Gestures protocol (one line each, `src/gestures/mac/omacvm-gestures.c`
-  header): the guest says `H <gestures> <glide> <token>` right after connecting
-  (the Bridge's token, which the Mac checks on every listener). Daemons from
+  header): the guest says `H <gestures> <glide> <token> <name>` right after connecting
+  (the Bridge's token, which the Mac checks on every listener; the VM's name
+  in base64, `OMACVM_VM_NAME_B64` in `/etc/omacvm/env`, from `omacvm apply`). Daemons from
   before the token (no token; a 1.x daemon says nothing: gestures on, scroll
   momentum off) are let in only from MAC addresses in `~/Library/Application
   Support/omacvm/gestures-legacy` (written once by `src/mac/install.sh`,
-  `omacvm apply` takes each VM off). The helper captures the trackpad only
-  for a network whose connected daemons all want it, and the scroll momentum
-  (macOS's continuous scroll events dropped, `A`/`W`/`P` sent, every
-  two-finger frame forwarded) only when they all want that.
+  `omacvm apply` takes each VM off). All VMs of one app share its network, so
+  the helper reads the title of the app's front window (Accessibility) and
+  sends frames, keys and the capture state only to the VM whose name it holds
+  (the exact name first, else the longest name in the title); without a match
+  (older daemons, a VM renamed since its last `omacvm apply`) to every VM of
+  that app. The helper captures the trackpad only when those VMs all want it,
+  and the scroll momentum (macOS's continuous scroll events dropped,
+  `A`/`W`/`P` sent, every two-finger frame forwarded) only when they all want
+  that.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.

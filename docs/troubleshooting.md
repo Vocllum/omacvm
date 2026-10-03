@@ -346,10 +346,21 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   connected from that app's network (`sendTo(frontNet, …)`); every app has one
   network for all its VMs. On Parallels only the swipes and scrolling are
   affected (Parallels passes Cmd itself).
-- **Fix:** none yet. It needs the front window's VM matched to a connected
-  VM (for example the window title through Accessibility, and the VM name in
-  the guest's hello). Until then, run one OmacVM VM per app at a time.
-- **Where:** `src/gestures/mac/omacvm-gestures.c` (`sendLine`, `forwardKey`).
+- **Fix:** `omacvm apply` gives the VM its name (`OMACVM_VM_NAME_B64` in
+  `/etc/omacvm/env`), the guest daemon says it in its hello, and the helper
+  reads the title of the VM app's front window through Accessibility (on
+  every app switch and on its 0.2 s check while a VM app is full screen in
+  front). Frames, keys and the capture state go only to the VM whose name is
+  in the title; switching VMs sends `S off` to the old one and `S on` to the
+  new one. Window titles seen: Parallels the VM's name (windowed and full
+  screen), UTM "UTM – NAME", VMware Fusion and OmacVM.app the VM's name
+  (windowed; their full screen not checked yet). Tested with two Parallels VMs: Cmd+Return opened a terminal only in
+  the VM in front, and only it got the swipe. A VM set up before this (no
+  name in its hello) or renamed since its last `omacvm apply` matches no
+  title: then every VM of that app gets them, as before; run `omacvm update`.
+- **Where:** `src/gestures/mac/omacvm-gestures.c` (`pickTargets`,
+  `windowTitle`), `src/gestures/guest/omacvm-gestures` (hello),
+  `src/guest/install.sh` (`--vm-name-b64`), `src/cmd/apply.sh`.
 
 ## 20. UTM: Cmd+W stops the VM
 

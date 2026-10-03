@@ -50,8 +50,11 @@ Install / remove on the Mac: `mac/install.sh`, `mac/uninstall.sh` (or
 in the VM; `omacvm apply` runs it).
 
 Protocol (TCP, one line each): see the header of `mac/omacvm-gestures.c`
-(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `H <gestures> <glide> <token>`
-from it: the Bridge's token, which every listener checks).
+(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `H <gestures> <glide> <token> <name>`
+from it: the Bridge's token, which every listener checks, and the VM's name in
+base64). With two VMs in one app, only the VM named in the title of the app's
+front window gets the trackpad and the keys; without a match every VM of that
+app does.
 
 Verified on macOS 15.7.4, Parallels 27.0.2, MacBook Pro M4 Max: 4-finger and
 3-finger swipes switch workspaces, pinch zooms in Chrome, macOS Spaces swipes
