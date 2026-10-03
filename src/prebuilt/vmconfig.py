@@ -68,8 +68,8 @@ def pvs_generalize(path, name):
         for f in hs.findall("SharedFolder"):
             hs.remove(f)
     for n in r.iter("NetworkAdapter"):
-        settext(n, "MAC", "001C42000000")
-        settext(n, "HostMAC", "001C42000001")
+        settext(n, "MAC", "")        # Parallels makes new ones on register
+        settext(n, "HostMAC", "")
     pvs_seed(r, None)
     pvs_save(tree, path)
 
@@ -131,7 +131,9 @@ def utm_generalize(path, name):
     c["Information"]["Name"] = name
     c["Information"]["UUID"] = "00000000-0000-0000-0000-000000000000"
     for n in c.get("Network", []):
-        n["MacAddress"] = "02:00:00:00:00:00"
+        # UTM keeps it on import: one random address per image (the
+        # installer gives each VM its own)
+        n["MacAddress"] = "02:" + ":".join("%02X" % random.randrange(256) for _ in range(5))
     c["Drive"] = [d for d in c["Drive"] if d.get("ImageType") == "Disk" and d.get("Interface") == "NVMe"]
     plistlib.dump(c, open(path, "wb"))
 

@@ -10,6 +10,7 @@
 #               first-boot service, check for personal data, zero the free space
 #   package     compact the disk, copy the bundle without logs or Mac paths,
 #               tar + zstd -19, split into 1.9 GB parts, manifest + SHA-256 sums
+#   repack      the packed image again with this checkout's configuration edits
 #   upload      to the GitHub release $OMACVM_PREBUILT_TAG (default
 #               prebuilt-VERSION), created as a pre-release if missing
 #   clean       delete the image VM (only the one this script made)
@@ -126,6 +127,12 @@ stage_package() {
       [[ -f $b/$VM.nvram ]] && cp -c "$b/$VM.nvram" "$stage/$name.nvram"
       python3 "$R/src/prebuilt/vmconfig.py" vmx-generalize "$stage/$name.vmx" "$name" ;;
   esac
+  compress_stage "$stage"
+}
+
+# compress_stage DIR: the bundle into parts, manifest, sums.
+compress_stage() {
+  local stage=$1 omarchy
   # Nothing of this Mac in the configuration files.
   if grep -rIl -e "$HOME" -e "$(id -un)" "$stage" --exclude='*.qcow2' --exclude='*.hds' --exclude='*.vmdk' --exclude='*.fd' --exclude='*.dat' --exclude='*.nvram' 2>/dev/null; then
     die "the files above still name this Mac's user"
@@ -146,6 +153,22 @@ stage_package() {
   cp "$OUT/packages.txt" "$OUT/$base-packages.txt"
   rm -rf "$WORK"
   ls -lh "$OUT"
+}
+
+# repack: the parts made before, unpacked, their configuration generalized
+# again with this checkout's vmconfig.py, packed again (no VM needed).
+stage_repack() {
+  local base=omacvm-prebuilt-$VERSION-$ROUTE stage
+  ls "$OUT/$base".tar.zst.part-* >/dev/null || die "nothing to repack in $OUT"
+  rm -rf "$WORK"; mkdir -p "$WORK"
+  cat "$OUT/$base".tar.zst.part-* | zstd -dc --long=27 -q | tar -xSf - -C "$WORK"
+  stage=$(ls -d "$WORK"/"$PREBUILT_NAME".*)
+  case $ROUTE in
+    parallels) python3 "$R/src/prebuilt/vmconfig.py" pvs-generalize "$stage/config.pvs" "$PREBUILT_NAME" ;;
+    utm) python3 "$R/src/prebuilt/vmconfig.py" utm-generalize "$stage/config.plist" "$PREBUILT_NAME" ;;
+    fusion) python3 "$R/src/prebuilt/vmconfig.py" vmx-generalize "$stage/$PREBUILT_NAME.vmx" "$PREBUILT_NAME" ;;
+  esac
+  compress_stage "$stage"
 }
 
 stage_upload() {
@@ -174,7 +197,7 @@ stage_clean() {
 
 for s in "${STAGES[@]}"; do
   case $s in
-    build|generalize|package|upload|clean) "stage_$s" ;;
+    build|generalize|package|repack|upload|clean) "stage_$s" ;;
     *) die "unknown stage $s" ;;
   esac
 done

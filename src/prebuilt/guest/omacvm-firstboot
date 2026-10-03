@@ -87,21 +87,23 @@ if [[ -z $NAME ]]; then
     else read -r -e -p "$1 [$2]: " a < $T; fi
     printf '%s' "${a:-$2}"
   }
-  clear
-  printf '\n  \033[1mOmacVM: set up this Omarchy VM\033[0m\n\n'
-  printf '  Your user, password, keyboard and timezone. Afterwards, on your Mac:\n'
-  printf '    omacvm apply --vm "NAME OF THIS VM"\n'
-  printf '  sets up the Mac side and the features (it shows one command to run here first).\n\n'
+  # Straight to the console: through the log pipe they would arrive after gum
+  # has put the terminal in raw mode.
+  clear > "$T"
+  printf '\n  \033[1mOmacVM: set up this Omarchy VM\033[0m\n\n' > "$T"
+  printf '  Your user, password, keyboard and timezone. Afterwards, on your Mac:\n' > "$T"
+  printf '    omacvm apply --vm "NAME OF THIS VM"\n' > "$T"
+  printf '  sets up the Mac side and the features (it shows one command to run here first).\n\n' > "$T"
   while :; do
     NAME=$(ask "user name (lower case)" "")
     [[ $NAME =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] && ! id "$NAME" >/dev/null 2>&1 && break
-    echo "  lower-case letters, digits, - and _, not a name that exists"
+    echo "  lower-case letters, digits, - and _, not a name that exists" > "$T"
   done
   FULL=$(ask "full name" "$NAME")
   while :; do
     p1=$(ask "password" "" pw); p2=$(ask "password again" "" pw)
     [[ -n $p1 && $p1 == "$p2" ]] && break
-    echo "  the passwords differ or are empty"
+    echo "  the passwords differ or are empty" > "$T"
   done
   HASH=$(printf '%s' "$p1" | openssl passwd -6 -stdin); unset p1 p2
   layouts=$(sed -n '/^! layout/,/^$/p' /usr/share/X11/xkb/rules/base.lst 2>/dev/null | awk 'NR > 1 && NF { l = $1; $1 = ""; printf "%-8s%s\n", l, $0 }')
