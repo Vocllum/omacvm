@@ -73,7 +73,7 @@ serve_reading() {   # -> URL of pages/reading.html where Chrome runs
   else echo "file://$here/pages/reading.html"; fi
 }
 
-if [[ -n $VM ]] && ! ssh "${K[@]}" "$VM" "test -f $VM_BENCH/pages/reading.html -a -f $VM_BENCH/video-bench.py" </dev/null; then
+if [[ -n $VM ]] && { want light || want video; } && ! ssh "${K[@]}" "$VM" "test -f $VM_BENCH/pages/reading.html -a -f $VM_BENCH/video-bench.py" </dev/null; then
   echo "power-suite.sh: $VM_BENCH not found in the VM (no SSH, or run omacvm update first)" >&2; exit 1
 fi
 if want idle; then say "idle"; measure idle; fi

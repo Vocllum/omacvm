@@ -1,6 +1,6 @@
 # OmacVM Gestures
 
-Mac trackpad gestures for the Omarchy VM in Parallels or UTM. The VM app gives
+Mac trackpad gestures for the Omarchy VM in Parallels, UTM or VMware Fusion. The VM app gives
 a Linux guest only a mouse (pointer, clicks, a wheel), so pinch and
 3/4-finger swipes never arrive. This tool reads the trackpad's raw
 finger contacts on the Mac (private MultitouchSupport framework) and replays
@@ -8,7 +8,7 @@ them on a virtual Apple touchpad in the guest, where libinput and Hyprland turn
 them into real gestures. With **macOS-native scroll momentum** (experimental, per VM) it also carries
 two-finger scrolling, with macOS's own acceleration and momentum.
 
-**Capture mode** = Parallels or UTM is the frontmost app, its VM window fills a
+**Capture mode** = Parallels, UTM or VMware Fusion is the frontmost app, its VM window fills a
 display (full screen), and that VM's daemon is connected and wants the
 trackpad. Then:
 

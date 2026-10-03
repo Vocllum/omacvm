@@ -1,7 +1,7 @@
 # Troubleshooting: what we found
 
-Problems we hit while building the VMware Fusion route and benchmarking all
-three routes, and what fixed them. Each one is written as symptom, cause, fix
+Problems we hit while building the VMware Fusion route, the browser GPU on
+every route and benchmarking all four ways, and what fixed them. Each one is written as symptom, cause, fix
 and where the fix lives, so you can find it again when it comes back.
 
 Most of these are not obvious from the outside: the symptom points somewhere

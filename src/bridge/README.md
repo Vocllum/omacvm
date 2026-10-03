@@ -187,7 +187,7 @@ off from the VM keeps the API reachable (tested), so it can switch it back on.
 
 ## Media keys
 
-While **Parallels or UTM is frontmost with the VM covering a whole display**, volume
+While **Parallels, UTM or VMware Fusion is frontmost with the VM covering a whole display**, volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
 and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
