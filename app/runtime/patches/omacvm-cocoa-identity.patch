@@ -1,0 +1,74 @@
+From: OmacVM
+Subject: [PATCH] cocoa: name and icon from the OmacVM launcher
+
+Applies after the try-omarchy patches. OMACVM_PRODUCT_NAME sets the app name
+(default OmacVM), OMACVM_ICON the icon file.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -115,6 +115,13 @@
+ static bool immersive_mode_enabled = true;
+ static NSMenuItem *fullScreenMenuItem;
+ 
++/* OmacVM: the app's name and icon come from the launcher (the user picks the name). */
++static NSString *omacvm_product_name(void)
++{
++    const char *name = getenv("OMACVM_PRODUCT_NAME");
++    return name && *name ? [NSString stringWithUTF8String:name] : @"OmacVM";
++}
++
+ static bool zoom_interpolation;
+ static NSTextField *pauseLabel;
+ 
+@@ -2062,7 +2069,7 @@
+ {
+     NSAlert *alert = [NSAlert new];
+     [alert autorelease];
+-    [alert setMessageText: @"Are you sure you want to quit Try Omarchy?"];
++    [alert setMessageText: [NSString stringWithFormat:@"Are you sure you want to quit %@?", omacvm_product_name()]];
+     [alert addButtonWithTitle: @"Cancel"];
+     [alert addButtonWithTitle: @"Quit"];
+     if([alert runModal] == NSAlertSecondButtonReturn) {
+@@ -2152,17 +2159,17 @@
+ 
+     // Application menu
+     menu = [[NSMenu alloc] initWithTitle:@""];
+-    [menu addItemWithTitle:@"About Try Omarchy" action:@selector(do_about_menu_item:) keyEquivalent:@""];
++    [menu addItemWithTitle:[NSString stringWithFormat:@"About %@", omacvm_product_name()] action:@selector(do_about_menu_item:) keyEquivalent:@""];
+     [menu addItem:[NSMenuItem separatorItem]]; //Separator
+     menuItem = [menu addItemWithTitle:@"Services" action:nil keyEquivalent:@""];
+     [menuItem setSubmenu:[NSApp servicesMenu]];
+     [menu addItem:[NSMenuItem separatorItem]];
+-    [menu addItemWithTitle:@"Hide Try Omarchy" action:@selector(hide:) keyEquivalent:@"h"];
++    [menu addItemWithTitle:[NSString stringWithFormat:@"Hide %@", omacvm_product_name()] action:@selector(hide:) keyEquivalent:@"h"];
+     menuItem = (NSMenuItem *)[menu addItemWithTitle:@"Hide Others" action:@selector(hideOtherApplications:) keyEquivalent:@"h"]; // Hide Others
+     [menuItem setKeyEquivalentModifierMask:(NSEventModifierFlagOption|NSEventModifierFlagCommand)];
+     [menu addItemWithTitle:@"Show All" action:@selector(unhideAllApplications:) keyEquivalent:@""]; // Show All
+     [menu addItem:[NSMenuItem separatorItem]]; //Separator
+-    [menu addItemWithTitle:@"Quit Try Omarchy" action:@selector(terminate:) keyEquivalent:@"q"];
++    [menu addItemWithTitle:[NSString stringWithFormat:@"Quit %@", omacvm_product_name()] action:@selector(terminate:) keyEquivalent:@"q"];
+     menuItem = [[NSMenuItem alloc] initWithTitle:@"Apple" action:nil keyEquivalent:@""];
+     [menuItem setSubmenu:menu];
+     [[NSApp mainMenu] addItem:menuItem];
+@@ -2834,8 +2841,10 @@
+         [[[executablePath stringByDeletingLastPathComponent]
+           stringByDeletingLastPathComponent]
+          stringByDeletingLastPathComponent];
+-    NSString *iconPath =
+-        [resourcesPath stringByAppendingPathComponent:@"TryOmarchy.icns"];
++    const char *iconEnv = getenv("OMACVM_ICON");
++    NSString *iconPath = iconEnv && *iconEnv
++        ? [NSString stringWithUTF8String:iconEnv]
++        : [resourcesPath stringByAppendingPathComponent:@"OmacVM.icns"];
+     NSImage *icon = [[NSImage alloc] initWithContentsOfFile:iconPath];
+ 
+     if (icon) {
+@@ -2856,7 +2865,7 @@
+     ProcessSerialNumber psn = { 0, kCurrentProcess };
+     TransformProcessType(&psn, kProcessTransformToForegroundApplication);
+ 
+-    [[NSProcessInfo processInfo] setProcessName:@"Try Omarchy"];
++    [[NSProcessInfo processInfo] setProcessName:omacvm_product_name()];
+     [QemuApplication sharedApplication];
+     cocoa_set_product_icon();
+ 

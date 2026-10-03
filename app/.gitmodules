@@ -1,0 +1,3 @@
+[submodule "vendor/omacvm"]
+	path = vendor/omacvm
+	url = https://github.com/gillesgoetsch/omacvm.git
