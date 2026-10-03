@@ -278,10 +278,11 @@ if [[ -f $RS ]]; then
     fi' || true
 fi
 # The initramfs and GRUB's menu: rebuilt only when what goes into them changed
-# (both took about a minute on every apply and update). Kernel and hook
+# (several seconds on every apply and update otherwise). Kernel and hook
 # updates rebuild the initramfs through pacman's own hook.
 BOOT_STAMP=/var/lib/omacvm/boot-inputs
-digest() { cat "$@" 2>/dev/null | sha256sum | cut -c1-16; }
+# A missing file or an empty folder's glob must not stop the install (pipefail).
+digest() { { cat "$@" 2>/dev/null || true; } | sha256sum | cut -c1-16; }
 init_conf=$(digest /etc/mkinitcpio.conf /etc/mkinitcpio.conf.d/* /etc/mkinitcpio.d/*)
 init_in=$init_conf
 for p in /etc/mkinitcpio.d/*.preset; do   # an image a preset builds is missing: rebuild
@@ -296,11 +297,12 @@ if [[ $(sed -n 's/^initramfs //p' $BOOT_STAMP 2>/dev/null || true) != "$init_in"
 else
   init_ok=$init_in
 fi
-grub_in=$(digest /etc/default/grub /etc/grub.d/*)-$(ls /boot | sha256sum | cut -c1-16)   # + the kernels' names
+grub_digest() { echo "$(digest /etc/default/grub /etc/grub.d/*)-$(ls /boot | sha256sum | cut -c1-16)"; }   # + the kernels' names
+grub_in=$(grub_digest)
 [[ -f /boot/grub/grub.cfg ]] || grub_in=missing
 grub_ok=$grub_in
 if [[ $grub_old != "$grub_in" ]] && command -v grub-mkconfig >/dev/null; then
-  grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || grub_ok=
+  if grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1; then grub_ok=$(grub_digest); else grub_ok=; fi
 fi
 printf 'initramfs %s\ngrub %s\n' "$init_ok" "$grub_ok" | install -Dm644 /dev/stdin $BOOT_STAMP
 [[ $TYPE == fusion ]] && "$R/fusion/guest/dns.sh" off   # back to Fusion's DNS, which follows the Mac's

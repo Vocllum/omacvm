@@ -52,7 +52,7 @@ case ${1:-} in
       settings) post /bluetooth/settings '{}' ;;
       *) echo "bluetooth: power, connect, disconnect, forget or settings" >&2; exit 2 ;;
     esac ;;
-  events) [[ ${2:-} == --external ]] && req -N "$URL/events?osd=external" || req -N "$URL/events" ;;
+  events) if [[ ${2:-} == --external ]]; then req -N "$URL/events?osd=external"; else req -N "$URL/events"; fi ;;
   volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
   mute) check_switch mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}")}" ;;
   mic-volume) check_percent mic-volume "${2:-}"; post /audio/volume "$(level_json volume "$2" ', "scope": "input"')" ;;

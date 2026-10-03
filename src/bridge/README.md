@@ -64,6 +64,9 @@ curl -H "Authorization: Bearer $T" $B/state
  "can_share":true,"tx_rate_mbps":866,"phy_mode":"802.11ac","country_code":"CH","seq":3,"updated_at":"…"}
 ```
 
+`seq` counts the events that went out. Small Wi-Fi changes (signal, noise,
+rate) wait up to 30 s, so `/state` can show newer values under the same `seq`.
+
 - Disconnected or Wi-Fi off: the link fields are `null`. `connected: true`
   with `ssid: null` = Location Services missing.
 - `quality` 0–100 from RSSI (−90 dBm = 0, −30 dBm = 100).
