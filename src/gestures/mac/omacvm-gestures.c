@@ -45,18 +45,27 @@
 //   W <dx> <dy>                       Glide: macOS's momentum (and Magic Mouse) in points
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
-// and from the guest, once after connecting:
-//   H <gestures 0|1> <glide 0|1> <token> [<name>]   what this VM wants, the Bridge's
-//                                     token (any VM on these networks can connect) and
-//                                     the VM's name in base64 (omacvm apply tells the VM)
+// and first, the handshake (any VM on these networks, and any Mac program on
+// 127.0.0.1, can connect; neither side ever sends the Bridge's token itself):
+//   C <guest nonce>                   from the guest: 32 hex digits
+//   M <mac nonce> <proof>             the Mac proves it knows the token: HMAC-SHA256(token,
+//                                     "omacvm-gestures mac <guest nonce> <mac nonce>"), hex
+//   R <gestures 0|1> <glide 0|1> <proof> [<name>]   from the guest once the Mac's proof
+//                                     holds: what this VM wants, its own proof (as above
+//                                     with "vm") and the VM's name in base64 (omacvm apply
+//                                     tells the VM). Only then do the lines above flow.
+// Daemons from before the handshake send "H <gestures> <glide> <token> [<name>]",
+// still let in until omacvm apply gives them the new one.
 // Two VMs in one app share its network: F, K, A, W, P and S on/esc go only to
 // the VM whose name is in the title of the app's front window; without such a
 // match (VMs from before the name, a renamed VM) to every VM of that app.
 #include <ApplicationServices/ApplicationServices.h>
 #include <Carbon/Carbon.h>
+#include <CommonCrypto/CommonHMAC.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <arpa/inet.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <libproc.h>
 #include <objc/message.h>
 #include <objc/runtime.h>
@@ -646,21 +655,51 @@ static void base64Name(const char *in, char *out, size_t cap) {
 }
 
 // ---- who may connect ----
-// Any VM on these networks can reach the listeners, so a VM's daemon says the
-// Bridge's token in its hello. Constant time.
-static int bridgeTokenOK(const char *given) {
-  char path[1024], tok[160] = "";
+// Any VM on these networks, and any Mac program on 127.0.0.1, can reach the
+// listeners: a VM's daemon proves it knows the Bridge's token (header).
+
+// The Bridge's token, or 0 when there is none.
+static size_t readToken(char tok[160]) {
+  char path[1024];
+  tok[0] = 0;
   snprintf(path, sizeof path, "%s/Library/Application Support/omacvm-bridge/token", getenv("HOME"));
   FILE *f = fopen(path, "r");
   if (!f) return 0;
-  if (!fgets(tok, sizeof tok, f)) tok[0] = 0;
+  if (!fgets(tok, 160, f)) tok[0] = 0;
   fclose(f);
   tok[strcspn(tok, "\r\n")] = 0;
   size_t n = strlen(tok);
-  if (n < 32 || strlen(given) != n) return 0;
+  return n >= 32 ? n : 0;
+}
+
+static int sameText(const char *a, const char *b) {   // constant time
+  size_t n = strlen(a);
+  if (strlen(b) != n) return 0;
   unsigned char diff = 0;
-  for (size_t i = 0; i < n; i++) diff |= (unsigned char)(tok[i] ^ given[i]);
+  for (size_t i = 0; i < n; i++) diff |= (unsigned char)(a[i] ^ b[i]);
   return diff == 0;
+}
+
+static int isHex(const char *s, size_t n) {
+  if (strlen(s) != n) return 0;
+  for (; *s; s++) if (!strchr("0123456789abcdef", *s)) return 0;
+  return 1;
+}
+
+// HMAC-SHA256(token, "omacvm-gestures <who> <guest nonce> <mac nonce>") in hex.
+static void proof(const char *tok, size_t tl, const char *who, const char *gn, const char *mn, char out[65]) {
+  char msg[160]; unsigned char d[CC_SHA256_DIGEST_LENGTH];
+  int n = snprintf(msg, sizeof msg, "omacvm-gestures %s %s %s", who, gn, mn);
+  CCHmac(kCCHmacAlgSHA256, tok, tl, msg, (size_t)n, d);
+  for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) snprintf(out + 2 * i, 3, "%02x", d[i]);
+}
+
+// Daemons from before the handshake say the token itself.
+static int bridgeTokenOK(const char *given) {
+  char tok[160];
+  int ok = readToken(tok) && sameText(tok, given);
+  memset(tok, 0, sizeof tok);
+  return ok;
 }
 
 // The peer's MAC address from the Mac's ARP table, as 12 hex digits.
@@ -704,9 +743,115 @@ static int legacyOK(struct in_addr a) {
   return ok;
 }
 
-// ---- server: one guest connection at a time ----
+// ---- server ----
+// One line from the guest, up to a few reads (SO_RCVTIMEO each): the newline
+// is cut off. -1: nothing came.
+static ssize_t recvLine(int fd, char *buf, size_t cap) {
+  size_t n = 0;
+  for (int i = 0; i < 4 && n + 1 < cap; i++) {
+    ssize_t r = recv(fd, buf + n, cap - 1 - n, 0);
+    if (r <= 0) break;
+    n += (size_t)r;
+    char *nl = memchr(buf, '\n', n);
+    if (nl) { *nl = 0; return nl - buf; }
+  }
+  buf[n] = 0;
+  return n ? (ssize_t)n : -1;
+}
+
+static void addClient(int c, int net, const char *ip, int gestures, int glide, const char *name) {
+  pthread_mutex_lock(&sendLock);
+  int slot = -1;
+  for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection
+    if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip)) { close(clients[i].fd); slot = i; break; }
+  for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
+  if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
+  clients[slot].fd = c; clients[slot].net = net;
+  clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
+  snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
+  snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
+  logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s)", ip, gestures ? "on" : "off",
+        glide ? "on" : "off", name[0] ? ", VM \"" : "", name, name[0] ? "\"" : "");
+  retargetLocked(capturing);
+  int front = clients[slot].target;
+  pthread_mutex_unlock(&sendLock);
+  const char *st = capturing && front ? "on\n" : "off\n";
+  char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
+  send(c, b, (size_t)n, MSG_NOSIGNAL);
+  // The Mac's scrolling direction and the trackpad's size, so the guest
+  // scales finger movement for this Mac (OmacVM's tuning is relative to a
+  // 156 x 96 mm trackpad with natural scrolling).
+  CFPropertyListRef nat = CFPreferencesCopyAppValue(CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication);
+  int natural = nat ? CFBooleanGetValue((CFBooleanRef)nat) : 1;
+  if (nat) CFRelease(nat);
+  n = snprintf(b, sizeof b, "O %d %d %d\n", natural, tpW, tpH);
+  send(c, b, (size_t)n, MSG_NOSIGNAL);
+}
+
+// Each connection's handshake runs in its own thread, so a peer that connects
+// and says nothing holds up no one else; at most this many at once.
+#define MAX_GREETING 64
+static volatile int greeting;
+struct greetArg { int fd, net; struct in_addr addr; };
+
+static void *greet(void *arg) {
+  struct greetArg g = *(struct greetArg *)arg; free(arg);
+  int c = g.fd, gestures = 1, glide = 0, ok = 0;
+  const char *addr = listenAddrs[g.net];
+  char ip[32]; inet_ntop(AF_INET, &g.addr, ip, sizeof ip);
+  char line[640], name64[360] = "", name[256];
+  const char *why = "no token (omacvm update gives the VM a daemon that proves it)";
+  struct timeval tv = { .tv_sec = 1 };
+  setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+  ssize_t n = recvLine(c, line, sizeof line);
+  char gn[72] = "";
+  if (n > 0 && line[0] == 'C' && sscanf(line + 1, "%71s", gn) == 1) {
+    // This daemon's handshake (header): the Mac's proof first.
+    char tok[160], mn[33], mine[65], want[65], got[72] = "", out[160];
+    size_t tl = readToken(tok);
+    why = !tl ? "no Bridge token on this Mac" : "wrong proof";
+    if (tl && isHex(gn, 32)) {
+      unsigned char r[16]; arc4random_buf(r, sizeof r);
+      for (int i = 0; i < 16; i++) snprintf(mn + 2 * i, 3, "%02x", r[i]);
+      proof(tok, tl, "mac", gn, mn, mine);
+      int k = snprintf(out, sizeof out, "M %s %s\n", mn, mine);
+      tv.tv_sec = 3; setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+      if (send(c, out, (size_t)k, MSG_NOSIGNAL) == k && recvLine(c, line, sizeof line) > 0 && line[0] == 'R' &&
+          sscanf(line + 1, "%d %d %71s %359s", &gestures, &glide, got, name64) >= 3) {
+        proof(tok, tl, "vm", gn, mn, want);
+        ok = sameText(got, want);
+      }
+    }
+    memset(tok, 0, sizeof tok);
+  } else if (n > 0 && line[0] == 'H') {
+    // Daemons from before the handshake: the token itself, or (from before
+    // the token) nothing and a VM on the legacy list.
+    char given[160] = "";
+    sscanf(line + 1, "%d %d %159s %359s", &gestures, &glide, given, name64);
+    if (given[0]) why = "wrong token";
+    ok = given[0] ? bridgeTokenOK(given) : legacyOK(g.addr);
+  } else {
+    ok = legacyOK(g.addr);   // daemons from before the hello say nothing (gestures on, Glide off)
+  }
+  if (ok) {
+    base64Name(name64, name, sizeof name);
+    addClient(c, g.net, ip, gestures, glide, name);
+  } else {
+    static char lastIp[32]; static time_t lastLog;   // a refused daemon retries every 2 s
+    pthread_mutex_lock(&sendLock);
+    if (strcmp(lastIp, ip) || time(NULL) - lastLog >= 60) {
+      logf_("refused %s on %s: %s", ip, addr, why);
+      snprintf(lastIp, sizeof lastIp, "%s", ip); lastLog = time(NULL);
+    }
+    pthread_mutex_unlock(&sendLock);
+    close(c);
+  }
+  __sync_fetch_and_sub(&greeting, 1);
+  return NULL;
+}
+
 static void *serverThread(void *arg) {
-  int net = (int)(intptr_t)arg;
+  int net = (int)(intptr_t)arg, inUse = 0;
   const char *addr = listenAddrs[net];
   for (;;) {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
@@ -715,9 +860,12 @@ static void *serverThread(void *arg) {
     if (inet_pton(AF_INET, addr, &a.sin_addr) != 1 || a.sin_addr.s_addr == INADDR_ANY) {
       close(s); logf_("not listening on '%s': not an address", addr); return NULL;   // never 0.0.0.0
     }
-    if (bind(s, (struct sockaddr *)&a, sizeof a) < 0 || listen(s, 2) < 0) {
-      close(s); sleep(5); continue;   // that VM network is not up (yet)
+    if (bind(s, (struct sockaddr *)&a, sizeof a) < 0 || listen(s, 16) < 0) {
+      // That VM network is not up (yet); another program on the port is worth a line.
+      if (errno == EADDRINUSE && !inUse) { logf_("%s:%d is taken by another program; trying again", addr, PORT); inUse = 1; }
+      close(s); sleep(5); continue;
     }
+    inUse = 0;
     logf_("listening on %s:%d", addr, PORT);
     for (;;) {
       struct sockaddr_in peer; socklen_t pl = sizeof peer;
@@ -725,52 +873,16 @@ static void *serverThread(void *arg) {
       if (c < 0) break;
       setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
       setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
-      char ip[32]; inet_ntop(AF_INET, &peer.sin_addr, ip, sizeof ip);
-      // The guest's hello: what this VM wants, and the token. Daemons from
-      // before it send nothing (gestures on, Glide off).
-      int gestures = 1, glide = 0;
-      struct timeval tv = { .tv_sec = 1 };
-      setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-      char hello[640], given[160] = "", name64[360] = "", name[256];
-      ssize_t hn = recv(c, hello, sizeof hello - 1, 0);
-      if (hn > 0) { hello[hn] = 0; if (hello[0] == 'H') sscanf(hello + 1, "%d %d %159s %359s", &gestures, &glide, given, name64); }
-      base64Name(name64, name, sizeof name);
-      if (given[0] ? !bridgeTokenOK(given) : !legacyOK(peer.sin_addr)) {
-        static char lastIp[32]; static time_t lastLog;   // a refused daemon retries every 2 s
-        if (strcmp(lastIp, ip) || time(NULL) - lastLog >= 60) {
-          logf_("refused %s on %s: %s", ip, addr, given[0] ? "wrong token"
-                : "no token (omacvm update gives the VM a daemon that sends it)");
-          snprintf(lastIp, sizeof lastIp, "%s", ip); lastLog = time(NULL);
-        }
-        close(c);
-        continue;
+      struct greetArg *g = malloc(sizeof *g);
+      if (!g || __sync_add_and_fetch(&greeting, 1) > MAX_GREETING) {
+        if (g) { __sync_fetch_and_sub(&greeting, 1); free(g); }
+        close(c); continue;
       }
-      pthread_mutex_lock(&sendLock);
-      int slot = -1;
-      for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection
-        if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip)) { close(clients[i].fd); slot = i; break; }
-      for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
-      if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
-      clients[slot].fd = c; clients[slot].net = net;
-      clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
-      snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
-      snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
-      logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s)", ip, gestures ? "on" : "off",
-            glide ? "on" : "off", name[0] ? ", VM \"" : "", name, name[0] ? "\"" : "");
-      retargetLocked(capturing);
-      int front = clients[slot].target;
-      pthread_mutex_unlock(&sendLock);
-      const char *st = capturing && front ? "on\n" : "off\n";
-      char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
-      send(c, b, (size_t)n, MSG_NOSIGNAL);
-      // The Mac's scrolling direction and the trackpad's size, so the guest
-      // scales finger movement for this Mac (OmacVM's tuning is relative to a
-      // 156 x 96 mm trackpad with natural scrolling).
-      CFPropertyListRef nat = CFPreferencesCopyAppValue(CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication);
-      int natural = nat ? CFBooleanGetValue((CFBooleanRef)nat) : 1;
-      if (nat) CFRelease(nat);
-      n = snprintf(b, sizeof b, "O %d %d %d\n", natural, tpW, tpH);
-      send(c, b, (size_t)n, MSG_NOSIGNAL);
+      g->fd = c; g->net = net; g->addr = peer.sin_addr;
+      pthread_t th; pthread_attr_t at;
+      pthread_attr_init(&at); pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+      if (pthread_create(&th, &at, greet, g)) { __sync_fetch_and_sub(&greeting, 1); free(g); close(c); }
+      pthread_attr_destroy(&at);
     }
     close(s);
   }
