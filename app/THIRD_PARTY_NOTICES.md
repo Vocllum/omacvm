@@ -10,9 +10,11 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   own source is at gitlab.com/qemu-project/qemu (commit c3d48b7d).
 - **try-omarchy** (github.com/omacom/try-omarchy), MIT: the runtime build
   scripts and patches, `QMPConnection.swift`, `VMHostSleepController.swift`,
-  the clipboard and battery bridges (`NativeBridgeSocket.swift`,
-  `NativeClipboardBridge.swift`, `NativeBatteryBridge.swift`,
-  `HostBattery.swift`) and the display sync script. `runtime/LICENSE.try-omarchy`.
+  `NativeBridgeSocket.swift`, the clipboard and battery bridges
+  (`NativeClipboardBridge.swift`, `NativeBatteryBridge.swift`,
+  `HostBattery.swift`), the camera (`camera.swift`, a link to
+  `src/bridge/mac/camera.swift`, from `NativeCameraBridge.swift`) and the
+  display sync script. `runtime/LICENSE.try-omarchy`.
   In the VM, the battery's kernel module (GPL-2.0-only, as try-omarchy's
   original file) and agent, in OmacVM's `src/battery/` (see the
   repository's `THIRD_PARTY_NOTICES.md`).
