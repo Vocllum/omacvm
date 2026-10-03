@@ -256,8 +256,10 @@ if [[ -n ${VM_DIR:-} ]]; then
   VM_DIR=${VM_DIR%/}
   p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "--vm-dir $VM_DIR: $p"
   dev=$(df -P "$VM_DIR" | awk 'END { print $1 }')
-  diskutil info "$dev" 2>/dev/null | grep -qE "Device Location: +External|Removable Media: +Removable" &&
-    info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
+  if diskutil info "$dev" 2>/dev/null | grep -qE "Device Location: +External|Removable Media: +Removable"; then
+    EXTERNAL=1
+    (( PLAN && JSON )) || info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
+  fi
   [[ $TYPE == fusion ]] && FUSION_DIR=$VM_DIR
 fi
 [[ -n ${VM_DIR:-} || $TYPE == utm ]] || VM_DIR=$(default_dir)
@@ -331,6 +333,7 @@ FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momen
        idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
+  (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
   if (( BRIDGE )); then
     echo "Allow Wi-Fi names: Location Services for OmacVM Bridge (macOS asks)."
     echo "Allow media keys: Accessibility for OmacVM Bridge."
