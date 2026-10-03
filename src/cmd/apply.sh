@@ -20,7 +20,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 features_load
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1
 SETN=(); SETV=()
 set_feature() {   # NAME on|off
   feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
@@ -38,6 +38,8 @@ while (( $# )); do
     --display) MODE=$2; shift 2 ;;
     --no-mac) MAC=0; shift ;;
     --reset-host-key) export OMA_PIN_RESET=1; shift ;;
+    --no-token) TOKEN=0; shift ;;   # prebuilt images: no Bridge token in the VM
+    --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --mac-wallpaper) set_feature wallpaper on; shift ;;       # 1.x names
     --no-mac-wallpaper) set_feature wallpaper off; shift ;;
@@ -83,7 +85,9 @@ had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
-if [[ -z $had ]]; then   # new to OmacVM: the defaults, Omanotch with a notch
+# New to OmacVM (or a prebuilt VM before its first apply): the defaults,
+# Omanotch with a notch.
+if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
 for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
@@ -123,12 +127,19 @@ if (( MAC )); then
 fi
 
 # ---------- the VM side ----------
+# Parallels Tools: a prebuilt VM comes without them (they are Parallels' own).
+if (( TOOLS )) && [[ $TYPE == parallels ]] && ! gssh "$IP" "systemctl cat prltoolsd >/dev/null 2>&1" < /dev/null; then
+  log "Parallels Tools (from this Mac's Parallels Desktop)"
+  parallels_tools_install "$IP"
+fi
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
 if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
 # The gestures daemon says it too (on UTM and Fusion it always runs).
-{ on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } && bridge_token_ensure
-if [[ -f $T ]]; then
+if (( TOKEN )) && { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; }; then bridge_token_ensure; fi
+if (( ! TOKEN )); then
+  :
+elif [[ -f $T ]]; then
   log "bridge token -> $IP"
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
@@ -152,7 +163,7 @@ gestures_legacy_forget "$IP"   # its daemon says the token now
 if [[ $TYPE == parallels ]]; then
   PVM=$(vm_bundle "$VM")
   [[ -d $PVM ]] && { log "Dock icon"; "$R/src/icon/set-vm-icon.sh" "$PVM"; }
-  if ! parallels_sends_shortcuts; then
+  if (( MAC )) && ! parallels_sends_shortcuts; then
     info "Parallels: set Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always"
     parallels_shortcuts_alert
   fi

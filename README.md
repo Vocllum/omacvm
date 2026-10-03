@@ -247,7 +247,17 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    Homebrew, or tells you how (Fusion: a free download from Broadcom, after
    signing in). A fresh Parallels without a licence yet asks
    which edition you plan on (the trial is Pro).
-2. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
+2. **Build it yourself or download a prebuilt VM.** Building takes 30 to 70
+   minutes and fetches everything from Arch Linux ARM and omarchy-mac. The
+   prebuilt VM is the same build, made by OmacVM without any user in it
+   and brought to your OmacVM version on the way: a download of 3.5 to 6 GB, then a few minutes (6 minutes in
+   all for Parallels on a fast connection). Either way you
+   get your own user, password, features, keyboard and timezone. You can
+   also download a prebuilt VM by hand from the
+   [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it
+   in its app: it asks for your user and password on its first boot. `--prebuilt` or `--build` for scripts; details, what is in the
+   images and how they are made: [docs/prebuilt.md](docs/prebuilt.md).
+3. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
    quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs
    and 8 GB, and OmacVM stays within that.
@@ -256,7 +266,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    an external drive for example (APFS or Mac OS Extended; Parallels and
    Fusion; UTM keeps its VMs in its own library). With `--vm-dir PATH` for
    scripts.
-3. **Features**, one checklist with the recommended ones on:
+4. **Features**, one checklist with the recommended ones on:
 
    | | Default |
    |---|---|
@@ -270,7 +280,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
 
-4. **Your user name, full name and password.** Omarchy's own first-boot setup
+5. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
 
 Then it shows a summary and starts: 30 to 70 minutes in numbered steps
