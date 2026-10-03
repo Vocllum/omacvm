@@ -25,7 +25,7 @@ if [[ $ON == on ]]; then
     chown "$U:$U" "$HY/hyprland.lua"
   fi
   install -d -o "$U" -g "$U" "$(dirname "$MARK")"
-  for f in "$H/.config/chromium-flags.conf" "$H/.config/chrome-flags.conf"; do
+  for f in "$H/.config/chromium-flags.conf" "$H/.config/chrome-flags.conf" "$H/.config/brave-flags.conf"; do
     [[ -f $f ]] || continue
     grep -qxF -- "$FLAG" "$f" && continue
     printf '%s\n' "$FLAG" >> "$f"

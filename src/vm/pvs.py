@@ -12,6 +12,8 @@ elsewhere, everything else is this file. Usage:
   pvs.py CONFIG boot-from INDEX           boot from that disk only
   pvs.py CONFIG remove-hdd INDEX          detach a disk (its files stay)
   pvs.py CONFIG add-share NAME PATH ro|rw add a shared folder (seen as /mnt/psf/NAME)
+  pvs.py CONFIG displays                  full screen on every Mac display (Parallels'
+                                          own full screen, not macOS's)
   pvs.py CONFIG get PATH                  print one value, e.g. Hardware/Memory/RAM
 """
 import re
@@ -64,7 +66,6 @@ def omacvm(root, cpus, memsize, description):
         "Hardware/Video/VideoMemorySize": 0,
         "Hardware/Video/EnableHiResDrawing": 1, "Hardware/Video/UseHiResInGuest": 1,
         "Settings/Runtime/HostRetinaEnabled": 1, "Settings/Runtime/OsResolutionInFullScreen": 1,
-        "Settings/Runtime/FullScreen/UseAllDisplays": 1,
         "Settings/Tools/SmoothScrolling/Enabled": 1,
         "Settings/Tools/SharedFolders/HostSharing/Enabled": 1,
         "Settings/Tools/SharedFolders/HostSharing/SharedCloud": 0,
@@ -73,8 +74,26 @@ def omacvm(root, cpus, memsize, description):
     }
     for path, value in s.items():
         setv(root, path, value)
+    displays(root)
     if description is not None:
         setv(root, "Settings/General/VmDescription", description)
+
+
+DISPLAYS = {
+    "Settings/Runtime/FullScreen/UseAllDisplays": 1,
+    "Settings/Runtime/FullScreen/UseNativeFullScreen": 0,
+    "Settings/Runtime/FullScreen/OptimiseForGames": 1,
+}
+
+
+def displays(root):
+    """True if something changed."""
+    changed = False
+    for path, value in DISPLAYS.items():
+        if node(root, path).text != str(value):
+            setv(root, path, value)
+            changed = True
+    return changed
 
 
 def hdds(root):
@@ -164,6 +183,9 @@ def main(argv):
     if cmd == "omacvm":
         opts = dict(zip(args[::2], args[1::2]))
         omacvm(root, int(opts["--cpus"]), int(opts["--memsize"]), opts.get("--description"))
+    elif cmd == "displays":
+        if not displays(root):
+            return
     elif cmd == "add-nvme":
         add_nvme(root, args[0], int(args[1]))
     elif cmd == "boot-from":
