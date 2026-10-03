@@ -105,6 +105,10 @@ src/prebuilt/make-image.sh parallels clean     # delete the image VM
   `tar | zstd -19 --long=27`, split into 1.9 GB parts, with a manifest
   (OmacVM and Omarchy versions, part sizes and SHA-256) and the package list.
 
+`OMACVM_HEADLESS=1` starts the VMs without a window (Parallels Pro or
+trial, UTM, Fusion). Run it from a copy of the checkout that nobody edits
+while it runs: bash reads scripts as it goes.
+
 Testing an image before it is uploaded:
 `OMACVM_PREBUILT_SOURCE=~/Library/Caches/omacvm/prebuilt-out/utm omacvm build --vm-type utm --prebuilt`.
 
