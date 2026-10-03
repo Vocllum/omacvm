@@ -169,7 +169,7 @@ fusion)
     ok "Hyprland" "$hv with the vmwgfx fix"
   else bad "Hyprland" "$hv without the vmwgfx fix (black screen at the next login): omacvm apply builds it"; fi
   check "Hyprland after updates" "pacman hook rebuilds it" test -f /etc/pacman.d/hooks/zz-omacvm-hyprland.hook
-  check "DNS" "public resolvers (Fusion's own drops lookups)" test -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf
+  check "DNS" "Fusion's own, which follows the Mac (public DNS only while OmacVM installs)" test ! -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf
   check "VMware Tools" "vmtoolsd (Fusion's display layout)" systemctl is-active -q vmtoolsd
   if user_active omacvm-fusion-displays.service; then
     n=$(/usr/local/share/omacvm/fusion/guest/omacvm-fusion-layout 2>/dev/null | grep -c .)

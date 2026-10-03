@@ -48,7 +48,7 @@ vm_find_ip() {   # NAME TYPE [seconds]
 
 vm_probe() {
   gssh "$1" 'U=$(getent passwd 1000 | cut -d: -f1); H=$(getent passwd 1000 | cut -d: -f6)
-    echo "OMACVM_USER=$U"
+    grep -q "^OMACVM_USER=" /etc/omacvm/env 2>/dev/null || echo "OMACVM_USER=$U"
     echo "OMACVM_VERSION=$(cat /usr/local/share/omacvm/VERSION 2>/dev/null || { [ -r /etc/omacvm/env ] && echo 1.x; })"
     cat /etc/omacvm/env 2>/dev/null
     # set up before the choices were kept
