@@ -74,7 +74,8 @@ vssh "rm -f /root/omacvm.env"   # it holds the password hash
 
 # ---------- 5. OmacVM ----------
 step 5 "Adding OmacVM to the VM"
-run_logged "$LOG/omacvm-install.log" omacvm_guest_install || die "OmacVM's VM side failed (log: $LOG/omacvm-install.log)"
+run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
+  die "OmacVM did not install (log: $LOG/omacvm-install.log)"
 
 # ---------- 6. done ----------
 step 6 "Shutting down"
