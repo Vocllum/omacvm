@@ -7,7 +7,6 @@ we found along the way. To set OmacVM up, start with the
 | Page | What it is for |
 |---|---|
 | [routes/vmware-fusion.md](routes/vmware-fusion.md) | Everything about the VMware Fusion route: what you need, what OmacVM does differently there, what works, fixes |
-| [routes/comparison-draft.md](routes/comparison-draft.md) | Draft of the README section comparing Parallels, UTM and Fusion, waiting for benchmark numbers |
 | [benchmarks/README.md](benchmarks/README.md) | How we benchmark the routes against the Mac, step by step, and the results so far |
 | [troubleshooting.md](troubleshooting.md) | Non-obvious problems we hit, each as symptom, cause, fix and where in the code |
 | [experiments/vmware-fusion.md](experiments/vmware-fusion.md) | The plan and test log from building the Fusion route |
