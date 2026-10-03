@@ -14,6 +14,7 @@ import glob
 import json
 import os
 import re
+import socket
 import subprocess
 import time
 
@@ -58,28 +59,57 @@ def connected_heads():
     return heads
 
 
+class LogWatch:
+    """The last display configuration Parallels pushed: {index: (x, y, w, h, hz)}
+    in pixels. parallels.log is read once (its last 512 KB), then only what
+    was appended since the last look."""
+    TAIL = 512 * 1024
+
+    def __init__(self, path):
+        self.path, self.ino, self.off = path, None, None
+        self.part, self.layout, self.collecting = b"", None, False
+
+    def get(self):
+        try:
+            st = os.stat(self.path)
+            if st.st_ino != self.ino or self.off is None or st.st_size < self.off:
+                self.ino, self.off = st.st_ino, 0        # new or rotated log
+                self.part, self.layout, self.collecting = b"", None, False
+            if st.st_size == self.off:
+                return self.layout or None
+            start = max(self.off, st.st_size - self.TAIL)
+            if start > self.off:
+                self.part, self.collecting = b"", False  # skipped a stretch: its lines are lost
+            with open(self.path, "rb") as f:
+                f.seek(start)
+                data = f.read(st.st_size - start)
+        except OSError:
+            return None
+        self.off = start + len(data)
+        lines = (self.part + data).split(b"\n")
+        self.part = lines.pop()
+        for raw in lines:
+            if b"[DYNRES]" not in raw:
+                self.collecting = False
+                continue
+            line = raw.decode("utf-8", "replace")
+            if "[DYNRES] Initiate guest display configuration changing" in line:
+                self.layout, self.collecting = {}, True
+                continue
+            m = DISPLAY_RE.search(line) if self.collecting else None
+            if not m:
+                self.collecting = False
+                continue
+            idx, x, y, w, h = map(int, m.groups()[:5])
+            self.layout[idx] = (x, y, w, h, int(m.group(6) or 60))
+        return self.layout or None
+
+
+LOGWATCH = LogWatch(LOG)
+
+
 def layout_from_log():
-    """Last display configuration Parallels pushed: {index: (x, y, w, h, hz)} in pixels."""
-    try:
-        with open(LOG, "rb") as f:
-            f.seek(max(0, os.path.getsize(LOG) - 512 * 1024))
-            lines = f.read().decode("utf-8", "replace").splitlines()
-    except OSError:
-        return None
-    start = None
-    for i, line in enumerate(lines):
-        if "[DYNRES] Initiate guest display configuration changing" in line:
-            start = i
-    if start is None:
-        return None
-    layout = {}
-    for line in lines[start + 1:]:
-        m = DISPLAY_RE.search(line)
-        if not m:
-            break
-        idx, x, y, w, h = map(int, m.groups()[:5])
-        layout[idx] = (x, y, w, h, int(m.group(6) or 60))
-    return layout or None
+    return LOGWATCH.get()
 
 
 def to_logical(pos, size, scale, psize, pscale):
@@ -109,8 +139,25 @@ def wanted():
     return want
 
 
+def hypr_monitors():
+    """`hyprctl monitors -j` straight from Hyprland's socket: no fork every second."""
+    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "hypr",
+                        os.environ.get("HYPRLAND_INSTANCE_SIGNATURE", ""), ".socket.sock")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(path)
+            s.sendall(b"j/monitors")
+            out = b""
+            while chunk := s.recv(65536):
+                out += chunk
+        return out.decode()
+    except OSError:
+        return subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True).stdout
+
+
 def current():
-    out = subprocess.run(["hyprctl", "monitors", "-j"], capture_output=True, text=True).stdout
+    out = hypr_monitors()
     # Only the Parallels displays: other outputs (e.g. Omanotch's
     # hidden NOTCH output) are managed elsewhere.
     return {m["name"]: (m["width"], m["height"], m["scale"], (m["x"], m["y"]), m["refreshRate"])
@@ -132,6 +179,9 @@ STATE = os.path.join(os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.
                      "parallels-dynres", "monitors")
 
 
+saved = None     # the text last written (or found) in STATE
+
+
 def save_layout(want):
     """Remember the layout for ~/.config/hypr/monitors.lua: a Hyprland config
     reload (every theme switch) then re-applies these exact modes instead of
@@ -141,8 +191,12 @@ def save_layout(want):
         position = "auto" if pos is None else f"{pos[0]}x{pos[1]}"
         lines.append(f"{name} {w}x{h}@{hz} {position} {s}\n")
     text = "".join(lines)
+    global saved
+    if text == saved:
+        return
     try:
         if open(STATE).read() == text:
+            saved = text
             return
     except OSError:
         pass
@@ -151,6 +205,7 @@ def save_layout(want):
     with open(tmp, "w") as f:
         f.write(text)
     os.replace(tmp, STATE)
+    saved = text
 
 
 def main():
