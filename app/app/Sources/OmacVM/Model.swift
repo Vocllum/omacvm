@@ -87,7 +87,7 @@ struct VMConfig: Equatable {
     var keyboard = "us"
     // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
     // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
 
@@ -124,6 +124,7 @@ struct VMConfig: Equatable {
     var qmpSocket: URL { Paths.runDir.appendingPathComponent("\(id).qmp") }
     var agentSocket: URL { Paths.runDir.appendingPathComponent("\(id).qga") }
     var clipboardSocket: URL { Paths.runDir.appendingPathComponent("\(id).clip") }
+    var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
 
     func write() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

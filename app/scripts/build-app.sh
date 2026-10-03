@@ -96,6 +96,7 @@ cat > "$C/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>The VM can use your Mac's microphone.</string>
+  <key>NSCameraUsageDescription</key><string>Linux apps in the VM can use your Mac's camera. It is on only while one of them uses it.</string>
 </dict>
 </plist>
 EOF
@@ -110,7 +111,7 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   done
   codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
-  codesign "${SIGN[@]}" --identifier org.omacvm.app "$APP"
+  codesign "${SIGN[@]}" --identifier org.omacvm.app --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
   log "signing (ad hoc)"
   for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
