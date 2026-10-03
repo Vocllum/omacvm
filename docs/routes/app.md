@@ -35,6 +35,27 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
   port, not the network).
 - Sound through the Mac (QEMU's HDA card; PipeWire in the VM).
 
+## From the omacvm command
+
+`omacvm build --vm-type app` (or OmacVM.app in the build's first question)
+builds the VM through the app instead of in it. The questions and the summary
+are the same as for the other routes; the VM goes into the app's VMs folder
+(set in the app; no `--vm-dir`). Then:
+
+1. It finds the app in /Applications or ~/Applications by its bundle id
+   (`org.omacvm.app`, under any name it was installed as). Not installed:
+   it says where to get it (the GitHub release) and stops (exit 3).
+2. It writes the VM's `vm.env` as the app does (name, CPUs, memory, disk,
+   a free SSH port from 52222, user, hostname, timezone, language, keyboard,
+   features) and runs the app's `Contents/Resources/scripts/create-vm.sh`
+   with the password on stdin: the same script and steps as a build in the
+   app. It leaves the VM shut down.
+3. `omacvm apply` from this checkout, which starts the VM in the app, then a
+   reboot, as on the other routes.
+
+No Homebrew tools are needed (the app brings QEMU and zstd). OmacVM.app runs
+one VM at a time: the build stops at the start while another one runs.
+
 ## What needs a person
 
 - The password for Omarchy, typed in the setup.
