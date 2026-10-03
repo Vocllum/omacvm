@@ -54,7 +54,8 @@ download them from there.
 
 Works: setup, VM build (about 8 minutes plus a 1.4 GB download the first
 time), window that Omarchy follows (native resolution, 120 Hz), full screen
-beside the notch (option), clipboard both ways, sound, WebGL in Chromium,
+beside the notch (option), clipboard both ways, sound and the microphone,
+the Mac's camera (on only while a Linux app reads it), WebGL in Chromium,
 Chrome, Brave and Firefox, clean shutdown on Quit, pause on Mac sleep,
 install under a chosen name, the Mac's battery in Omarchy's bar, ⌘ keys as Super in full screen (through OmacVM
 Gestures, which the build installs on the Mac with the other helpers).

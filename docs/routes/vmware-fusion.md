@@ -66,6 +66,8 @@ building it.
 | Window mode: Omarchy follows the window size | ✓ |
 | Retina resolution, 120 Hz | ✓, 120 Hz as reported by the guest |
 | OmacVM Bridge: Wi-Fi, Bluetooth, audio, Night Shift, wallpaper | ✓ |
+| The Mac's camera, as *Mac Camera* | ✓ through OmacVM Bridge (`GET /camera`), as on UTM |
+| Sound, the Mac's microphone | ✓ HD Audio card (playback and capture); recording needs the microphone permission for VMware Fusion ([finding 22](../troubleshooting.md#22-fusion-app-the-microphone-records-nothing)) |
 | Media keys and trackpad gestures in full screen | ✓ |
 | Cmd shortcuts in full screen | ✓ (through OmacVM Gestures) |
 | Copy and paste text, both ways | ✓, Fusion syncs when the pointer enters or leaves the VM |
@@ -85,6 +87,7 @@ The VM (`src/vm/fusion.sh`; created with `vmcli`, the rest is lines in the `.vmx
 | `nvme0:0` | the system disk (`vmware-vdiskmanager`, growable) | the base install takes the one NVMe disk |
 | `sata0:0` | the raw live image through a monolithicFlat `live.vmdk`, removed after the base install | Arch Linux ARM's live kernel boots from it, no conversion |
 | `ethernet0` | `e1000e`, `nat` | ALARM's kernel has no `vmxnet3` |
+| `sound.present`, `sound.virtualDev`, `sound.fileName`, `sound.autodetect` | TRUE, `hdaudio`, `-1`, TRUE | speakers and the Mac's microphone; vmcli makes no sound card (`fusion_add_sound`, also when `omacvm apply` starts an older VM) |
 | `svga.numDisplays`, `svga.maxWidth`/`maxHeight`, `gui.fullScreenOnAllHostDisplays` | the Mac's display count, its arrangement in pixels, TRUE | one guest display per Mac display in full screen |
 
 Network and tools on the Mac:

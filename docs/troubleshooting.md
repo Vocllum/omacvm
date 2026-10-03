@@ -30,6 +30,8 @@ else than the cause. Recipes and the general failure table are in
 | 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
 | 19 | All | [Two VMs in one app both get the swipes and Cmd shortcuts](#19-all-routes-two-vms-in-one-app-both-get-the-swipes-and-cmd-shortcuts) |
 | 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
+| 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
+| 22 | Fusion, app | [The microphone records nothing](#22-fusion-app-the-microphone-records-nothing) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -378,3 +380,40 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   with System Events.
 - **Where:** `src/gestures/mac/omacvm-gestures.c` (event tap at
   `kCGHIDEventTap`).
+
+## 21. UTM, Fusion: no sound at all, no microphone
+
+- **Symptom:** in a UTM or VMware Fusion VM, `aplay -l` says "no soundcards
+  found"; Omarchy plays nothing and PipeWire has no input.
+- **Cause:** neither app gave the VM a sound card. UTM's scripting has no
+  sound property, so the VM it made had `Sound = []`; `vmcli VM Create`
+  writes no `sound.*` lines.
+- **Fix:** UTM: `Sound = [{Hardware = intel-hda}]` in the VM's config.plist
+  (QEMU then gets `intel-hda` + `hda-duplex` on UTM's SPICE audio, input and
+  output). UTM starts a VM with the configuration it read at its own start,
+  so after the edit UTM is quit first (only when no UTM VM runs), else the VM
+  comes up without the card. Fusion: `sound.present`, `sound.virtualDev =
+  "hdaudio"`, `sound.fileName = "-1"`, `sound.autodetect` in the .vmx. New VMs
+  get it during the build; an older VM when `omacvm apply` starts it from shut
+  down. Tested: UTM records the Mac's microphone (RMS about 9, a quiet room),
+  Fusion shows "HD-Audio Generic" for playback and capture.
+- **Where:** `src/lib/mac.sh` (`utm_add_sound`, `fusion_add_sound`),
+  `src/lib/vm.sh` (`vm_boot`), `src/cmd/build.sh`.
+
+## 22. Fusion, app: the microphone records nothing
+
+- **Symptom:** PipeWire lists the input, but `pw-record` gets no samples at
+  all (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`), not even
+  silence.
+- **Cause:** macOS's microphone permission. The process that records on the
+  Mac (`vmware-vmx`, OmacVM.app's QEMU) is a helper that cannot ask for it
+  itself: its `AudioQueueStart` fails with 268451843. vmware.log says
+  `SoundAQStartStream: Failed to start input audio queue, error: (no mapping)
+  (268451843)`; OmacVM.app's `logs/qemu.log` says `SDL_OpenAudioDevice for
+  recording failed: CoreAudio error (AudioQueueStart): 268451843`. UTM
+  worked on the same Mac because UTM had the permission already.
+- **Fix:** Fusion: allow VMware Fusion in System Settings › Privacy &
+  Security › Microphone (a person's step). OmacVM.app: the app now asks for
+  the microphone when it starts a VM, and QEMU records under its grant; the
+  Developer ID build has the `audio-input` entitlement for that.
+- **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`.

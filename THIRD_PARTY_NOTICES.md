@@ -16,6 +16,10 @@ each file taken from them:
   `src/battery/guest/omacvm-battery`, UPower's setting `90-omacvm-battery.conf`,
   and the Mac's side in `src/bridge/mac/battery.swift` and OmacVM.app's
   `HostBattery.swift` and `NativeBatteryBridge.swift`.
+  The Mac's camera in the VM: `src/bridge/mac/camera.swift` (from
+  `NativeCameraBridge.swift`; OmacVM.app uses it too), the VM's
+  `src/camera/guest/omacvm-camera` (from `omarchy-native-camera-bridge`) and
+  its v4l2loopback and udev settings.
 - **omarchy-parallels** (github.com/vincenzopalazzo/omarchy-parallels), MIT,
   (c) Vincenzo Palazzo, `src/vm/live/LICENSE`: the live image builder in
   `src/vm/live`.
@@ -26,6 +30,10 @@ each file taken from them:
   the bar widgets in `src/bridge/plugins` and `src/workspaces/plugins` are
   derived from Omarchy's own, each with its `LICENSE`; the icon
   (`src/icon/omacvm.svg`) uses Omarchy's mark.
+- **Omanotch** (`src/omanotch/`) has its own README and licence.
+- In the VM, nothing else is bundled: Arch Linux ARM and Omarchy
+  (omarchy-mac) come from their own servers, v4l2loopback too (built in the
+  VM by DKMS, GPL-2.0), each package under its own licence.
 
 What OmacVM.app ships (QEMU, edk2, QEMU's libraries) is listed in
 [app/THIRD_PARTY_NOTICES.md](app/THIRD_PARTY_NOTICES.md).
