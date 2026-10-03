@@ -126,15 +126,14 @@ if (( ! JSON )); then
   (( YES )) || prereq_screen
 fi
 
-# What the build needs: Xcode's command line tools and Homebrew (installed
-# after asking), then Homebrew's zstd, e2fsprogs and OpenSSL. A plan or a dry
-# run only reports.
+# What the build needs: Xcode's command line tools (installed after asking).
+# Homebrew's tools wait for the route question below. A plan or a dry run
+# only reports.
 if (( DRY )); then
   have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
 else
   ensure_xcode_tools
   ensure_swift_works
-  [[ $TYPE == app ]] || ensure_brew_tools   # OmacVM.app brings its own tools
 fi
 # A build peaks at about 25 GB (download, temporary installer, new disk); a
 # finished VM takes 10-12 GB and grows as it is used.
@@ -184,6 +183,9 @@ case $TYPE in
     fi ;;
   *) usage "--vm-type parallels, utm, fusion or app" ;;
 esac
+# Homebrew and its zstd, e2fsprogs and OpenSSL (installed after asking), for
+# the routes that build the disk here. OmacVM.app brings its own tools.
+(( DRY )) || [[ $TYPE == app ]] || ensure_brew_tools
 [[ $VM =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]] || usage "--vm-name: letters, digits, spaces, dots, _ and - only (got '$VM')"
 [[ $TYPE != app || ${#VM} -le 64 ]] || usage "--vm-name: at most 64 characters for OmacVM.app"
 # A name is taken in any app: omacvm --vm NAME has to find one VM.
