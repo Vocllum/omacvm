@@ -4,9 +4,10 @@
  * Mesa reads it.
  * UTM can't draw into multisampled buffers for real: reading one back
  * (readPixels, toDataURL) gives nothing and can blank the whole browser
- * window. So every buffer is also created single-sampled: no antialiasing,
- * but the right picture. Loaded from /etc/ld.so.preload; touches only these
- * two ioctls. */
+ * window. So where we raised the value, buffers are also created
+ * single-sampled: no antialiasing, but the right picture. A host that reports
+ * 4 samples itself is left alone. Loaded from /etc/ld.so.preload; touches
+ * only these two ioctls. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdarg.h>
@@ -19,6 +20,8 @@
 #define BSET 65                /* bool set 1; bit 14 = texture_multisample */
 #define MAX_SAMPLES 71
 
+static int raised;             /* this process got 4 samples from us */
+
 int ioctl(int fd, unsigned long req, ...)
 {
 	static int (*real)(int, unsigned long, ...);
@@ -28,7 +31,7 @@ int ioctl(int fd, unsigned long req, ...)
 	va_end(ap);
 	if (!real)
 		real = (int (*)(int, unsigned long, ...))dlsym(RTLD_NEXT, "ioctl");
-	if (req == DRM_IOCTL_VIRTGPU_RESOURCE_CREATE) {
+	if (raised && arg && req == DRM_IOCTL_VIRTGPU_RESOURCE_CREATE) {
 		struct drm_virtgpu_resource_create *c = arg;
 		if (c->nr_samples > 1)
 			c->nr_samples = 0;
@@ -38,8 +41,10 @@ int ioctl(int fd, unsigned long req, ...)
 		struct drm_virtgpu_get_caps *g = arg;
 		uint32_t *c = (uint32_t *)(uintptr_t)g->addr;
 		if ((g->cap_set_id == 1 || g->cap_set_id == 2) && g->size > MAX_SAMPLES * 4 &&
-		    (c[BSET] >> 14 & 1) && c[MAX_SAMPLES] < 4)
+		    (c[BSET] >> 14 & 1) && c[MAX_SAMPLES] < 4) {
 			c[MAX_SAMPLES] = 4;
+			raised = 1;
+		}
 	}
 	return r;
 }

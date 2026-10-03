@@ -32,8 +32,9 @@ install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
 pacman -S --needed --noconfirm gcc >/dev/null 2>&1
 L=/usr/local/lib/omacvm/virgl-msaa.so
 install -d /usr/local/lib/omacvm
-gcc -shared -fPIC -O2 -o "$L.new" virgl-msaa.c -ldl && mv -f "$L.new" "$L"
-grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >> /etc/ld.so.preload
+if gcc -shared -fPIC -O2 -o "$L.new" virgl-msaa.c -ldl; then mv -f "$L.new" "$L"
+else rm -f "$L.new"; echo "UTM: could not build virgl-msaa.so (browser GPU not updated)" >&2; fi
+if [[ -f $L ]]; then grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >> /etc/ld.so.preload; fi
 
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)

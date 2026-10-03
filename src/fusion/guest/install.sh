@@ -58,14 +58,30 @@ install -m644 "$here/omacvm-fusion-clipboard.service" /etc/systemd/user/omacvm-f
 systemctl --global disable omacvm-fusion-clipboard.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" enable omacvm-fusion-clipboard.service >/dev/null 2>&1
 
-# Chrome and Chromium block VMware's GPU driver (SVGA3D) and draw everything
-# in software: WebGL off, slow pages. The GPU works fine, so skip the blocklist.
-for f in chromium-flags.conf chrome-flags.conf; do
-  c=$H/.config/$f
-  [[ -f $c ]] || [[ $f == chromium-flags.conf ]] || continue
+# Chromium, Chrome and Brave block VMware's GPU driver (SVGA3D) and draw
+# everything in software: WebGL off, slow pages. The GPU works fine, so skip
+# the blocklist. Chromium and Chrome (through install-chrome.sh's launcher)
+# read /etc/<name>-flags.conf, which Omarchy never rewrites. Brave reads only
+# ~/.config/brave-flags.conf, which "omarchy install browser brave" replaces:
+# omacvm apply puts the line back.
+B=$H/.config/brave-flags.conf
+for c in /etc/chromium-flags.conf /etc/chrome-flags.conf "$B"; do
+  [[ $c == /etc/* || -f $c ]] || command -v brave >/dev/null || continue
   grep -qx -- '--ignore-gpu-blocklist' "$c" 2>/dev/null || echo '--ignore-gpu-blocklist' >> "$c"
-  chown "$U:$U" "$c"
 done
+if [[ -f $B ]]; then chown "$U:$U" "$B"; fi
+# Firefox counts every vmwgfx driver as software GL (widget/gtk/GfxInfo.cpp)
+# and draws pages (WebRender) and WebGL (llvmpipe) in software. Allow the GPU
+# for those three. Our own default-pref file: Firefox updates leave it alone,
+# and Firefox's downloadable blocklist only sets or clears user values.
+# Written even without Firefox, so a later install is covered.
+install -Dm644 /dev/stdin /usr/lib/firefox/defaults/pref/omacvm-fusion.js <<'JS'
+// OmacVM, VMware Fusion: Firefox counts VMware's GPU driver (vmwgfx) as
+// software GL and draws pages and WebGL in software. The GPU works: allow it.
+pref("gfx.blacklist.layers.opengl", 1);
+pref("gfx.blacklist.webrender", 1);
+pref("gfx.blacklist.webgl-use-hardware", 1);
+JS
 
 M=$H/.config/hypr/monitors.lua
 # Ours already: only the first mode changes, the rest stays as you left it.
@@ -95,4 +111,4 @@ if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
   pkill -u "$U" -f 'vmtoolsd -n vmusr' 2>/dev/null || true   # a stray agent on Hyprland's X11 display
   systemctl --user -M "$U@" restart omacvm-fusion-clipboard.service 2>/dev/null || true
 fi
-echo "VMware Fusion: Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale), copy and paste"
+echo "VMware Fusion: Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale), copy and paste, browsers on the GPU"

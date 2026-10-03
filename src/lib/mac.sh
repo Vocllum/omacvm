@@ -84,6 +84,9 @@ parallels_shortcuts_alert() {
 
 vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts it
   local i
+  # Full screen on every Mac display (VMs from before 2.2 lack it); Parallels
+  # reads config.pvs when the VM starts.
+  python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vm/pvs.py" "$2/config.pvs" displays 2>/dev/null || true
   open -a "Parallels Desktop" "$2"
   for ((i = 0; i < 60; i += 3)); do [[ $(vm_state "$1") == running ]] && return 0; sleep 3; done
   "$PRLCTL" start "$1" >/dev/null 2>&1 && return 0      # Pro/Business editions

@@ -152,7 +152,7 @@ parallels)
   if grep -q '<UseAllDisplays>1' "$pvs" 2>/dev/null && grep -q '<UseNativeFullScreen>0' "$pvs" 2>/dev/null; then
     ok "full screen on every display" "Parallels' full screen, all displays"
   else
-    skip "full screen on every display" "stop the VM, then Parallels Desktop > the VM's Configure > Options > Full Screen: turn on \"Use all displays\", turn off \"Use macOS full screen\"" human
+    skip "full screen on every display" "shut the VM down, then omacvm apply --vm \"$VM\" (it sets this when it starts the VM)" human
   fi
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;

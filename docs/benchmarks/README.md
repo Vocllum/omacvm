@@ -39,7 +39,7 @@ Do all of this, or the numbers won't compare:
 | Full screen | the VM app in full screen. `bench.sh` also starts Chrome full screen |
 | No screensaver | Omarchy's screensaver and lock off: `omacvm disable idle-lock --vm NAME`. It can start in the middle of a run otherwise |
 | Google Chrome everywhere | Google Chrome on the Mac and in the VM. Arch's Chromium is much slower than Chrome (Parallels: 35.4 with Chromium 153 vs about 45 with Chrome), so it would not compare |
-| Chrome's flags | in a VM, `bench.sh` starts Chrome with the flags in Omarchy's `~/.config/chrome-flags.conf`. On Fusion that file must have `--ignore-gpu-blocklist`, or Chrome draws in software ([why](../troubleshooting.md#2-fusion-chrome-draws-everything-in-software)) |
+| Chrome's flags | in a VM, `bench.sh` starts Chrome with the flags in `/etc/chrome-flags.conf` and Omarchy's `~/.config/chrome-flags.conf`. On Fusion one of them must have `--ignore-gpu-blocklist` (OmacVM puts it in `/etc`), or Chrome draws in software ([why](../troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
 | Runs | 3 of each test, report the median. Single runs land within 2 to 3 % of each other |
 
 ## Run it
