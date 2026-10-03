@@ -18,6 +18,19 @@ open dist/OmacVM.app
 
 The first build compiles QEMU (about 70 seconds).
 
+## Status
+
+Works: setup, VM build (about 8 minutes plus a 1.4 GB download the first
+time), window that Omarchy follows (native resolution, 120 Hz), full screen
+beside the notch (option), clipboard both ways, sound, WebGL in Chromium,
+Chrome, Brave and Firefox, clean shutdown on Quit, pause on Mac sleep,
+install under a chosen name.
+
+Waiting: Bridge and Gestures on the Mac (omacvm branch `app-route`, needs the
+helpers installed), external displays.
+
+Needs a person: Accessibility for the app (⌘ keys as Super in Omarchy).
+
 ## What the app does
 
 1. Asks for a VM name, your user and password, resources and where the disk goes.
