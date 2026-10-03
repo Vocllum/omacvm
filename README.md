@@ -140,11 +140,13 @@ Pascal-0x90, [hyprwm/Hyprland#12966](https://github.com/hyprwm/Hyprland/discussi
 and a pacman hook builds it again after every Hyprland update (10 to 20
 minutes, inside `omarchy update`).
 
-What works so far: the desktop and apps on the GPU, live resolution changes,
-the Mac's display mode from boot, OmacVM Bridge (Wi-Fi, Bluetooth, audio,
-Night Shift, wallpaper), the media keys and trackpad gestures in full screen,
-every `omacvm check` line. Not there yet: more than one display, the clipboard
-(VMware's tools are not in Arch Linux ARM), Omanotch. The plan and the test results:
+What works so far: the desktop and apps on the GPU; every display in full
+screen, laid out like macOS's, and Omarchy following the window when it is not
+full screen (OmacVM builds VMware Tools for Arch Linux ARM, which does not
+package them); OmacVM Bridge (Wi-Fi, Bluetooth, audio, Night Shift,
+wallpaper); the media keys and trackpad gestures in full screen; every
+`omacvm check` line. Not there yet: the clipboard, Omanotch, a speed
+measurement. The plan and the test results:
 [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
 
 ## Requirements

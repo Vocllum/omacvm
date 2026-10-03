@@ -123,7 +123,7 @@ GitHub.
 | `src/vm/omarchy-install.sh` | In the new system: omarchy-mac `install.sh --channel rc`, unattended; SSH rule for the Mac's network |
 | `src/vm/pvs.py` | Parallels `config.pvs` editor (settings, NVMe disk, boot order, shares) |
 | `src/vm/fusion.sh` | VMware Fusion: create the VM (`fusion_create`: vmcli, then `.vmx` lines; the raw live image through a monolithicFlat descriptor), drop the live disk |
-| `src/fusion/` | Fusion guest specifics: public DNS (`dns.sh`), Hyprland with the vmwgfx fix (`build-hyprland.sh`, the patch, a pacman hook that rebuilds after hyprland upgrades), the Mac's display mode in `monitors.lua` |
+| `src/fusion/` | Fusion guest specifics: public DNS (`dns.sh`), Hyprland with the vmwgfx fix (`build-hyprland.sh`, the patch, a pacman hook that rebuilds after hyprland upgrades), VMware Tools (`build-open-vm-tools.sh`), the display layout (`omacvm-fusion-layout`, `omacvm-fusion-displays` + its user unit), `monitors.lua` |
 | `src/vm/utm.sh` | UTM: create the VM (AppleScript `make new virtual machine`), drop the live disk, app-wide speed settings |
 | `src/lib/mac.sh` | Mac helpers: `gssh`, Parallels (`vm_ip` by DHCP lease, `vm_state`, `vm_start`), UTM (`vm_type`, `utm_ip`, `utm_state`, `utm_start`, `utm_wait_stopped`) and Fusion (`fusion_list` from Fusion's `vmInventory`, `fusion_ip` from `vmnet-dhcpd-vmnet8.leases`, `fusion_state`, `fusion_start`, `fusion_host`) |
 | `src/guest/omacvm-omanotch.service` | The omanotch feature: one-shot user unit that runs Omanotch's `guest/install.sh` in the first desktop session (it needs Hyprland running), skipped once `~/.local/bin/notchcast` exists |
@@ -227,6 +227,9 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | `sata0:0` | the raw live image via a monolithicFlat `live.vmdk` (removed after the base install) | ALARM's live kernel boots from it; no conversion |
 | `ethernet0` | `e1000e`, `nat` | ALARM's kernel has no vmxnet3 |
 | guest NetworkManager `90-omacvm-fusion.conf` | global DNS 1.1.1.1, 9.9.9.9 | Fusion's NAT DNS drops lookups under load (failed the yay build) |
+| `svga.numDisplays`, `svga.maxWidth`/`maxHeight`, `gui.fullScreenOnAllHostDisplays` | the Mac's display count, its arrangement in pixels, TRUE | one guest display per Mac display in full screen |
+| guest VMware Tools | `open-vm-tools` built from Arch's recipe with `makepkg -A` (`--without-gtkmm4`), `[resolutionKMS] enable=true`, rebuilt when `vmtoolsd` misses a library | Fusion sends its display layout (`DisplayTopology_Set`) only to a guest running the tools; without them every Mac display shows the same screen |
+| guest user unit `omacvm-fusion-displays` | applies vmwgfx's suggested positions (`omacvm-fusion-layout`, libdrm) with `hyprctl eval hl.monitor{…}` on every DRM change and config reload | Hyprland ignores suggested positions |
 | guest Hyprland | built with `src/fusion/guest/hyprland-vmwgfx-dmabuf.patch`, stock kept as `/usr/bin/Hyprland.stock`, `/var/lib/omacvm/hyprland-vmwgfx` = version + checksum | without it every GPU client dies (`invalid arguments for wl_surface.attach`), SDDM's greeter first |
 
 The Mac is `.1` on Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in

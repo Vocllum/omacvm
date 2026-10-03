@@ -61,9 +61,14 @@ A third VM type, `fusion`, next to `parallels` and `utm`.
   already the patched build of that version. A pacman hook re-runs it after a `hyprland`
   upgrade, so `omarchy update` cannot bring the black screen back. Not a feature switch:
   on Fusion the desktop does not start without it.
-- **Display.** Fusion pushes no layout to the guest without VMware's tools. Start like UTM:
-  the Mac's display mode from `src/display/mac-display.swift`, written to `monitors.lua`.
-  Unlike UTM it can be applied live. More displays: later.
+- **Display.** Fusion sends its layout only to a guest running VMware Tools: without them
+  every Mac display in full screen shows the same guest screen (Fusion's spare windows stay
+  unattached, `src screenId=-1` in `vmware.log`). OmacVM builds `open-vm-tools` from Arch's
+  recipe for aarch64; its resolutionKMS plugin passes Fusion's `DisplayTopology_Set` to
+  vmwgfx, and `omacvm-fusion-displays` applies the suggested positions to Hyprland (which
+  ignores them). Tested: three 2560x1440 displays in the macOS arrangement, windowed mode
+  following the window, switching between them, a reboot. New VMs get `svga.numDisplays`
+  = the Mac's display count and `gui.fullScreenOnAllHostDisplays`.
 - **Clipboard.** None from VMware. Later, over the Bridge.
 - **Full-screen capture** (media keys, gestures, pointer): add Fusion's process name next
   to `prl_client_app` and `UTM`.
