@@ -1,0 +1,76 @@
+From: OmacVM
+Subject: [PATCH] socket: host loopback only on listed ports
+
+With OMACVM_SLIRP_HOST_PORTS=47811,47830,47831 the guest reaches the
+Mac's 127.0.0.1 only on those TCP ports; anything else on the host
+address is refused. Applies after the try-omarchy libslirp patches.
+
+--- a/src/socket.c
++++ b/src/socket.c
+@@ -971,6 +971,48 @@
+         so->so_state |= SS_FWDRAIN;
+     else
+         sofcantsendmore(so);
++}
++
++/*
++ * OmacVM: the guest reaches the Mac's 127.0.0.1 through the host address only
++ * on the TCP ports listed in OMACVM_SLIRP_HOST_PORTS (comma separated), not on
++ * every port. Unset: libslirp's usual behaviour.
++ */
++static bool omacvm_host_port_allowed(struct socket *so)
++{
++    static int loaded;
++    static int count = -1;
++    static uint16_t ports[32];
++    if (!loaded) {
++        const char *list = getenv("OMACVM_SLIRP_HOST_PORTS");
++        loaded = 1;
++        if (list) {
++            count = 0;
++            while (*list && count < 32) {
++                char *end;
++                long p = strtol(list, &end, 10);
++                if (end == list) {
++                    break;
++                }
++                if (p > 0 && p < 65536) {
++                    ports[count++] = (uint16_t)p;
++                }
++                list = *end == ',' ? end + 1 : end;
++            }
++        }
++    }
++    if (count < 0) {
++        return true;
++    }
++    if (so->so_type != IPPROTO_TCP) {
++        return false;
++    }
++    for (int i = 0; i < count; i++) {
++        if (ntohs(so->so_fport) == ports[i]) {
++            return true;
++        }
++    }
++    return false;
+ }
+ 
+ static bool sotranslate_out4(Slirp *s, struct socket *so, struct sockaddr_in *sin)
+@@ -982,7 +1024,7 @@
+ 
+     if (so->so_faddr.s_addr == s->vhost_addr.s_addr ||
+         so->so_faddr.s_addr == 0xffffffff) {
+-        if (s->disable_host_loopback) {
++        if (s->disable_host_loopback || !omacvm_host_port_allowed(so)) {
+             return false;
+         }
+ 
+@@ -1006,7 +1048,7 @@
+ 
+     if (in6_equal_net(&so->so_faddr6, &s->vprefix_addr6, s->vprefix_len) ||
+         in6_equal(&so->so_faddr6, &(struct in6_addr)ALLNODES_MULTICAST)) {
+-        if (s->disable_host_loopback) {
++        if (s->disable_host_loopback || !omacvm_host_port_allowed(so)) {
+             return false;
+         }
+ 
