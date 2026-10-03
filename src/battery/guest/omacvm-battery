@@ -215,6 +215,10 @@ def main() -> int:
     vm_type = env_value(ENV_FILE.read_text(), "OMACVM_VM_TYPE") if ENV_FILE.exists() else ""
     feeder = Feeder()
     if vm_type == "app":
+        for _ in range(30):   # udev names the port a moment after boot
+            if PORT.exists():
+                break
+            time.sleep(0.5)
         if not PORT.exists():
             # An OmacVM.app from before the battery: nothing to wait for.
             log(f"no {PORT}: this OmacVM.app does not pass the battery (omacvm update)")
