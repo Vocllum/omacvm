@@ -1,6 +1,6 @@
 # OmacVM Bridge
 
-The Mac's Wi-Fi, Bluetooth, audio, media keys and display, inside the Omarchy
+The Mac's Wi-Fi, Bluetooth, audio, media keys, display and camera, inside the Omarchy
 VM. The VM only has a virtual Ethernet card and a virtual sound card; the bridge is a
 small Mac menu-bar app that serves the real thing as JSON over the private
 VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-Sent Events.
@@ -17,7 +17,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Bar widgets | `plugins/omacvm.bluetooth`, `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's Bluetooth, network and audio widgets; Super+Ctrl+B opens the Bluetooth one), `plugins/omacvm.nightshift` |
 
 Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, IOBluetooth,
-CoreBluetooth (the permission), AppKit, Security, and the private
+CoreBluetooth (the permission), AVFoundation (the camera), AppKit, Security, and the private
 DisplayServices and CoreBrightness (brightness, Night Shift, True Tone,
 keyboard light). Bluetooth power and forgetting a device use IOBluetooth's
 private `IOBluetoothPreferenceSetControllerPowerState` and
@@ -30,6 +30,7 @@ private `IOBluetoothPreferenceSetControllerPowerState` and
 | Location Services | macOS only shows Wi-Fi names to apps with it; no location is read | prompt on first start; System Settings › Privacy & Security › Location Services |
 | Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
 | Bluetooth | connecting, disconnecting, forgetting and switching from the VM (without it the devices are listed read-only, from macOS's system report) | prompt on first start; Privacy & Security › Bluetooth |
+| Camera | the Mac's camera for UTM and VMware Fusion VMs (`GET /camera`) | prompt the first time a Linux app in such a VM uses the camera; Privacy & Security › Camera |
 | Keychain (per request) | the Wi-Fi password for QR sharing | macOS asks for an administrator's approval every time |
 
 The menu-bar icon shows both grants and links to the settings. Permissions
@@ -172,6 +173,34 @@ request from the VM, `external` = anything else (macOS slider, AirPods, keys
 outside the VM). Volume and mute changes come as `external` always; brightness
 changes made on the Mac only to clients that asked with `GET /events?osd=external`
 (the Bridge then reads the brightness every 0.5 s). `: ping` every 15 s; `retry: 3000`.
+
+### Camera
+
+UTM and VMware Fusion VMs get the Mac's camera from the Bridge
+(`camera.swift`; OmacVM.app uses the same code over a virtio port). The VM's
+`omacvm-camera` (`../camera/guest/`) opens a connection only while a Linux
+app reads `/dev/video42`:
+
+1. `GET /camera` with the token, after `/proof`. The Bridge answers `200` and
+   the connection is the camera's from then on (`503` with 8 VMs connected).
+2. The VM sends one JSON object per line: `{"type":"start"}`, `{"type":"stop"}`.
+3. The Bridge sends messages: a 16-byte header (`TOCM`, version 1, kind 1
+   status or 2 frame, two zero bytes, payload length and sequence as
+   little-endian UInt32) and the payload. Status is JSON:
+   `{"status":"idle"}`, `{"status":"streaming","name":"MacBook Pro Camera","width":1280,"height":720,"fps":30,"pixelFormat":"NV12"}`
+   or `{"status":"unavailable","reason":"permission"|"no-camera"|"capture"}`.
+   A frame is 1280×720 NV12, 1,382,400 bytes.
+
+The camera runs while at least one VM said start and has neither said stop
+nor closed the connection. Every VM gets the same frames; one that has not
+taken the last frame yet skips the next, so a slow VM holds up nobody. A VM
+that stops reading for 2 seconds is dropped. The first `start` ever makes
+macOS ask for the camera; until it is answered the VM shows black.
+
+`GET /camera/status`: `{"permission": "granted"|"not-determined"|"denied"|"restricted", "camera": "MacBook Pro Camera", "on": false, "readers": 0, "connections": 0}`.
+
+`OMACVM_CAMERA=test` in the Bridge's environment sends a moving test picture
+instead of the camera (no permission needed), to check the way into the VM.
 
 ### Wallpaper
 

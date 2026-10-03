@@ -148,6 +148,7 @@ GitHub.
 | `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
 | `src/clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
+| `src/camera/` | Feature `camera` (from try-omarchy): guest `omacvm-camera` (user service) feeds `/dev/video42` "Mac Camera" (v4l2loopback via DKMS, `exclusive_caps`) and asks the Mac for frames only while v4l2loopback reports a reader: Bridge `GET /camera` (UTM, Fusion; `src/bridge/mac/camera.swift`) or OmacVM.app's virtio port `org.omacvm.camera` (same Swift file, linked into `app/app/Sources/OmacVM`). Parallels passes the camera itself: nothing installed there. `omacvm-camera --status` for the check |
 | `src/keyboard/` | `mac-layout.sh` (macOS input source → XKB), guest layout + Cmd+V paste |
 | `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; opt-in memory-optimized kernel (THP always + MGLRU) from ALARM's PKGBUILD, built only with `--thp-kernel`. ALARM's stock `linux-aarch64` has `# CONFIG_TRANSPARENT_HUGEPAGE is not set` and `# CONFIG_LRU_GEN is not set` (verified 7.2.8), so the THP/MGLRU tmpfiles lines are no-ops there (systemd-tmpfiles skips missing files) |
 | Feature switches | `src/guest/install.sh --feature NAME=on\|off` for every feature in `src/features.tsv`, kept in `/etc/omacvm/env`; `omacvm apply` passes all of them (also `--[no-]FEATURE`, and 1.x's `--[no-]mac-wallpaper`). omanotch=on: `omacvm-omanotch.service` installs Omanotch from the copy of `src/omanotch` in the session (now if Hyprland runs, else at the next login), again when that copy changed; the clone earlier versions made in `~/.local/share/omanotch` is removed; off: Omanotch's own `guest/uninstall.sh` in the session. scroll-momentum (was glide; the old key in /etc/omacvm/env and `--feature glide=` still map to it): `gestures/guest/glide.sh` on/off (`omacvm_glide.lua` required from `hyprland.lua`, `--disable-smooth-scrolling` in existing `chromium-flags.conf`/`chrome-flags.conf`, marker `~/.local/state/omacvm/glide-flags` so off removes only what it added). idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). Gestures off: the VM's daemon says so in its hello (on UTM it still runs, for Cmd as Super) and the Mac helper leaves that VM's trackpad to macOS; on Parallels the daemon is not installed. `--keys-only` on the Mac app is a Mac-wide off switch |
@@ -255,6 +256,7 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | `nvme0:0` | system disk (vmware-vdiskmanager, growable) | base-install takes the one NVMe disk |
 | `sata0:0` | the raw live image via a monolithicFlat `live.vmdk` (removed after the base install) | ALARM's live kernel boots from it; no conversion |
 | `ethernet0` | `e1000e`, `nat` | ALARM's kernel has no vmxnet3 |
+| `sound.present`, `sound.virtualDev`, `sound.fileName`, `sound.autodetect` (`fusion_add_sound`, VM stopped) | TRUE, `hdaudio`, `-1`, TRUE | vmcli makes no sound card: no speakers or microphone without it |
 | guest NetworkManager `90-omacvm-fusion.conf` (`src/fusion/guest/dns.sh`) | global DNS 1.1.1.1, 9.9.9.9, only while OmacVM installs | Fusion's NAT DNS drops lookups under load (failed the yay build); afterwards Fusion's DNS, which follows the Mac's |
 | `svga.numDisplays`, `svga.maxWidth`/`maxHeight`, `gui.fullScreenOnAllHostDisplays` | the Mac's display count, its arrangement in pixels, TRUE | one guest display per Mac display in full screen |
 | guest VMware Tools | `open-vm-tools` built from Arch's recipe with `makepkg -A` (`--without-gtkmm4`), `[resolutionKMS] enable=true`, rebuilt when `vmtoolsd` misses a library | Fusion sends its display layout (`DisplayTopology_Set`) only to a guest running the tools; without them every Mac display shows the same screen |
@@ -271,6 +273,7 @@ guest's gateway is `.2`.
 | Setting | Value | Why |
 |---|---|---|
 | backend, architecture, `hypervisor`, `uefi` | qemu, aarch64, true, true | HVF, EDK2 |
+| `Sound` in config.plist (`utm_add_sound`, VM stopped: the build, or `omacvm apply` starting a stopped VM) | `intel-hda` | UTM's scripting has no sound; without it the VM has no speakers or microphone. Audio goes through UTM's default SPICE backend (input and output; "CoreAudio" in UTM's settings is output only) |
 | display | `virtio-gpu-gl-pci`, native resolution, dynamic resolution | virgl; the guest pins its mode |
 | network | `virtio-net-pci`, shared | Mac = gateway 192.168.64.1 |
 | drives | live installer VirtIO (removed after the base install), system NVMe | base-install looks for NVMe |
@@ -311,10 +314,17 @@ guest's gateway is `.2`.
 - **As the desktop user over SSH**: `sudo -u <user> env XDG_RUNTIME_DIR=/run/user/1000 bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap; <cmd>'`
   (`hyprctl`/`grim` also need `WAYLAND_DISPLAY=wayland-1` and `HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr | head -1)`).
 - **Screenshot the guest**: `grim -o Virtual-1` as above.
+- **Camera**: in the VM `omacvm-camera --status`, `journalctl --user -u omacvm-camera`,
+  `ffmpeg -f v4l2 -i /dev/video42 -frames 30 -f null -` (reads it, so the Mac's camera turns on); the
+  Bridge's log `camera:` lines. Without the camera permission (or to test the path):
+  `OMACVM_CAMERA=test` in the Bridge's or the app's environment sends a moving test picture.
+- **Microphone**: as the desktop user `pw-record --rate 48000 --channels 1 /tmp/m.wav` for a few seconds;
+  all zeros = the VM's app has no microphone permission (or no sound card: `pactl list short sources`).
 - **Bridge from the guest**: `omacvm-bridge state|audio|display|events`; from the Mac:
   `curl -H "Authorization: Bearer $(cat ~/Library/Application\ Support/omacvm-bridge/token)" http://10.211.55.2:47831/state`.
 - **Permissions**: Location Services (bridge), Accessibility (bridge, gestures), Input Monitoring
-  (gestures). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
+  (gestures), Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
+  first uses it), Microphone (the VM's app). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
   `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
   `journalctl --user -u omacvm-bridge-osd`, `journalctl -u omacvm-gestures`,
