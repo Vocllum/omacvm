@@ -263,8 +263,11 @@ on the branch.
 - **Check:** in the VM, `grep -E "^cpu: |idle_calls" /proc/timer_list` shows
   millions of idle calls on some CPUs; on the Mac, `ps -M -p $(pgrep -x
   QEMULauncher)` shows one thread near 100 %.
-- **Fix:** none in OmacVM yet; it needs a fixed UTM. A guest kernel with
-  HZ=250 (4 ms ticks) would avoid it and is the next thing to try.
+- **Tried:** a guest kernel with HZ=250 (4 ms ticks, built like the
+  memory-optimized kernel) halves it: UTM's QEMU at 49 % instead of 102 % at
+  idle. Other short timers still make some CPUs spin.
+- **Fix:** it needs a UTM with the upstream QEMU fix. Until then, for battery
+  life use VMware Fusion, Parallels or OmacVM.app.
 
 ## 16. MotionMark gives no stable result
 
