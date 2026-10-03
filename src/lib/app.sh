@@ -17,9 +17,13 @@ app_env() {   # DIR KEY: one value from vm.env (single quotes stripped)
   sed -n "s/^$2=//p" "$1/vm.env" 2>/dev/null | tail -1 | sed "s/^'\(.*\)'\$/\1/"
 }
 
-app_running_dir() {   # DIR: its QEMU runs (the disk is on its command line, commas doubled)
-  ps -axo args= 2>/dev/null | grep -F -- "file=${1//,/,,}/disk.img," | grep -vq grep
+app_pid_dir() {   # DIR -> the PID of its QEMU (the disk is on its command line, commas
+  # doubled); this user's processes only: another account could fake the line.
+  ps -x -U "$(id -u)" -o pid=,args= 2>/dev/null | grep -F -- "file=${1//,/,,}/disk.img," |
+    grep -v grep | awk '{ print $1; exit }'
 }
+
+app_running_dir() { [[ -n $(app_pid_dir "$1") ]]; }
 
 app_list() {
   local d n
@@ -39,12 +43,16 @@ app_dir() {
   return 1
 }
 
-app_ip() {   # NAME [seconds]
-  local d p i
+app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
+  # whatever else listens there)
+  local d p i pid
   d=$(app_dir "$1") || return 1
-  p=$(app_env "$d" SSH_PORT); [[ -n $p ]] || return 1
+  p=$(app_env "$d" SSH_PORT); [[ $p =~ ^[0-9]+$ ]] || return 1
   for ((i = 0; i <= ${2:-0}; i += 2)); do
-    app_running_dir "$d" && { echo "127.0.0.1:$p"; return 0; }
+    pid=$(app_pid_dir "$d")
+    if [[ -n $pid ]] && lsof -nP -a -p "$pid" -iTCP@127.0.0.1:"$p" -sTCP:LISTEN >/dev/null 2>&1; then
+      echo "127.0.0.1:$p"; return 0
+    fi
     sleep 2
   done
   return 1
