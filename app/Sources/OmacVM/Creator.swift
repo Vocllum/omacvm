@@ -12,9 +12,16 @@ final class Creator: ObservableObject {
     @Published var finished = false
     private var process: Process?
     private var buffer = ""
+    private var run = 0
+    private var reader: FileHandle?
+    private var exitStatus: Int32?
+    private var logURL: URL?
 
     func start(config: VMConfig, password: String) {
         failed = nil; finished = false; step = 0
+        reader?.readabilityHandler = nil
+        reader = nil; run += 1; buffer = ""; exitStatus = nil
+        let id = run
         title = "Preparing"
         do {
             try config.write()
@@ -31,25 +38,28 @@ final class Creator: ObservableObject {
         p.standardError = output
         let logURL = config.folder.appendingPathComponent("create.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        self.logURL = logURL
         let log = try? FileHandle(forWritingTo: logURL)
+        // The main queue keeps the output in order, and the end of the output
+        // after it: a failed build's last line (its ERROR:) is read before
+        // the build counts as done.
+        reader = output.fileHandleForReading
         output.fileHandleForReading.readabilityHandler = { [weak self] h in
             let data = h.availableData
-            guard !data.isEmpty else { return }
+            guard !data.isEmpty else {
+                h.readabilityHandler = nil
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.outputEnded(id) } }
+                return
+            }
             log?.write(data)
             let text = String(decoding: data, as: UTF8.self)
-            Task { @MainActor in self?.consume(text) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.consume(text) } }
         }
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
-            Task { @MainActor in
-                output.fileHandleForReading.readabilityHandler = nil
-                guard let self else { return }
-                if status == 0 {
-                    self.finished = true
-                } else if self.failed == nil {
-                    self.failed = "The build stopped (exit \(status)). Log: \(logURL.path)"
-                }
-            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.exited(id, status) } }
+            // A process left behind that holds the pipe must not keep the build open.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { MainActor.assumeIsolated { self?.outputEnded(id) } }
         }
         do {
             try p.run()
@@ -57,11 +67,38 @@ final class Creator: ObservableObject {
             try? input.fileHandleForWriting.close()
             process = p
         } catch {
+            reader?.readabilityHandler = nil
+            reader = nil
             failed = "Could not start the build: \(error.localizedDescription)"
         }
     }
 
     func cancel() { process?.terminate() }
+
+    private func exited(_ id: Int, _ status: Int32) {
+        guard id == run else { return }
+        exitStatus = status
+        settle()
+    }
+
+    private func outputEnded(_ id: Int) {
+        guard id == run, let r = reader else { return }
+        r.readabilityHandler = nil
+        reader = nil
+        if !buffer.isEmpty { handle(buffer.trimmingCharacters(in: .whitespaces)); buffer = "" }
+        settle()
+    }
+
+    /// Done once the build has exited and its output is read.
+    private func settle() {
+        guard reader == nil, let status = exitStatus else { return }
+        exitStatus = nil
+        if status == 0 {
+            finished = true
+        } else if failed == nil {
+            failed = "The build stopped (exit \(status)). Log: \(logURL?.path ?? "")"
+        }
+    }
 
     private func consume(_ text: String) {
         buffer += text
