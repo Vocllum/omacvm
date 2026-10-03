@@ -84,8 +84,8 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
     private var activeGuest: GuestInfo? { state.active.flatMap { guests[$0] } }
     private var activeStream: GuestStream? { state.active.flatMap { link.stream(for: $0) } }
     /// Title of the full-screen VM window: re-read on app and Space changes,
-    /// for another window, or after a few seconds.
-    private var titleCache: (window: CGWindowID, title: String?, at: Date)?
+    /// for another window, or (none yet) after `wait`.
+    private var titleCache: (window: CGWindowID, title: String?, retry: Date, wait: TimeInterval)?
     /// The VM's full-screen window on the built-in display, tracked across Spaces.
     private var vmWindow: CGWindowID?
     private var misses = 0
@@ -212,12 +212,18 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         Log.info(on ? "strip shown, guest bar parked" : "strip hidden, guest bar restored")
     }
 
-    /// The title of the full-screen VM window, cached per window.
+    /// The title of the full-screen VM window, kept until the window changes
+    /// (or a Space or app change clears it). No title (no permission yet, or a
+    /// busy VM app): asked again after 3 s, then up to every 10 s.
     private func windowTitle(_ g: StripGeometry) -> String? {
-        if let c = titleCache, c.window == g.windowID, Date().timeIntervalSince(c.at) < 3 { return c.title }
+        var wait: TimeInterval = 3
+        if let c = titleCache, c.window == g.windowID {
+            if c.title != nil || Date() < c.retry { return c.title }
+            wait = min(c.wait * 2, 10)
+        }
         WindowTitle.askOnce()
         let title = WindowTitle.title(pid: g.ownerPID, rect: g.windowRect)
-        titleCache = (g.windowID, title, Date())
+        titleCache = (g.windowID, title, Date().addingTimeInterval(wait), wait)
         return title
     }
 
