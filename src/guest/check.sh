@@ -48,7 +48,7 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
-MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}
+MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -113,6 +113,30 @@ if [[ $BRIDGE == on ]]; then
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
   else skip "wallpaper" "off (chosen at setup)"; fi
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
+
+section "The Mac's battery"
+if [[ $TYPE == parallels ]]; then
+  skip "battery" "Parallels gives the VM the Mac's battery itself"
+elif [[ $BATTERY == on ]]; then
+  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
+  else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
+  # Every kernel that boots must have it (DKMS builds it with each kernel's headers).
+  for k in $(ls /usr/lib/modules 2>/dev/null); do
+    [[ -d /usr/lib/modules/$k/kernel ]] || continue
+    if dkms status -k "$k" omacvm-battery 2>/dev/null | grep -q installed; then ok "battery: kernel $k" "module built (DKMS)"
+    elif [[ ! -f /usr/lib/modules/$k/build/Makefile ]]; then bad "battery: kernel $k" "no headers to build the module with: omarchy update, reboot, omacvm apply"
+    else bad "battery: kernel $k" "module not built (omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
+  done
+  if systemctl is-active -q omacvm-battery; then ok "battery agent" "omacvm-battery feeds it the Mac's"
+  else bad "battery agent" "omacvm-battery.service not running ($(journalctl -u omacvm-battery -n1 -o cat 2>/dev/null | sed 's/^omacvm-battery: //'))"; fi
+  up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
+  pct=$(awk '/percentage:/ { print $2; exit }' <<<"$up"); st=$(awk '/state:/ { print $2; exit }' <<<"$up")
+  if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
+  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update)"
+  else bad "battery in UPower" "no BAT0"; fi
+  if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "Omarchy warns; the VM never suspends for it"
+  else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
+else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super

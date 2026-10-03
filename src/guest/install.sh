@@ -6,7 +6,7 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
+# omanotch, mac-clock, idle-lock, autologin, thp-kernel, battery) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
 # --thp-kernel and --autologin still work.
@@ -23,7 +23,7 @@ FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
   FEATURES+=("$name"); NEEDS[$name]=$needs
-  [[ $def == on ]] && F[$name]=on || F[$name]=off   # "notch": the Mac decides (build.sh, omacvm)
+  [[ $def == on ]] && F[$name]=on || F[$name]=off   # "notch", "laptop": the Mac decides (build.sh, omacvm)
 done < "$R/features.tsv"
 while (( $# )); do
   case $1 in
@@ -93,6 +93,8 @@ case $TYPE in
           [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
   *) echo "guest/install.sh: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;;
 esac
+# Parallels gives the VM the Mac's battery itself.
+[[ $TYPE == parallels ]] && F[battery]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
@@ -169,6 +171,11 @@ case $TYPE in
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
+if [[ ${F[battery]} == on ]]; then
+  log "the Mac's battery"; "$R/battery/guest/install.sh" on
+elif [[ -f /etc/systemd/system/omacvm-battery.service ]]; then
+  log "the Mac's battery: off"; "$R/battery/guest/install.sh" off
+fi
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
 # On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd

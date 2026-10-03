@@ -17,7 +17,7 @@
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
-#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock idle-lock autologin thp-kernel)
+#   them: bridge wallpaper gestures scroll-momentum omanotch mac-clock battery idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
 # Silicon, Parallels Desktop 19+, UTM 5, VMware Fusion 13+ or OmacVM.app, and
 # Homebrew's zstd + e2fsprogs (not for OmacVM.app, which builds the VM with its
@@ -50,7 +50,7 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
@@ -63,6 +63,7 @@ feature_flag() {   # NAME on|off
     scroll-momentum|glide) GLIDE=$v ;;
     omanotch) OMANOTCH=$v ;;
     mac-clock) MAC_CLOCK=$v ;;
+    battery) BATTERY=$v ;;
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
@@ -189,6 +190,10 @@ case $TYPE in
     fi ;;
   *) usage "--vm-type parallels, utm, fusion or app" ;;
 esac
+# The Mac's battery: on with one, except on Parallels (it shows it itself).
+i=$(feature_index battery)
+if [[ -z $BATTERY ]]; then [[ $(feature_default "$i") == on ]] && BATTERY=1 || BATTERY=0
+elif (( BATTERY )) && ! feature_available "$i"; then (( JSON )) || info "${FTITLE[$i]}: off ($REASON)"; BATTERY=0; fi
 # Homebrew and its zstd, e2fsprogs and OpenSSL (installed after asking), for
 # the routes that build the disk here. OmacVM.app brings its own tools.
 (( DRY )) || [[ $TYPE == app ]] || ensure_brew_tools
@@ -326,6 +331,7 @@ fvar() {
   case $1 in
     bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
     scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; idle-lock) echo IDLE_LOCK ;;
+    battery) echo BATTERY ;;
     autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
   esac
 }
@@ -338,6 +344,7 @@ explain_features() {
     state=$( ((v)) && echo on || echo off)
     [[ ${FN[$i]} == idle-lock ]] && state=$( ((v)) && echo kept || echo "off, the Mac's lock")
     [[ ${FN[$i]} == omanotch && $NOTCH != notch ]] && state="off (no notch)"
+    feature_has_tag "$i" laptop && ! feature_available "$i" && state="off ($REASON)"
     printf '    %-48s %s%s\n' "${FTITLE[$i]}" "$state" "$(feature_has_tag "$i" experimental && echo "  (experimental)")"
   done
 }
@@ -348,7 +355,7 @@ if (( ! YES )); then
     UI_ON+=("$(fget "${FN[$i]}")")
     t=""; feature_has_tag "$i" experimental && t=experimental; feature_has_tag "$i" slow && t=slow
     UI_TAG+=("$t")
-    r=""; feature_has_tag "$i" notch && [[ $NOTCH != notch ]] && r="needs a MacBook with a notch"
+    r=""; feature_available "$i" || r=$REASON
     UI_OFF_REASON+=("$r")
     n=${FNEEDS[$i]}; [[ $n == - ]] && n=""; UI_NEEDS+=("$n")
   done
@@ -383,7 +390,7 @@ esac
 [[ -n $CHANNEL ]] || CHANNEL=$(omarchy_channel)
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
-       mac-clock "$MAC_CLOCK" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
+       mac-clock "$MAC_CLOCK" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."

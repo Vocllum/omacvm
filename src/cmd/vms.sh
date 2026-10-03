@@ -32,7 +32,7 @@ while IFS=$'\t' read -r name type state; do
       reach=true
       version=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
       if [[ -n $version ]]; then
-        features_read_env "$probe"
+        TYPE=$type; features_read_env "$probe"   # TYPE: the defaults of features it does not name
         for ((i = 0; i < ${#FN[@]}; i++)); do
           feats+="${feats:+, }\"${FN[$i]}\": $( [[ ${FV[$i]} == on ]] && echo true || echo false)"
         done
