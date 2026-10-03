@@ -1,9 +1,10 @@
 # The Mac's battery
 
 On a MacBook, Omarchy's bar shows the Mac's battery as it would on a laptop:
-charge, charging or not, time left, and its battery panel (size, cycles,
-the charge limit set in macOS). Omarchy warns when it runs low; the VM never
-suspends or powers off for it, the Mac decides that.
+charge, charging or not, and its battery panel (size, cycles, the charge
+limit set in macOS). Time left and Omarchy's low-battery warning should work
+the same way but are not tested yet with the Mac on battery (see Tested). The
+VM never suspends or powers off for a low battery, the Mac decides that.
 
 Feature `battery`: on by default for UTM, VMware Fusion and OmacVM.app on a
 Mac with a battery. Parallels gives the VM the Mac's battery itself, so
