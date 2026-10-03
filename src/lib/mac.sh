@@ -158,6 +158,16 @@ vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts
   die "VM '$1' did not start"
 }
 
+# Parallels Tools from this Mac's Parallels Desktop into the VM at IP.
+parallels_tools_install() {
+  local iso="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
+  [[ -f $iso ]] || die "Parallels Tools not found: $iso"
+  gssh "$1" "cat > /root/prl-tools-lin-arm.iso" < "$iso"
+  gssh "$1" "set -e; mkdir -p /mnt/tools; mount -o loop,ro /root/prl-tools-lin-arm.iso /mnt/tools
+    /mnt/tools/installer/install-cli.sh --install >/dev/null 2>&1 || /mnt/tools/installer/install-cli.sh --install
+    umount /mnt/tools; rm -f /root/prl-tools-lin-arm.iso"
+}
+
 # ---- UTM ----
 UTMCTL=/Applications/UTM.app/Contents/MacOS/utmctl
 
