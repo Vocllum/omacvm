@@ -306,6 +306,7 @@ What the review found, and the fixes:
 
 Left open: the Mac apps are signed ad hoc with a requirement that names only
 their identifier, so another program signed the same way could keep their
-privacy permissions (signing releases with a Developer ID fixes that); the
-try-omarchy image, Omanotch and Arch Linux ARM's kernel recipe are not pinned
-to a checksum or commit.
+privacy permissions (signing releases with a Developer ID fixes that); Omanotch
+and Arch Linux ARM's kernel recipe follow their latest versions (not pinned to
+a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
+(`dmg_sha256`) refuses a `TryOmarchy.dmg` whose SHA-256 differs.
