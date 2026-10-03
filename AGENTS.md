@@ -41,8 +41,8 @@ UTM, or choose their password: hand those over, never work around them.
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
      is experimental and off by default: offer
      it, do not decide it.
-  3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes; run it in the
-     background and follow its output). Exit 3 = something to install first.
+  3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, Fusion 45-85:
+     `minutes` in the plan; run it in the background and follow its output). Exit 3 = something to install first.
   4. Hand over the `needs_human` steps, then `omacvm check --vm NAME --json`
      until `ok` (the person must be logged in to Omarchy; `needs_human: true`
      entries are theirs). With several VMs, Omanotch serves one at a time: an

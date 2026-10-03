@@ -398,7 +398,7 @@ if (( PLAN && JSON )); then
     printf '%s"%s": %s' "$( ((k)) && echo ', ')" "${FEATS[$k]}" "$( ((FEATS[k+1])) && echo true || echo false)"
     cmd+=" --feature ${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)"
   done
-  printf '},\n  "minutes": "30-70",\n  "needs_human": ['
+  printf '},\n  "minutes": "%s",\n  "needs_human": [' "$([[ $TYPE == fusion ]] && echo 45-85 || echo 30-70)"
   first=1
   while IFS= read -r step; do
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0
