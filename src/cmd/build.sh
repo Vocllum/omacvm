@@ -176,8 +176,14 @@ case $TYPE in
     else wait_for_app fusion; fi
     vm_network_ok fusion || needs_person "VMware Fusion's NAT network is missing (see above)" ;;
   app)
-    # Not downloaded for you yet: the release page only.
-    APP=$(app_bundle) || needs_person "OmacVM.app is not installed: download it from $APP_RELEASES, drag it into Applications, open it once, then run omacvm again"
+    # Missing: installed above (ensure_vm_app); a plan or a dry run only checks
+    # that this version's download is there.
+    if ! APP=$(app_bundle); then
+      (( DRY )) || die "OmacVM.app is not installed"
+      APP=""; app_published "$(cat "$R/src/VERSION")" || app_not_published "$(cat "$R/src/VERSION")"
+    elif (( ! JSON )) && app_version_lt "$(app_version "$APP")" "$(cat "$R/src/VERSION")"; then
+      info "OmacVM.app $(app_version "$APP") is older than this OmacVM ($(cat "$R/src/VERSION")): omacvm update updates it"
+    fi
     if (( ! DRY )) && other=$(app_other_running ""); then
       needs_person "OmacVM.app runs one VM at a time and the build starts the new one at its end: shut down '$other' first"
     fi ;;
@@ -417,7 +423,7 @@ if (( PLAN && JSON )); then
       (parallels) echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" ;;
       (utm) echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" ;;
       (fusion) echo "VMware Fusion $(fusion_version)" ;;
-      (app) echo "OmacVM.app $(app_version "$APP") ($APP)" ;;
+      (app) [[ -n $APP ]] && echo "OmacVM.app $(app_version "$APP") ($APP)" || echo "OmacVM.app $(cat "$R/src/VERSION") (not installed: downloaded by the build)" ;;
     esac)")" \
     "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")" "$(json_str "${VM_DIR:-UTM library}")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
@@ -443,6 +449,7 @@ if (( PLAN && JSON )); then
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0
   done < <([[ $TYPE == app ]] || have_homebrew || echo "Install Homebrew (https://brew.sh): /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
            [[ $TYPE == app ]] || { bt=$(missing_brew_tools); [[ -z $bt ]] || echo "Install Homebrew's tools for the build: brew install $bt"; }
+           [[ $TYPE != app || -n $APP ]] || echo "Install OmacVM.app (omacvm build without --yes does it after asking): $(app_install_cmd "$(cat "$R/src/VERSION")")"
            echo "Choose the password for $U in Omarchy (OMACVM_PASSWORD for --yes)."; human_steps)
   printf '\n  ],\n  "command": %s\n}\n' "$(json_str "$cmd")"
   DONE=1; exit 0
@@ -456,7 +463,7 @@ if [[ $TYPE == parallels ]]; then
 elif [[ $TYPE == utm ]]; then
   APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
 elif [[ $TYPE == app ]]; then
-  APP_LINE="OmacVM.app $(app_version "$APP") ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM"))"
+  APP_LINE="OmacVM.app $( [[ -n $APP ]] && app_version "$APP" || echo "$(cat "$R/src/VERSION"), downloaded first") ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM"))"
 else
   APP_LINE="VMware Fusion $(fusion_version) ($(fusion_bundle "$VM" | sed "s|^$HOME|~|"))"
 fi
