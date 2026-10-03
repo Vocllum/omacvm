@@ -57,7 +57,8 @@ log "OmacVM on the Mac"
 if app=$(app_bundle); then
   have=$(app_version "$app"); want=$(cat "$R/src/VERSION")
   if app_version_lt "$have" "$want"; then
-    running=$(app_list | awk -F'\t' '$3 == "running" { print $1; exit }')
+    # awk reads to the end: an early exit would stop app_list with SIGPIPE.
+    running=$(app_list | awk -F'\t' '$3 == "running" && !f { print $1; f = 1 }')
     if [[ -n $running ]]; then
       info "OmacVM.app: '$running' runs in it, not updated ($have; $want is out). Shut the VM down, then: omacvm update"
     elif pgrep -qf "$app/Contents/"; then
