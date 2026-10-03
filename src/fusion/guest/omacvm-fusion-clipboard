@@ -10,10 +10,24 @@
 # text there (polled). The agent sees a new copy by the selection's TIMESTAMP,
 # which xsel answers (xclip answers it with the text). Text only. Runs in the
 # desktop session (omacvm-fusion-clipboard.service), Xvfb and the agent as its
-# children.
+# children. The X display is its own, on a free number, and needs a cookie
+# only the desktop user can read.
 import hashlib, os, subprocess, threading, time
 
-ENV = dict(os.environ, DISPLAY=os.environ.get("OMACVM_AGENT_DISPLAY", ":99"))
+
+def own_display():
+    n = 99
+    while os.path.exists(f"/tmp/.X11-unix/X{n}") or os.path.exists(f"/tmp/.X{n}-lock"):
+        n += 1
+    return f":{n}"
+
+
+DISPLAY = own_display()
+AUTH = os.path.join(os.environ.get("XDG_RUNTIME_DIR", "/tmp"), "omacvm-fusion-xauth")
+open(AUTH, "w").close()
+os.chmod(AUTH, 0o600)
+subprocess.run(["xauth", "-q", "-f", AUTH, "add", DISPLAY, "MIT-MAGIC-COOKIE-1", os.urandom(16).hex()], check=True)
+ENV = dict(os.environ, DISPLAY=DISPLAY, XAUTHORITY=AUTH)
 last = None
 lock = threading.Lock()
 
@@ -58,15 +72,12 @@ def x11_to_wayland():
             last = digest(data)
         subprocess.run(["wl-copy", "--type", "text/plain;charset=utf-8"], input=data, env=ENV)
 
-DISPLAY = ENV["DISPLAY"]
-if subprocess.run(["xsel", "--clipboard", "--output"], env=ENV, capture_output=True).returncode != 0 and \
-        not os.path.exists("/tmp/.X11-unix/X" + DISPLAY.lstrip(":")):
-    subprocess.Popen(["Xvfb", DISPLAY, "-nolisten", "tcp", "-screen", "0", "1024x768x24"],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(50):
-        if os.path.exists("/tmp/.X11-unix/X" + DISPLAY.lstrip(":")):
-            break
-        time.sleep(0.1)
+subprocess.Popen(["Xvfb", DISPLAY, "-auth", AUTH, "-nolisten", "tcp", "-nolisten", "local",
+                  "-screen", "0", "1024x768x24"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+for _ in range(50):
+    if os.path.exists("/tmp/.X11-unix/X" + DISPLAY.lstrip(":")):
+        break
+    time.sleep(0.1)
 subprocess.Popen(["vmware-user-suid-wrapper"], env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 threading.Thread(target=wayland_to_x11, daemon=True).start()
 x11_to_wayland()
