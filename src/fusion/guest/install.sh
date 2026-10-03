@@ -4,10 +4,18 @@
 set -euo pipefail
 U=${1:?usage: install.sh <desktop-user> <WxH@Hz>}
 MODE=${2:?usage: install.sh <desktop-user> <WxH@Hz>}
+[[ $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || { echo "install.sh: --display WxH@Hz, not '$MODE'" >&2; exit 2; }
 here=$(cd "$(dirname "$0")" && pwd)
 H=$(getent passwd "$U" | cut -d: -f6)
 
-"$here/dns.sh"
+# Public DNS while OmacVM installs (guest/install.sh turns it off at the end).
+"$here/dns.sh" on
+
+# What runs as root later (the pacman hook) gets its own root-owned copy.
+L=/usr/local/lib/omacvm/fusion
+install -d -o root -g root -m755 "$L"
+install -o root -g root -m755 "$here/build-hyprland.sh" "$L/"
+install -o root -g root -m644 "$here/hyprland-vmwgfx-dmabuf.patch" "$L/"
 
 # Hyprland with the vmwgfx fix, now and after every hyprland upgrade. The hook
 # cannot install packages (pacman's database is locked), so the build tools stay.
@@ -21,9 +29,9 @@ Target = hyprland
 [Action]
 Description = OmacVM: Hyprland with the vmwgfx fix for VMware Fusion (10 to 20 minutes)
 When = PostTransaction
-Exec = /usr/local/share/omacvm/fusion/guest/build-hyprland.sh --hook
+Exec = /usr/local/lib/omacvm/fusion/build-hyprland.sh --hook
 HOOK
-"$here/build-hyprland.sh"
+"$L/build-hyprland.sh"
 
 # Displays: VMware Tools brings Fusion's layout (every Mac display in full
 # screen, the window size in a window) to vmwgfx; omacvm-fusion-displays puts
@@ -32,11 +40,12 @@ HOOK
 # Omarchy's scaling menu chose, else 2 on a Retina-size display.
 "$here/build-open-vm-tools.sh" "$U"
 install -m644 "$here/omacvm-fusion-displays.service" /etc/systemd/user/omacvm-fusion-displays.service
-systemctl --global enable omacvm-fusion-displays.service >/dev/null 2>&1
+systemctl --global disable omacvm-fusion-displays.service >/dev/null 2>&1 || true   # older versions: every user
+systemctl --user -M "$U@" enable omacvm-fusion-displays.service >/dev/null 2>&1
 # Copy and paste: VMware's agent on a private X display, synced with Wayland's
 # clipboard (omacvm-fusion-clipboard). The tools' own autostart entry would
 # start a second agent on Hyprland's X11 display, where it cannot work.
-pacman -S --needed --noconfirm xorg-server-xvfb xsel wl-clipboard >/dev/null
+pacman -S --needed --noconfirm xorg-server-xvfb xorg-xauth xsel wl-clipboard >/dev/null
 install -Dm644 /dev/stdin "$H/.config/autostart/vmware-user.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
@@ -46,9 +55,14 @@ Hidden=true
 DESKTOP
 chown -R "$U:$U" "$H/.config/autostart"
 install -m644 "$here/omacvm-fusion-clipboard.service" /etc/systemd/user/omacvm-fusion-clipboard.service
-systemctl --global enable omacvm-fusion-clipboard.service >/dev/null 2>&1
+systemctl --global disable omacvm-fusion-clipboard.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" enable omacvm-fusion-clipboard.service >/dev/null 2>&1
 
 M=$H/.config/hypr/monitors.lua
+# Ours already: only the first mode changes, the rest stays as you left it.
+if head -1 "$M" 2>/dev/null | grep -q '^-- OmacVM, VMware Fusion'; then
+  sed -i "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|" "$M"
+else
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
 [[ -n $scale ]] || { w=${MODE%%x*}; (( w >= 3000 )) && scale=2 || scale=1; }
 gdk=$(printf '%.0f' "$scale")
@@ -64,10 +78,12 @@ hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
 hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })
 LUA
+fi
 chown "$U:$U" "$M"
+scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" | head -1)
 if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
   systemctl --user -M "$U@" restart omacvm-fusion-displays.service 2>/dev/null || true
   pkill -u "$U" -f 'vmtoolsd -n vmusr' 2>/dev/null || true   # a stray agent on Hyprland's X11 display
   systemctl --user -M "$U@" restart omacvm-fusion-clipboard.service 2>/dev/null || true
 fi
-echo "VMware Fusion: public DNS, Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale), copy and paste"
+echo "VMware Fusion: Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale), copy and paste"

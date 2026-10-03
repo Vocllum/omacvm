@@ -66,6 +66,7 @@ if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
   exit 3
 fi
 [[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ -z $MODE || $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || die "--display WxH@Hz, not '$MODE'"
 [[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
 probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")
@@ -119,9 +120,10 @@ fi
 log "OmacVM -> $IP:/usr/local/share/omacvm"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycache__ -czf - . |
   gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
-              tar -C /usr/local/share/omacvm -xzf - 2>/dev/null"
+              tar --no-same-owner -C /usr/local/share/omacvm -xzf - 2>/dev/null"
 fargs=""
 for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
+[[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 
 if [[ $TYPE == parallels ]]; then
