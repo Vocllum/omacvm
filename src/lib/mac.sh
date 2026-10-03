@@ -47,7 +47,7 @@ hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) c
 # daemons say it too, so it is made here when Gestures comes without the Bridge.
 BRIDGE_TOKEN="$HOME/Library/Application Support/omacvm-bridge/token"
 bridge_token_ensure() {
-  [[ $(tr -d '[:space:]' < "$BRIDGE_TOKEN" 2>/dev/null | wc -c) -ge 32 ]] && return 0
+  [[ -f $BRIDGE_TOKEN && $(tr -d '[:space:]' < "$BRIDGE_TOKEN" | wc -c) -ge 32 ]] && return 0
   mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
   (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
 }
