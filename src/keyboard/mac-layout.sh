@@ -11,7 +11,8 @@ case $id in
   Colemak) echo "us colemak" ;;
   British|British-PC|ABC-QWERTZ) echo "gb" ;;
   Irish|IrishExtended) echo "ie" ;;
-  Canadian|Canadian-CSA|CanadianFrench-PC) echo "ca" ;;
+  Canadian) echo "ca eng" ;;
+  Canadian-CSA|CanadianFrench-PC) echo "ca" ;;
   German) echo "de" ;;
   Austrian) echo "at" ;;
   SwissGerman) echo "ch de" ;;
