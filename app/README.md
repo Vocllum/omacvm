@@ -25,9 +25,21 @@ committed: the build stops when `src/` has uncommitted changes.
 ## Release
 
 ```sh
+export OMACVM_SIGN_ID=<Developer ID identity, name or SHA-1>
 scripts/build-app.sh --release      # stops unless the whole repo is committed
 scripts/package-release.sh          # dist/OmacVM-<version>.zip and .sha256
 ```
+
+With `OMACVM_SIGN_ID` the app, its QEMU and QEMU's libraries are signed with
+that Developer ID, the hardened runtime and a timestamp; QEMU gets
+`runtime/qemu-hvf.entitlements` (Hypervisor, microphone), the app
+`app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc.
+Check the unzipped app with `codesign --verify --deep --strict` and
+`spctl -a -vv -t exec`: until it is notarized, spctl says "Unnotarized
+Developer ID", and a browser download needs Open Anyway the first time.
+Notarizing (not part of the scripts yet): `xcrun notarytool submit
+dist/OmacVM-<version>.zip --keychain-profile <profile> --wait`, then
+`xcrun stapler staple dist/OmacVM.app` and `scripts/package-release.sh` again.
 
 The version is OmacVM's (`../src/VERSION`). Upload both files to the GitHub
 release `v<version>`: `omacvm build --vm-type app` and `omacvm update`

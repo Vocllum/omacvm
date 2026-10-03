@@ -13,8 +13,10 @@ OmacVM's version.
 - `omacvm build --vm-type app`: when the app is missing, OmacVM offers to
   download it (below) and goes on with the build.
 - Or download `OmacVM-<version>.zip` from the
-  [releases](https://github.com/gillesgoetsch/omacvm/releases), unzip it and
-  open it: it offers to install itself in Applications. Downloaded with a
+  [releases](https://github.com/gillesgoetsch/omacvm/releases) (signed with
+  a Developer ID), unzip it and open it: it offers to install itself in
+  Applications, keeping that signature (under another name it is signed
+  again ad hoc). Downloaded with a
   browser, macOS blocks it the first time: click Open Anyway in System
   Settings › Privacy & Security.
 
