@@ -71,8 +71,10 @@ struct VMInterface: Hashable {
 /// connected at once; the controller decides which one the strip serves. A
 /// new connection from a connected guest's address replaces the old one (a
 /// restarted notchcast or rebooted VM). On 127.0.0.1 all of OmacVM.app's VMs
-/// share one address, so there each connection is a guest of its own; one
-/// that says the token and the name of a connected guest replaces that one.
+/// share one address, so there each connection is a guest of its own, once it
+/// has proved it knows the Bridge's token (GuestAuth); until then it is kept
+/// apart and takes no guest's slot. One that says the name of a connected
+/// guest replaces that one.
 ///
 /// It listens only on the Mac's side of VM shared networks (never on Wi-Fi,
 /// Ethernet, Internet Sharing or Thunderbolt bridges) and accepts a connection
@@ -92,9 +94,6 @@ final class GuestLink {
         var connection: NWConnection
         let stream = GuestStream()
         var isConnected = false
-        /// On 127.0.0.1 a guest counts only after "auth <token>" (any Mac
-        /// program can connect there); elsewhere the network is the check.
-        var authorized: Bool
         /// Its "vmname" as sent (127.0.0.1 only).
         var vmName: String?
         let since = Date()
@@ -104,11 +103,25 @@ final class GuestLink {
             self.peer = peer
             self.iface = iface
             self.connection = connection
-            self.authorized = iface != VMInterface.omacvmApp
+        }
+    }
+
+    /// A connection on 127.0.0.1 that has not proved the token yet.
+    private final class Pending {
+        let peer: UInt32
+        let connection: NWConnection
+        var buffer = Data()
+        /// The Mac address it came in on and the nonces, after "challenge".
+        var addr = "", guestNonce = "", macNonce = ""
+
+        init(peer: UInt32, connection: NWConnection) {
+            self.peer = peer
+            self.connection = connection
         }
     }
 
     static let maxGuests = 8
+    static let maxPending = 16
 
     private let port: UInt16
     private let prefixes: [String]
@@ -121,6 +134,8 @@ final class GuestLink {
     private var listeners: [VMInterface: NWListener] = [:]
     private var scanTimer: Timer?
     private var guests: [Int: Guest] = [:]
+    private var pending: [ObjectIdentifier: Pending] = [:]
+    private var lastRefusal = ("", Date.distantPast)
     /// Guest ids grow with each new guest, so they give the connection order.
     private var nextID = 1
 
@@ -214,12 +229,16 @@ final class GuestLink {
             c.cancel()
             return
         }
+        // 127.0.0.1: any VM of OmacVM.app, or any Mac program. It proves the
+        // token first and replaces no one by its address.
+        if iface == VMInterface.omacvmApp {
+            startPending(c, peer: ip)
+            return
+        }
         // The same address again takes over at once (a restarted notchcast or
         // rebooted VM). TCP keepalive and the network check in rescan() notice
-        // a guest that vanished without closing. Not on 127.0.0.1: there it
-        // would be any VM of OmacVM.app (or any Mac program).
-        if iface != VMInterface.omacvmApp,
-           let g = guests.values.first(where: { $0.peer == ip && $0.iface == iface }) {
+        // a guest that vanished without closing.
+        if let g = guests.values.first(where: { $0.peer == ip && $0.iface == iface }) {
             let old = g.connection
             let takeover = g.isConnected
             g.connection = c
@@ -237,26 +256,21 @@ final class GuestLink {
         nextID += 1
         guests[g.id] = g
         run(c, for: g, takeover: false)
-        if !g.authorized {
-            // A connection that never says the token does not keep its slot.
-            queue.asyncAfter(deadline: .now() + 10) { [weak g] in
-                guard let g, !g.authorized, g.connection === c else { return }
-                Log.info("guest \(g.id) on 127.0.0.1 sent no token in time; dropping it")
-                c.cancel()
-            }
-        }
     }
 
     private func run(_ c: NWConnection, for g: Guest, takeover: Bool) {
+        watch(c, for: g, takeover: takeover)
+        c.start(queue: queue)
+    }
+
+    private func watch(_ c: NWConnection, for g: Guest, takeover: Bool) {
         c.stateUpdateHandler = { [weak self, weak c, weak g] state in
             guard let self, let c, let g, c === g.connection, self.guests[g.id] === g else { return }
             switch state {
             case .ready:
                 Log.info("guest \(g.id) connected: \(c.endpoint)")
                 // Taking over from an old connection is a new session too.
-                if !g.authorized {
-                    // waits for "auth" (receive)
-                } else if takeover && g.isConnected { self.onConnectionChange?(g.id, true) } else { self.setConnected(g, true) }
+                if takeover && g.isConnected { self.onConnectionChange?(g.id, true) } else { self.setConnected(g, true) }
                 self.receive(on: c, for: g)
             case .failed, .cancelled:
                 self.drop(g, c)
@@ -264,34 +278,145 @@ final class GuestLink {
                 break
             }
         }
+    }
+
+    // MARK: 127.0.0.1: the token first
+
+    /// Kept apart from the guests until it proves the token: it takes no
+    /// guest's slot and replaces no one; at most `maxPending` at once.
+    private func startPending(_ c: NWConnection, peer: UInt32) {
+        guard pending.count < Self.maxPending else {
+            Log.info("\(pending.count) connections on 127.0.0.1 have not proved the token yet; turning away \(c.endpoint)")
+            c.cancel()
+            return
+        }
+        let p = Pending(peer: peer, connection: c)
+        let key = ObjectIdentifier(c)
+        pending[key] = p
+        c.stateUpdateHandler = { [weak self, weak p] state in
+            guard let self, let p, self.pending[key] === p else { return }
+            switch state {
+            case .ready: self.receivePending(p)
+            case .failed, .cancelled: self.pending[key] = nil
+            default: break
+            }
+        }
         c.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 10) { [weak self, weak p] in
+            guard let self, let p, self.pending[key] === p else { return }
+            self.refuse(p, "proved no token in time")
+        }
+    }
+
+    private func receivePending(_ p: Pending) {
+        let c = p.connection, key = ObjectIdentifier(c)
+        c.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self, weak p] data, _, isComplete, error in
+            guard let self, let p, self.pending[key] === p else { return }
+            if let data { p.buffer.append(data) }
+            // Short text messages only ("NTXT", u32 length, text).
+            while p.buffer.count >= 8 {
+                guard p.buffer.readUInt32(at: 0) == GuestStream.textMagic else { return self.refuse(p, "no challenge") }
+                let len = Int(p.buffer.readUInt32(at: 4))
+                guard len <= 200 else { return self.refuse(p, "no challenge") }
+                guard p.buffer.count >= 8 + len else { break }
+                let start = p.buffer.startIndex
+                let text = String(decoding: p.buffer[start + 8 ..< start + 8 + len], as: UTF8.self)
+                p.buffer.removeFirst(8 + len)
+                switch self.handshake(p, text) {
+                case .more: continue
+                case .proved: return self.promote(p)
+                case .refused(let why): return self.refuse(p, why)
+                }
+            }
+            if isComplete || error != nil { return self.refuse(p, nil) }
+            self.receivePending(p)
+        }
+    }
+
+    private enum Step { case more, proved, refused(String) }
+
+    /// One message of the handshake (GuestAuth).
+    private func handshake(_ p: Pending, _ text: String) -> Step {
+        let parts = text.split(separator: " ", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return .refused("not the handshake") }
+        if p.macNonce.isEmpty, parts[0] == "auth" {
+            // notchcast from before the proof says the token itself.
+            guard GuestAuth.legacyTokenMatches(String(parts[1])) else { return .refused("wrong token") }
+            Log.info("a VM on 127.0.0.1 sent the token itself: run guest/install.sh in it again for the proof")
+            return .proved
+        }
+        guard let token = GuestAuth.token() else { return .refused("no Bridge token on this Mac") }
+        if p.macNonce.isEmpty {
+            guard parts[0] == "challenge", GuestAuth.isHex(parts[1], count: 32) else { return .refused("no challenge") }
+            guard let addr = localAddress(p.connection) else { return .refused("own address unknown") }
+            p.addr = addr
+            p.guestNonce = String(parts[1])
+            p.macNonce = GuestAuth.nonce()
+            let mine = GuestAuth.proof(token: token, who: "mac", addr: addr, guestNonce: p.guestNonce, macNonce: p.macNonce)
+            p.connection.send(content: Data("proof \(p.macNonce) \(mine)\n".utf8), completion: .contentProcessed { _ in })
+            return .more
+        }
+        guard parts[0] == "proof" else { return .refused("no proof") }
+        let want = GuestAuth.proof(token: token, who: "vm", addr: p.addr, guestNonce: p.guestNonce, macNonce: p.macNonce)
+        return GuestAuth.same(Array(want.utf8), Array(parts[1].utf8)) ? .proved : .refused("wrong proof")
+    }
+
+    /// The Mac address a connection came in on (its getsockname).
+    private func localAddress(_ c: NWConnection) -> String? {
+        guard case let .hostPort(host, _)? = c.currentPath?.localEndpoint else { return nil }
+        let s = "\(host)".components(separatedBy: "%")[0]
+        return VMInterface.parse(s) != nil ? s : nil
+    }
+
+    /// A refused VM retries every few seconds: the same reason is logged once a minute.
+    private func refuse(_ p: Pending, _ why: String?) {
+        if let why, why != lastRefusal.0 || Date().timeIntervalSince(lastRefusal.1) >= 60 {
+            Log.info("refused a connection on 127.0.0.1: \(why)")
+            lastRefusal = (why, Date())
+        }
+        pending[ObjectIdentifier(p.connection)] = nil
+        p.connection.cancel()
+    }
+
+    /// Proved: a guest of its own, with what came after the proof.
+    private func promote(_ p: Pending) {
+        let c = p.connection
+        pending[ObjectIdentifier(c)] = nil
+        guard guests.count < Self.maxGuests else {
+            Log.info("\(guests.count) guests connected already; turning away \(c.endpoint)")
+            c.cancel()
+            return
+        }
+        let g = Guest(id: nextID, peer: p.peer, iface: .omacvmApp, connection: c)
+        nextID += 1
+        guests[g.id] = g
+        watch(c, for: g, takeover: false)   // ready already: only its end counts
+        Log.info("guest \(g.id) connected: \(c.endpoint)")
+        setConnected(g, true)
+        if !p.buffer.isEmpty, !deliver(p.buffer, on: c, for: g) { return }
+        receive(on: c, for: g)
+    }
+
+    // MARK: guests
+
+    /// Feeds a guest's bytes on; false when that dropped it.
+    private func deliver(_ data: Data, on c: NWConnection, for g: Guest) -> Bool {
+        do {
+            let messages = try g.stream.feed(data)
+            if g.iface == VMInterface.omacvmApp { replaceSameName(g, messages) }
+            if !messages.isEmpty { onMessages?(g.id, messages) }
+            return true
+        } catch {
+            Log.info("\(error); dropping guest \(g.id)")
+            c.cancel()
+            return false
+        }
     }
 
     private func receive(on c: NWConnection, for g: Guest) {
         c.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self, weak g] data, _, isComplete, error in
             guard let self, let g, c === g.connection, self.guests[g.id] === g else { return }
-            if let data, !data.isEmpty {
-                do {
-                    var messages = try g.stream.feed(data)
-                    if !g.authorized, !messages.isEmpty {
-                        guard case let .text(t) = messages[0], t.hasPrefix("auth "),
-                              OmacVMApp.tokenMatches(String(t.dropFirst(5))) else {
-                            Log.info("guest \(g.id) on 127.0.0.1 sent no valid token; dropping it")
-                            c.cancel()
-                            return
-                        }
-                        g.authorized = true
-                        messages.removeFirst()
-                        self.setConnected(g, true)
-                    }
-                    if g.iface == VMInterface.omacvmApp { self.replaceSameName(g, messages) }
-                    if !messages.isEmpty { self.onMessages?(g.id, messages) }
-                } catch {
-                    Log.info("\(error); dropping guest \(g.id)")
-                    c.cancel()
-                    return
-                }
-            }
+            if let data, !data.isEmpty, !self.deliver(data, on: c, for: g) { return }
             if isComplete || error != nil {
                 c.cancel()
                 return

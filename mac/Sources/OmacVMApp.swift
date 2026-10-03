@@ -5,9 +5,9 @@ import Foundation
 /// OmacVM.app: its VM window belongs to the app's QEMU, whose process may carry
 /// any name the user gave the app. Its executable is always
 /// <app>/Contents/Resources/runtime/bin/OmacVM, so windows of that process
-/// count as owner "OmacVM". Its VMs reach the Mac at 127.0.0.1 and must say
-/// OmacVM's Bridge token first ("auth <token>"), since any Mac program can
-/// connect there.
+/// count as owner "OmacVM". Its VMs reach the Mac at 127.0.0.1 and must
+/// prove they know OmacVM's Bridge token first, since any Mac program can
+/// connect there (GuestAuth).
 enum OmacVMApp {
     static let owner = "OmacVM"
 
@@ -27,18 +27,5 @@ enum OmacVMApp {
     static func ownerName(_ w: [String: Any]) -> String? {
         if let pid = w[kCGWindowOwnerPID as String] as? Int, isQEMU(pid_t(pid)) { return owner }
         return w[kCGWindowOwnerName as String] as? String
-    }
-
-    /// Compares a guest's "auth" with the Bridge's token, in constant time.
-    static func tokenMatches(_ given: String) -> Bool {
-        let path = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/omacvm-bridge/token").path
-        guard let s = try? String(contentsOfFile: path, encoding: .utf8) else { return false }
-        let want = Array(s.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
-        let got = Array(given.trimmingCharacters(in: .whitespaces).utf8)
-        guard want.count >= 32, got.count == want.count else { return false }
-        var diff: UInt8 = 0
-        for i in 0..<want.count { diff |= want[i] ^ got[i] }
-        return diff == 0
     }
 }

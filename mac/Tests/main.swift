@@ -1,6 +1,7 @@
 import Foundation
 
-// Offline tests for picking the guest the strip serves (GuestPicker.swift).
+// Offline tests for picking the guest the strip serves (GuestPicker.swift)
+// and the handshake on 127.0.0.1 (GuestAuth.swift).
 // Run: ./mac/test.sh
 
 var failures = 0
@@ -133,6 +134,25 @@ for (owner, title, want) in windows {
     check(parkedGuests.count <= 1, true, "at most one bar parked")
     if let want { check(parkedGuests, [want], "the front VM's bar is parked") }
 }
+
+// The handshake's proofs (Python's hmac gives the same).
+let tok = Array(String(repeating: "0123456789abcdef", count: 4).utf8)
+let gn = "00112233445566778899aabbccddeeff", mn = "ffeeddccbbaa99887766554433221100"
+check(GuestAuth.proof(token: tok, who: "mac", addr: "127.0.0.1", guestNonce: gn, macNonce: mn),
+      "6fa309bdb8d1e1803b2875f65bb9cf1542cc4d9842c7dc07de5a7f775a954ce6", "Mac's proof")
+check(GuestAuth.proof(token: tok, who: "vm", addr: "127.0.0.1", guestNonce: gn, macNonce: mn),
+      "48fcac6736d91efc2fbf44882c689c7bfc2f65bb74498f5b7e58026c292e89f2", "VM's proof")
+check(GuestAuth.proof(token: tok, who: "mac", addr: "10.211.55.2", guestNonce: gn, macNonce: mn)
+      != GuestAuth.proof(token: tok, who: "mac", addr: "127.0.0.1", guestNonce: gn, macNonce: mn), true,
+      "the address counts")
+check(GuestAuth.nonce().count, 32, "nonce length")
+check(GuestAuth.nonce() != GuestAuth.nonce(), true, "fresh nonces")
+check(GuestAuth.isHex(Substring(gn), count: 32), true, "hex nonce")
+check(GuestAuth.isHex("00112233445566778899AABBCCDDEEFF", count: 32), false, "upper-case hex")
+check(GuestAuth.isHex("0011", count: 32), false, "short nonce")
+check(GuestAuth.same(Array("abc".utf8), Array("abc".utf8)), true, "same")
+check(GuestAuth.same(Array("abc".utf8), Array("abd".utf8)), false, "not same")
+check(GuestAuth.same(Array("abc".utf8), Array("ab".utf8)), false, "other length")
 
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
