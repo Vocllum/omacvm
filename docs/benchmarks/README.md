@@ -94,6 +94,50 @@ bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,gpu,glmark
 Each result is one JSON line: host, OS, test, run, value, and the browser
 version or Geekbench link.
 
+## Power draw and battery life
+
+How much power the whole Mac draws while Omarchy runs in a VM, against the
+same work on macOS, and what that means for the battery. Run on the Mac:
+
+```bash
+src/bench/power-suite.sh ~/bench/power-mac.jsonl                      # macOS itself
+src/bench/power-suite.sh --vm root@<vm-ip> ~/bench/power-fusion.jsonl  # one VM doing the work
+```
+
+| Load | What runs |
+|---|---|
+| idle | nothing: the desktop as you leave it |
+| light | Chrome scrolling a long text page, like reading (`src/bench/pages/reading.html`) |
+| video | YouTube 4K in Chrome (`video-bench.py`, below) |
+| cpu | every CPU core busy |
+| gpu | WebGL Aquarium with 30,000 fish in Chrome |
+
+- **The number** comes from the battery's own telemetry (`power.sh`, no sudo):
+  `AccumulatedSystemLoad` over `SystemLoadAccumulatorCount` in
+  `AppleSmartBattery`, the average draw of the whole Mac, display included.
+  macOS updates it about every 45 seconds, so each window starts and ends on an
+  update (3 minutes plus up to a minute).
+- **Battery life** is the battery's capacity over that draw: for this MacBook
+  Pro 16" M4 Max, 100 Wh. On the charger the numbers are the same: the Mac
+  reports what the system uses, not what the charger delivers.
+- **Keep it quiet:** only the VM under test runs, its app in full screen on the
+  built-in display, the same brightness for every run, no other apps, Bluetooth
+  and Wi-Fi as usual. Don't touch the Mac while it measures. An agent running
+  the tests must not poll during the windows either.
+
+## YouTube 4K
+
+```bash
+src/bench/video-bench.py --port 9222 --seconds 60   # Chrome started with --remote-debugging-port=9222
+```
+
+It plays a 4K video (YouTube's embed player inside a small local page, which
+YouTube needs), and reads from Chrome's media events which decoder plays it:
+`VideoToolboxVideoDecoder` on the Mac and `VaapiVideoDecoder` in a VM mean
+hardware; `Dav1dVideoDecoder`, `VpxVideoDecoder` or `FFmpegVideoDecoder` mean
+the CPU. It also reports the resolution, frames per second and dropped frames.
+On the Mac: AV1 3840x2160 at 60 fps in hardware, 0 % dropped.
+
 ## Report and chart
 
 On the Mac, with all files in one folder:
