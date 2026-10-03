@@ -109,6 +109,8 @@ if command -v grub-mkconfig >/dev/null; then
   printf '%s\n' '[[ " ${HOOKS[*]} " == *" grub-btrfs-overlayfs "* ]] || HOOKS+=(grub-btrfs-overlayfs)' \
     > /etc/mkinitcpio.conf.d/zz-omacvm.conf
   systemctl enable --now grub-btrfsd >/dev/null 2>&1 || true
+  # Arch Linux ARM's kernel under a name GRUB pairs with its initramfs.
+  "$R/kernel/stock-kernel.sh"
 fi
 install -Dm644 /dev/stdin /etc/systemd/resolved.conf.d/10-omacvm.conf <<'EOF'
 [Resolve]
@@ -244,12 +246,16 @@ if [[ ${F[thp-kernel]} == on ]]; then
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"
   fi
-elif pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
-  # Off: GRUB boots Arch Linux ARM's own kernel again. The package goes once
-  # the VM no longer runs it (this run, or the next one after a reboot).
+elif [[ -f /boot/vmlinuz-linux ]] && command -v grub-mkconfig >/dev/null; then
+  # Off: GRUB boots Arch Linux ARM's own kernel, by stock-kernel.sh's name
+  # for it (with its initramfs).
   G=/etc/default/grub
-  sed -i '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' $G
-  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/Image"' >> $G   # linux-aarch64's
+  sed -i -e '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' -e '/^GRUB_TOP_LEVEL="\/boot\/Image"$/d' $G
+  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux"' >> $G
+fi
+# The memory-optimized kernel's package goes once the VM no longer runs it
+# (this run, or the next one after a reboot).
+if [[ ${F[thp-kernel]} != on ]] && pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
   if [[ $(uname -r) == *thp* ]]; then
     log "memory-optimized kernel: off, Arch Linux ARM's own kernel from the next boot"
   else

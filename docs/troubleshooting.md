@@ -27,6 +27,7 @@ else than the cause. Recipes and the general failure table are in
 | 15 | UTM | [UTM uses 15 W while Omarchy sits idle](#15-utm-uses-15-w-while-omarchy-sits-idle) |
 | 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
 | 17 | All | [Security review of the Mac and guest sides; "another SSH host key"](#17-security-review-of-the-mac-and-guest-sides) |
+| 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -310,3 +311,24 @@ privacy permissions (signing releases with a Developer ID fixes that); Omanotch
 and Arch Linux ARM's kernel recipe follow their latest versions (not pinned to
 a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
 (`dmg_sha256`) refuses a `TryOmarchy.dmg` whose SHA-256 differs.
+
+## 18. All routes: no snapshots in GRUB with Arch Linux ARM's own kernel
+
+- **Symptom:** without the memory-optimized kernel, GRUB has no "Omarchy
+  snapshots" menu, and `/proc/cmdline` says `BOOT_IMAGE=/Image` with no
+  initramfs (no Plymouth splash, and a read-only snapshot would get no
+  writable overlay). Found when `omacvm disable thp-kernel` went back to the
+  stock kernel.
+- **Cause:** Arch Linux ARM installs its kernel as `/boot/Image`. GRUB's
+  `10_linux` lists it but looks for `initramfs-Image.img`, which does not
+  exist; grub-btrfs only looks at `vmlinuz-*`, so it found no kernel at all
+  ("Kernels not found"). The memory-optimized kernel never had the problem:
+  it is `vmlinuz-linux-aarch64-thp`.
+- **Fix:** a copy of the kernel as `/boot/vmlinuz-linux`, which pairs with
+  `initramfs-linux.img` in both, kept current by a pacman hook after every
+  kernel update; GRUB boots it by default when the memory-optimized kernel is
+  off. `omacvm check` fails "bootable snapshots" when GRUB has no snapshots
+  menu.
+- **Where:** `src/kernel/stock-kernel.sh` (copy and hooks
+  `/etc/pacman.d/hooks/zz-omacvm-stock-kernel*.hook`), `src/guest/install.sh`
+  (`GRUB_TOP_LEVEL`), `src/guest/check.sh`.
