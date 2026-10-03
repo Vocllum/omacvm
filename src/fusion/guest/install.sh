@@ -33,6 +33,21 @@ HOOK
 "$here/build-open-vm-tools.sh" "$U"
 install -m644 "$here/omacvm-fusion-displays.service" /etc/systemd/user/omacvm-fusion-displays.service
 systemctl --global enable omacvm-fusion-displays.service >/dev/null 2>&1
+# Copy and paste: VMware's agent on a private X display, synced with Wayland's
+# clipboard (omacvm-fusion-clipboard). The tools' own autostart entry would
+# start a second agent on Hyprland's X11 display, where it cannot work.
+pacman -S --needed --noconfirm xorg-server-xvfb xsel wl-clipboard >/dev/null
+install -Dm644 /dev/stdin "$H/.config/autostart/vmware-user.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=VMware User Agent (started by omacvm-fusion-clipboard instead)
+Exec=/usr/bin/vmware-user-suid-wrapper
+Hidden=true
+DESKTOP
+chown -R "$U:$U" "$H/.config/autostart"
+install -m644 "$here/omacvm-fusion-clipboard.service" /etc/systemd/user/omacvm-fusion-clipboard.service
+systemctl --global enable omacvm-fusion-clipboard.service >/dev/null 2>&1
+
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
 [[ -n $scale ]] || { w=${MODE%%x*}; (( w >= 3000 )) && scale=2 || scale=1; }
@@ -52,5 +67,7 @@ LUA
 chown "$U:$U" "$M"
 if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
   systemctl --user -M "$U@" restart omacvm-fusion-displays.service 2>/dev/null || true
+  pkill -u "$U" -f 'vmtoolsd -n vmusr' 2>/dev/null || true   # a stray agent on Hyprland's X11 display
+  systemctl --user -M "$U@" restart omacvm-fusion-clipboard.service 2>/dev/null || true
 fi
-echo "VMware Fusion: public DNS, Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale)"
+echo "VMware Fusion: public DNS, Hyprland with the vmwgfx fix, VMware Tools, displays (first: $MODE, scale $scale), copy and paste"
