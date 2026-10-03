@@ -52,5 +52,34 @@ local omarchy_monitor_scale = ${scale:-2}
 hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
 hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
 LUA
-if cmp -s "$tmp" "$M"; then rm -f "$tmp"; else chmod 644 "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$M"; fi
-echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE"
+# A new mode while Omarchy runs would go live and blank virgl: then it waits in
+# monitors.lua.pending, which omacvm-utm-display puts in place at the next boot.
+cat > /etc/systemd/system/omacvm-utm-display.service <<'UNIT'
+[Unit]
+Description=OmacVM, UTM: a display mode set while Omarchy ran
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-utm-display
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /usr/local/bin/omacvm-utm-display <<'SH'
+#!/bin/sh
+for f in /home/*/.config/hypr/monitors.lua.pending; do
+  [ -f "$f" ] && mv -f "$f" "${f%.pending}"
+done
+exit 0
+SH
+chmod 755 /usr/local/bin/omacvm-utm-display
+systemctl enable -q omacvm-utm-display.service 2>/dev/null || true
+when=now
+if cmp -s "$tmp" "$M"; then rm -f "$tmp"; rm -f "$M.pending"
+else
+  chmod 644 "$tmp"; chown "$U:$U" "$tmp"
+  if [[ -n $(ls -A "/run/user/$(id -u "$U")/hypr" 2>/dev/null) ]]; then mv -f "$tmp" "$M.pending"; when="from the next boot"
+  else mv -f "$tmp" "$M"; fi
+fi
+echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE ($when)"

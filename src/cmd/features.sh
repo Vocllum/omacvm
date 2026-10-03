@@ -10,8 +10,8 @@
 # they need, then the VM. A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "needs", "title", "summary"}]}.
-# Without --vm it starts nothing: a running VM's state, else the defaults
-# ("vm": null).
+# Without --vm it starts nothing: the state of the VM it would pick if that
+# one runs, else the defaults ("vm": null).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)

@@ -82,7 +82,7 @@ if [[ -z $here ]]; then
     [[ -z $(git -C "$here" status --porcelain --untracked-files=no) ]] ||
       { echo "$here has local changes: not switching it to $OMACVM_REF" >&2; exit 1; }
     say "updating $here to $OMACVM_REF"
-    if git -C "$here" ls-remote --exit-code --heads origin "$OMACVM_REF" >/dev/null; then
+    if git -C "$here" ls-remote --exit-code origin "refs/heads/$OMACVM_REF" >/dev/null; then
       git -C "$here" fetch -q origin "+refs/heads/$OMACVM_REF:refs/remotes/origin/$OMACVM_REF"
       git -C "$here" checkout -q -B "$OMACVM_REF" --track "origin/$OMACVM_REF"
     else

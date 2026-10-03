@@ -183,8 +183,10 @@ ui_spin() {
   out=$(mktemp)
   if (( ! UI_FANCY )); then
     printf '  %s...\n' "$msg"   # no terminal to draw on (scripts, agents): plain output
-    # A subshell, as in the spinner branch: a die inside still shows its reason.
-    ( "$@" ) > "$out" 2>&1 && rc=0 || rc=$?
+    # In the background and waited for, as in the spinner branch: set -e
+    # still stops the step, and a die inside still shows its reason.
+    ( "$@" ) > "$out" 2>&1 &
+    wait $! && rc=0 || rc=$?
   else
     "$@" > "$out" 2>&1 &
     pid=$!
