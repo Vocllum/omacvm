@@ -1,0 +1,1 @@
+../../../../src/bridge/mac/camera.swift

@@ -4,5 +4,9 @@
 <dict>
     <key>com.apple.security.device.audio-input</key>
     <true/>
+    <!-- The launcher passes the Mac's camera to the VM (camera.swift); with the
+         hardened runtime of a Developer ID build it needs this. -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
 </dict>
 </plist>

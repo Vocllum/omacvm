@@ -75,7 +75,10 @@ final class Runner {
               "-device", "virtserialport,bus=vser0.0,nr=2,chardev=clip0,name=org.omacvm.clipboard",
               // The Mac's battery (omacvm-battery in the VM, from try-omarchy).
               "-chardev", "socket,id=batt0,path=\(q(c.batterySocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=3,chardev=batt0,name=org.omacvm.battery"]
+              "-device", "virtserialport,bus=vser0.0,nr=3,chardev=batt0,name=org.omacvm.battery",
+              // The Mac's camera, while a Linux app reads it (omacvm-camera in the VM).
+              "-chardev", "socket,id=cam0,path=\(q(c.cameraSocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera"]
         return a
     }
 
@@ -114,6 +117,7 @@ final class Runner {
         observeSleep()
         startClipboard()
         startBattery()
+        startCamera()
     }
 
     /// Asks the guest to shut down: the power button, then the guest agent
@@ -175,6 +179,25 @@ final class Runner {
                     DispatchQueue.main.sync { self?.battery = bridge }
                     try? bridge.run()
                     bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: The Mac's camera (camera.swift, shared with OmacVM Bridge), reconnected while QEMU runs.
+
+    private let camera = CameraHub { FileHandle.standardError.write(Data("camera: \($0)\n".utf8)) }
+
+    private func startCamera() {
+        let path = config.cameraSocket.path, hub = camera
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let fd = try? NativeBridgeSocket.connectSecure(path: path, label: "camera") {
+                    hub.run(fd: fd, label: "VM")   // until QEMU closes it
                 }
                 Thread.sleep(forTimeInterval: 1)
             }
