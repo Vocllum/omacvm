@@ -68,11 +68,15 @@ browser_start() {
       >/dev/null 2>&1 &
   else
     # Google Chrome, as on the Mac (install-chrome.sh); Arch's Chromium is slower.
-    command -v google-chrome-stable >/dev/null || { echo "Google Chrome is missing: install-chrome.sh" >&2; return 1; }
-    # The flags Omarchy launches Chrome with (on Fusion: --ignore-gpu-blocklist).
-    local flags=()
-    [[ -f $HOME/.config/chrome-flags.conf ]] && mapfile -t flags < <(grep -v -e '^#' -e '^$' -e '--load-extension' "$HOME/.config/chrome-flags.conf")
-    google-chrome-stable "${flags[@]}" --ozone-platform=wayland --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
+    [[ -x /opt/google/chrome/google-chrome ]] || { echo "Google Chrome is missing: install-chrome.sh" >&2; return 1; }
+    # The flags Omarchy launches Chrome with (on Fusion: --ignore-gpu-blocklist
+    # in /etc/chrome-flags.conf), without its extensions. The binary itself, not
+    # the launcher, so the flags are not added twice.
+    local flags=() f
+    for f in /etc/chrome-flags.conf "$HOME/.config/chrome-flags.conf"; do
+      if [[ -f $f ]]; then mapfile -t -O "${#flags[@]}" flags < <(grep -v -e '^#' -e '^$' -e '--load-extension' "$f"); fi
+    done
+    /opt/google/chrome/google-chrome "${flags[@]}" --ozone-platform=wayland --user-data-dir="$PROFILE" --remote-debugging-port=9222 \
       --no-first-run --no-default-browser-check --start-fullscreen about:blank >/dev/null 2>&1 &
   fi
   BROWSER=$!

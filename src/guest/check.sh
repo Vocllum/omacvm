@@ -161,7 +161,7 @@ EOF
   else bad "pointer range" "tablet $tab px vs screen $w px"; fi
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
   check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
-  check "GPU for browsers" "virgl-msaa.so preloaded" grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload ;;
+  check "GPU for browsers" "virgl-msaa.so preloaded" bash -c 'test -s /usr/local/lib/omacvm/virgl-msaa.so && grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload' ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
@@ -170,6 +170,14 @@ fusion)
     ok "Hyprland" "$hv with the vmwgfx fix"
   else bad "Hyprland" "$hv without the vmwgfx fix (black screen at the next login): omacvm apply builds it"; fi
   check "Hyprland after updates" "pacman hook rebuilds it" test -f /etc/pacman.d/hooks/zz-omacvm-hyprland.hook
+  check "GPU in Chromium and Chrome" "--ignore-gpu-blocklist in /etc/chromium-flags.conf, /etc/chrome-flags.conf" \
+    bash -c 'grep -qx -- --ignore-gpu-blocklist /etc/chromium-flags.conf && grep -qx -- --ignore-gpu-blocklist /etc/chrome-flags.conf'
+  if command -v brave >/dev/null; then
+    check "GPU in Brave" "--ignore-gpu-blocklist in ~/.config/brave-flags.conf (omacvm apply)" grep -qx -- --ignore-gpu-blocklist "$H/.config/brave-flags.conf"
+  fi
+  if command -v firefox >/dev/null; then
+    check "GPU in Firefox" "omacvm-fusion.js (vmwgfx allowed)" test -f /usr/lib/firefox/defaults/pref/omacvm-fusion.js
+  fi
   check "DNS" "Fusion's own, which follows the Mac (public DNS only while OmacVM installs)" test ! -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf
   check "VMware Tools" "vmtoolsd (Fusion's display layout)" systemctl is-active -q vmtoolsd
   if user_active omacvm-fusion-displays.service; then

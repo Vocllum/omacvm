@@ -11,7 +11,7 @@ else than the cause. Recipes and the general failure table are in
 | # | Route | Finding |
 |---|---|---|
 | 1 | Fusion | [Black screen with stock Omarchy](#1-fusion-black-screen-with-stock-omarchy) |
-| 2 | Fusion | [Chrome draws everything in software](#2-fusion-chrome-draws-everything-in-software) |
+| 2 | Fusion | [Browsers draw everything in software](#2-fusion-browsers-draw-everything-in-software) |
 | 3 | Fusion | [Displays sit in the wrong place on a Retina Mac](#3-fusion-displays-sit-in-the-wrong-place-on-a-retina-mac) |
 | 4 | Fusion | [No hover or clicks on Omanotch's strip](#4-fusion-no-hover-or-clicks-on-omanotchs-strip) |
 | 5 | Fusion | [Omanotch cannot find the Mac](#5-fusion-omanotch-cannot-find-the-mac) |
@@ -23,6 +23,7 @@ else than the cause. Recipes and the general failure table are in
 | 11 | All | [Benchmarks that don't compare](#11-benchmarks-chromium-vs-chrome-and-the-screensaver) |
 | 12 | UTM | [Moving a UTM VM deletes it](#12-utm-moving-a-vm-and-changing-its-config) |
 | 13 | Fusion | [Security review of PR #1](#13-security-review-of-the-fusion-route-pr-1) |
+| 14 | UTM | [Chrome has no GPU, then WebGL comes out empty](#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -54,22 +55,34 @@ else than the cause. Recipes and the general failure table are in
   with `pacman -S omarchy/hyprland`. Plain `pacman -S hyprland` takes Arch's
   `extra` first and downgrades Hyprland.
 
-## 2. Fusion: Chrome draws everything in software
+## 2. Fusion: browsers draw everything in software
 
-- **Symptom:** Chrome and Chromium are slow on Fusion, WebGL is off, and
-  `chrome://gpu` says software rendering.
+- **Symptom:** Chromium, Chrome, Brave and Firefox are slow on Fusion, and
+  WebGL is off or runs on `llvmpipe` (the CPU).
 - **Cause:** Chromium's GPU blocklist has an entry for VMware's GPU on Linux
-  (`software_rendering_list`, entry 176, "VMware is buggy on Linux"). The GPU
-  works fine with the vmwgfx fix above.
-- **Fix:** OmacVM adds `--ignore-gpu-blocklist` to `~/.config/chromium-flags.conf`,
-  and to `~/.config/chrome-flags.conf` when that file exists. Chrome must be
-  fully restarted to pick it up: closing the window is not enough, quit every
-  Chrome process.
+  (`software_rendering_list`, entry 176, "VMware is buggy on Linux"). Firefox
+  counts every `vmwgfx` driver as software GL (`widget/gtk/GfxInfo.cpp`), so it
+  draws pages with software WebRender and WebGL on `llvmpipe`. The GPU works
+  fine with the vmwgfx fix above.
+- **Fix:** OmacVM adds `--ignore-gpu-blocklist` to `/etc/chromium-flags.conf`
+  and `/etc/chrome-flags.conf`, which Omarchy never rewrites, and to Brave's
+  `~/.config/brave-flags.conf`. Omarchy's `omarchy install browser brave`
+  replaces that file, so run `omacvm apply` after installing Brave. For
+  Firefox it writes `/usr/lib/firefox/defaults/pref/omacvm-fusion.js`, which
+  sets `gfx.blacklist.layers.opengl`, `gfx.blacklist.webrender` and
+  `gfx.blacklist.webgl-use-hardware` to 1 (`gfx.webrender.all` and
+  `layers.acceleration.force-enabled` don't help). Quit each browser fully
+  afterwards: closing the window is not enough.
+- **Check:** `chrome://gpu` says "Hardware accelerated" for Compositing,
+  Rasterization and WebGL; Firefox's `about:support` says "Compositing:
+  WebRender" (not "(Software)") and the WebGL renderer is SVGA3D.
 - **Note:** WebGPU then shows "Hardware accelerated", but Fusion gives Linux
-  no Vulkan, so there is no real WebGPU or GPU compute behind it.
-- **Where:** `src/fusion/guest/install.sh` (the loop over the two flag files).
-  If you install Google Chrome after OmacVM and `chrome-flags.conf` did not exist
-  yet, add the line yourself or run `omacvm apply` again.
+  no Vulkan, so there is no real WebGPU or GPU compute behind it. Video is
+  decoded on the CPU: Mesa has no VA-API driver for `vmwgfx`, so YouTube 4K
+  plays in software in every browser.
+- **Where:** `src/fusion/guest/install.sh`. Google Chrome from
+  `src/bench/install-chrome.sh` reads `/etc/chrome-flags.conf` through its
+  `google-chrome-stable` launcher; Google's own launcher reads no flags file.
 
 ## 3. Fusion: displays sit in the wrong place on a Retina Mac
 
@@ -212,3 +225,23 @@ on the branch.
 | The guest guessed the Mac's address | the Mac passes it (`--host`); the guest accepts only an address ending in `.1` | `src/cmd/apply.sh`, `src/guest/install.sh` |
 | Fusion's `networking` file | strict parsing: the first `VNET_8_HOSTONLY_SUBNET` line, and only a private address (not UTM's) | `src/lib/mac.sh` (`fusion_host`), `src/bridge/mac/main.swift`, `src/gestures/mac/omacvm-gestures.c` |
 | Listeners on the Mac | Gestures never binds `0.0.0.0`: an address it cannot parse, or `0.0.0.0` itself, means no listener on that network | `src/gestures/mac/omacvm-gestures.c` (`serverThread`) |
+
+## 14. UTM: Chrome has no GPU, then WebGL comes out empty
+
+- **Symptom:** on UTM, `chrome://gpu` says "Software only" and WebGL is off
+  (before 2.2.1). With 2.2.1, the GPU was on, but a page that read an
+  antialiased WebGL canvas back got nothing, and the whole Chrome window
+  could turn transparent.
+- **Cause:** UTM's virglrenderer reports `max_samples 1` to Linux. OpenGL ES
+  3.0 needs 4 samples, so Chrome's ANGLE refuses ES 3.0 and turns the GPU
+  off. try-omarchy has the same problem
+  ([try-omarchy#230](https://github.com/omacom/try-omarchy/issues/230)). And
+  UTM can't really draw into multisampled buffers.
+- **Fix:** a small preload library (`src/utm/guest/virgl-msaa.c`, from
+  `/etc/ld.so.preload`) reports 4 samples to Mesa and creates every buffer
+  single-sampled. The picture is right, without antialiasing. OmacVM also
+  sets UTM's default renderer: with "Apple Core OpenGL" Chrome stays without
+  GPU. After `omacvm update`, restart the browsers.
+- **Note:** video is decoded on the CPU: UTM's VA-API lists no decode
+  profiles. Chrome's "Video Decode: Hardware accelerated" is only a flag.
+- **Where:** `src/utm/guest/install.sh`, `src/vm/utm.sh`, `src/cmd/apply.sh`.
