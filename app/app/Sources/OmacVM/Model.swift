@@ -87,7 +87,7 @@ struct VMConfig: Equatable {
     var keyboard = "us"
     // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
     // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on battery=\(Mac.hasBattery ? "on" : "off") idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
 
@@ -124,6 +124,7 @@ struct VMConfig: Equatable {
     var qmpSocket: URL { Paths.runDir.appendingPathComponent("\(id).qmp") }
     var agentSocket: URL { Paths.runDir.appendingPathComponent("\(id).qga") }
     var clipboardSocket: URL { Paths.runDir.appendingPathComponent("\(id).clip") }
+    var batterySocket: URL { Paths.runDir.appendingPathComponent("\(id).batt") }
 
     func write() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -321,4 +322,7 @@ extension Mac {
     static var hasNotch: Bool {
         NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
     }
+
+    /// A MacBook: its battery shows in Omarchy's bar.
+    static let hasBattery: Bool = HostBatterySnapshot.capture().present
 }

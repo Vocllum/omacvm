@@ -72,7 +72,10 @@ final class Runner {
               "-device", "virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0",
               // The clipboard, both ways (omacvm-clipboard in the VM).
               "-chardev", "socket,id=clip0,path=\(q(c.clipboardSocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=2,chardev=clip0,name=org.omacvm.clipboard"]
+              "-device", "virtserialport,bus=vser0.0,nr=2,chardev=clip0,name=org.omacvm.clipboard",
+              // The Mac's battery (omacvm-battery in the VM, from try-omarchy).
+              "-chardev", "socket,id=batt0,path=\(q(c.batterySocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=3,chardev=batt0,name=org.omacvm.battery"]
         return a
     }
 
@@ -102,6 +105,7 @@ final class Runner {
             Task { @MainActor in
                 self?.stopObserving()
                 self?.clipboard?.stop()
+                self?.battery?.stop()
                 self?.onExit?(status)
             }
         }
@@ -109,6 +113,7 @@ final class Runner {
         process = p
         observeSleep()
         startClipboard()
+        startBattery()
     }
 
     /// Asks the guest to shut down: the power button, then the guest agent
@@ -147,6 +152,27 @@ final class Runner {
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeClipboardBridge(socketPath: path) {
                     DispatchQueue.main.sync { self?.clipboard = bridge }
+                    try? bridge.run()
+                    bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: The Mac's battery (try-omarchy's bridge), reconnected while QEMU runs.
+
+    private var battery: NativeBatteryBridge?
+
+    private func startBattery() {
+        let path = config.batterySocket.path
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let bridge = try? NativeBatteryBridge(socketPath: path) {
+                    DispatchQueue.main.sync { self?.battery = bridge }
                     try? bridge.run()
                     bridge.stop()
                 }
