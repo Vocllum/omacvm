@@ -208,25 +208,33 @@ if [[ ${F[wallpaper]} == on ]]; then
 elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
   log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
 fi
-# Omanotch's VM side (github.com/gillesgoetsch/omanotch) builds and installs in
-# the desktop session: omacvm-omanotch.service runs it at the next login, or
-# right away when the session is running.
+# Omanotch's VM side (omanotch/guest in this copy) builds and installs in the
+# desktop session: omacvm-omanotch.service runs it at the next login, or right
+# away when the session is running. A changed copy installs again.
 in_session() {
   local run; run=/run/user/$(id -u "$U")
   sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
     HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
+# Earlier versions cloned Omanotch into the user's home; this copy is used now.
+[[ -d $H/.local/share/omanotch/.git ]] && rm -rf "$H/.local/share/omanotch"
 # OmacVM.app too: its full screen sits below the notch like the other routes'
 # (its own notch-strip mode is an opt-in; Omanotch then leaves the strip alone).
 if [[ ${F[omanotch]} == on ]]; then
   # An empty notchcast is a broken install (seen once): build it again.
   [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
+  sum=$(cd "$R/omanotch/guest" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+  stamp=$H/.local/state/omacvm/omanotch
+  if [[ -x $H/.local/bin/notchcast && $(cat "$stamp" 2>/dev/null) != "$sum" ]]; then
+    log "Omanotch: changed, installs again"
+    rm -f "$H/.local/bin/notchcast"
+  fi
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
     pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
-    [[ -d $H/.local/share/omanotch ]] ||
-      sudo -u "$U" git clone -q https://github.com/gillesgoetsch/omanotch.git "$H/.local/share/omanotch"
+    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
+    echo "$sum" > "$stamp"; chown "$U:$U" "$stamp"
     install -m644 "$R/guest/omacvm-omanotch.service" /etc/systemd/user/
     systemctl --global enable omacvm-omanotch.service >/dev/null 2>&1
     if pgrep -u "$U" -x Hyprland >/dev/null; then
@@ -267,11 +275,9 @@ elif [[ -x $H/.local/bin/notchcast ]]; then
   systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
   rm -f /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
   [[ -n $("$R/guest/omanotch-notifications.sh" off || true) ]] && { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
-  if [[ -f $H/.local/share/omanotch/guest/uninstall.sh ]]; then
-    in_session bash "$H/.local/share/omanotch/guest/uninstall.sh" >/dev/null 2>&1 || true
-  else
+  in_session bash "$R/omanotch/guest/uninstall.sh" >/dev/null 2>&1 ||
     user_ctl disable --now notchcast.service >/dev/null 2>&1 || true
-  fi
+  rm -f "$H/.local/state/omacvm/omanotch"
 fi
 if [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
