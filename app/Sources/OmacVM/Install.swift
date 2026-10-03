@@ -31,6 +31,9 @@ enum Installer {
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         let target = folder.appendingPathComponent("\(name).app")
+        guard target.standardizedFileURL.path != Bundle.main.bundleURL.standardizedFileURL.path else {
+            throw HelperError.io("this app is already there under that name")
+        }
         if fm.fileExists(atPath: target.path) {
             try fm.trashItem(at: target, resultingItemURL: nil)
         }
@@ -120,8 +123,14 @@ struct InstallView: View {
             let app = try Installer.install(name: name, into: folder)
             let config = NSWorkspace.OpenConfiguration()
             config.createsNewApplicationInstance = true
-            NSWorkspace.shared.openApplication(at: app, configuration: config) { _, _ in
-                DispatchQueue.main.async { NSApp.terminate(nil) }
+            NSWorkspace.shared.openApplication(at: app, configuration: config) { _, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        self.error = "Installed to \(app.path), but it did not open: \(error.localizedDescription)"
+                    } else {
+                        NSApp.terminate(nil)
+                    }
+                }
             }
         } catch {
             self.error = "Could not install: \(error.localizedDescription)"

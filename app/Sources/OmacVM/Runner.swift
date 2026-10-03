@@ -113,6 +113,10 @@ final class Runner {
         let qmpPath = config.qmpSocket.path, agentPath = config.agentSocket.path
         Task.detached {
             if let qmp = try? QMPConnection(socketPath: qmpPath, identifierPrefix: "omacvm-power") {
+                // A VM paused by the Mac's sleep cannot shut down: resume it first.
+                if let status = try? qmp.execute("query-status"), status["status"] as? String == "paused" {
+                    _ = try? qmp.execute("cont")
+                }
                 _ = try? qmp.execute("system_powerdown")
                 qmp.close()
             }
@@ -174,8 +178,44 @@ final class Runner {
     private func didWake() {
         do {
             try sleep.resumeAfterHostWake(vmIsRunning: isRunning, isStopping: false)
+            syncClock()
         } catch {
-            sleep.scheduleWakeRetry { [weak self] in self?.didWake() }
+            if !sleep.scheduleWakeRetry({ [weak self] in self?.didWake() }) {
+                wakeFailed()
+            }
+        }
+    }
+
+    /// The VM's clock stood still while the Mac slept: set it to the Mac's
+    /// (guest agent), a few tries while the guest wakes up.
+    private func syncClock() {
+        let path = config.agentSocket.path
+        Task.detached {
+            for _ in 0..<5 {
+                if GuestAgent.setTime(socketPath: path) { return }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    /// Resume after sleep failed for good: the VM stays paused. Say so.
+    private func wakeFailed() {
+        let alert = NSAlert()
+        alert.messageText = "\(config.name) did not wake up with the Mac"
+        alert.informativeText = "It is paused. Resume it, or shut it down."
+        alert.addButton(withTitle: "Resume")
+        alert.addButton(withTitle: "Shut Down")
+        let shutDown = alert.runModal() == .alertSecondButtonReturn
+        resumeIfPaused()
+        if shutDown { powerDown() } else { syncClock() }
+    }
+
+    /// cont on a fresh QMP connection when QEMU reports "paused".
+    private func resumeIfPaused() {
+        guard let qmp = try? QMPConnection(socketPath: config.qmpSocket.path, identifierPrefix: "omacvm-resume") else { return }
+        defer { qmp.close() }
+        if let status = try? qmp.execute("query-status"), status["status"] as? String == "paused" {
+            _ = try? qmp.execute("cont")
         }
     }
 

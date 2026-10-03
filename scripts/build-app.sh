@@ -46,8 +46,14 @@ ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$C/Resources/firmware/"
 install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" "$C/Resources/scripts/"
-# OmacVM's VM side as committed in vendor/omacvm (no stray local files).
-git -C "$ROOT/vendor/omacvm" archive HEAD src | tar -x -C "$C/Resources/omacvm"
+# OmacVM as pinned by this repository (the submodule commit), nothing else.
+PIN=$(git -C "$ROOT" ls-tree HEAD vendor/omacvm | awk '{ print $3 }')
+[[ -n $PIN ]] || { echo "vendor/omacvm is not pinned" >&2; exit 1; }
+if [[ $(git -C "$ROOT/vendor/omacvm" rev-parse HEAD) != "$PIN" || -n $(git -C "$ROOT/vendor/omacvm" status --porcelain) ]]; then
+  echo "vendor/omacvm is not at its pinned commit $PIN, or has changes: commit them and the pin first" >&2
+  exit 1
+fi
+git -C "$ROOT/vendor/omacvm" archive "$PIN" src | tar -x -C "$C/Resources/omacvm"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"

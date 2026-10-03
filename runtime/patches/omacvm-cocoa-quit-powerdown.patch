@@ -1,53 +1,51 @@
 From: OmacVM
 Subject: [PATCH] cocoa: Quit shuts the guest down
 
-Quit and the close button press the guest's power button instead of
-stopping it. Asking again within a minute offers to stop it at once.
+Quit, the close button, a logout or a restart press the guest's power
+button and wait for it (NSTerminateLater); QEMU exits when the guest is off.
+A paused VM is resumed first; a guest that hangs is stopped after a minute.
 Applies after omacvm-cocoa-identity.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -2064,19 +2064,35 @@
-     }
- }
- 
--/* Verifies if the user really wants to quit */
-+/*
-+ * OmacVM: Quit and the close button shut the guest down like its power
-+ * button; QEMU exits when the guest has powered off. Asking again while that
-+ * runs offers to stop the VM at once.
-+ */
-+static NSDate *powerdownRequested;
-+
- - (BOOL)verifyQuit
+@@ -1787,12 +1787,39 @@
  {
--    NSAlert *alert = [NSAlert new];
--    [alert autorelease];
--    [alert setMessageText: [NSString stringWithFormat:@"Are you sure you want to quit %@?", omacvm_product_name()]];
--    [alert addButtonWithTitle: @"Cancel"];
--    [alert addButtonWithTitle: @"Quit"];
--    if([alert runModal] == NSAlertSecondButtonReturn) {
-+    if (!runstate_is_running()) {
-         return YES;
--    } else {
+     return YES;
+ }
++
++/*
++ * OmacVM: Quit, the close button, a logout or a restart press the guest's
++ * power button, and the quit waits (NSTerminateLater): QEMU exits by itself
++ * once the guest is off (-action shutdown=poweroff). A guest that does not
++ * shut down within a minute is stopped. A VM paused (by the Mac's sleep) is
++ * resumed first, so it can shut down.
++ */
++static bool powerdownPending;
+ 
+ - (NSApplicationTerminateReply)applicationShouldTerminate:
+                                                          (NSApplication *)sender
+ {
+     COCOA_DEBUG("QemuCocoaAppController: applicationShouldTerminate\n");
+-    return [self verifyQuit];
++    if (runstate_check(RUN_STATE_PAUSED)) {
++        with_bql(^{
++            qmp_cont(NULL);
++        });
 +    }
-+    if (!powerdownRequested ||
-+        [[NSDate date] timeIntervalSinceDate:powerdownRequested] > 60) {
-+        [powerdownRequested release];
-+        powerdownRequested = [[NSDate date] retain];
++    if (!runstate_is_running()) {
++        return NSTerminateNow;
++    }
++    if (!powerdownPending) {
++        powerdownPending = true;
 +        with_bql(^{
 +            qemu_system_powerdown_request();
 +        });
 +        [[cocoaView window] setTitle:[NSString stringWithFormat:@"%@ (shutting down)", omacvm_product_name()]];
-         return NO;
-     }
-+    NSAlert *alert = [NSAlert new];
-+    [alert autorelease];
-+    [alert setMessageText: [NSString stringWithFormat:@"%@ is shutting down.", omacvm_product_name()]];
-+    [alert setInformativeText: @"Stop it now? Anything not saved in the VM is lost."];
-+    [alert addButtonWithTitle: @"Wait"];
-+    [alert addButtonWithTitle: @"Stop Now"];
-+    return [alert runModal] == NSAlertSecondButtonReturn;
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++            [NSApp replyToApplicationShouldTerminate:YES];
++        });
++    }
++    return NSTerminateLater;
  }
  
- /* The action method for the About menu item */
+ - (void)windowDidChangeScreen:(NSNotification *)notification

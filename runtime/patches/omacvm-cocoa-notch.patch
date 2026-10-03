@@ -1,26 +1,24 @@
 From: OmacVM
 Subject: [PATCH] cocoa: full screen beside the notch
 
-With OMACVM_NOTCH=1, full screen is a borderless window over the whole
-built-in display (menu bar and Dock hidden), the strip beside the notch
-included; the guest puts its bar there. Applies after
-omacvm-cocoa-quit-powerdown.patch.
+With OMACVM_NOTCH=1, full screen on a display with a notch is a borderless
+window over the whole display (menu bar and Dock hidden), the strip beside
+the notch included; the guest puts its bar there. Other displays get
+macOS's own full screen. Applies after omacvm-cocoa-quit-powerdown.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -785,11 +785,21 @@
-     }
- 
+@@ -787,9 +787,19 @@
      return fixed;
-+}
-+
+ }
+ 
 +/* OmacVM: with OMACVM_NOTCH=1, full screen covers the strip beside the notch too. */
 +static bool omacvm_notch_mode(void)
 +{
 +    const char *v = getenv("OMACVM_NOTCH");
 +    return v && !strcmp(v, "1");
- }
- 
++}
++
  - (NSSize) screenSafeAreaSize
  {
      NSSize size = [[[self window] screen] frame].size;
@@ -30,18 +28,20 @@ omacvm-cocoa-quit-powerdown.patch.
      NSEdgeInsets insets = [[[self window] screen] safeAreaInsets];
      size.width -= insets.left + insets.right;
      size.height -= insets.top + insets.bottom;
-@@ -1674,6 +1684,58 @@
+@@ -1673,7 +1683,55 @@
+ - (void)openDocumentation:(NSString *)filename;
  - (IBAction) do_about_menu_item: (id) sender;
  - (void)adjustSpeed:(id)sender;
- @end
++@end
 +
 +/*
 + * OmacVM notch mode: macOS full screen keeps windows below the notch. Instead,
-+ * a borderless window covers the whole built-in display, the menu bar and the
-+ * Dock hidden; Omarchy's bar sits in the strip beside the camera.
++ * on a display with a notch a borderless window covers the whole display, the
++ * menu bar and the Dock hidden; Omarchy's bar sits in the strip beside the
++ * camera. Other displays get macOS's own full screen.
 + */
 +@interface QemuWindow : NSWindow
-+@end
+ @end
 +
 +@implementation QemuWindow
 +- (BOOL)canBecomeKeyWindow { return YES; }
@@ -52,16 +52,11 @@ omacvm-cocoa-quit-powerdown.patch.
 +static NSRect notchSavedFrame;
 +static NSWindowStyleMask notchSavedMask;
 +
++/* Enters notch full screen on the window's display, or leaves it. */
 +static void omacvm_toggle_notch_full_screen(void)
 +{
 +    NSWindow *w = [cocoaView window];
 +    NSScreen *target = [w screen] ? [w screen] : [NSScreen mainScreen];
-+    for (NSScreen *candidate in [NSScreen screens]) {
-+        if ([candidate safeAreaInsets].top > 0) {
-+            target = candidate;
-+            break;
-+        }
-+    }
 +    if (!notchFull) {
 +        notchFull = YES;
 +        notchSavedFrame = [w frame];
@@ -89,7 +84,7 @@ omacvm-cocoa-quit-powerdown.patch.
  
  static NSRect cocoa_initial_window_frame(void)
  {
-@@ -1719,7 +1781,7 @@
+@@ -1719,7 +1777,7 @@
          }
  
          // create a window
@@ -98,18 +93,24 @@ omacvm-cocoa-quit-powerdown.patch.
              styleMask:NSWindowStyleMaskTitled|NSWindowStyleMaskMiniaturizable|NSWindowStyleMaskClosable
              backing:NSBackingStoreBuffered defer:NO];
          if(!window) {
-@@ -1874,6 +1936,10 @@
+@@ -1901,7 +1959,15 @@
   */
  - (void) doToggleFullScreen:(id)sender
  {
-+    if (omacvm_notch_mode()) {
+-    [[cocoaView window] toggleFullScreen:sender];
++    NSWindow *w = [cocoaView window];
++    /* Notch full screen only on a display with a notch; elsewhere macOS's own. */
++    if (notchFull ||
++        (omacvm_notch_mode() && !([w styleMask] & NSWindowStyleMaskFullScreen) &&
++         [[w screen] safeAreaInsets].top > 0)) {
 +        omacvm_toggle_notch_full_screen();
 +        return;
 +    }
-     [[cocoaView window] toggleFullScreen:sender];
++    [w toggleFullScreen:sender];
  }
  
-@@ -2956,7 +3022,7 @@
+ - (void) setFullGrab:(id)sender
+@@ -2967,7 +3033,7 @@
  
      /* if fullscreen mode is to be used */
      if (opts->has_full_screen && opts->full_screen) {

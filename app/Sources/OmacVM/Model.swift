@@ -171,6 +171,11 @@ struct VMConfig: Equatable {
         return c
     }
 
+    static func named(_ name: String) -> VMConfig? {
+        let items = (try? FileManager.default.contentsOfDirectory(at: Paths.vmsRoot, includingPropertiesForKeys: nil)) ?? []
+        return items.compactMap { load(from: $0) }.first { $0.name == name || $0.folder.lastPathComponent == name }
+    }
+
     /// The VM the app manages (one at a time): the one named with --vm NAME,
     /// else the first folder with a vm.env.
     static func existing() -> VMConfig? {
