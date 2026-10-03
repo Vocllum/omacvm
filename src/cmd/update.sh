@@ -3,7 +3,9 @@
 # checkout (git pull, when it is a clean clone), the Mac side that is
 # installed, Omanotch on the Mac (when its clone is clean), then OmacVM in
 # every running VM that has it (or only --vm NAME; a stopped one is started).
-# Each VM keeps its feature choices. Stopped VMs are listed, not started.
+# Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
+# VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
+# built them) get the update, and with it the Bridge's token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -13,7 +15,7 @@ while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --no-pull) PULL=0; shift ;;
-    -h|--help) sed -n '2,6s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -65,9 +67,18 @@ while IFS=$'\t' read -r name type state; do
   [[ -n $name ]] || continue
   if [[ $state != running ]]; then stopped+=("$name"); continue; fi
   ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || continue
-  # Not reachable with OmacVM's key (another OS, or no OmacVM): skip it.
-  v=$(vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p') || continue
+  vm_pin "$name" "$type"
+  # Not reachable with OmacVM's key (another OS, no OmacVM, or another host
+  # key): say why for the last one, then go on with the other VMs.
+  if ! v=$(vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p'); then
+    hostkey_changed "$ip" 2>/dev/null && info "VM '$name': another SSH host key, not updated (rebuilt? omacvm apply --vm $(printf %q "$name") --reset-host-key)"
+    continue
+  fi
   [[ -n $v ]] || continue
+  if [[ ! -s $OMA_PIN ]] && ! vm_marked "$name" "$type"; then
+    info "VM '$name' says it has OmacVM $v, but OmacVM has not set it up from this Mac yet: omacvm update --vm $(printf %q "$name")"
+    continue
+  fi
   log "VM '$name' (OmacVM $v)"
   "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac < /dev/null || failed+=("$name")
   done_any=1

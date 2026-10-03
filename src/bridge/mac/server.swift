@@ -34,6 +34,26 @@ func setTimeout(_ fd: Int32, _ opt: Int32, _ seconds: Int) {
   setsockopt(fd, SOL_SOCKET, opt, &tv, socklen_t(MemoryLayout<timeval>.size))
 }
 
+/// Requests being handled: at most 32, 16 per peer, so slow or stuck peers
+/// cannot hold every worker thread.
+final class Gate {
+  private let lock = NSLock()
+  private var total = 0, perPeer: [String: Int] = [:]
+  func enter(_ peer: String) -> Bool {
+    lock.lock(); defer { lock.unlock() }
+    guard total < 32, perPeer[peer, default: 0] < 16 else { return false }
+    total += 1; perPeer[peer, default: 0] += 1
+    return true
+  }
+  func leave(_ peer: String) {
+    lock.lock(); defer { lock.unlock() }
+    total -= 1
+    let n = perPeer[peer, default: 1] - 1
+    perPeer[peer] = n > 0 ? n : nil
+  }
+}
+let gate = Gate()
+
 func ipv4String(_ a: in_addr) -> String {
   var a = a, buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
   inet_ntop(AF_INET, &a, &buf, socklen_t(buf.count))
@@ -179,12 +199,18 @@ func handle(_ fd: Int32, peer: String) {
   var one: Int32 = 1
   setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
   _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)   // BSD: accept() inherits O_NONBLOCK
-  setTimeout(fd, SO_RCVTIMEO, 5)
   setTimeout(fd, SO_SNDTIMEO, 2)
 
   var buf = Data(), chunk = [UInt8](repeating: 0, count: 4096)
   let end = Data("\r\n\r\n".utf8)
+  // Reads stop at a deadline for the whole head (and later the body), not
+  // per read: a byte every few seconds no longer keeps a thread forever.
+  var deadline = Date().addingTimeInterval(5)
   func readMore() -> Bool {
+    let left = deadline.timeIntervalSinceNow
+    guard left > 0.001 else { return false }   // {0, 0} would mean no timeout at all
+    var tv = timeval(tv_sec: Int(left), tv_usec: max(1, Int32((left - left.rounded(.down)) * 1_000_000)))
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     let n = read(fd, &chunk, chunk.count)
     if n > 0 { buf.append(contentsOf: chunk[0..<n]) }
     return n > 0
@@ -209,10 +235,12 @@ func handle(_ fd: Int32, peer: String) {
     return
   }
   // Bodies are small JSON, except a wallpaper image (read only after the token checked out).
-  let wanted = Int(headers["content-length"] ?? "") ?? 0
+  guard let wanted = Int(headers["content-length"] ?? "0"), wanted >= 0 else {
+    respond(fd, 400, ["error": "bad Content-Length"]); return
+  }
   let limit = path == "/wallpaper" ? 48 << 20 : 65536
   guard wanted <= limit else { respond(fd, 413, ["error": "body too large"]); return }
-  if path == "/wallpaper" { setTimeout(fd, SO_RCVTIMEO, 30) }
+  deadline = Date().addingTimeInterval(path == "/wallpaper" ? 120 : 5)
   while buf.count - headEnd.upperBound < wanted, readMore() {}
   let body = buf[headEnd.upperBound...].prefix(wanted)
   switch (method, path) {
@@ -353,7 +381,8 @@ final class Server {
         }
         if c < 0 { break }
         let who = ipv4String(peer.sin_addr)
-        DispatchQueue.global(qos: .utility).async { onConnection(c, who) }
+        guard gate.enter(who) else { close(c); continue }
+        DispatchQueue.global(qos: .utility).async { onConnection(c, who); gate.leave(who) }
       }
     }
     src.setCancelHandler { close(fd) }

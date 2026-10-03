@@ -47,7 +47,20 @@ install_app() {
   INSTALLED+=("$name")
 }
 INSTALLED=()
+source "$R/lib/mac.sh"
+# The token first: a Bridge starting without one makes its own, and two at
+# once could end up with the file holding another token than the Bridge.
+(( BRIDGE || GESTURES != -1 )) && bridge_token_ensure
 (( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac
+# Gestures lets a VM in when its daemon says the Bridge's token (made here
+# when the Bridge is not installed). VMs set up before that keep working until
+# omacvm update or apply gives them the daemon that says it: the list of them
+# is written once, before the first Gestures that checks.
+if (( GESTURES != -1 )); then
+  if [[ ! -e $GESTURES_LEGACY ]]; then
+    "$R/mac/gestures-legacy.sh" > "$GESTURES_LEGACY.new" && mv -f "$GESTURES_LEGACY.new" "$GESTURES_LEGACY"
+  fi
+fi
 case $GESTURES in
   1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac ;;
   0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;

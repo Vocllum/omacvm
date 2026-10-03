@@ -97,7 +97,14 @@ if ! ifconfig | grep -q "inet $HOST "; then
   (( JSON )) && json_out false
   exit 1
 fi
-(wait_ssh "$IP" 30) >/dev/null 2>&1 || { bad "SSH" "no SSH to $IP with $KEY (omacvm apply shows how to let OmacVM in)"; (( JSON )) && json_out false; exit 1; }
+[[ -n ${OMA_PIN:-} || -z ${VM:-} ]] || vm_pin "$VM" "$TYPE"   # --ip alone: no key kept (DHCP reuses addresses)
+ssh_ok=0; (wait_ssh "$IP" 30) >/dev/null 2>&1 || ssh_ok=$?
+if (( ssh_ok == 3 )); then
+  bad "SSH" "$IP answers with another SSH host key than the one OmacVM remembered (rebuilt? omacvm apply ${OMA_PIN_ARGS:-} --reset-host-key)"
+  (( JSON )) && json_out false; exit 1
+elif (( ssh_ok )); then
+  bad "SSH" "no SSH to $IP with $KEY (omacvm apply shows how to let OmacVM in)"; (( JSON )) && json_out false; exit 1
+fi
 [[ -n $U ]] || U=$(vm_probe "$IP" | sed -n 's/^OMACVM_USER=//p')
 # What was chosen at setup for this VM (defaults for VMs from before the choices).
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)

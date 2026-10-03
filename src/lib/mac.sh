@@ -6,17 +6,80 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
-# SSH into the guest as root with the OmacVM key. VMs get rebuilt, so
-# their host keys are not remembered.
+# SSH into the guest as root with the OmacVM key. Each VM's host key is
+# remembered the first time OmacVM sets the VM up (build, apply) and checked on
+# every later connection: OMA_PIN is that VM's file (vm_pin, vm.sh), and
+# OMA_PIN_NEW=1 lets a connection record the key when there is none yet. A VM
+# without a remembered key (and OMA_PIN_NEW unset) is reached as before.
+OMA_PINS="$HOME/Library/Application Support/omacvm/known_hosts"
 gssh() {
   local ip=$1; shift
+  local hk=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
+  if [[ -n ${OMA_PIN:-} ]] && [[ -s $OMA_PIN || ${OMA_PIN_NEW:-} == 1 ]]; then
+    [[ -s $OMA_PIN ]] || { mkdir -p "$(dirname "$OMA_PIN")" && chmod 700 "$(dirname "$OMA_PIN")"; }
+    hk=(-o "StrictHostKeyChecking=$([[ -s $OMA_PIN ]] && echo yes || echo accept-new)"
+        -o "UserKnownHostsFile=\"$OMA_PIN\"" -o HostKeyAlias=omacvm-vm -o CheckHostIP=no)
+  fi
   ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
+    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
 }
 
-wait_ssh() {   # <ip> [seconds]
+# hostkey_changed IP: the VM answers, with other host keys than the one
+# remembered for it.
+hostkey_changed() {
+  [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
+  local _h t k seen=0
+  while read -r _h t k; do
+    [[ -n $k ]] || continue
+    seen=1
+    grep -qF " $t $k" "$OMA_PIN" && return 1
+  done < <(ssh-keyscan -T 5 "$1" 2>/dev/null)
+  (( seen ))
+}
+
+hostkey_error() {   # the VM's name (VM) and how apply names it (OMA_PIN_ARGS) come from vm_pin
+  printf '\033[1;31merror:\033[0m %s answers with another SSH host key than the one OmacVM remembered for it.\n' "${VM:-the VM}" >&2
+  printf 'If you rebuilt or reinstalled it, forget the old key:\n\n  omacvm apply %s --reset-host-key\n\nIf not, something else may answer at its address: do not go on.\n' \
+    "${OMA_PIN_ARGS:-}" >&2
+}
+
+# The Bridge's token (the Bridge makes it on its first start). The VMs' gestures
+# daemons say it too, so it is made here when Gestures comes without the Bridge.
+BRIDGE_TOKEN="$HOME/Library/Application Support/omacvm-bridge/token"
+bridge_token_ensure() {
+  [[ -f $BRIDGE_TOKEN && $(tr -d '[:space:]' < "$BRIDGE_TOKEN" | wc -c) -ge 32 ]] && return 0
+  mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
+  (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
+}
+
+# Gestures lets daemons from before the token in only from these VMs (MAC
+# addresses, one per line); src/mac/install.sh writes the list once.
+GESTURES_LEGACY="$HOME/Library/Application Support/omacvm/gestures-legacy"
+mac_norm() {   # aa:b:cc:.. or AABBCC.. -> aabbcc.. (12 hex digits), else nothing
+  local m out="" p
+  m=$(tr 'A-F' 'a-f' <<<"$1")
+  if [[ $m == *:* ]]; then
+    for p in $(tr ':' ' ' <<<"$m"); do (( ${#p} == 1 )) && p=0$p; out+=$p; done
+  else
+    out=$m
+  fi
+  [[ $out =~ ^[0-9a-f]{12}$ ]] && echo "$out"
+}
+gestures_legacy_forget() {   # IP: that VM's daemon sends the token now
+  local m
+  [[ -s $GESTURES_LEGACY ]] || return 0
+  m=$(mac_norm "$(arp -n "$1" 2>/dev/null | awk '{ print $4 }')") || return 0
+  grep -vx "$m" "$GESTURES_LEGACY" > "$GESTURES_LEGACY.new" || true
+  mv -f "$GESTURES_LEGACY.new" "$GESTURES_LEGACY"
+}
+
+wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
   local i
-  for ((i = 0; i < ${2:-600}; i += 5)); do gssh "$1" true 2>/dev/null && return 0; sleep 5; done
+  for ((i = 0; i < ${2:-600}; i += 5)); do
+    gssh "$1" true 2>/dev/null && return 0
+    hostkey_changed "$1" && { hostkey_error; return 3; }
+    sleep 5
+  done
   die "no SSH on $1 after ${2:-600} s"
 }
 
@@ -119,8 +182,9 @@ utm_ip() {   # <vm name> [seconds]: the guest's address on UTM's shared network
     # the QEMU guest agent knows; without it, UTM's DHCP server (bootpd) does
     ip=$("$UTMCTL" ip-address "$1" 2>/dev/null | grep -m1 -E '^192\.168\.[0-9]+\.[0-9]+$') && { echo "$ip"; return 0; }
     local mac
-    mac=$(osascript -e "tell application \"UTM\"" -e "copy (configuration of virtual machine named \"$1\") to c" \
-            -e "get address of item 1 of (network interfaces of c)" -e "end tell" 2>/dev/null |
+    # the name goes in as an argument, never into the script's source
+    mac=$(osascript -e 'on run argv' -e 'tell application "UTM"' -e 'copy (configuration of virtual machine named (item 1 of argv)) to c' \
+            -e 'get address of item 1 of (network interfaces of c)' -e 'end tell' -e 'end run' "$1" 2>/dev/null |
           tr 'A-F' 'a-f' | sed 's/:0/:/g; s/^0//')
     if [[ -n $mac ]]; then
       ip=$(awk -v m="1,$mac" '/ip_address=/ { split($0, a, "="); ip = a[2] } /hw_address=/ { split($0, b, "="); if (b[2] == m) print ip }' /var/db/dhcpd_leases 2>/dev/null | tail -1)
