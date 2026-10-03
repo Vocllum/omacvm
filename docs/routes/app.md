@@ -63,7 +63,8 @@ are the same as for the other routes; the VM goes into the app's VMs folder
    (`org.omacvm.app`, under any name it was installed as). Not installed:
    after asking, it downloads `OmacVM-<version>.zip` (this OmacVM's version)
    from the GitHub release `v<version>` with curl, checks it against the
-   `.sha256` next to it, and puts it in /Applications (or ~/Applications when
+   `.sha256` next to it and that the app is signed with OmacVM's Developer
+   ID (team 722686Y34B), and puts it in /Applications (or ~/Applications when
    /Applications is not writable). curl sets no quarantine attribute, so
    Gatekeeper does not stop the app. Releases from before the app have no
    zip: it says so and stops (exit 3). With `--yes` it installs nothing and

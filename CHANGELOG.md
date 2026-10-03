@@ -11,8 +11,8 @@ in more words.
   signed with a Developer ID. See [docs/routes/app.md](docs/routes/app.md).
 - `omacvm build --vm-type app`: builds the VM through OmacVM.app with the same
   questions as the other routes. It downloads the app when it is missing
-  (after asking) and checks the zip against its `.sha256`. `omacvm update`
-  replaces an older app.
+  (after asking), checks the zip against its `.sha256` and that the app is
+  signed with OmacVM's Developer ID. `omacvm update` replaces an older app.
 - Omanotch is built in: it lives in `src/omanotch` and OmacVM installs it
   from there, on the Mac and in the VM, with no clone of its own repo.
 - Proofs between the VM and the Mac, so another program on the Mac can't pose

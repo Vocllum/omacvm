@@ -118,6 +118,10 @@ app_create() {
 }
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
+# The release app is signed with OmacVM's Developer ID (team 722686Y34B). The
+# .sha256 comes from the same release, so it only shows the download is
+# whole; this shows who made it.
+APP_DEVID='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
 
 app_version_lt() {   # A B: A is older than B (2.10.0 is newer than 2.9.1)
   awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, ".")
@@ -139,7 +143,7 @@ app_install_cmd() {   # VERSION
 }
 
 # curl sets no quarantine attribute (a browser does), so Gatekeeper does not
-# stop the app, notarized or not. The zip's checksum comes from the same release.
+# stop the app, notarized or not: the Developer ID check does that part.
 app_install() {   # VERSION [APP]
   local v=$1 dest=${2:-} url tmp want got new name
   url=$(app_zip_url "$v")
@@ -158,6 +162,8 @@ app_install() {   # VERSION [APP]
      ! codesign --verify --deep --strict "$new" 2>/dev/null; then
     rm -rf "$tmp"; echo "the download holds no intact OmacVM.app: not installed" >&2; return 1
   fi
+  codesign --verify -R="$APP_DEVID" "$new" 2>/dev/null ||
+    { rm -rf "$tmp"; echo "the download is not signed with OmacVM's Developer ID (team 722686Y34B): not installed" >&2; return 1; }
   if [[ -n $dest ]]; then
     # Installed under its own name (the app offers that): keep it, signed
     # again ad hoc as the app does when it installs itself.
