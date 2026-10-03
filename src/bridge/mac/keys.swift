@@ -224,11 +224,11 @@ final class MediaKeys {
     log("media keys: event tap installed")
   }
 
-  /// Parallels (prl_client_app), UTM or VMware Fusion is frontmost and its VM window spans a whole
+  /// Parallels (prl_client_app), UTM, VMware Fusion or OmacVM.app is frontmost and its VM window spans a whole
   /// display (it sits below the menu bar/notch strip, so allow a gap on top).
   private func parallelsFullScreen() -> Bool {
     guard let app = NSWorkspace.shared.frontmostApplication,
-          ["prl_client_app", "UTM", "VMware Fusion"].contains(app.executableURL?.lastPathComponent ?? ""),
+          ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(app.executableURL?.lastPathComponent ?? ""),
           let wins = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
     else { return false }
     var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0

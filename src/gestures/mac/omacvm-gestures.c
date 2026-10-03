@@ -103,11 +103,13 @@ extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1
 #endif
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
-// its subnet at install time, the Mac is .1; empty without Fusion). One
-// listener per address; never 0.0.0.0.
-static char listenAddrs[3][16] = { "10.211.55.2", "192.168.64.1", "" };
+// its subnet at install time, the Mac is .1; empty without Fusion) and
+// OmacVM.app (QEMU's user network reaches the Mac's 127.0.0.1). One listener
+// per address; never 0.0.0.0.
+static char listenAddrs[4][16] = { "10.211.55.2", "192.168.64.1", "", "127.0.0.1" };
 #define NET_UTM 1
 #define NET_FUSION 2
+#define NET_APP 3
 
 // The first VNET_8_HOSTONLY_SUBNET line, and only a private address (as
 // fusion_host in src/lib/mac.sh and the Bridge read it).
@@ -138,7 +140,7 @@ static volatile int frontIsVM, escaped, capturing;
 static pid_t frontPid;   // the full-screen VM app in front, else 0
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
-// 1 = UTM, 2 = Fusion, the index into listenAddrs). One connection per VM used to mean
+// 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
 // two running VMs pushed each other off every two seconds.
 #define MAX_CLIENTS 8
 static struct { int fd, net, gestures, glide, target; char ip[32], name[256]; } clients[MAX_CLIENTS];
@@ -382,7 +384,8 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
   // Parallels' VM window, UTM's, or VMware Fusion's.
   int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
-          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION : -1;
+          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
+          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
   int front = net >= 0 && vmFullScreen(pid);
   if (front) {
     // Which of the app's VMs: its window title, on this check (every 0.2 s
