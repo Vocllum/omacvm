@@ -153,7 +153,7 @@ stage_upload() {
   ls "$OUT/$base".tar.zst.part-* >/dev/null || die "nothing to upload in $OUT"
   if ! gh release view "$TAG" -R "$PREBUILT_REPO" >/dev/null 2>&1; then
     log "creating the pre-release $TAG"
-    gh release create "$TAG" -R "$PREBUILT_REPO" --prerelease --target "$(git -C "$R" rev-parse HEAD)" \
+    gh release create "$TAG" -R "$PREBUILT_REPO" --prerelease --target "${OMACVM_PREBUILT_TARGET:-main}" \
       --title "Prebuilt VMs for OmacVM $VERSION ($TAG)" \
       --notes "Prebuilt Omarchy VMs for OmacVM $VERSION. Use them with: omacvm build --prebuilt. See docs/prebuilt.md and SOURCES.md." >/dev/null
   fi
