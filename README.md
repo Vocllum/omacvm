@@ -197,8 +197,8 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   others keep their own bar. Omanotch tells VMs of the same app apart by the
   window title (the VM's name), which it reads through Accessibility: allow
   Omanotch in System Settings → Privacy & Security → Accessibility when it
-  asks (only needed with two or more VMs of one app connected). The VM says its name if
-  [OmacVM](https://github.com/gillesgoetsch/omacvm) set it up
+  asks (only needed with two or more VMs of one app connected). The VM says
+  its name if [OmacVM](https://github.com/gillesgoetsch/omacvm) set it up
   (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`); a VM without a name is matched
   by its app only.
 - Keep UTM's library window and Parallels' Control Center out of full screen on

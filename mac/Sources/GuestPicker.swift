@@ -27,9 +27,10 @@ enum GuestPicker {
     ///
     /// The name that is the title wins, else the longest name that is a part
     /// of it ("UTM – Omarchy 2": "Omarchy 2", not "Omarchy"). Without a match,
-    /// a guest that has not said its name may be the one, one that has is not. Ties (and no title): the current
-    /// guest if it runs in the front app, else the first one that does, else
-    /// the current one, else the first connected.
+    /// a guest that has not said its name may be the one, one that has is
+    /// not. Ties (and no title): the current guest if it runs in the front
+    /// app, else the first one that does, else the current one, else the
+    /// first connected.
     static func pick(_ guests: [GuestCandidate], front: FrontWindow, current: Int?) -> Int? {
         let fits = guests.filter { $0.owner == nil || $0.owner == front.owner }
         guard !fits.isEmpty else { return nil }
