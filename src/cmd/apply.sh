@@ -106,6 +106,8 @@ fi
 
 # ---------- the VM side ----------
 T=~/Library/Application\ Support/omacvm-bridge/token
+# A Bridge installed a moment ago writes its token when it first starts.
+if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
 if [[ -f $T ]]; then
   log "bridge token -> $IP"
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
