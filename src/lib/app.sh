@@ -175,8 +175,15 @@ app_install() {   # VERSION [APP]
   # Next to the old one first, then swapped: never a half-copied app.
   rm -rf "$dest.new" "$dest.old"
   ditto "$new" "$dest.new" || { rm -rf "$tmp" "$dest.new"; echo "could not write $(dirname "$dest")" >&2; return 1; }
-  [[ ! -e $dest ]] || mv "$dest" "$dest.old"
-  mv "$dest.new" "$dest"
+  # Each step checked: a failed first mv must not move the new app into the
+  # old one (that breaks its signature); a failed second mv puts the old back.
+  if [[ -e $dest ]] && ! mv "$dest" "$dest.old"; then
+    rm -rf "$tmp" "$dest.new"; echo "could not move $dest aside: not updated" >&2; return 1
+  fi
+  if ! mv "$dest.new" "$dest"; then
+    [[ ! -e $dest.old ]] || mv "$dest.old" "$dest" || echo "the old app is at $dest.old" >&2
+    rm -rf "$tmp" "$dest.new"; echo "could not put the new app at $dest: not updated" >&2; return 1
+  fi
   rm -rf "$dest.old" "$tmp"
   # So that open -b org.omacvm.app finds it right away.
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$dest" >/dev/null 2>&1 || true
