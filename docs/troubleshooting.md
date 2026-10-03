@@ -112,7 +112,7 @@ else than the cause. Recipes and the general failure table are in
 - **Fix:** on VMware, `notchcast` only hides and shows the guest cursor; it
   never moves it.
 - **Where:** the [Omanotch](https://github.com/gillesgoetsch/omanotch) repo,
-  branch `fusion` (`notchcast`). Not in this repo.
+  `notchcast` (on its main branch). Not in this repo.
 
 ## 5. Fusion: Omanotch cannot find the Mac
 
@@ -121,7 +121,7 @@ else than the cause. Recipes and the general failure table are in
 - **Cause:** `notchcast` looked for the Mac at the default gateway. On Fusion's
   NAT network the gateway is `.2` (Fusion's NAT), and the Mac is `.1`.
 - **Fix:** OmacVM passes the Mac's address to `notchcast` as `NOTCHBAR_HOST`,
-  on every route. `notchcast` also knows Fusion now (Omanotch's `fusion` branch).
+  on every route. `notchcast` also knows Fusion now (on Omanotch's main branch).
 - **Where:** `src/guest/install.sh` writes
   `~/.config/systemd/user/notchcast.service.d/omacvm-host.conf`.
 
