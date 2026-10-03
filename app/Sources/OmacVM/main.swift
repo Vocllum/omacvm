@@ -10,6 +10,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var runner: Runner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Scripted install: --install-as NAME [--into FOLDER]
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--install-as"), i + 1 < args.count {
+            let folder = args.firstIndex(of: "--into").flatMap { $0 + 1 < args.count ? URL(fileURLWithPath: args[$0 + 1]) : nil }
+            do {
+                let app = try Installer.install(name: args[i + 1], into: folder ?? Installer.defaultFolder)
+                print("installed \(app.path)")
+                exit(0)
+            } catch {
+                FileHandle.standardError.write("install failed: \(error.localizedDescription)\n".data(using: .utf8)!)
+                exit(1)
+            }
+        }
         // One launcher at a time: a second one hands over to the first.
         let me = NSRunningApplication.current
         if let id = Bundle.main.bundleIdentifier,
@@ -20,7 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         state.startVM = { [weak self] in self?.startVM() }
         buildMenu()
-        if state.screen == .ready && CommandLine.arguments.contains("--start") {
+        if state.config.isReady && CommandLine.arguments.contains("--start") {
             startVM()
         } else {
             showWindow()

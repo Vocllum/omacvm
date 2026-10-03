@@ -3,6 +3,7 @@ import SwiftUI
 
 /// What the launcher window shows.
 enum Screen: Equatable {
+    case install
     case setup
     case building
     case ready
@@ -21,6 +22,7 @@ final class AppState: ObservableObject {
             config = existing
             screen = existing.isReady ? .ready : .setup
         } else {
+            screen = .setup
             var c = VMConfig()
             let t = Mac.tier(1)
             c.cpus = t.cpus
@@ -32,7 +34,13 @@ final class AppState: ObservableObject {
             c.keyboard = Mac.keyboard
             config = c
         }
+        afterInstall = screen
+        if !Installer.isInstalled { screen = .install }
     }
+
+    /// What the window shows once the install question is answered.
+    private(set) var afterInstall: Screen = .setup
+    func installDone() { screen = afterInstall }
 }
 
 struct RootView: View {
@@ -41,6 +49,7 @@ struct RootView: View {
     var body: some View {
         Group {
             switch state.screen {
+            case .install: InstallView(onDone: { state.installDone() })
             case .setup: SetupView(state: state)
             case .building: BuildView(state: state, creator: state.creator)
             case .ready: ReadyView(state: state)
@@ -57,6 +66,7 @@ struct SetupView: View {
     @State private var password2 = ""
     @State private var tier = 1
     @State private var location = Paths.vmsRoot.path
+    @State private var locationProblem: String?
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
@@ -97,6 +107,9 @@ struct SetupView: View {
                     Text(location).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
                     Button("Change…") { chooseLocation() }
                 }
+                if let p = locationProblem {
+                    Text(p).font(.caption).foregroundStyle(.red)
+                }
             }
             HStack {
                 Text("Keyboard \(state.config.keyboard), \(state.config.timeZone), \(state.config.language) (from the Mac)")
@@ -117,12 +130,21 @@ struct SetupView: View {
         panel.prompt = "Use This Folder"
         panel.message = "Where the VM's disk goes. An external drive works too (APFS)."
         if panel.runModal() == .OK, let url = panel.url {
+            if let problem = VolumeCheck.problem(with: url) {
+                locationProblem = problem
+                return
+            }
+            locationProblem = nil
             UserDefaults.standard.set(url.path, forKey: "vmsRoot")
             location = url.path
         }
     }
 
     private func build() {
+        if let p = VolumeCheck.problem(with: Paths.vmsRoot) {
+            locationProblem = p
+            return
+        }
         let t = Mac.tier(tier)
         state.config.cpus = t.cpus
         state.config.memoryMB = t.memoryGB * 1024
