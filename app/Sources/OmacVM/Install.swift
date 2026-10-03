@@ -45,7 +45,8 @@ enum Installer {
         try out.write(to: plist)
         let sign = Process()
         sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-        sign.arguments = ["--force", "--sign", "-", "--identifier", "org.omacvm.app", target.path]
+        sign.arguments = ["--force", "--sign", "-", "--identifier", "org.omacvm.app",
+                          "-r=designated => identifier \"org.omacvm.app\"", target.path]
         sign.standardOutput = FileHandle.nullDevice
         sign.standardError = FileHandle.nullDevice
         try sign.run()

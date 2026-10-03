@@ -79,8 +79,10 @@ log "signing (ad hoc)"
 for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
   codesign --force --sign - "$f" 2>/dev/null
 done
-codesign --force --sign - --identifier org.omacvm.app.qemu \
+# The designated requirement names the identifier, not the binary's hash, so
+# macOS keeps Accessibility and other grants across rebuilds (as OmacVM's helpers).
+codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
   --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
-codesign --force --sign - --identifier org.omacvm.app "$APP"
+codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
 codesign --verify --deep --strict "$APP"
 log "built $APP ($(du -sh "$APP" | cut -f1))"
