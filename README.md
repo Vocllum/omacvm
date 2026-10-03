@@ -192,7 +192,15 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   again — the patches are versioned and refuse to apply blindly.
 - Hyprland warns about overlapping monitors after layout changes. The overlap
   is deliberate; `notchbar.lua` dismisses that one warning and nothing else.
-- One VM at a time: while one guest is connected, another one is turned away.
+- Several VMs at once: the strip shows the bar of the VM whose window is full
+  screen on the built-in display, and only that VM's bar is parked; the
+  others keep their own bar. Omanotch tells VMs of the same app apart by the
+  window title (the VM's name), which it reads through Accessibility: allow
+  Omanotch in System Settings → Privacy & Security → Accessibility when it
+  asks (only needed with two or more VMs connected). The VM says its name if
+  [OmacVM](https://github.com/gillesgoetsch/omacvm) set it up
+  (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`); a VM without a name is matched
+  by its app only.
 - Keep UTM's library window and Parallels' Control Center out of full screen on
   the built-in display while a VM is connected: from the outside they look just
   like a full-screen VM.
@@ -220,6 +228,7 @@ up by itself.
 | UTM: the pointer never reaches the strip | UTM's automatic input capture is on (see Requirements), or press ⌃⌥ to release the mouse |
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
 | Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
+| Strip shows another VM's bar | `~/Library/Logs/omanotch.log` ("strip serves guest …; front window …"): Omanotch needs Accessibility permission, and the VM's name (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`) must appear in its window title |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
 | Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display |
 
