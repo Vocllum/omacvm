@@ -515,10 +515,41 @@ static void save_strip_height(int h) {
     }
 }
 
+#ifndef OMACVM_ENV
+#define OMACVM_ENV "/etc/omacvm/env"
+#endif
+
+// The VM's name in its app, base64, as OmacVM writes it (OMACVM_VM_NAME_B64=…
+// in /etc/omacvm/env; the last one counts). 0 when there is none.
+static int vm_name_b64(char *out, size_t size) {
+    char line[512];
+    int found = 0;
+    FILE *f = fopen(OMACVM_ENV, "r");
+    if (!f) return 0;
+    while (fgets(line, sizeof line, f)) {
+        static const char key[] = "OMACVM_VM_NAME_B64=";
+        if (strncmp(line, key, sizeof key - 1)) continue;
+        char *v = line + sizeof key - 1;
+        v[strcspn(v, "\r\n")] = 0;
+        size_t n = strlen(v);
+        if (n >= 2 && (*v == '"' || *v == '\'') && v[n - 1] == *v) {
+            v[n - 1] = 0;
+            v++;
+            n -= 2;
+        }
+        found = n > 0 && n < size && strspn(v, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") == n;
+        if (found) memcpy(out, v, n + 1);
+    }
+    fclose(f);
+    return found;
+}
+
 // Tells the helper which hypervisor this guest runs in, so it only takes this
-// VM app's full-screen window for the strip ("hello qemu", "hello parallels").
+// VM app's full-screen window for the strip ("hello qemu", "hello parallels"),
+// and the VM's name, so it can tell several VMs of one app apart by their
+// window titles ("vmname <base64>"; older helpers ignore it).
 static void send_hello(void) {
-    char vendor[64] = "", msg[96];
+    char vendor[64] = "", msg[96], name[400], namemsg[420];
     FILE *f = fopen("/sys/class/dmi/id/sys_vendor", "r");
     if (f) {
         if (!fgets(vendor, sizeof vendor, f)) vendor[0] = 0;
@@ -528,6 +559,10 @@ static void send_hello(void) {
                    : strstr(vendor, "VMware") ? "vmware" : strstr(vendor, "Apple") ? "apple" : "unknown";
     snprintf(msg, sizeof msg, "hello %s", hv);
     send_text(msg);
+    if (vm_name_b64(name, sizeof name)) {
+        snprintf(namemsg, sizeof namemsg, "vmname %s", name);
+        send_text(namemsg);
+    }
 }
 
 static int is_number(const char *s) {
@@ -886,7 +921,8 @@ static void *net_thread(void *unused) {
         close(fd);
         set_guest_cursor_visible(1);
         // Dropped right away: most likely turned away because another VM
-        // holds the strip. Do not hammer the helper.
+        // holds the strip (older helpers serve one VM only). Do not hammer
+        // the helper.
         if (now_ms() - connected_at < 2000) sleep(3);
     }
     return NULL;
