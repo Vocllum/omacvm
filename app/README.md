@@ -36,6 +36,9 @@ that Developer ID, the hardened runtime and a timestamp; QEMU gets
 `app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc,
 and `package-release.sh` refuses it: a release needs the Developer ID of team
 722686Y34B.
+It also refuses a history that holds `runtime/.build-runtime.log` (local home
+paths, filtered out of the history): rebase a branch made before that onto
+the filtered history first.
 Check the unzipped app with `codesign --verify --deep --strict` and
 `spctl -a -vv -t exec`: until it is notarized, spctl says "Unnotarized
 Developer ID", and a browser download needs Open Anyway the first time.

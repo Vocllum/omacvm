@@ -18,6 +18,11 @@ plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$APP/Contents/Info.plist" 2>/d
 [[ $(plist OmacVMCommit) == "$(git -C "$REPO" rev-parse HEAD)" ]] ||
   die "the app was built from another commit: build it again (scripts/build-app.sh --release)"
 [[ -z $(git -C "$REPO" status --porcelain) ]] || die "uncommitted changes: a release comes from a clean tree"
+# The runtime's build log holds local home paths. It once got into the
+# history (037fcf58, filtered out since); a branch made before that brings it
+# back until it is rebased onto the filtered history.
+[[ -z $(git -C "$REPO" rev-list --objects HEAD | grep '\.build-runtime\.log$') ]] ||
+  die "runtime/.build-runtime.log is in this history: rebase the branches made from the old app-in first"
 # Releases are signed with OmacVM's Developer ID (team 722686Y34B), as
 # omacvm build --vm-type app and omacvm update check: no ad hoc build.
 TEAM=722686Y34B
