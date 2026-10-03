@@ -61,7 +61,8 @@ if app=$(app_bundle); then
     running=$(app_list | awk -F'\t' '$3 == "running" && !f { print $1; f = 1 }')
     if [[ -n $running ]]; then
       info "OmacVM.app: '$running' runs in it, not updated ($have; $want is out). Shut the VM down, then: omacvm update"
-    elif pgrep -qf "$app/Contents/"; then
+    # The app's path as it is (pgrep -f took it as a regex: "Omarchy (2).app").
+    elif procs=$(ps -ax -o args= 2>/dev/null) && [[ $procs == *"$app/Contents/"* ]]; then
       info "OmacVM.app is open, not updated ($have; $want is out). Quit it, then: omacvm update"
     elif ! app_published "$want"; then
       info "OmacVM.app $have: no download for $want yet"
