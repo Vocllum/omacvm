@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import Foundation
 
 /// Runs one VM: QEMU with its own Cocoa window (VirGL), a QMP socket for
@@ -107,6 +108,12 @@ final class Runner {
                 self?.clipboard?.stop()
                 self?.onExit?(status)
             }
+        }
+        // QEMU records through SDL in its own process, which cannot ask macOS
+        // for the microphone (its AudioQueueStart just fails): the app asks,
+        // once, and QEMU records under its grant from then on.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
         }
         try p.run()
         process = p
