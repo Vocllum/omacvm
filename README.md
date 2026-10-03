@@ -199,17 +199,24 @@ omacvm            # or: omacvm build
 </p>
 
 It first shows what it found on your Mac (Xcode's command line tools,
-Homebrew, Parallels, UTM) and installs what is missing, after asking. Then a
+Homebrew, Parallels, UTM, VMware Fusion) and installs what is missing, after
+asking. Then a
 few screens (↑/↓ to choose, space to switch, Return to confirm):
 
-1. **Parallels or UTM**, with the comparison above. If the app isn't
-   installed yet (or UTM is older than 5), it offers to install it with
-   Homebrew, or tells you how. A fresh Parallels without a licence yet asks
+1. **Parallels, UTM or VMware Fusion**, with the comparison above. If the app
+   isn't installed yet (or UTM is older than 5), it offers to install it with
+   Homebrew, or tells you how (Fusion: a free download from Broadcom, after
+   signing in). A fresh Parallels without a licence yet asks
    which edition you plan on (the trial is Pro).
 2. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
    quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs
    and 8 GB, and OmacVM stays within that.
+
+   Then **where the VM goes**: the app's own folder, or any folder you pick,
+   an external drive for example (APFS or Mac OS Extended; Parallels and
+   Fusion; UTM keeps its VMs in its own library). With `--vm-dir PATH` for
+   scripts.
 3. **Features**, one checklist with the recommended ones on:
 
    | | Default |

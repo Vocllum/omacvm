@@ -48,6 +48,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --vm-name)        VM_NAME="$2"; shift 2 ;;
+    --vm-dir)         PVM_DIR="${2%/}"; shift 2 ;;
     --dmg)            DMG_PATH="$2"; shift 2 ;;
     --release)        RELEASE="$2"; shift 2 ;;
     --root-size-gib)  ROOT_SIZE_GIB="$2"; shift 2 ;;
@@ -244,7 +245,7 @@ if [[ -z "$DISK_SIZE_MIB" ]]; then
 fi
 TOTAL_LBAS=$(( DISK_SIZE_MIB * 2048 ))
 
-PVM="$VM_DIR/$VM_NAME.pvm"
+PVM="${PVM_DIR:-$VM_DIR}/$VM_NAME.pvm"   # --vm-dir; VM_DIR stays where other VMs lend VM.app/NVRAM
 DISK_NAME="${VM_NAME// /}-0.hdd"
 HDD="$PVM/$DISK_NAME"
 HDS="$HDD/$DISK_NAME.0.{5fbaabe3-6958-40ff-92a7-860e329aab41}.hds"

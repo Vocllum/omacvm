@@ -11,6 +11,7 @@
 # password then comes from OMACVM_PASSWORD):
 #   --vm-type parallels|utm|fusion   --vm-name NAME   --hostname NAME
 #   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
+#   --vm-dir PATH   where the VM goes (Parallels, Fusion; default: the app's own folder)
 #   --user NAME   --full-name "NAME"
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
@@ -66,6 +67,7 @@ while (( $# )); do
   case $1 in
     --vm-type) TYPE=$2; shift 2 ;;
     --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
+    --vm-dir) VM_DIR=$2; shift 2 ;;
     --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
@@ -217,6 +219,53 @@ fi
 (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
 (( DISK_GB >= 64 )) || die "disk: at least 64 GB"
 
+# ---------- where the VM goes ----------
+# Parallels and Fusion take any folder (an external drive, say); UTM keeps its
+# VMs in its own library (moving one there is not safe through its scripting).
+default_dir() { case $TYPE in parallels) echo "$HOME/Parallels" ;; fusion) echo "$FUSION_DIR" ;; utm) echo "UTM's library" ;; esac; }
+free_gb_at() {   # free GB on the drive of a folder, as Finder counts it
+  local g
+  g=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: CommandLine.arguments[1]).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' "$1" 2>/dev/null)
+  [[ $g =~ ^[0-9]+$ && $g -gt 0 ]] || g=$(df -g "$1" | awk 'END { print $4 }')
+  echo "$g"
+}
+vm_dir_problem() {   # DIR -> a reason it does not work, or nothing
+  local mp fs dev
+  [[ -d $1 && -w $1 ]] || { echo "not a folder you can write to"; return; }
+  mp=$(df -P "$1" | awk 'END { print $6 }')
+  fs=$(mount | awk -v m="$mp" '$3 == m { sub(/^\(/, "", $4); sub(/,$/, "", $4); print $4; exit }')
+  case $fs in apfs|hfs) ;; *) echo "its drive is ${fs:-unknown}: a VM disk needs APFS or Mac OS Extended (Disk Utility can erase it as APFS)"; return ;; esac
+  (( $(free_gb_at "$1") >= 30 )) || echo "only $(free_gb_at "$1") GB free on that drive (the VM needs about 30)"
+}
+if [[ -n ${VM_DIR:-} && $TYPE == utm ]]; then usage "--vm-dir: UTM keeps its VMs in its own library"; fi
+if [[ -z ${VM_DIR:-} && $TYPE != utm ]] && (( ! YES )); then
+  ui_select loc "Where should the VM go?" 0 "Default|$(default_dir | sed "s|^$HOME|~|")" \
+    "Another folder…|an external drive, for example (a Finder window opens)"
+  while (( loc == 1 )); do
+    VM_DIR=$(osascript -e 'POSIX path of (choose folder with prompt "Where should the Omarchy VM go?")' 2>/dev/null) ||
+      VM_DIR=$(ask_value "folder for the VM" "" '^/')
+    VM_DIR=${VM_DIR%/}
+    p=$(vm_dir_problem "$VM_DIR")
+    [[ -z $p ]] && break
+    say "    $VM_DIR: $p"
+    ui_select loc "Where should the VM go?" 1 "Default|$(default_dir | sed "s|^$HOME|~|")" "Another folder…|pick again"
+    (( loc == 0 )) && VM_DIR=""
+  done
+fi
+if [[ -n ${VM_DIR:-} ]]; then
+  VM_DIR=${VM_DIR%/}
+  p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "--vm-dir $VM_DIR: $p"
+  dev=$(df -P "$VM_DIR" | awk 'END { print $1 }')
+  diskutil info "$dev" 2>/dev/null | grep -qE "Device Location: +External|Removable Media: +Removable" &&
+    info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
+  [[ $TYPE == fusion ]] && FUSION_DIR=$VM_DIR
+fi
+[[ -n ${VM_DIR:-} || $TYPE == utm ]] || VM_DIR=$(default_dir)
+case $TYPE in
+  parallels) [[ ! -e $VM_DIR/$VM.pvm ]] || usage "$VM_DIR/$VM.pvm already exists (choose another --vm-name)" ;;
+  fusion) [[ ! -e $(fusion_bundle "$VM") ]] || usage "$(fusion_bundle "$VM") already exists (choose another --vm-name)" ;;
+esac
+
 # ---------- 3. features ----------
 # The build's switches by feature name (src/features.tsv).
 fvar() {
@@ -305,14 +354,15 @@ human_steps() {
 }
 if (( PLAN && JSON )); then
   cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $HOST"
+  [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
-  printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s},\n' \
+  printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s, "dir": %s},\n' \
     "$(json_str "$VM")" "$TYPE" "$(json_str "$(case $TYPE in
       (parallels) echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" ;;
       (utm) echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" ;;
       (fusion) echo "VMware Fusion $(fusion_version)" ;;
     esac)")" \
-    "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")"
+    "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")" "$(json_str "${VM_DIR:-UTM library}")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
   printf '  "resource_tiers": {'   # what --resources gives on this Mac
   for t in 0 1 2 3; do
@@ -342,7 +392,7 @@ if [[ $TYPE == parallels ]]; then
   APP_LINE="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}"
   if [[ -n ${P_PLANNED:-} ]]; then APP_LINE+=" (planned; no licence yet, the trial starts with the VM)"
   elif [[ $P_TRIAL == yes ]]; then APP_LINE+=" (trial)"; fi
-  APP_LINE+=" (~/Parallels/$VM.pvm)"
+  APP_LINE+=" ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM.pvm"))"
 elif [[ $TYPE == utm ]]; then
   APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
 else
@@ -418,8 +468,8 @@ if [[ $TYPE == parallels ]]; then
   info "allow access): click through them, the build waits for the VM to start."
 fi
 if [[ $TYPE == parallels ]]; then
-  "$R/src/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
-  PVM="$HOME/Parallels/$VM.pvm"
+  "$R/src/vm/live/build-live.sh" --vm-name "$VM" --vm-dir "$VM_DIR" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
+  PVM="$VM_DIR/$VM.pvm"
   "$PRLCTL" unregister "$VM" >/dev/null
   log "VM settings and a ${DISK_GB} GB NVMe disk"
   /usr/local/bin/prl_disk_tool create --hdd "$PVM/omarchy.hdd" --size "${DISK_GB}G" >/dev/null
