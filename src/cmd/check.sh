@@ -123,10 +123,15 @@ if [[ $BRIDGE == on ]]; then
   T=~/Library/Application\ Support/omacvm-bridge/token
   if [[ -s $T ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
-    st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
+    # The token only to this user's Bridge (on 127.0.0.1 any Mac program could
+    # listen), and through a header file, never on a command line.
+    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831$1"; }
+    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1 ||
+      { bad "Bridge" "$HOST:47831 is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
+    st=$(bget /state)
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
     else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
-    bt=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/bluetooth")
+    bt=$(bget /bluetooth)
     case $(jq -r '.permission // empty' <<<"$bt" 2>/dev/null) in
       granted) ok "Bluetooth" "granted (connect devices from the VM)" ;;
       "") bad "Bluetooth" "the Bridge does not answer /bluetooth: src/mac/install.sh" ;;

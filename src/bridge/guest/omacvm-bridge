@@ -20,8 +20,23 @@ set -euo pipefail
 URL=${OMACVM_BRIDGE_URL:-http://${OMACVM_HOST:-10.211.55.2}:47831}
 TOKEN_FILE=${OMACVM_BRIDGE_TOKEN_FILE:-$HOME/.config/omacvm-bridge/token}
 
+# The token only to a Bridge that first proved it knows it (HMAC-SHA256 of a
+# fresh nonce): on 127.0.0.1 (OmacVM.app) any Mac program could listen in its
+# place. Bridges from before /proof get no token: omacvm update.
+proven() {
+  local n p
+  n=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  p=$(curl -sS -m 5 "${URL%/}/proof?nonce=$n" 2>/dev/null | jq -r '.proof // empty' 2>/dev/null) || p=""
+  python3 -c 'import hashlib, hmac, sys
+t = open(sys.argv[1], "rb").read().strip()
+w = hmac.new(t, b"omacvm-bridge mac " + sys.argv[2].encode(), hashlib.sha256).hexdigest()
+sys.exit(not hmac.compare_digest(w.encode(), sys.argv[3].encode()))' "$TOKEN_FILE" "$n" "$p" 2>/dev/null
+}
 # The token goes in via a header file, so it never shows up in `ps`.
-req() { curl -sS --fail-with-body -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") "$@"; echo; }
+req() {
+  proven || { echo "omacvm-bridge: $URL did not prove it is OmacVM's Bridge (an older Bridge? omacvm update); token not sent" >&2; return 1; }
+  curl -sS --fail-with-body -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") "$@"; echo
+}
 post() { req -X POST -H 'Content-Type: application/json' -d "$2" "$URL$1"; }
 frac() { awk -v p="$1" 'BEGIN { printf "%.4f", p / 100 }'; }
 check_switch() { [[ ${2:-toggle} =~ ^(on|off|toggle)$ ]] || { echo "$1: on, off or toggle" >&2; exit 2; }; }

@@ -70,7 +70,7 @@ if [[ $BRIDGE == on ]]; then
     else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)" human; fi
     if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
     else skip "Wi-Fi password sharing" "not on a shareable network"; fi
-  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831"; fi
+  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update)"; fi
   audio=$(as_user omacvm-bridge audio 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
     ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"

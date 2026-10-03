@@ -1,10 +1,19 @@
 // HTTP server (BSD sockets, one thread per request), auth, routing, and the
 // hub that tracks state and pushes changes to Server-Sent Events clients.
+import CryptoKit
 import Foundation
 
 struct APIError: Error {
   let status: Int, message: String
   init(_ status: Int, _ message: String) { self.status = status; self.message = message }
+}
+
+/// GET /proof: HMAC-SHA256(token, "omacvm-bridge mac <nonce>") in hex. The VM
+/// checks it before it sends the token, so a program listening in the
+/// Bridge's place (on 127.0.0.1 any Mac program could) never gets it.
+func proof(_ nonce: String) -> String {
+  HMAC<SHA256>.authenticationCode(for: Data("omacvm-bridge mac \(nonce)".utf8), using: SymmetricKey(data: token))
+    .map { String(format: "%02x", $0) }.joined()
 }
 
 func authorized(_ header: String?) -> Bool {
@@ -269,6 +278,14 @@ func handle(_ fd: Int32, peer: String) {
   let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
   let path = url?.path ?? "", query = url?.queryItems ?? []
 
+  if method == "GET", path == "/proof" {   // no token: it is how the VM checks this is the Bridge
+    guard let n = query.first(where: { $0.name == "nonce" })?.value, n.count == 32,
+          n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+      respond(fd, 400, ["error": "nonce: 32 hex digits"]); return
+    }
+    respond(fd, 200, ["proof": proof(n)])
+    return
+  }
   guard authorized(headers["authorization"]) else {
     log("401 \(method) \(path) from \(peer)")
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")

@@ -11,7 +11,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network), `192.168.64.1` (UTM's) and the `.1` of VMware Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in `/Library/Preferences/VMware Fusion/networking`), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
 | Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
-| VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
+| VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`, and goes only to a Bridge that proved it knows it, see API) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Night light | `guest/omarchy-toggle-nightlight` in `/usr/local/bin`, ahead of Omarchy's: Super+Ctrl+N and the menu switch the Mac's Night Shift |
 | Bar widgets | `plugins/omacvm.bluetooth`, `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's Bluetooth, network and audio widgets; Super+Ctrl+B opens the Bluetooth one), `plugins/omacvm.nightshift` |
@@ -38,7 +38,11 @@ survive rebuilds (see `../lib/sign.sh`).
 ## API
 
 Every request needs `Authorization: Bearer <token>`; JSON in and out, errors
-are `{"error": "…"}`. The client wraps all of it:
+are `{"error": "…"}`. Only `GET /proof?nonce=N` (N: 32 hex digits) needs no
+token: it answers `{"proof": HMAC-SHA256(token, "omacvm-bridge mac N")}`, and
+the client checks that before every request, so a program listening in the
+Bridge's place (on 127.0.0.1 for OmacVM.app any Mac program could) never gets
+the token. The client wraps all of it:
 
 ```bash
 omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events
