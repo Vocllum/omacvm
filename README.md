@@ -2,7 +2,7 @@
 
 <h3 align="center">Omarchy in a VM on your Mac, feeling native</h3>
 
-<p align="center">One command builds the VM, in Parallels Desktop or UTM. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
+<p align="center">One command builds the VM, in Parallels Desktop, UTM or VMware Fusion. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
   <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
@@ -69,7 +69,7 @@ Set up OmacVM on my Mac (github.com/gillesgoetsch/omacvm): Omarchy in a VM.
 Read https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/AGENTS.md
 first (section 0) and follow it. Install it with
 curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash -s -- --no-start
-then walk me through the build: ask me Parallels or UTM, how much of my Mac
+then walk me through the build: ask me Parallels, UTM or VMware Fusion, how much of my Mac
 the VM gets and which features I want (explain each, scroll momentum is
 experimental), show me the plan, ask for my password, build it, and tell me
 the steps only I can do.
@@ -199,7 +199,7 @@ layout and copy and paste. Everything about the route:
   grows as you use it), and a decent connection.
 
 `omacvm` tells you about anything missing before it starts and waits while you
-install Parallels or UTM.
+install Parallels, UTM or VMware Fusion.
 
 ## Build a VM
 
@@ -351,7 +351,7 @@ VM with the macOS-native scroll momentum on"* or *"Turn on the scroll momentum f
   the steps only you can do as `needs_human`, and the exact command).
 - Nothing waits on a question without a terminal: `--yes` and options instead
   (`omacvm build --help`), the password from `OMACVM_PASSWORD`. Exit codes:
-  0 done, 1 failed, 2 usage, 3 needs a person (installing Parallels or UTM, a
+  0 done, 1 failed, 2 usage, 3 needs a person (installing Parallels, UTM or Fusion, a
   macOS permission), and the message says what to do.
 
 The steps that need you (macOS permission prompts, one Parallels setting, your
@@ -400,7 +400,7 @@ With two VMs running, the wallpaper follows whichever changed its theme last.
 
 ### macOS-native scroll momentum
 
-Parallels and UTM give Linux a mouse wheel: your trackpad's two-finger
+Parallels, UTM and Fusion give Linux a mouse wheel: your trackpad's two-finger
 scrolling arrives as wheel steps, and the feel of macOS (acceleration,
 momentum, precise slow scrolling) is gone. With this on, the full-screen
 VM gets the real thing instead:
@@ -454,7 +454,7 @@ On a notched MacBook, the full-screen VM sits *below* the camera housing and
 leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
 streams Omarchy's real bar into that strip and gives the space back to your
 windows; the graphics on this page show the two together. It is a separate
-project for Parallels and UTM; OmacVM sets it up as a feature on a MacBook
+project for Parallels, UTM and VMware Fusion; OmacVM sets it up as a feature on a MacBook
 with a notch (`omacvm enable omanotch` on an existing VM).
 
 ## Troubleshooting
@@ -487,7 +487,7 @@ with a notch (`omacvm enable omanotch` on an existing VM).
 omacvm uninstall            # --purge also removes the bridge token and settings
 ```
 
-Then delete the VM in Parallels Desktop or UTM. In System Settings › Privacy &
+Then delete the VM in Parallels Desktop, UTM or VMware Fusion. In System Settings › Privacy &
 Security, remove the OmacVM apps from Location Services if still listed.
 
 ## Credits
@@ -501,7 +501,7 @@ Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
 findings (virtio-gpu settings, UTM's scripting) shaped the UTM route and
 whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The bar
 widgets are clones of Omarchy's own. OmacVM is a community project, not
-affiliated with the Omarchy team, Parallels, UTM or Apple.
+affiliated with the Omarchy team, Parallels, UTM, VMware (Broadcom) or Apple.
 
 ## License
 
