@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build OmacVM.app into dist/: the launcher, QEMU (built from source on the
-# first run, about 70 seconds), UEFI firmware, the VM scripts and OmacVM's VM
-# side. Signed ad hoc.
+# first run and when its patches or build scripts change, about 70 seconds),
+# UEFI firmware, the VM scripts and OmacVM's VM side. Signed ad hoc.
 #   scripts/build-app.sh [--name NAME]   (default OmacVM: the app's name and Dock title)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -22,16 +22,21 @@ if [[ $(git -C "$ROOT/vendor/omacvm" rev-parse HEAD) != "$PIN" || -n $(git -C "$
   exit 1
 fi
 RT=$ROOT/runtime/.build
-if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd ]]; then
+# What the runtime was built from: its build scripts and patches.
+INPUTS=$(cd "$ROOT/runtime" && shasum -a 256 ./*.sh runtime-files.txt patches/* | shasum -a 256 | cut -d' ' -f1)
+if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
+      || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
   log "QEMU (from source)"
   "$ROOT/runtime/build-qemu-gpu-runtime.sh"
+  echo "$INPUTS" > "$RT/inputs.sha256"
 fi
 
 log "launcher"
 cd "$ROOT/app"
 mkdir -p .build/mc/swift .build/mc/clang
 SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/mc/clang \
-  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none 2>&1 | grep -v '^\[' || true
+  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none 2>&1 | { grep -v '^\[' || true; } ||
+  { echo "launcher build failed" >&2; exit 1; }
 LAUNCHER=$ROOT/app/.build/release/OmacVM
 [[ -x $LAUNCHER ]] || { echo "launcher build failed" >&2; exit 1; }
 
