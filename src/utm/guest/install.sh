@@ -7,7 +7,7 @@
 #    X11-only and sizes the pointer wrong under Hyprland) and the QEMU guest
 #    agent (utmctl ip-address / exec / file push)
 #  * virtio-gpu workarounds for Hyprland
-#  * the GPU for Chrome and other Chromium browsers (virgl-msaa.c)
+#  * the GPU for the browsers: Chrome, Chromium, Brave, Firefox (virgl-msaa.c)
 #  * a fixed display mode from boot: UTM's GPU path goes blank when the mode
 #    changes while running, and "preferred" is only 1280x800
 set -euo pipefail
@@ -27,7 +27,7 @@ if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
 fi
 install -Dm644 90-omacvm-utm.conf /etc/environment.d/90-omacvm-utm.conf
 
-# GPU in Chrome and other Chromium browsers: see virgl-msaa.c. Built here, as
+# GPU in the browsers: see virgl-msaa.c. Built here, as
 # the kernel headers it needs come with the VM.
 pacman -S --needed --noconfirm gcc >/dev/null 2>&1
 L=/usr/local/lib/omacvm/virgl-msaa.so

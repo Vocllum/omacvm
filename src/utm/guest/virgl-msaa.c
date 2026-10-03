@@ -1,8 +1,12 @@
 /* UTM's virglrenderer tells Linux the GPU has no multisampling (max_samples 1).
  * OpenGL ES 3.0 needs 4 samples, so Chrome's ANGLE refuses ES 3.0 and Chrome
- * turns its GPU off (no WebGL, pages drawn in software). The Mac's GPU has
- * them: raise the value when Mesa reads it. Loaded from /etc/ld.so.preload;
- * only touches that one ioctl result. */
+ * turns its GPU off (no WebGL, pages drawn in software). Raise the value when
+ * Mesa reads it.
+ * UTM can't draw into multisampled buffers for real: reading one back
+ * (readPixels, toDataURL) gives nothing and can blank the whole browser
+ * window. So every buffer is also created single-sampled: no antialiasing,
+ * but the right picture. Loaded from /etc/ld.so.preload; touches only these
+ * two ioctls. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <stdarg.h>
@@ -24,6 +28,11 @@ int ioctl(int fd, unsigned long req, ...)
 	va_end(ap);
 	if (!real)
 		real = (int (*)(int, unsigned long, ...))dlsym(RTLD_NEXT, "ioctl");
+	if (req == DRM_IOCTL_VIRTGPU_RESOURCE_CREATE) {
+		struct drm_virtgpu_resource_create *c = arg;
+		if (c->nr_samples > 1)
+			c->nr_samples = 0;
+	}
 	int r = real(fd, req, arg);
 	if (r == 0 && req == DRM_IOCTL_VIRTGPU_GET_CAPS) {
 		struct drm_virtgpu_get_caps *g = arg;
