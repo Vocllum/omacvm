@@ -7,7 +7,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
-install -o "$U" -g "$U" -m644 monitor_workspaces.lua "$H/.config/hypr/monitor_workspaces.lua"
+# Replaced in one step: Omarchy reloads its config on every change, and
+# bindings.lua requires this file (a reload in between showed "module not found").
+install -o "$U" -g "$U" -m644 monitor_workspaces.lua "$H/.config/hypr/.monitor_workspaces.lua.new"
+mv -f "$H/.config/hypr/.monitor_workspaces.lua.new" "$H/.config/hypr/monitor_workspaces.lua"
 B=$H/.config/hypr/bindings.lua
 grep -q 'require("hypr.monitor_workspaces")' "$B" 2>/dev/null || { cat workspace-bindings.lua >> "$B"; chown "$U:$U" "$B"; }
 ../../lib/install-plugin.sh "$U" ../plugins/omacvm.workspaces

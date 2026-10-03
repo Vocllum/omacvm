@@ -1,15 +1,16 @@
 #!/bin/bash
-# omacvm apply: put OmacVM onto a running VM, Parallels or UTM, or bring it up
+# omacvm apply: put OmacVM onto a running VM (Parallels, UTM or VMware Fusion), or bring it up
 # to this version: the Mac side the VM's features need, then the VM side. Also
 # for an Omarchy you installed by hand from omarchy-mac.
-#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME]
+#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
 # VM has (new to OmacVM: the defaults). --no-mac leaves the Mac side alone.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
 # started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
-# Mac's current layout. Display (UTM): the Mac's built-in display below the notch.
+# Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
+# the notch (no built-in display: the main one).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (see the message).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -52,19 +53,20 @@ NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 
 # ---------- which VM ----------
 if [[ -n $IP ]]; then
-  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels or utm" >&2; exit 2; }
+  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
   [[ -n $VM ]] || VM="the VM at $IP"
 else
   resolve_vm start
 fi
-[[ $TYPE == parallels || $TYPE == utm ]] || { echo "omacvm apply: --vm-type parallels or utm" >&2; exit 2; }
+case $TYPE in parallels|utm|fusion) ;; *) echo "omacvm apply: --vm-type parallels, utm or fusion" >&2; exit 2 ;; esac
 vm_network_ok "$TYPE" "$IP" || exit 3
 if ! (wait_ssh "$IP" 120) >/dev/null 2>&1; then
   printf '\033[1;31merror:\033[0m no SSH access to %s (%s).\n' "$VM" "$IP" >&2
   printf 'If OmacVM did not build this VM, open a terminal in it and run this once (it lets\nOmacVM in with its own key, from the Mac only), then run omacvm apply again:\n\n  %s\n\n' "$(ssh_setup_command "$TYPE")" >&2
   exit 3
 fi
-[[ $TYPE == utm && -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ $TYPE == utm || $TYPE == fusion ]] && [[ -z $MODE ]] && MODE=$(swift "$R/src/display/mac-display.swift")
+[[ -z $MODE || $MODE =~ ^[0-9]+x[0-9]+(@[0-9.]+)?$ ]] || die "--display WxH@Hz, not '$MODE'"
 [[ -n $KB ]] || KB=$("$R/src/keyboard/mac-layout.sh")
 probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")
@@ -89,7 +91,7 @@ info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i
 if (( MAC )); then
   args=(--quiet)
   on bridge || args+=(--no-bridge)
-  { on gestures || [[ $TYPE == utm ]]; } || args+=(--skip-gestures)   # on UTM it also types Cmd as Super
+  { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   "$R/src/mac/install.sh" "${args[@]}"
   if on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then
@@ -105,6 +107,8 @@ fi
 
 # ---------- the VM side ----------
 T=~/Library/Application\ Support/omacvm-bridge/token
+# A Bridge installed a moment ago writes its token when it first starts.
+if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
 if [[ -f $T ]]; then
   log "bridge token -> $IP"
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
@@ -116,9 +120,10 @@ fi
 log "OmacVM -> $IP:/usr/local/share/omacvm"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycache__ -czf - . |
   gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
-              tar -C /usr/local/share/omacvm -xzf - 2>/dev/null"
+              tar --no-same-owner -C /usr/local/share/omacvm -xzf - 2>/dev/null"
 fargs=""
 for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
+[[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 
 if [[ $TYPE == parallels ]]; then

@@ -1,7 +1,7 @@
 #!/bin/bash
 # omacvm-gestures, guest side. Run as root inside the VM: ./install.sh <desktop-user>
 # Idempotent. Installs the daemon (virtual Apple touchpad fed by the Mac helper)
-# and Hyprland's 3/4-finger workspace swipes.
+# and Hyprland's 3/4-finger workspace swipes, with the workspaces sliding.
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
@@ -31,6 +31,13 @@ if (( ${#missing[@]} )); then
       echo "hl.gesture({ fingers = $n, direction = \"horizontal\", action = \"workspace\" })"
     done
   } >> "$I"
+  chown "$U:$U" "$I"
+fi
+# Omarchy turns the workspace animation off, so a swipe jumped to the next
+# workspace when the fingers lifted. Slide like Spaces, unless you set your own.
+if ! grep -q 'leaf *= *"workspaces"' "$H"/.config/hypr/*.lua 2>/dev/null; then
+  printf '%s\n' '-- OmacVM trackpad: workspaces slide into place after a swipe, like Spaces.' \
+    'hl.animation({ leaf = "workspaces", enabled = true, speed = 4, bezier = "default", style = "slide" })' >> "$I"
   chown "$U:$U" "$I"
 fi
 echo "omacvm-gestures guest side installed"

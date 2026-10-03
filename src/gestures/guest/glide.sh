@@ -17,7 +17,9 @@ LINE='require("hypr.omacvm_glide")'
 MARK=$H/.local/state/omacvm/glide-flags
 FLAG=--disable-smooth-scrolling
 if [[ $ON == on ]]; then
-  install -o "$U" -g "$U" -m644 omacvm_glide.lua "$HY/omacvm_glide.lua"
+  # In one step: hyprland.lua requires it and Omarchy reloads on every change.
+  install -o "$U" -g "$U" -m644 omacvm_glide.lua "$HY/.omacvm_glide.lua.new"
+  mv -f "$HY/.omacvm_glide.lua.new" "$HY/omacvm_glide.lua"
   if ! grep -qxF "$LINE" "$HY/hyprland.lua"; then
     printf -- '-- OmacVM Glide (experimental): scrolling settings for the virtual trackpad.\n%s\n' "$LINE" >> "$HY/hyprland.lua"
     chown "$U:$U" "$HY/hyprland.lua"

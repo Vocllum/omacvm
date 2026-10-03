@@ -2,7 +2,7 @@
 # OmacVM, guest side: everything that makes Omarchy feel native in a VM on a
 # Mac, in Parallels or UTM. Run as root inside the VM from a copy of this
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
-#   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm]
+#   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]...
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, idle-lock, autologin, thp-kernel) with its defaults; a feature
@@ -28,6 +28,7 @@ while (( $# )); do
     --keyboard) KB=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
+    --host) HOST_GIVEN=$2; shift 2 ;;
     --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
     --no-thp-kernel) SET[thp-kernel]=off; shift ;;
     --thp-kernel) SET[thp-kernel]=on; shift ;;
@@ -65,22 +66,27 @@ for f in "${FEATURES[@]}"; do
 done
 
 # Which VM, and where its Mac is: Parallels' Mac is 10.211.55.2 on its shared
-# network; on UTM's shared network the Mac is the default gateway.
+# network; on UTM's shared network the Mac is the default gateway; on VMware
+# Fusion's NAT network the gateway is .2 and the Mac is .1.
 if [[ -z $TYPE ]]; then
   case $(cat /sys/class/dmi/id/sys_vendor 2>/dev/null) in
     Parallels*) TYPE=parallels ;;
     QEMU*) TYPE=utm ;;
-    *) echo "guest/install.sh: unknown VM, pass --vm-type parallels|utm" >&2; exit 2 ;;
+    VMware*) TYPE=fusion ;;
+    *) echo "guest/install.sh: unknown VM, pass --vm-type parallels|utm|fusion" >&2; exit 2 ;;
   esac
 fi
 case $TYPE in
   parallels) HOST=10.211.55.2 ;;
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
-  *) echo "guest/install.sh: --vm-type parallels or utm" >&2; exit 2 ;;
+  fusion) HOST=${HOST_GIVEN:-}   # from the Mac (apply.sh): the gateway's network may not be Fusion's
+          [[ $HOST =~ ^[0-9]+\.[0-9]+\.[0-9]+\.1$ ]] || { echo "guest/install.sh: VMware Fusion needs --host (the Mac's address on Fusion's network)" >&2; exit 2; }
+          [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
+  *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
 esac
 {
-  printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\n' "$TYPE" "$HOST"
+  printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\nOMACVM_USER=%s\n' "$TYPE" "$HOST" "$U"
   for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
 } | install -Dm644 /dev/stdin "$ENV"
 log "$TYPE VM, the Mac is $HOST"
@@ -131,16 +137,19 @@ elif [[ -f $MARK ]]; then
   rm -f "$STAY" "$MARK"
 fi
 
-if [[ $TYPE == parallels ]]; then
-  log "display";    "$R/display/guest/install.sh" "$U"
-  log "clipboard";  "$R/clipboard/guest/install.sh" "$U"
-else
-  log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE"
-fi
+case $TYPE in
+  parallels)
+    log "display";    "$R/display/guest/install.sh" "$U"
+    log "clipboard";  "$R/clipboard/guest/install.sh" "$U" ;;
+  utm)
+    log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
+  fusion)
+    log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
+esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM the gestures daemon also types Cmd shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm ]]; then
+# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
@@ -185,6 +194,8 @@ in_session() {
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
 if [[ ${F[omanotch]} == on ]]; then
+  # An empty notchcast is a broken install (seen once): build it again.
+  [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
     pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
@@ -199,6 +210,13 @@ if [[ ${F[omanotch]} == on ]]; then
       log "Omanotch: installs at the first login"
     fi
   fi
+  # The Mac's address, so notchcast does not have to guess it (on VMware
+  # Fusion the gateway is Fusion's NAT, not the Mac).
+  install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
+  printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST" > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  user_ctl daemon-reload 2>/dev/null || true
+  user_ctl try-restart notchcast.service 2>/dev/null || true
 elif [[ -x $H/.local/bin/notchcast ]]; then
   log "Omanotch: off"
   systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
@@ -238,4 +256,5 @@ if [[ -f $RS ]]; then
 fi
 mkinitcpio -P >/dev/null 2>&1 || true
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
+[[ $TYPE == fusion ]] && "$R/fusion/guest/dns.sh" off   # back to Fusion's DNS, which follows the Mac's
 log "OmacVM guest side installed for $U (reboot to apply everything)"

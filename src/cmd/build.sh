@@ -1,6 +1,7 @@
 #!/bin/bash
 # omacvm build: an Omarchy VM that feels like a native Mac, in Parallels
-# Desktop or UTM, from nothing, in one go (30-70 minutes, mostly downloads).
+# Desktop, UTM or VMware Fusion, from nothing, in one go (30-70 minutes, mostly
+# downloads; Fusion about 15 more, it builds Hyprland with a fix).
 #
 #   omacvm build             asks a few questions, shows a summary, then builds
 #   omacvm build --dry-run   asks the questions and shows the summary only
@@ -8,21 +9,26 @@
 #
 # Everything can also be given up front (--yes skips the questions; the
 # password then comes from OMACVM_PASSWORD):
-#   --vm-type parallels|utm   --vm-name NAME   --hostname NAME
+#   --vm-type parallels|utm|fusion   --vm-name NAME   --hostname NAME
 #   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
+#   --vm-dir PATH   where the VM goes (Parallels, Fusion; default: the app's own folder)
+#   --graphics-gb N   VMware Fusion: graphics memory, part of the VM's memory (1-8)
 #   --user NAME   --full-name "NAME"
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
 #   --feature NAME=on|off, or --FEATURE / --no-FEATURE (omacvm features lists
 #   them: bridge wallpaper gestures scroll-momentum omanotch idle-lock autologin thp-kernel)
 # The keyboard layout, timezone and language come from this Mac. Needs Apple
-# Silicon, Parallels Desktop 19+ or UTM 5, and Homebrew's zstd + e2fsprogs.
+# Silicon, Parallels Desktop 19+, UTM 5 or VMware Fusion 13+, and Homebrew's
+# zstd + e2fsprogs. Fusion VMs go to ~/Virtual Machines.localized, or
+# $OMACVM_FUSION_DIR.
 # Exit codes: 0 built, 1 failed, 2 usage (or a question without a terminal),
 # 3 needs a person (an app to install, see the message).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
 source "$R/src/vm/utm.sh"
+source "$R/src/vm/fusion.sh"
 source "$R/src/lib/setup.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
@@ -62,6 +68,8 @@ while (( $# )); do
   case $1 in
     --vm-type) TYPE=$2; shift 2 ;;
     --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
+    --vm-dir) VM_DIR=$2; shift 2 ;;
+    --graphics-gb) GFX_GB=$2; shift 2 ;;
     --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
@@ -122,13 +130,14 @@ fi
 (( free_gb >= 50 )) || info "$free_gb GB free: enough to build; the VM grows as you use it, so keep some room."
 
 
-# ---------- 1. Parallels or UTM ----------
+# ---------- 1. Parallels, UTM or VMware Fusion ----------
 if [[ -z $TYPE ]]; then
-  (( YES )) && usage "--yes needs --vm-type parallels or utm"
+  (( YES )) && usage "--yes needs --vm-type parallels, utm or fusion"
   ui_select pick "Where should Omarchy run?" 0 \
     "Parallels Desktop|near-native speed, every display · paid" \
-    "UTM|free · one display, slower desktop · UTM 5 (beta)"
-  (( pick == 0 )) && TYPE=parallels || TYPE=utm
+    "UTM|free · one display, slower desktop · UTM 5 (beta)" \
+    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it (new)"
+  case $pick in 0) TYPE=parallels ;; 1) TYPE=utm ;; *) TYPE=fusion ;; esac
   say "    Comparison: $README_ROUTES"
 fi
 # The app itself: installed now (after asking) when it is missing.
@@ -150,11 +159,16 @@ case $TYPE in
     if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || { utm_install_help >&2; needs_person "UTM 5 is not installed (brew install --cask utm@beta, then open UTM once)"; }
     else wait_for_app utm; fi
     : ;;
-  *) usage "--vm-type parallels or utm" ;;
+  fusion)
+    if (( YES )); then have_fusion || needs_person "VMware Fusion is not installed: download it from support.broadcom.com (free, needs a sign-in), then open it once"
+    else wait_for_app fusion; fi
+    vm_network_ok fusion || needs_person "VMware Fusion's NAT network is missing (see above)" ;;
+  *) usage "--vm-type parallels, utm or fusion" ;;
 esac
-# A name is taken in either app: omacvm --vm NAME has to find one VM.
+[[ $VM =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]] || usage "--vm-name: letters, digits, spaces, dots, _ and - only (got '$VM')"
+# A name is taken in any app: omacvm --vm NAME has to find one VM.
 vm_taken() {
-  [[ -e "$HOME/Parallels/$1.pvm" ]] || vms_list | awk -F'\t' -v n="$1" '$1 == n { f = 1 } END { exit !f }'
+  [[ -e "$HOME/Parallels/$1.pvm" || -e $(fusion_bundle "$1") ]] || vms_list | awk -F'\t' -v n="$1" '$1 == n { f = 1 } END { exit !f }'
 }
 if vm_taken "$VM"; then
   n=2; while vm_taken "$VM $n"; do n=$((n + 1)); done
@@ -206,6 +220,65 @@ fi
 (( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
 (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
 (( DISK_GB >= 64 )) || die "disk: at least 64 GB"
+# VMware Fusion: the GPU's memory comes out of the VM's own. A quarter of it,
+# up to Fusion's 8 GB (two Retina displays need several GB).
+if [[ $TYPE == fusion ]]; then
+  gfx_auto=$(( MEM_GB / 4 )); (( gfx_auto > 8 )) && gfx_auto=8; (( gfx_auto < 1 )) && gfx_auto=1
+  if (( ${custom:-0} )) && [[ -z ${GFX_GB:-} ]]; then
+    GFX_GB=$(ask_value "graphics memory in GB, part of the VM's memory (1-8)" "$gfx_auto" '^[0-9]+$')
+  fi
+  : "${GFX_GB:=$gfx_auto}"
+  (( GFX_GB >= 1 && GFX_GB <= 8 && GFX_GB < MEM_GB )) || die "graphics memory: 1 to 8 GB, less than the VM's memory"
+fi
+
+# ---------- where the VM goes ----------
+# Parallels and Fusion take any folder (an external drive, say); UTM keeps its
+# VMs in its own library (moving one there is not safe through its scripting).
+default_dir() { case $TYPE in parallels) echo "$HOME/Parallels" ;; fusion) echo "$FUSION_DIR" ;; utm) echo "UTM's library" ;; esac; }
+free_gb_at() {   # free GB on the drive of a folder, as Finder counts it
+  local g
+  g=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: CommandLine.arguments[1]).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' "$1" 2>/dev/null)
+  [[ $g =~ ^[0-9]+$ && $g -gt 0 ]] || g=$(df -g "$1" | awk 'END { print $4 }')
+  echo "$g"
+}
+vm_dir_problem() {   # DIR -> a reason it does not work, or nothing
+  local mp fs dev
+  [[ -d $1 && -w $1 ]] || { echo "not a folder you can write to"; return; }
+  mp=$(df -P "$1" | awk 'END { print $6 }')
+  fs=$(mount | awk -v m="$mp" '$3 == m { sub(/^\(/, "", $4); sub(/,$/, "", $4); print $4; exit }')
+  case $fs in apfs|hfs) ;; *) echo "its drive is ${fs:-unknown}: a VM disk needs APFS or Mac OS Extended (Disk Utility can erase it as APFS)"; return ;; esac
+  (( $(free_gb_at "$1") >= 30 )) || echo "only $(free_gb_at "$1") GB free on that drive (the VM needs about 30)"
+}
+if [[ -n ${VM_DIR:-} && $TYPE == utm ]]; then usage "--vm-dir: UTM keeps its VMs in its own library"; fi
+if [[ -z ${VM_DIR:-} && $TYPE != utm ]] && (( ! YES )); then
+  ui_select loc "Where should the VM go?" 0 "Default|$(default_dir | sed "s|^$HOME|~|")" \
+    "Another folder…|an external drive, for example (a Finder window opens)"
+  while (( loc == 1 )); do
+    VM_DIR=$(osascript -e 'POSIX path of (choose folder with prompt "Where should the Omarchy VM go?")' 2>/dev/null) ||
+      VM_DIR=$(ask_value "folder for the VM" "" '^/')
+    VM_DIR=${VM_DIR%/}
+    p=$(vm_dir_problem "$VM_DIR")
+    [[ -z $p ]] && break
+    say "    $VM_DIR: $p"
+    ui_select loc "Where should the VM go?" 1 "Default|$(default_dir | sed "s|^$HOME|~|")" "Another folder…|pick again"
+    (( loc == 0 )) && VM_DIR=""
+  done
+fi
+if [[ -n ${VM_DIR:-} ]]; then
+  VM_DIR=${VM_DIR%/}
+  p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "--vm-dir $VM_DIR: $p"
+  dev=$(df -P "$VM_DIR" | awk 'END { print $1 }')
+  if diskutil info "$dev" 2>/dev/null | grep -qE "Device Location: +External|Removable Media: +Removable"; then
+    EXTERNAL=1
+    (( PLAN && JSON )) || info "On an external drive: connect it before you start the VM, and never unplug it while the VM runs."
+  fi
+  [[ $TYPE == fusion ]] && FUSION_DIR=$VM_DIR
+fi
+[[ -n ${VM_DIR:-} || $TYPE == utm ]] || VM_DIR=$(default_dir)
+case $TYPE in
+  parallels) [[ ! -e $VM_DIR/$VM.pvm ]] || usage "$VM_DIR/$VM.pvm already exists (choose another --vm-name)" ;;
+  fusion) [[ ! -e $(fusion_bundle "$VM") ]] || usage "$(fusion_bundle "$VM") already exists (choose another --vm-name)" ;;
+esac
 
 # ---------- 3. features ----------
 # The build's switches by feature name (src/features.tsv).
@@ -272,31 +345,43 @@ FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momen
        idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
+  (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."
   if (( BRIDGE )); then
     echo "Allow Wi-Fi names: Location Services for OmacVM Bridge (macOS asks)."
     echo "Allow media keys: Accessibility for OmacVM Bridge."
     echo "Allow Bluetooth devices: Bluetooth for OmacVM Bridge (macOS asks)."
   fi
-  if (( GESTURES )) || [[ $TYPE == utm ]]; then
+  if (( GESTURES )) || [[ $TYPE == utm || $TYPE == fusion ]]; then
     local what="the trackpad"
-    [[ $TYPE == utm ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
+    [[ $TYPE == utm || $TYPE == fusion ]] && { (( GESTURES )) && what="the trackpad and Cmd keys" || what="the Cmd keys"; }
     echo "Allow $what: Accessibility and Input Monitoring for OmacVM Gestures."
   fi
-  if [[ $TYPE == parallels ]]; then
+  case $TYPE in
+  parallels)
     [[ -n ${P_PLANNED:-} ]] && echo "Parallels has no licence yet: when the build starts the VM, start the free trial or sign in in the window Parallels shows."
     parallels_profile_emptied || echo "Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels)."
-    parallels_sends_shortcuts || echo "Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > \"Send macOS system shortcuts: Always\" (an alert shows where)."
-  else
-    echo "UTM: put the VM in full screen on the built-in display (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower."
-  fi
+    parallels_sends_shortcuts || echo "Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > \"Send macOS system shortcuts: Always\" (an alert shows where)." ;;
+  utm)
+    echo "UTM: put the VM in full screen on the built-in display (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
+  fusion)
+    echo "VMware Fusion asks for Accessibility on its first start: click OK, then turn on VMware Fusion in System Settings > Privacy & Security > Accessibility (keyboard and mouse in the VM)."
+    echo "VMware Fusion: put the VM in full screen (View > Full Screen; gestures and media keys need it)." ;;
+  esac
 }
 if (( PLAN && JSON )); then
   cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $HOST"
+  [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
+  [[ -n ${GFX_GB:-} ]] && cmd+=" --graphics-gb $GFX_GB"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
-  printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s},\n' \
-    "$(json_str "$VM")" "$TYPE" "$(json_str "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" || echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)")")" \
-    "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")"
+  printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s, "dir": %s},\n' \
+    "$(json_str "$VM")" "$TYPE" "$(json_str "$(case $TYPE in
+      (parallels) echo "Parallels Desktop $P_EDITION${P_TRIAL:+ trial=$P_TRIAL}${P_PLANNED:+ (planned: no licence yet, Parallels asks for the trial or a sign-in when the VM starts)}" ;;
+      (utm) echo "UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)" ;;
+      (fusion) echo "VMware Fusion $(fusion_version)" ;;
+    esac)")" \
+    "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")" "$(json_str "${VM_DIR:-UTM library}")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
+  [[ -n ${GFX_GB:-} ]] && printf '  "graphics_gb": %s,\n' "$GFX_GB"
   printf '  "resource_tiers": {'   # what --resources gives on this Mac
   for t in 0 1 2 3; do
     tier_values "$t"
@@ -325,13 +410,15 @@ if [[ $TYPE == parallels ]]; then
   APP_LINE="Parallels Desktop $(tr '[:lower:]' '[:upper:]' <<<"${P_EDITION:0:1}")${P_EDITION:1}"
   if [[ -n ${P_PLANNED:-} ]]; then APP_LINE+=" (planned; no licence yet, the trial starts with the VM)"
   elif [[ $P_TRIAL == yes ]]; then APP_LINE+=" (trial)"; fi
-  APP_LINE+=" (~/Parallels/$VM.pvm)"
-else
+  APP_LINE+=" ($(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM.pvm"))"
+elif [[ $TYPE == utm ]]; then
   APP_LINE="UTM $(defaults read /Applications/UTM.app/Contents/Info CFBundleShortVersionString 2>/dev/null)"
+else
+  APP_LINE="VMware Fusion $(fusion_version) ($(fusion_bundle "$VM" | sed "s|^$HOME|~|"))"
 fi
 box=("OmacVM will build this VM" ""
      "VM         $VM, in $APP_LINE"
-     "resources  $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)"
+     "resources  $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory${GFX_GB:+ ($GFX_GB GB of it for graphics)}, $DISK_GB GB disk (expanding)"
      "user       $U ($FULL), hostname $HOST"
      "keyboard   $KB_SHOWN"
      "timezone   $TZ_MAC, language $LANG_VM"
@@ -383,7 +470,7 @@ build_end() {
   (( rc == 0 )) && return
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
   printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \
-    "$( [[ $TYPE == parallels ]] && echo "Parallels Desktop" || echo UTM)"
+    "$(case $TYPE in (parallels) echo "Parallels Desktop" ;; (utm) echo UTM ;; (fusion) echo "VMware Fusion" ;; esac)"
 }
 trap 'build_end; ui_restore' EXIT
 
@@ -399,8 +486,8 @@ if [[ $TYPE == parallels ]]; then
   info "allow access): click through them, the build waits for the VM to start."
 fi
 if [[ $TYPE == parallels ]]; then
-  "$R/src/vm/live/build-live.sh" --vm-name "$VM" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
-  PVM="$HOME/Parallels/$VM.pvm"
+  "$R/src/vm/live/build-live.sh" --vm-name "$VM" --vm-dir "$VM_DIR" --root-size-gib 16 --skip-boot --ssh-key "$KEY.pub"
+  PVM="$VM_DIR/$VM.pvm"
   "$PRLCTL" unregister "$VM" >/dev/null
   log "VM settings and a ${DISK_GB} GB NVMe disk"
   /usr/local/bin/prl_disk_tool create --hdd "$PVM/omarchy.hdd" --size "${DISK_GB}G" >/dev/null
@@ -416,6 +503,15 @@ if [[ $TYPE == parallels ]]; then
   "$PRLCTL" register "$PVM" >/dev/null
   vm_start "$VM" "$PVM"
   ui_spin_val IP "The live installer gets its address" vm_ip "$PVM" 300 || die "the live installer got no IP address"
+elif [[ $TYPE == fusion ]]; then
+  # The raw live image goes inside the VM's folder; Fusion reads it in place.
+  LIVE="$(fusion_bundle "$VM").live.img"
+  "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
+  log "VMware Fusion VM with a ${DISK_GB} GB NVMe disk"
+  VMX=$(fusion_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" "$DISK_GB" "$GFX_GB")
+  mv "$LIVE" "$(fusion_bundle "$VM")/live.img"; LIVE="$(fusion_bundle "$VM")/live.img"   # live.vmdk points here
+  fusion_start "$VM"
+  ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
 else
   LIVE="$HOME/Library/Caches/omacvm/live/$VM-live.img"
   "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
@@ -448,6 +544,13 @@ if [[ $TYPE == utm ]]; then
   utm_start "$VM"
   sleep 20
   ui_spin_val IP "The new system starts and gets its address" utm_ip "$VM" 300 || die "the new system got no IP address"
+elif [[ $TYPE == fusion ]]; then
+  ui_spin "The live installer shuts down" fusion_wait_stopped "$VM"
+  fusion_drop_live "$VM"
+  rm -f "$LIVE"
+  fusion_start "$VM"
+  sleep 20
+  ui_spin_val IP "The new system starts and gets its address" fusion_ip "$VM" 300 || die "the new system got no IP address"
 else
 ui_spin "The live installer shuts down" wait_stopped "$VM"
 "$PRLCTL" unregister "$VM" >/dev/null
@@ -476,6 +579,7 @@ ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 
 # ---------- 4. Omarchy + Parallels Tools ----------
 step "Omarchy from omarchy-mac (the longest step)"
+[[ $TYPE == fusion ]] && gssh "$IP" "bash -s" < "$R/src/fusion/guest/dns.sh"   # Fusion's own DNS fails the install
 gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh" 2>&1 | ui_follow "Installing Omarchy (20-40 minutes)"
 if [[ $TYPE == parallels ]]; then
   step "Parallels Tools"

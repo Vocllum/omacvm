@@ -153,9 +153,98 @@ utm_wait_stopped() {   # <vm name>
   die "UTM VM '$1' did not stop"
 }
 
-# OmacVM's helpers listen on the Mac's address on each VM app's default shared
-# network: 10.211.55.2 (Parallels), 192.168.64.1 (UTM). vm_network_ok TYPE [IP]
-# says (on stderr) what to change when that network was moved.
+# ---- VMware Fusion ----
+# Fusion's tools live in the app; its library is a text file, so listing VMs
+# never starts Fusion. A VM is its .vmx; its name is displayName in there.
+FUSION_LIB="/Applications/VMware Fusion.app/Contents/Library"
+VMRUN=$FUSION_LIB/vmrun
+FUSION_INVENTORY="$HOME/Library/Application Support/VMware Fusion/vmInventory"
+FUSION_NETWORKING="/Library/Preferences/VMware Fusion/networking"
+FUSION_LEASES=/var/db/vmware/vmnet-dhcpd-vmnet8.leases
+FUSION_DIR=${OMACVM_FUSION_DIR:-$HOME/Virtual Machines.localized}   # where omacvm build puts new VMs
+
+fusion_bundle() { echo "$FUSION_DIR/$1.vmwarevm"; }   # <vm name> -> the folder omacvm build gives it
+fusion_version() { defaults read "/Applications/VMware Fusion.app/Contents/Info" CFBundleShortVersionString 2>/dev/null; }
+
+fusion_list() {   # one line per VM in Fusion's library: NAME<TAB>VMX
+  local x n
+  [[ -f $FUSION_INVENTORY ]] || return 0
+  sed -n 's/^vmlist[0-9]*\.config = "\(.*\.vmx\)"$/\1/p' "$FUSION_INVENTORY" | while IFS= read -r x; do
+    [[ -f $x ]] || continue
+    n=$(sed -n 's/^displayName = "\(.*\)"$/\1/p' "$x" | head -1)
+    printf '%s\t%s\n' "${n:-$(basename "$x" .vmx)}" "$x"
+  done
+}
+
+fusion_vmx() {   # <vm name> -> its .vmx (in Fusion's library, or one omacvm build made)
+  local x
+  x=$(fusion_list | awk -F'\t' -v n="$1" '$1 == n { print $2; exit }')
+  [[ -n $x ]] || { x="$(fusion_bundle "$1")/$1.vmx"; [[ -f $x ]] || x=""; }
+  [[ -n $x ]] && echo "$x"
+}
+
+fusion_state() {   # <vm name> -> running|stopped
+  local x
+  x=$(fusion_vmx "$1") || return 1
+  if [[ -x $VMRUN ]] && "$VMRUN" list 2>/dev/null | grep -qxF "$x"; then echo running; else echo stopped; fi
+}
+
+# The Mac's address on Fusion's NAT network (vmnet8). Fusion picks the subnet
+# at install time; the Mac is .1 there (the guests' gateway is .2). The first
+# VNET_8_HOSTONLY_SUBNET line, and only a private address (the Bridge and
+# Gestures read it the same way).
+fusion_host() {
+  local net
+  net=$(awk '$1 == "answer" && $2 == "VNET_8_HOSTONLY_SUBNET" { print $3; exit }' "$FUSION_NETWORKING" 2>/dev/null)
+  private_ipv4 "$net" || return 1
+  [[ ${net%.*}.1 != 192.168.64.1 ]] || return 1   # UTM's
+  echo "${net%.*}.1"
+}
+private_ipv4() {   # 10/8, 172.16/12 or 192.168/16, each part 0-255
+  local a b c d
+  [[ ${1:-} =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a=${BASH_REMATCH[1]} b=${BASH_REMATCH[2]} c=${BASH_REMATCH[3]} d=${BASH_REMATCH[4]}
+  (( a <= 255 && b <= 255 && c <= 255 && d <= 255 )) || return 1
+  (( a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) ))
+}
+
+fusion_ip() {   # <vm name> [seconds]: the address Fusion's DHCP gave the VM's MAC
+  local x mac i ip
+  x=$(fusion_vmx "$1") || return 1
+  for ((i = 0; i < ${2:-1}; i += 3)); do
+    mac=$(sed -n 's/^ethernet0\.generatedAddress = "\(.*\)"$/\1/p; s/^ethernet0\.address = "\(.*\)"$/\1/p' "$x" | head -1 | tr 'A-F' 'a-f')
+    if [[ -n $mac ]]; then
+      ip=$(awk -v m="$mac" '$1 == "lease" { ip = $2 } $1 == "hardware" && tolower($3) == m ";" { last = ip } END { print last }' "$FUSION_LEASES" 2>/dev/null)
+      [[ -n $ip ]] && { echo "$ip"; return 0; }
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+fusion_start() {   # <vm name>
+  # Right after a shutdown Fusion can still hold the VM's files and leave a
+  # start without effect (no error): check, and try again.
+  local x i
+  x=$(fusion_vmx "$1") || die "no VMware Fusion VM named '$1'"
+  for ((i = 0; i < 5; i++)); do
+    [[ $(fusion_state "$1") == running ]] && return 0
+    "$VMRUN" -T fusion start "$x" gui >/dev/null 2>&1 || true
+    sleep 3
+  done
+  [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"
+}
+
+fusion_wait_stopped() {   # <vm name>
+  local i
+  for ((i = 0; i < 180; i += 3)); do [[ $(fusion_state "$1") == stopped ]] && return 0; sleep 3; done
+  die "VMware Fusion VM '$1' did not stop"
+}
+
+# OmacVM's helpers listen on the Mac's address on each VM app's shared network:
+# 10.211.55.2 (Parallels), 192.168.64.1 (UTM), the .1 of Fusion's NAT network
+# (fusion_host). vm_network_ok TYPE [IP] says (on stderr) what to change when
+# that network was moved.
 vm_network_ok() {
   local a
   case $1 in
@@ -170,6 +259,16 @@ vm_network_ok() {
         printf 'The UTM VM is at %s, outside UTM'"'"'s default shared network 192.168.64.0/24 (the Mac at 192.168.64.1), which OmacVM needs: give the VM the "Shared Network" mode with macOS'"'"'s default range.\n' "$2" >&2
         return 1
       fi ;;
+    fusion)
+      a=$(fusion_host) || {
+        printf 'VMware Fusion has no NAT network (vmnet8) on this Mac: open VMware Fusion > Settings > Network.\n' >&2
+        return 1
+      }
+      if [[ -n ${2:-} && ${2%.*} != "${a%.*}" ]]; then
+        printf 'The VMware Fusion VM is at %s, outside Fusion'"'"'s NAT network (the Mac at %s), which OmacVM needs: give the VM the "Share with my Mac" network.\n' "$2" "$a" >&2
+        return 1
+      fi ;;
+    *) return 1 ;;
   esac
   return 0
 }

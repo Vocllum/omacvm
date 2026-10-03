@@ -3,7 +3,8 @@ Description=OmacVM: install Omanotch's VM side at the first login (build.sh --om
 After=graphical-session.target omacvm-plugins.service
 PartOf=graphical-session.target
 ConditionPathExists=%h/.local/share/omanotch/guest/install.sh
-ConditionPathExists=!%h/.local/bin/notchcast
+# Missing, or left empty by an install that did not finish.
+ConditionFileNotEmpty=!%h/.local/bin/notchcast
 
 [Service]
 Type=oneshot

@@ -1,8 +1,8 @@
 #!/bin/bash
 # omacvm check: is every OmacVM feature in place and working, on the Mac and
-# in a running VM (Parallels or UTM)? Read-only; run it after a build or an
+# in a running VM (Parallels, UTM or VMware Fusion)? Read-only; run it after a build or an
 # apply, or whenever something seems off:
-#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm] [--user NAME] [--key PRIVATE_KEY] [--json]
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME] [--key PRIVATE_KEY] [--json]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
 # per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
 # must be logged in to the VM.
@@ -32,13 +32,15 @@ if [[ -z $IP ]]; then
   resolve_vm
   [[ -n $IP ]] || { echo "omacvm check: '$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)" >&2; exit 1; }
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels or UTM VM named '$VM' (or pass --vm-type and --ip)"
+[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels, UTM or VMware Fusion VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
              [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || die "no IP for VM '$VM' (is it running?)" ;;
   utm) HOST=192.168.64.1
        [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || die "no IP for UTM VM '$VM' (is it running?)" ;;
-  *) die "--vm-type parallels or utm" ;;
+  fusion) HOST=$(fusion_host)
+          [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || die "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
+  *) die "--vm-type parallels, utm or fusion" ;;
 esac
 export OMA_KEY=$KEY
 
@@ -113,7 +115,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup)"; fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
-if [[ $GESTURES == on || $TYPE == utm ]]; then
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
@@ -138,17 +140,26 @@ else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
   skip "menu bar in full screen" "macOS always shows it: System Settings > Menu Bar (older macOS: Control Center) > Automatically hide and show the menu bar: In Full Screen Only" human
 else ok "menu bar in full screen" "hidden by macOS"; fi
-if [[ $TYPE == parallels ]]; then
+case $TYPE in
+parallels)
   running org.omacvm.clip-in && ok "clipboard VM -> Mac" "org.omacvm.clip-in" || bad "clipboard VM -> Mac" "org.omacvm.clip-in not running"
   # Parallels keeps both settings in undocumented files: hints, not failures.
   parallels_sends_shortcuts && ok "Cmd+Space etc. to the VM" "Send macOS system shortcuts: Always" \
     || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always" human
+  # Every Mac display in full screen needs Parallels' own full screen (not
+  # macOS's native one) with "Use all displays" (new VMs get both).
+  pvs="$(vm_bundle "$VM")/config.pvs"
+  if grep -q '<UseAllDisplays>1' "$pvs" 2>/dev/null && grep -q '<UseNativeFullScreen>0' "$pvs" 2>/dev/null; then
+    ok "full screen on every display" "Parallels' full screen, all displays"
+  else
+    skip "full screen on every display" "stop the VM, then Parallels Desktop > the VM's Configure > Options > Full Screen: turn on \"Use all displays\", turn off \"Use macOS full screen\"" human
+  fi
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
-    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human
-else
+    || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
+utm)
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
-    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
-fi
+    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)" ;;
+esac
 pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
 (( fails )) && mac_failed=1 || mac_failed=0
 

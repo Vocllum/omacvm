@@ -135,12 +135,13 @@ check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
 if [[ -n $kb ]]; then ok "keyboard layout" "$kb"; else bad "keyboard layout" "no layout from Hyprland"; fi
 
-if [[ $TYPE == parallels ]]; then
+case $TYPE in
+parallels)
   section "Parallels"
   check "Parallels Tools" "prltoolsd" systemctl is-active -q prltoolsd
   check "dynamic resolution" "parallels-dynres" test -x /usr/local/bin/parallels-dynres
-  check "clipboard VM -> Mac" "parallels-clip-out" test -x /usr/local/bin/parallels-clip-out
-else
+  check "clipboard VM -> Mac" "parallels-clip-out" test -x /usr/local/bin/parallels-clip-out ;;
+utm)
   section "UTM"
   check "SPICE daemon" "spice-vdagentd" systemctl is-active -q spice-vdagentd
   if user_active omacvm-vdagent.service; then ok "clipboard + pointer" "omacvm-vdagent"
@@ -159,8 +160,25 @@ EOF
   elif [[ $tab == "$w" ]]; then ok "pointer range" "${tab} px, the whole screen"
   else bad "pointer range" "tablet $tab px vs screen $w px"; fi
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
-  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
-fi
+  check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf ;;
+fusion)
+  section "VMware Fusion"
+  check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
+  hv=$(pacman -Q hyprland 2>/dev/null | awk '{ print $2 }')
+  if [[ "$(cat /var/lib/omacvm/hyprland-vmwgfx 2>/dev/null)" == "$hv $(sha256sum /usr/bin/Hyprland | awk '{ print $1 }')" ]]; then
+    ok "Hyprland" "$hv with the vmwgfx fix"
+  else bad "Hyprland" "$hv without the vmwgfx fix (black screen at the next login): omacvm apply builds it"; fi
+  check "Hyprland after updates" "pacman hook rebuilds it" test -f /etc/pacman.d/hooks/zz-omacvm-hyprland.hook
+  check "DNS" "Fusion's own, which follows the Mac (public DNS only while OmacVM installs)" test ! -f /etc/NetworkManager/conf.d/90-omacvm-fusion.conf
+  check "VMware Tools" "vmtoolsd (Fusion's display layout)" systemctl is-active -q vmtoolsd
+  if user_active omacvm-fusion-displays.service; then
+    n=$(/usr/local/share/omacvm/fusion/guest/omacvm-fusion-layout 2>/dev/null | grep -c .)
+    ok "displays" "omacvm-fusion-displays follows Fusion's layout ($n output(s) now)"
+  else bad "displays" "omacvm-fusion-displays.service not running: omacvm apply"; fi
+  if user_active omacvm-fusion-clipboard.service && pgrep -u "$U" -f 'vmtoolsd -n vmusr' >/dev/null; then
+    ok "copy and paste" "VMware's agent + omacvm-fusion-clipboard"
+  else bad "copy and paste" "omacvm-fusion-clipboard.service or VMware's agent not running: omacvm apply"; fi ;;
+esac
 
 section "Speed and safety"
 k=$(uname -r)
