@@ -112,19 +112,22 @@ More in [With a coding agent](#with-a-coding-agent).
 
 ## Four ways: Parallels, UTM, VMware Fusion or OmacVM.app
 
-OmacVM builds the same Omarchy VM in Parallels Desktop, UTM or VMware Fusion.
-OmacVM.app, its own app that needs nothing else, is coming. Once it is
-installed, `omacvm build` offers it as the fourth choice (or
-`--vm-type app`): the app builds the VM with its own steps, then OmacVM is
+OmacVM builds the same Omarchy VM in Parallels Desktop, UTM, VMware Fusion or
+OmacVM.app, its own app that needs nothing else. Get the app with
+`omacvm build --vm-type app` (it downloads the app when it is missing), or
+download `OmacVM-<version>.zip` from the
+[releases](https://github.com/gillesgoetsch/omacvm/releases). Downloaded with a
+browser, macOS blocks it the first time: click Open Anyway in System Settings ›
+Privacy & Security. The app builds the VM with its own steps, then OmacVM is
 applied as on the other routes ([docs/routes/app.md](docs/routes/app.md)).
-Everything in [What you get](#what-you-get) works in all three apps, except
+Everything in [What you get](#what-you-get) works in all four apps, except
 where the table says otherwise.
 
 **Which one?** Fastest and least to set up, and fine with paying: Parallels.
 Free, with external displays and the longest battery life: VMware Fusion.
 Free and open source, one display: UTM.
 
-| | Parallels Desktop | UTM 5 | VMware Fusion 26 | OmacVM.app *(coming)* |
+| | Parallels Desktop | UTM 5 | VMware Fusion 26 | OmacVM.app |
 |---|---|---|---|---|
 | **Best for** | least to set up | free and open source | free, external displays, battery | nothing else to install |
 | Cost | paid | **free**, open source | **free**, also for work | **free**, open source |
@@ -155,7 +158,7 @@ Free and open source, one display: UTM.
 | The bar beside the notch | ✓ Omanotch | ✓ Omanotch | ✓ Omanotch | ✓ built in |
 | Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
 | **Setup** | | | | |
-| Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | download the app |
+| Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
 | Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
