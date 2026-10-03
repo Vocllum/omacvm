@@ -135,17 +135,22 @@ def stop_upstream(why, close_clients):
     p, upstream = upstream, None
     sel.unregister(p.stdout)
     p.stdout.close()
-    # The whole group: the client's curl too.
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    # The whole group (its own session): the client's curl too, also a
+    # stopped one, and whatever is left after the client ended.
+    for sig in (signal.SIGTERM, signal.SIGCONT):
         try:
             os.killpg(p.pid, sig)
         except OSError:
             pass
-        try:
-            p.wait(timeout=2)
-            break
-        except subprocess.TimeoutExpired:
-            pass
+    try:
+        p.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        pass
+    p.wait()
     log(f"stream from the Mac: {why} (exit {p.returncode})")
     cache.clear()
     if close_clients:
@@ -223,8 +228,6 @@ def read_client(c):
     c.external = "osd=external" in query.split("&")
     send(c, b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n"
             b"Connection: close\r\n\r\nretry: 3000\n\n" + b"".join(cache.values()))
-    if upstream is not None and c.external and not up_external:
-        stop_upstream("reopened for external OSD events", False)
 
 
 def main():
@@ -244,7 +247,10 @@ def main():
         if upstream is None and waiting and now - up_started >= RETRY:
             start_upstream()
         elif upstream is not None:
-            if not waiting and idle_since is not None and now - idle_since >= LINGER:
+            if waiting and want_external() != up_external:
+                # Reopened with or without ?osd=external; clients stay.
+                stop_upstream("reopening " + ("with" if want_external() else "without") + " external OSD events", False)
+            elif not waiting and idle_since is not None and now - idle_since >= LINGER:
                 stop_upstream("no clients", False)
             elif now - up_last > SILENCE:
                 stop_upstream("silent for 20 s", True)

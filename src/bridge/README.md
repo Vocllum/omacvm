@@ -179,7 +179,8 @@ In the VM, the bar widgets and the OSD follower share one stream:
 started by its socket), which keeps a single `omacvm-bridge events --direct`
 to the Mac (the proof and the token as for every request). A new reader
 first gets the latest event of each kind, as from the Mac. The Mac stream is
-opened with `?osd=external` while a reader asked for it, closed 30 s after
+opened with `?osd=external` while a reader asks for it (reopened when that
+changes), closed 30 s after
 the last reader left, and when it ends or stays silent for 20 s every reader
 is closed, so each one sees what it saw before (the stream ends, it reconnects
 after 3 s). Without the socket (an older install, the service failing)
