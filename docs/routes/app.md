@@ -51,9 +51,10 @@ OmacVM's version.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
 - Sound through the Mac (QEMU's HDA card; PipeWire in the VM).
-- The Mac's battery in Omarchy's bar, on a MacBook: charge, charging, time
-  left, Omarchy's battery panel and its low-battery warning (try-omarchy's
-  bridge, over a virtio port; [how it works](../../src/battery/README.md)).
+- The Mac's battery in Omarchy's bar, on a MacBook: charge, charging and
+  Omarchy's battery panel; time left and the low-battery warning are not
+  tested yet with the Mac on battery (try-omarchy's bridge, over a virtio
+  port; [how it works](../../src/battery/README.md)).
 
 ## From the omacvm command
 
