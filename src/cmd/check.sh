@@ -28,19 +28,33 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 export OMA_KEY=$KEY
+# stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
+stop() {
+  if (( JSON )); then
+    printf '{"vm": %s, "type": %s, "ip": "", "ok": false, "checks": [\n  {"section": "Mac", "name": "VM", "status": "fail", "detail": %s, "needs_human": false}\n]}\n' \
+      "$( [[ -n $VM ]] && json_str "$VM" || echo null)" "$( [[ -n $TYPE ]] && json_str "$TYPE" || echo null)" "$(json_str "$2")"
+  fi
+  echo "omacvm check: $2" >&2
+  exit "$1"
+}
 if [[ -z $IP ]]; then
-  resolve_vm
-  [[ -n $IP ]] || { echo "omacvm check: '$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)" >&2; exit 1; }
+  # resolve_vm exits when it cannot tell which VM: in a subshell, to say so.
+  err=$(mktemp)
+  r=$(resolve_vm 2>"$err" && printf '%s\t%s\t%s' "$VM" "$TYPE" "$IP"); rc=$?
+  msg=$(sed 's/^omacvm: //' "$err"); rm -f "$err"
+  (( rc == 0 )) || stop "$rc" "${msg:-no VM}"
+  IFS=$'\t' read -r VM TYPE IP <<<"$r"
+  [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || die "no Parallels, UTM or VMware Fusion VM named '$VM' (or pass --vm-type and --ip)"
+[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM or VMware Fusion VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
-             [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || die "no IP for VM '$VM' (is it running?)" ;;
+             [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || stop 1 "no IP for VM '$VM' (is it running?)" ;;
   utm) HOST=192.168.64.1
-       [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || die "no IP for UTM VM '$VM' (is it running?)" ;;
+       [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || stop 1 "no IP for UTM VM '$VM' (is it running?)" ;;
   fusion) HOST=$(fusion_host)
-          [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || die "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
-  *) die "--vm-type parallels, utm or fusion" ;;
+          [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || stop 1 "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
+  *) stop 2 "--vm-type parallels, utm or fusion" ;;
 esac
 export OMA_KEY=$KEY
 

@@ -23,10 +23,12 @@ if [[ ! -f $C ]]; then
   exit 0
 fi
 
-write() {   # jq program and args; result replaces shell.json in one step
+write() {   # jq program and args; result replaces shell.json in one step, if it changes
   local tmp
   tmp=$(mktemp "$C.XXXXXX")
-  jq "$@" "$C" > "$tmp" && chown "$U:$U" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$C"
+  jq "$@" "$C" > "$tmp" || { rm -f "$tmp"; return 1; }
+  if cmp -s "$tmp" "$C"; then rm -f "$tmp"; return 0; fi
+  chown "$U:$U" "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$C"
 }
 
 case $MODE in

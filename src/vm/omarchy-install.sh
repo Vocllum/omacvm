@@ -17,18 +17,22 @@ log "system update"
 pacman -Syu --noconfirm >/dev/null 2>&1 || true
 
 log "omarchy-mac (channel ${OMARCHY_MAC_CHANNEL:-rc})"
-cat > "$H/.omacvm-install.sh" <<EOF
+{
+  cat <<EOF
 #!/bin/bash
 set -o pipefail
 cd ~
 [[ -d ~/.local/share/omarchy/.git ]] || git clone https://github.com/omacom/omarchy-mac.git ~/.local/share/omarchy
 cd ~/.local/share/omarchy
 echo "omarchy-mac \$(cat version) \$(git rev-parse --short HEAD)"
-export OMARCHY_USER_NAME="$OMA_FULLNAME"
-export OMARCHY_USER_EMAIL="${OMA_EMAIL:-}"
+EOF
+  # Quoted for the shell: a name may hold quotes, $ or backticks.
+  printf 'export OMARCHY_USER_NAME=%q\nexport OMARCHY_USER_EMAIL=%q\n' "$OMA_FULLNAME" "${OMA_EMAIL:-}"
+  cat <<EOF
 bash install.sh --channel ${OMARCHY_MAC_CHANNEL:-rc} < /dev/null
 echo "INSTALL-EXIT=\$?"
 EOF
+} > "$H/.omacvm-install.sh"
 chown "$U:$U" "$H/.omacvm-install.sh"; chmod +x "$H/.omacvm-install.sh"
 L=/var/log/omacvm-omarchy-install.log
 systemctl reset-failed omacvm-omarchy-install 2>/dev/null || true

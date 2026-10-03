@@ -80,9 +80,9 @@ ssh_setup_command() {
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
 }
 
-# resolve_vm [start]: VM (name) -> TYPE and IP. No name: "Omarchy", else the
-# only running VM. With "start", a stopped VM is started; without, IP stays
-# empty for it. Exits 2 when it cannot tell which VM.
+# resolve_vm [start|soft]: VM (name) -> TYPE and IP. No name: "Omarchy", else
+# the only running VM. With "start", a stopped VM is started; without, IP stays
+# empty for it. Exits 2 when it cannot tell which VM ("soft": returns 1).
 resolve_vm() {
   local running
   if [[ -z ${VM:-} ]]; then
@@ -91,6 +91,7 @@ resolve_vm() {
       running=$(vms_list | awk -F'\t' '$3 == "running" { print $1 }')
       if [[ $(grep -c . <<<"$running") == 1 ]]; then VM=$running
       else
+        [[ ${1:-} == soft ]] && return 1
         echo "omacvm: which VM? pass --vm NAME (your VMs: $(vms_list | cut -f1 | paste -sd, - | sed 's/,/, /g'))" >&2
         exit 2
       fi

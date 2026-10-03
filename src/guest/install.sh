@@ -86,6 +86,9 @@ case $TYPE in
           [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
   *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
 esac
+# Fusion: the public DNS from fusion/guest/install.sh goes again also when a
+# later step fails.
+if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
 {
   printf 'OMACVM_VM_TYPE=%s\nOMACVM_HOST=%s\nOMACVM_USER=%s\n' "$TYPE" "$HOST" "$U"
   for f in "${FEATURES[@]}"; do printf 'OMACVM_FEATURE_%s=%s\n' "${f//-/_}" "${F[$f]}"; done
@@ -180,9 +183,9 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   # Omarchy's own night light indicator, as it was before the Bridge.
   NL=$H/.local/state/omacvm/nightlight-indicator C=$H/.config/omarchy/shell.json
   if [[ -f $NL && -f $C ]]; then
-    tmp=$(mktemp)
+    tmp=$(mktemp "$C.XXXXXX")
     jq --argjson items "$(cat "$NL")" '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (if $items == null then del(.items) else .items = $items end)' "$C" > "$tmp" &&
-      install -o "$U" -g "$U" -m600 "$tmp" "$C"
+      chmod --reference="$C" "$tmp" && chown "$U:$U" "$tmp" && mv -f "$tmp" "$C"
     rm -f "$tmp" "$NL"
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
@@ -237,9 +240,21 @@ fi
 if [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then
     log "memory-optimized kernel (about 10 minutes)"
-    "$R/kernel/build-thp-kernel.sh" "$U"
+    "$R/kernel/build-thp-kernel.sh" "$U" || log "memory-optimized kernel: not updated (see above)"
   else
     log "memory-optimized kernel skipped: this VM does not boot with GRUB"
+  fi
+elif pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
+  # Off: GRUB boots Arch Linux ARM's own kernel again. The package goes once
+  # the VM no longer runs it (this run, or the next one after a reboot).
+  G=/etc/default/grub
+  sed -i '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' $G
+  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/Image"' >> $G   # linux-aarch64's
+  if [[ $(uname -r) == *thp* ]]; then
+    log "memory-optimized kernel: off, Arch Linux ARM's own kernel from the next boot"
+  else
+    log "memory-optimized kernel: off, removed"
+    pacman -Rn --noconfirm $(pacman -Qq linux-aarch64-thp linux-aarch64-thp-headers 2>/dev/null) >/dev/null
   fi
 fi
 # Updated bar widgets only load in a new shell: restart it once if any changed.

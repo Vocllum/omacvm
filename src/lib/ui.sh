@@ -183,7 +183,10 @@ ui_spin() {
   out=$(mktemp)
   if (( ! UI_FANCY )); then
     printf '  %s...\n' "$msg"   # no terminal to draw on (scripts, agents): plain output
-    "$@" > "$out" 2>&1; rc=$?
+    # In the background and waited for, as in the spinner branch: set -e
+    # still stops the step, and a die inside still shows its reason.
+    ( "$@" ) > "$out" 2>&1 &
+    wait $! && rc=0 || rc=$?
   else
     "$@" > "$out" 2>&1 &
     pid=$!
@@ -193,7 +196,7 @@ ui_spin() {
       printf '\r\033[2K  %s%s%s %s %s%dm %02ds%s' "$UACC" "${UI_FRAMES:i % 10:1}" "$UR" "$(ui_fit "$msg")" "$UD" $(( e / 60 )) $(( e % 60 )) "$UR" > "$TTY"
       i=$(( i + 1 )); sleep 0.1
     done
-    wait "$pid"; rc=$?
+    wait "$pid" && rc=0 || rc=$?
     printf '\r\033[2K\033[?25h' > "$TTY"
   fi
   e=$(( SECONDS - t0 ))

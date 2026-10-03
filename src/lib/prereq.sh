@@ -94,7 +94,7 @@ ensure_homebrew() {
 ensure_brew_tools() {
   local m; m=$(missing_brew_tools)
   [[ -z $m ]] && return 0
-  (( PLAN )) && return 0
+  (( DRY )) && return 0
   ensure_homebrew
   ui_spin "Installing from Homebrew: $m" brew install -q $m || needs_person "brew install $m failed: run it yourself, then omacvm again"
 }

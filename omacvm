@@ -38,6 +38,7 @@ case $cmd in
       "") sed -n '2,20s/^# \{0,1\}//p' "$0" ;;
       features|enable|disable) exec "$C/features.sh" "$1" --help ;;
       build|apply|check|vms|update) exec "$C/$1.sh" --help ;;
+      uninstall) exec "$R/src/mac/uninstall.sh" --help ;;
       *) echo "omacvm help: no command '$1'" >&2; exit 2 ;;
     esac ;;
   *) echo "omacvm: no command '$cmd' (omacvm help)" >&2; exit 2 ;;

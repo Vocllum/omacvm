@@ -38,7 +38,10 @@ if [[ -f $L ]]; then grep -qx "$L" /etc/ld.so.preload 2>/dev/null || echo "$L" >
 
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
-cat > "$M" <<LUA
+# Written next to it and moved into place, only when it changes: Hyprland
+# reloads on every write.
+tmp=$(mktemp "$M.XXXXXX")
+cat > "$tmp" <<LUA
 -- OmacVM, UTM: the Mac's built-in display below the notch, fixed from boot.
 -- UTM's virtio-gpu (virgl) goes blank when the mode changes while running, so
 -- do not switch modes live; edit and reboot instead. Omarchy's scaling menu
@@ -49,5 +52,34 @@ local omarchy_monitor_scale = ${scale:-2}
 hl.env("GDK_SCALE", tostring(omarchy_gdk_scale))
 hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = omarchy_monitor_scale })
 LUA
-chown "$U:$U" "$M"
-echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE"
+# A new mode while Omarchy runs would go live and blank virgl: then it waits in
+# monitors.lua.pending, which omacvm-utm-display puts in place at the next boot.
+cat > /etc/systemd/system/omacvm-utm-display.service <<'UNIT'
+[Unit]
+Description=OmacVM, UTM: a display mode set while Omarchy ran
+Before=display-manager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-utm-display
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+cat > /usr/local/bin/omacvm-utm-display <<'SH'
+#!/bin/sh
+for f in /home/*/.config/hypr/monitors.lua.pending; do
+  [ -f "$f" ] && mv -f "$f" "${f%.pending}"
+done
+exit 0
+SH
+chmod 755 /usr/local/bin/omacvm-utm-display
+systemctl enable -q omacvm-utm-display.service 2>/dev/null || true
+when=now
+if cmp -s "$tmp" "$M"; then rm -f "$tmp"; rm -f "$M.pending"
+else
+  chmod 644 "$tmp"; chown "$U:$U" "$tmp"
+  if [[ -n $(ls -A "/run/user/$(id -u "$U")/hypr" 2>/dev/null) ]]; then mv -f "$tmp" "$M.pending"; when="from the next boot"
+  else mv -f "$tmp" "$M"; fi
+fi
+echo "UTM: guest tools, virtio-gpu settings, browser GPU, display $MODE ($when)"

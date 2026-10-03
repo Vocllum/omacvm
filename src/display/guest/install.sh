@@ -14,8 +14,11 @@ install -m755 parallels-dynres /usr/local/bin/parallels-dynres
 # monitors.lua: keep the scale chosen in Omarchy's menu if there already is one.
 M=$H/.config/hypr/monitors.lua
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
-install -o "$U" -g "$U" -m644 monitors.lua "$M"
-[[ -n $scale ]] && sed -i "s/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = $scale/" "$M"
+# One write, only when it changes: Hyprland reloads on every write.
+tmp=$(mktemp "$M.XXXXXX")
+cp monitors.lua "$tmp"
+[[ -n $scale ]] && sed -i "s/^local omarchy_monitor_scale = .*/local omarchy_monitor_scale = $scale/" "$tmp"
+if cmp -s "$tmp" "$M"; then rm -f "$tmp"; else chmod 644 "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$M"; fi
 
 A=$H/.config/hypr/autostart.lua
 grep -q parallels-dynres "$A" 2>/dev/null || { echo 'o.launch_on_start("parallels-dynres")' >> "$A"; chown "$U:$U" "$A"; }

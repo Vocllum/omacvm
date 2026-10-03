@@ -109,7 +109,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Trackpad and keyboard"
-if [[ $GESTURES == on || $TYPE == utm ]]; then   # on UTM the daemon also types Cmd as Super
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then   # on UTM and Fusion the daemon also types Cmd as Super
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
@@ -129,7 +129,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
-if [[ $TYPE == utm ]]; then
+if [[ $TYPE == utm || $TYPE == fusion ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
@@ -193,7 +193,8 @@ esac
 section "Speed and safety"
 k=$(uname -r)
 [[ -n $THP_KERNEL ]] || { [[ $k == *thp* ]] && THP_KERNEL=on || THP_KERNEL=off; }
-if [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
+if [[ $k == *thp* && $THP_KERNEL == off ]]; then bad "kernel" "$k: the memory-optimized kernel is off but still running (reboot)"
+elif [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
 elif [[ $THP_KERNEL == off ]]; then ok "kernel" "$k (Arch Linux ARM's own; memory-optimized kernel not chosen)"
 elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (the memory-optimized kernel needs GRUB)"
 else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after apply.sh?)"; fi
