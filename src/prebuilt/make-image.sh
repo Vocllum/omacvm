@@ -54,6 +54,7 @@ wait_off() {
 stage_build() {
   vms_list | cut -f1 | grep -qxF "$VM" && die "'$VM' exists: delete it first (make-image.sh $ROUTE clean)"
   log "build: $VM"
+  rm -f "$OUT/omarchy-version" "$OUT/packages.txt"
   OMACVM_PASSWORD=$(openssl rand -hex 16) "$R/omacvm" build --image --vm-type "$ROUTE" --vm-name "$VM" \
     --cpus 8 --memory-gb 12 --disk-gb "$PREBUILT_DISK_GB" \
     --user "$PREBUILT_USER" --full-name "$PREBUILT_FULLNAME" --hostname omarchy \
