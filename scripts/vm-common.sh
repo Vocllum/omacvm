@@ -21,6 +21,8 @@ fi
 CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/OmacVM}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 LIVE_RELEASE=v0.4.1
+# The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Gestures, Bridge.
+HOST_PORTS=47830,47831
 
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
@@ -88,6 +90,7 @@ live_fetch() {
 qemu_headless() {
   local name=$1; shift
   rm -f "$QMP"
+  OMACVM_SLIRP_HOST_PORTS=$HOST_PORTS \
   "$QEMU" -name "$NAME" -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off \
     -smp "$CPUS" -m "${MEM_MB}M" -nodefaults -display none -monitor none \
     -action reboot=reset,shutdown=poweroff \
