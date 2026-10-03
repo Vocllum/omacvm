@@ -61,7 +61,8 @@ rm -rf "$T/.cache" "$T/.ssh" "$T/.gnupg" "$T/.local/share/keyrings" "$T/.config/
   "$T/.omacvm-install.log" "$T/.local/state/wireplumber" "$T/.local/share/Trash"
 find "$T" -name '*.log' -path '*/.local/*' -delete 2>/dev/null || true
 userdel "$U"
-getent group "$U" >/dev/null && groupdel "$U"
+if getent group "$U" >/dev/null; then groupdel "$U"; fi
+for f in passwd shadow group gshadow subuid subgid; do [[ -f /etc/$f ]] && cp -p "/etc/$f" "/etc/$f-"; done
 rm -rf "$H" "/var/spool/mail/$U" "/var/lib/systemd/linger/$U" "/var/lib/AccountsService/users/$U" \
   /etc/sddm.conf.d/20-omacvm-autologin.conf
 if [[ -f /var/lib/sddm/state.conf ]]; then sed -i "s/^User=.*/User=$U/" /var/lib/sddm/state.conf; fi
