@@ -23,14 +23,14 @@ fusion_mac_displays() {
     print(s.count, max(w, 2560), max(h, 1600))' 2>/dev/null || echo "1 2560 1600"
 }
 
-# fusion_create NAME CPUS MEMORY_MB LIVE_IMAGE DISK_GB
+# fusion_create NAME CPUS MEMORY_MB LIVE_IMAGE DISK_GB GRAPHICS_GB
 # Like the VM the Fusion route was tested with: UEFI, 3D acceleration on the
 # vmwgfx GPU, an Intel e1000e NIC on Fusion's NAT network (Arch Linux ARM's
 # kernel has no vmxnet3), the live installer as a SATA disk and the system
 # disk as NVMe (the base install takes the one NVMe disk). The live image stays
 # a raw file: a "monolithicFlat" descriptor points Fusion at it.
 fusion_create() {
-  local name=$1 cpus=$2 mem=$3 live=$4 disk=$5 b x sectors
+  local name=$1 cpus=$2 mem=$3 live=$4 disk=$5 gfx=${6:-8} b x sectors
   b=$(fusion_bundle "$name")
   [[ -e $b ]] && die "$b already exists"
   mkdir -p "$b"
@@ -44,7 +44,7 @@ fusion_create() {
   vmx_del "$x" memory.maxsize
   vmx_set "$x" firmware efi
   vmx_set "$x" mks.enable3d TRUE
-  vmx_set "$x" svga.graphicsMemoryKB 4194304
+  vmx_set "$x" svga.graphicsMemoryKB $((gfx * 1048576))   # taken from the VM's memory; 8 GB at most
   vmx_set "$x" annotation "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM"
   "$FUSION_LIB/vmware-vdiskmanager" -c -s "${disk}GB" -a lsilogic -t 0 "$b/omarchy.vmdk" >/dev/null || die "vmware-vdiskmanager could not create the disk"
   vmx_set "$x" nvme0.present TRUE

@@ -12,6 +12,7 @@
 #   --vm-type parallels|utm|fusion   --vm-name NAME   --hostname NAME
 #   --resources low|balanced|high|best   --cpus N   --memory-gb N   --disk-gb N
 #   --vm-dir PATH   where the VM goes (Parallels, Fusion; default: the app's own folder)
+#   --graphics-gb N   VMware Fusion: graphics memory, part of the VM's memory (1-8)
 #   --user NAME   --full-name "NAME"
 #   --parallels-edition standard|pro   only while Parallels has no licence yet
 #                (a fresh install; the trial is Pro): the limits to size the VM by
@@ -68,6 +69,7 @@ while (( $# )); do
     --vm-type) TYPE=$2; shift 2 ;;
     --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
     --vm-dir) VM_DIR=$2; shift 2 ;;
+    --graphics-gb) GFX_GB=$2; shift 2 ;;
     --resources) RES=$2; shift 2 ;;
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
@@ -218,6 +220,16 @@ fi
 (( CPUS >= 1 && CPUS <= CAP_CPUS )) || die "CPUs: 1 to $CAP_CPUS${LIMITED:+ ($LIMITED)}"
 (( MEM_GB >= 4 && MEM_GB <= CAP_MEM_GB )) || die "memory: 4 to $CAP_MEM_GB GB${LIMITED:+ ($LIMITED)}"
 (( DISK_GB >= 64 )) || die "disk: at least 64 GB"
+# VMware Fusion: the GPU's memory comes out of the VM's own. A quarter of it,
+# up to Fusion's 8 GB (two Retina displays need several GB).
+if [[ $TYPE == fusion ]]; then
+  gfx_auto=$(( MEM_GB / 4 )); (( gfx_auto > 8 )) && gfx_auto=8; (( gfx_auto < 1 )) && gfx_auto=1
+  if (( ${custom:-0} )) && [[ -z ${GFX_GB:-} ]]; then
+    GFX_GB=$(ask_value "graphics memory in GB, part of the VM's memory (1-8)" "$gfx_auto" '^[0-9]+$')
+  fi
+  : "${GFX_GB:=$gfx_auto}"
+  (( GFX_GB >= 1 && GFX_GB <= 8 && GFX_GB < MEM_GB )) || die "graphics memory: 1 to 8 GB, less than the VM's memory"
+fi
 
 # ---------- where the VM goes ----------
 # Parallels and Fusion take any folder (an external drive, say); UTM keeps its
@@ -359,6 +371,7 @@ human_steps() {
 if (( PLAN && JSON )); then
   cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $HOST"
   [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
+  [[ -n ${GFX_GB:-} ]] && cmd+=" --graphics-gb $GFX_GB"
   printf '{\n  "omacvm": %s,\n' "$(json_str "$(cat "$R/src/VERSION")")"
   printf '  "vm": {"name": %s, "type": "%s", "app_version": %s, "cpus": %s, "memory_gb": %s, "disk_gb": %s, "hostname": %s, "dir": %s},\n' \
     "$(json_str "$VM")" "$TYPE" "$(json_str "$(case $TYPE in
@@ -368,6 +381,7 @@ if (( PLAN && JSON )); then
     esac)")" \
     "$CPUS" "$MEM_GB" "$DISK_GB" "$(json_str "$HOST")" "$(json_str "${VM_DIR:-UTM library}")"
   printf '  "limits": {"cpus": %s, "memory_gb": %s},\n' "$CAP_CPUS" "$CAP_MEM_GB"
+  [[ -n ${GFX_GB:-} ]] && printf '  "graphics_gb": %s,\n' "$GFX_GB"
   printf '  "resource_tiers": {'   # what --resources gives on this Mac
   for t in 0 1 2 3; do
     tier_values "$t"
@@ -404,7 +418,7 @@ else
 fi
 box=("OmacVM will build this VM" ""
      "VM         $VM, in $APP_LINE"
-     "resources  $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory, $DISK_GB GB disk (expanding)"
+     "resources  $CPUS of $mac_cores CPUs, $MEM_GB of $mac_mem_gb GB memory${GFX_GB:+ ($GFX_GB GB of it for graphics)}, $DISK_GB GB disk (expanding)"
      "user       $U ($FULL), hostname $HOST"
      "keyboard   $KB_SHOWN"
      "timezone   $TZ_MAC, language $LANG_VM"
@@ -494,7 +508,7 @@ elif [[ $TYPE == fusion ]]; then
   LIVE="$(fusion_bundle "$VM").live.img"
   "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
   log "VMware Fusion VM with a ${DISK_GB} GB NVMe disk"
-  VMX=$(fusion_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" "$DISK_GB")
+  VMX=$(fusion_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" "$DISK_GB" "$GFX_GB")
   mv "$LIVE" "$(fusion_bundle "$VM")/live.img"; LIVE="$(fusion_bundle "$VM")/live.img"   # live.vmdk points here
   fusion_start "$VM"
   ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
