@@ -24,10 +24,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         // One launcher at a time: a second one hands over to the first (a
-        // start request too: `open -n ... --args --start --vm NAME`).
+        // start request too: `open -n ... --args --start --vm NAME`). The
+        // copy that just installed this one is quitting: it does not count.
         let me = NSRunningApplication.current
+        let installer = args.firstIndex(of: "--installed-by").flatMap { $0 + 1 < args.count ? pid_t(args[$0 + 1]) : nil }
         if let id = Bundle.main.bundleIdentifier,
-           let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: { $0 != me }) {
+           let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: {
+               $0 != me && !$0.isTerminated && $0.processIdentifier != installer
+           }) {
             if CommandLine.arguments.contains("--start") {
                 let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
                 DistributedNotificationCenter.default().postNotificationName(
