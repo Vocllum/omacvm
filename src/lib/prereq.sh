@@ -6,7 +6,8 @@
 #   ensure_xcode_tools       Xcode's command line tools (Swift, clang, git)
 #   ensure_homebrew          Homebrew, on the PATH of this run
 #   ensure_brew_tools        zstd, e2fsprogs, and an OpenSSL with SHA-512 passwords
-#   ensure_vm_app TYPE       Parallels Desktop or UTM 5
+#   ensure_vm_app TYPE       Parallels Desktop or UTM 5 (OmacVM.app: build.sh says
+#                            where to get it)
 
 # An OpenSSL that can hash the password (macOS's own LibreSSL has no "passwd -6").
 sha512_openssl() {
@@ -40,6 +41,7 @@ have_fusion() {
   local v; v=$(fusion_version | cut -d. -f1)
   [[ -x $VMRUN && -x $FUSION_LIB/vmcli && $v =~ ^[0-9]+$ ]] && (( v >= 13 ))
 }
+have_omacvm_app() { app_bundle >/dev/null; }
 
 # The installs: ask (or stop with the command under --yes), run, check.
 prereq_install() {   # "what" "command" -> runs the command after asking
@@ -159,7 +161,8 @@ prereq_screen() {
   printf '\n  %s%s%s  ·  %s  ·  %s GB  ·  macOS %s%s\n' "$UB" "${model:-Mac}" "$UR" "${chip:-Apple Silicon}" "$mac_mem_gb" \
     "$(sw_vers -productVersion)" "$( [[ $NOTCH == notch ]] && echo "  ·  notch")" > "$TTY"
   for mark in "Xcode's command line tools|have_xcode_tools" "Homebrew|have_homebrew" \
-              "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion"; do
+              "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion" \
+              "OmacVM.app|have_omacvm_app"; do
     if ${mark#*|}; then printf '  %s✓%s %s\n' "$UOK" "$UR" "${mark%%|*}" > "$TTY"
     else printf '  %s·%s %s %s(not installed)%s\n' "$UD" "$UR" "${mark%%|*}" "$UD" "$UR" > "$TTY"; fi
   done
