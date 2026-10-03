@@ -17,8 +17,10 @@ final class Runner {
 
     func arguments() -> [String] {
         let c = config
+        // QEMU option values split at commas; a comma in a value is written twice.
+        func q(_ s: String) -> String { s.replacingOccurrences(of: ",", with: ",,") }
         var a: [String] = [
-            "-name", c.name,
+            "-name", q(c.name),
             "-machine", "virt,gic-version=3",
             "-accel", "hvf",
             // HVF has no usable guest PMU on Apple Silicon.
@@ -28,9 +30,9 @@ final class Runner {
             "-nodefaults",
             "-action", "reboot=reset,shutdown=poweroff",
             // UEFI firmware (read-only) and this VM's own boot variables.
-            "-drive", "if=pflash,format=raw,readonly=on,file=\(Paths.firmware.path)",
-            "-drive", "if=pflash,format=raw,file=\(c.efiVars.path)",
-            "-drive", "if=none,id=disk,file=\(c.disk.path),format=raw,cache=writeback,discard=unmap",
+            "-drive", "if=pflash,format=raw,readonly=on,file=\(q(Paths.firmware.path))",
+            "-drive", "if=pflash,format=raw,file=\(q(c.efiVars.path))",
+            "-drive", "if=none,id=disk,file=\(q(c.disk.path)),format=raw,cache=writeback,discard=unmap",
             "-device", "nvme,serial=omacvm,drive=disk,bootindex=0",
             // QEMU's user network: the Mac is 10.0.2.2 for the VM; SSH from the Mac on 127.0.0.1.
             "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:\(c.sshPort)-:22",
@@ -48,7 +50,7 @@ final class Runner {
             "-device", "hda-micro,bus=hda0.0,audiodev=snd0",
             "-serial", "none",
             "-monitor", "none",
-            "-qmp", "unix:\(c.qmpSocket.path),server=on,wait=off",
+            "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
         if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
@@ -59,13 +61,13 @@ final class Runner {
         }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
-              "-chardev", "file,id=hvc0,path=\(console.replacingOccurrences(of: ",", with: ",,"))",
+              "-chardev", "file,id=hvc0,path=\(q(console))",
               "-device", "virtconsole,bus=vser0.0,nr=0,chardev=hvc0",
               // QEMU guest agent: a clean shutdown even when the power key is ignored.
-              "-chardev", "socket,id=qga0,path=\(c.agentSocket.path),server=on,wait=off",
+              "-chardev", "socket,id=qga0,path=\(q(c.agentSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0",
               // The clipboard, both ways (omacvm-clipboard in the VM).
-              "-chardev", "socket,id=clip0,path=\(c.clipboardSocket.path),server=on,wait=off",
+              "-chardev", "socket,id=clip0,path=\(q(c.clipboardSocket.path)),server=on,wait=off",
               "-device", "virtserialport,bus=vser0.0,nr=2,chardev=clip0,name=org.omacvm.clipboard"]
         return a
     }

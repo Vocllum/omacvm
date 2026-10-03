@@ -21,7 +21,8 @@ enum Installer {
 
     static func validName(_ name: String) -> Bool {
         let n = name.trimmingCharacters(in: .whitespaces)
-        return !n.isEmpty && n.count <= 40 && !n.contains("/") && !n.contains(":") && !n.hasPrefix(".")
+        // No "," either: QEMU shows the name, and its options split at commas.
+        return !n.isEmpty && n.count <= 40 && !n.contains("/") && !n.contains(":") && !n.contains(",") && !n.hasPrefix(".")
     }
 
     /// Copies this app to FOLDER/NAME.app with NAME as its name, signs it again

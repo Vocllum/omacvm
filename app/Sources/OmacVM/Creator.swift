@@ -8,6 +8,7 @@ final class Creator: ObservableObject {
     @Published var title = ""
     @Published var detail = ""
     @Published var failed: String?
+    @Published var warning: String?
     @Published var finished = false
     private var process: Process?
     private var buffer = ""
@@ -87,6 +88,9 @@ final class Creator: ObservableObject {
             detail = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 .replacingOccurrences(of: "\u{1B}[1;32m", with: "")
                 .replacingOccurrences(of: "\u{1B}[0m", with: "")
+        } else if line.hasPrefix("WARN:") {
+            warning = String(line.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+            detail = warning ?? ""
         } else if line.hasPrefix("ERROR:") {
             failed = String(line.dropFirst(6)).trimmingCharacters(in: .whitespaces)
         } else if let pct = line.split(separator: " ").last, pct.hasSuffix("%"),
