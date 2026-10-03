@@ -204,7 +204,10 @@ Omanotch.app (separate) :47811          ◀────────── notchc
 - Disk: GPT on NVMe: 2 GiB EFI at `/boot` + btrfs `@ @home @log` (+ `@factory`
   and snapper from omarchy-mac), `noatime,compress=zstd:1,space_cache=v2,discard=async`.
   GRUB (omarchy-mac's restore tooling expects it), normal and `--removable`.
-- Kernel: stock `linux-aarch64`; with `--thp-kernel` also `linux-aarch64-thp`
+- Kernel: stock `linux-aarch64`, booted as `/boot/vmlinuz-linux` (a copy of
+  its `/boot/Image`, kept current by a pacman hook, `src/kernel/stock-kernel.sh`:
+  only that name pairs with `initramfs-linux.img` in GRUB and grub-btrfs);
+  with `--thp-kernel` also `linux-aarch64-thp`
   (`/boot/vmlinuz-linux-aarch64-thp`, GRUB default via `GRUB_TOP_LEVEL`), stock as fallback. Cmdline
   `loglevel=3 quiet mitigations=off nowatchdog`.
 
@@ -353,7 +356,8 @@ The less obvious ones, with causes and where the fix lives, are in
   window "Parallels Shared Clipboard" tiles unless the window rule keeps it out.
 - The VM never returns touched memory to the Mac while it runs (Parallels'
   balloon has no free-page reporting). Keep zram small and memory capped.
-- GRUB on Arch only boots kernels named `/boot/vmlinuz-*` with their initramfs.
+- GRUB on Arch only boots kernels named `/boot/vmlinuz-*` with their initramfs
+  (`/boot/Image` boots without one, and grub-btrfs ignores it).
 - A Linux guest gets no trackpad gestures from Parallels, UTM or Fusion; they come from
   MultitouchSupport on the Mac + uinput in the guest.
 - UTM: only one `virtio-gpu-gl` device is allowed, so no second accelerated

@@ -209,7 +209,10 @@ else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kern
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after apply.sh?)"
 if command -v grub-mkconfig >/dev/null; then
-  check "bootable snapshots" "grub-btrfsd" systemctl is-active -q grub-btrfsd
+  if ! systemctl is-active -q grub-btrfsd; then bad "bootable snapshots" "grub-btrfsd is not running"
+  elif [[ ! -s /boot/grub/grub-btrfs.cfg ]] && btrfs subvolume list -s / 2>/dev/null | grep -q .; then
+    bad "bootable snapshots" "no snapshots menu in GRUB: it finds no kernel with an initramfs (omacvm apply)"
+  else ok "bootable snapshots" "grub-btrfsd, snapshots menu in GRUB"; fi
 fi
 if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH from the Mac" "firewall rule"
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi

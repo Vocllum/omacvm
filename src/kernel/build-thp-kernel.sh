@@ -17,7 +17,8 @@ G=/etc/default/grub
 # pointed GRUB back at the stock kernel).
 grub_default_thp() {
   grep -qx 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' $G && return 0
-  sed -i -e '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' -e '/^GRUB_TOP_LEVEL="\/boot\/Image"$/d' $G
+  sed -i -e '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' -e '/^GRUB_TOP_LEVEL="\/boot\/Image"$/d' \
+    -e '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux"$/d' $G
   grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' >> $G
   grep -q '^GRUB_DISABLE_LINUX_UUID=' $G || echo 'GRUB_DISABLE_LINUX_UUID=false' >> $G
   grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -2
@@ -59,7 +60,14 @@ done
 python3 "$here/thp-pkgbuild.py" "$W"
 chmod 755 "$W"; chown -R "$U:$U" "$W"
 # makepkg builds with one job unless told otherwise: use every vCPU.
-sudo -u "$U" env MAKEFLAGS="-j$(nproc)" SRCDEST="$SRC" makepkg --noconfirm --cleanbuild
+# Its thousands of compiler lines go to a log, not to the terminal.
+LOG=$B/build.log
+echo "building linux-aarch64-thp $latest (log: $LOG)"
+if ! sudo -u "$U" env MAKEFLAGS="-j$(nproc)" SRCDEST="$SRC" makepkg --noconfirm --cleanbuild > "$LOG" 2>&1; then
+  tail -30 "$LOG" >&2
+  echo "build-thp-kernel: the build failed, full log in the VM: $LOG" >&2
+  exit 1
+fi
 # Keep only the downloads this PKGBUILD uses.
 keep=$(sudo -u "$U" makepkg --printsrcinfo | sed -n 's/^[[:space:]]*source = //p' | sed 's/::.*//; s#.*/##')
 for f in "$SRC"/*; do
