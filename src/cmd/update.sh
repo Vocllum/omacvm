@@ -1,8 +1,8 @@
 #!/bin/bash
 # omacvm update [--vm NAME] [--no-pull]: OmacVM up to date everywhere. This
 # checkout (git pull, when it is a clean clone), the Mac side that is
-# installed, Omanotch on the Mac (when its clone is clean), then OmacVM in
-# every running VM that has it (or only --vm NAME; a stopped one is started).
+# installed (Omanotch with it), then OmacVM in every running VM that has it
+# (or only --vm NAME; a stopped one is started).
 # Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
 # VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
 # built them) get the update, and with it the Bridge's token.
@@ -43,20 +43,12 @@ launchctl print "gui/$(id -u)/org.omacvm.bridge" >/dev/null 2>&1 || args+=(--no-
 if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- --keys-only; then args+=(--no-gestures)
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
 launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
+launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
-if [[ -d $HOME/omanotch/.git && -d $HOME/Applications/Omanotch.app ]]; then
-  if [[ -n $(git -C "$HOME/omanotch" status --porcelain --untracked-files=no) ]]; then
-    info "Omanotch: ~/omanotch has local changes, left as it is"
-  else
-    before=$(git -C "$HOME/omanotch" rev-parse HEAD)
-    git -C "$HOME/omanotch" pull -q --ff-only 2>/dev/null || info "Omanotch: git pull failed, left as it is"
-    if [[ $(git -C "$HOME/omanotch" rev-parse HEAD) != "$before" ]]; then
-      log "Omanotch on the Mac"
-      "$HOME/omanotch/mac/install.sh"
-    fi
-  fi
-fi
+# Omanotch comes with OmacVM now (src/omanotch): the clone earlier versions
+# made is no longer used.
+[[ -d $HOME/omanotch/.git ]] && info "Omanotch: ~/omanotch is no longer used (it comes with OmacVM now), delete it when you like"
 
 # ---------- the VMs ----------
 if [[ -n $VM ]]; then

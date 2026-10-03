@@ -102,19 +102,11 @@ if (( MAC )); then
   on bridge || args+=(--no-bridge)
   { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
+  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
+  # app's own notch-strip mode is a separate switch in the app, which apply
+  # leaves alone).
+  on omanotch && args+=(--omanotch)
   "$R/src/mac/install.sh" "${args[@]}"
-  # OmacVM.app: Omanotch as for the other routes (the app's own notch-strip
-  # mode is a separate switch in the app, which apply leaves alone).
-  if on omanotch; then
-    if [[ ! -d $HOME/omanotch ]]; then
-      log "Omanotch on the Mac"
-      git clone -q https://github.com/gillesgoetsch/omanotch.git "$HOME/omanotch"
-      "$HOME/omanotch/mac/install.sh"
-    elif [[ ! -d $HOME/Applications/Omanotch.app ]]; then
-      log "Omanotch on the Mac"
-      "$HOME/omanotch/mac/install.sh"
-    fi
-  fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
     case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in

@@ -13,6 +13,7 @@ done
 "$R/bridge/mac/uninstall.sh" $PURGE
 "$R/gestures/mac/uninstall.sh"
 "$R/clipboard/mac/uninstall.sh"
+"$R/omanotch/mac/uninstall.sh"
 tccutil reset Accessibility org.omacvm.gestures >/dev/null 2>&1 || true
 tccutil reset ListenEvent org.omacvm.gestures >/dev/null 2>&1 || true
 rm -rf "$HOME/Library/Application Support/omacvm/installed"
