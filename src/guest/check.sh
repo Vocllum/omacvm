@@ -134,6 +134,9 @@ elif [[ $BATTERY == on ]]; then
   if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
   elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update)"
   else bad "battery in UPower" "no BAT0"; fi
+  if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
+    ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
+  else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
   if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "Omarchy warns; the VM never suspends for it"
   else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
