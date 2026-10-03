@@ -272,6 +272,8 @@ final class CameraHub: @unchecked Sendable {
   private var state = "idle"   // idle, starting, streaming
   private var cameraName = ""
   private var sequence: UInt32 = 0
+  private var retryDelay = 2.0     // seconds; doubles up to 30, back to 2 with the first frame
+  private var problem = ""         // the last failure, logged once
   private let capture = CameraCapture()
   private let log: (String) -> Void
   let maxConnections = 8
@@ -349,7 +351,7 @@ final class CameraHub: @unchecked Sendable {
     guard changed else { return }
     if on {
       if st == "streaming" { c.send(streaming(name)) }
-      else if st == "idle" { startCapture(c.label) }   // starting: the status comes when it is up
+      else if st == "idle" { log("\(c.label) wants the camera"); startCapture() }   // starting: the status comes when it is up
     } else {
       c.send(CameraWire.status(["status": "idle"]))
       if none { stopCapture() }
@@ -361,8 +363,7 @@ final class CameraHub: @unchecked Sendable {
                        "fps": CameraWire.fps, "pixelFormat": "NV12"])
   }
 
-  private func startCapture(_ who: String) {   // state is "starting"
-    log("\(who) wants the camera")
+  private func startCapture() {   // state is "starting"
     capture.start { [self] result in
       lock.lock()
       if wanting.isEmpty {   // nobody left by the time it started
@@ -373,19 +374,24 @@ final class CameraHub: @unchecked Sendable {
       let targets = wanting.compactMap { channels[$0] }
       switch result {
       case .success(let name):
-        state = "streaming"; cameraName = name; lock.unlock()
-        log("on (\(name))")
+        state = "streaming"; cameraName = name
+        let retrying = !problem.isEmpty   // "back" comes with the first frame
+        lock.unlock()
+        if !retrying { log("on (\(name))") }
         targets.forEach { $0.send(streaming(name)) }
       case .failure(let e):
-        state = "idle"; lock.unlock()
-        log("unavailable: \(e.message)")
+        state = "idle"
+        let new = problem != e.message; problem = e.message
+        retryLater()
+        lock.unlock()
+        if new { log("unavailable: \(e.message) (trying again while a VM wants it)") }
         targets.forEach { $0.send(CameraWire.status(["status": "unavailable", "reason": e.reason])) }
       }
     }
   }
 
   private func stopCapture() {
-    lock.lock(); let was = state; state = "idle"; lock.unlock()
+    lock.lock(); let was = state; state = "idle"; retryDelay = 2; problem = ""; lock.unlock()
     guard was != "idle" else { return }
     capture.stop()
     log("off (no VM reads it)")
@@ -393,18 +399,41 @@ final class CameraHub: @unchecked Sendable {
 
   private func failed(_ message: String) {
     lock.lock()
-    let was = state; state = "idle"
+    let was = state
+    guard was == "streaming" else { lock.unlock(); return }
+    state = "idle"
     let targets = wanting.compactMap { channels[$0] }
+    let new = problem != message; problem = message
+    retryLater()
     lock.unlock()
-    guard was == "streaming" else { return }
     capture.stop()
-    log("stopped: \(message)")
+    if new { log("stopped: \(message) (trying again while a VM wants it)") }
     targets.forEach { $0.send(CameraWire.status(["status": "unavailable", "reason": "capture"])) }
+  }
+
+  /// The camera failed while VMs still want it (another app took it, the
+  /// permission is not given yet): tries again after 2 s, then up to every
+  /// 30 s, until it works or no VM wants it. The VMs show black meanwhile and
+  /// get "streaming" when it is back. Lock held.
+  private func retryLater() {
+    let delay = retryDelay
+    retryDelay = min(retryDelay * 2, 30)
+    DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + delay) { [self] in
+      lock.lock()
+      let go = state == "idle" && !wanting.isEmpty
+      if go { state = "starting" }
+      lock.unlock()
+      if go { startCapture() }
+    }
   }
 
   private func frame(_ payload: Data) {
     lock.lock()
     guard state == "streaming" else { lock.unlock(); return }
+    if retryDelay != 2 || !problem.isEmpty {   // it works again
+      if !problem.isEmpty { log("back: \(cameraName)") }
+      retryDelay = 2; problem = ""
+    }
     sequence &+= 1
     let seq = sequence, targets = wanting.compactMap { channels[$0] }
     lock.unlock()

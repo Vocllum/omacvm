@@ -368,9 +368,10 @@ def main() -> int:
     retry = 0.0          # Bridge: when to connect again
     quiet_until = 0.0    # Port: the app is not connected, look again then
     black_at = 0.0
+    unavailable = ""     # the Mac's last reason, logged once (the Mac tries again by itself)
 
     def handle(chunk: bytes) -> None:
-        nonlocal streaming
+        nonlocal streaming, unavailable
         for kind_, payload in parser.feed(chunk):
             if kind_ == KIND_FRAME:
                 if active:
@@ -380,12 +381,16 @@ def main() -> int:
             state = status.get("status") if isinstance(status, dict) else None
             if state == "streaming":
                 streaming = active
+                unavailable = ""
                 log(f"streaming the Mac's {status.get('name', 'camera')}")
             elif state == "idle" and active and link.fd >= 0:
                 send_all(link.fd, request("start"))   # a new connection on the Mac's side
             elif state == "unavailable":
                 streaming = False
-                log(f"the Mac's camera is unavailable ({status.get('reason', 'error')})")
+                reason = str(status.get("reason", "error"))
+                if reason != unavailable:
+                    log(f"the Mac's camera is unavailable ({reason}); black until it is back")
+                unavailable = reason
 
     if isinstance(link, Port):
         link.want(False)   # whatever an earlier run left on

@@ -233,6 +233,10 @@ nor closed the connection. Every VM gets the same frames; one that has not
 taken the last frame yet skips the next, so a slow VM holds up nobody. A VM
 that stops reading for 2 seconds is dropped. The first `start` ever makes
 macOS ask for the camera; until it is answered the VM shows black.
+When the camera fails while VMs still want it (another Mac app takes it, the
+permission is missing), they get `unavailable` and show black, and the Bridge
+tries again after 2 seconds, then up to every 30, until it works (they get
+`streaming` again) or no VM wants it.
 
 Both are only for VMs: from 127.0.0.1 or from one of the Mac's own
 addresses they answer `403`. The token is a plain file, so otherwise any
