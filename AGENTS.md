@@ -91,7 +91,7 @@ A build is done when all of this holds:
 | Host | Apple Silicon, macOS 14+ (verified 15.7.4, MacBook Pro M4 Max) |
 | Parallels route | Parallels Desktop 19+ (verified 27.0.2, Pro trial). Per-VM limits from `prlsrvctl info --license` (`cpu_total`, `max_memory`): Standard 4 CPUs / 8 GB, Pro/Business/trial 32 CPUs (18 tested on Apple Silicon) / 128 GB; build.sh never writes more than the licence allows (Parallels would reject the config). Only `prlctl list/register/unregister` and `prl_disk_tool`; everything else is `config.pvs` (vm/pvs.py); `prlctl start` only as a fallback |
 | UTM route | UTM 5 (verified 5.0.6, QEMU 10.0.12); required: on UTM 4.7 GL clients map but never paint (black windows) unless rendering is forced to software (ggalancs/omarchy-arm-utm#7). OmacVM never sets `LIBGL_ALWAYS_SOFTWARE`; VirGL (virtio-gpu-gl), Vulkan off. VM creation through UTM's AppleScript dictionary (`/Applications/UTM.app/Contents/Resources/UTM.sdef`), `utmctl` for start/stop/status/ip-address |
-| VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/experiments/vmware-fusion.md`. `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
+| VMware Fusion route (new) | VMware Fusion 13+ (verified 26.0.1). Needs Hyprland with the vmwgfx fix (`src/fusion/guest/`); see `docs/routes/vmware-fusion.md` (and the build log `docs/experiments/vmware-fusion.md`). `vmcli VM Create`, `vmware-vdiskmanager`, `vmrun start/list` from `VMware Fusion.app/Contents/Library`; the rest is the `.vmx` (`src/vm/fusion.sh`). VMs in `~/Virtual Machines.localized` or `$OMACVM_FUSION_DIR` |
 | Tools | Xcode Command Line Tools (swiftc, clang, swift), Homebrew `zstd` + `e2fsprogs` (live installer), python3, openssl |
 | Network | ~1.4 GB try-omarchy download (live installer) + Arch Linux ARM and Omarchy packages |
 | Disk | ~60 GB free for the build (VM disks are expanding) |
@@ -100,7 +100,7 @@ A build is done when all of this holds:
 
 The root holds only the entry points (`omacvm`, `install.sh`, and `build.sh`,
 `apply.sh`, `check.sh`, which forward to `omacvm` for one release), the docs and
-`docs/` (README graphics); everything else lives in `src/`: the commands in
+`docs/` (graphics, route pages, benchmarks, findings); everything else lives in `src/`: the commands in
 `src/cmd/`, one folder per feature, and the install plumbing (`guest/`, `mac/`,
 `lib/`, `vm/`). Keep it that way: a short root keeps the README near the top on
 GitHub.
@@ -141,7 +141,7 @@ GitHub.
 | `src/memory/`, `src/kernel/` | zram/sysctl/THP-defrag/MGLRU; opt-in memory-optimized kernel (THP always + MGLRU) from ALARM's PKGBUILD, built only with `--thp-kernel`. ALARM's stock `linux-aarch64` has `# CONFIG_TRANSPARENT_HUGEPAGE is not set` and `# CONFIG_LRU_GEN is not set` (verified 7.2.8), so the THP/MGLRU tmpfiles lines are no-ops there (systemd-tmpfiles skips missing files) |
 | Feature switches | `src/guest/install.sh --feature NAME=on\|off` for every feature in `src/features.tsv`, kept in `/etc/omacvm/env`; `omacvm apply` passes all of them (also `--[no-]FEATURE`, and 1.x's `--[no-]mac-wallpaper`). omanotch=on: clones Omanotch to `~/.local/share/omanotch`, `omacvm-omanotch.service` installs it in the session (now if Hyprland runs, else at the next login); off: Omanotch's own `guest/uninstall.sh` in the session. scroll-momentum (was glide; the old key in /etc/omacvm/env and `--feature glide=` still map to it): `gestures/guest/glide.sh` on/off (`omacvm_glide.lua` required from `hyprland.lua`, `--disable-smooth-scrolling` in existing `chromium-flags.conf`/`chrome-flags.conf`, marker `~/.local/state/omacvm/glide-flags` so off removes only what it added). idle-lock=off = Omarchy's own Stay Awake file (`~/.local/state/omarchy/indicators/stay-awake`, watched by the shell) plus an OmacVM marker so turning it back on never undoes a user's own Stay Awake. bridge=off disables the clones (Omarchy restores its stock widgets). Gestures off: the VM's daemon says so in its hello (on UTM it still runs, for Cmd as Super) and the Mac helper leaves that VM's trackpad to macOS; on Parallels the daemon is not installed. `--keys-only` on the Mac app is a Mac-wide off switch |
 | `src/icon/` | `omacvm.svg` is the one icon (⌘ loops around Omarchy's mark): `make-icns.sh` renders it with AppKit (`render.swift`) + `iconutil` into both apps' `Contents/Resources/OmacVM.icns`, the Parallels VM's Dock icon (`set-vm-icon.sh` → Finder custom icon of the .pvm) and UTM's library icon (`src/vm/utm.sh` `utm_set_icon`: `Data/omacvm.png` + `Information.Icon`/`IconCustom` in config.plist, VM stopped; UTM's scripting only takes built-in icon names) |
-| `docs/` | README graphics (hand-written SVG + SMIL) |
+| `docs/` | Index `docs/README.md`. `images/`: README graphics (hand-written SVG + SMIL; `parallels-shortcuts.svg` stays in `docs/`, `src/mac/parallels-system-shortcuts.sh` opens it). `routes/vmware-fusion.md`, `routes/comparison-draft.md` (README section waiting for numbers), `benchmarks/README.md` (method + results; tools in `src/bench/`), `troubleshooting.md` (findings: symptom, cause, fix, code), `experiments/` |
 
 ## 4. Architecture
 
@@ -291,6 +291,9 @@ guest's gateway is `.2`.
 - **Uninstall**: `src/mac/uninstall.sh [--purge]`; delete the VM in Parallels/UTM.
 
 ## 7. Failure modes
+
+The less obvious ones, with causes and where the fix lives, are in
+`docs/troubleshooting.md`.
 
 | Symptom | Cause | Fix |
 |---|---|---|

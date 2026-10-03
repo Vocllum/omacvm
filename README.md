@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
+  <img src="docs/images/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
 </p>
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
@@ -78,7 +78,7 @@ the steps only I can do.
 More in [With a coding agent](#with-a-coding-agent).
 
 <p align="center">
-  <img src="docs/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
+  <img src="docs/images/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
 </p>
 
 ## What you get
@@ -101,11 +101,11 @@ More in [With a coding agent](#with-a-coding-agent).
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
 <p align="center">
-  <img src="docs/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and the omacvm command." width="100%">
+  <img src="docs/images/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and the omacvm command." width="100%">
 </p>
 
 <p align="center">
-  <img src="docs/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
+  <img src="docs/images/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
 </p>
 
 ## Three routes: Parallels, UTM or VMware Fusion
@@ -148,15 +148,17 @@ full screen (OmacVM builds VMware Tools for Arch Linux ARM, which does not
 package them); OmacVM Bridge (Wi-Fi, Bluetooth, audio, Night Shift,
 wallpaper); the media keys and trackpad gestures in full screen; copy and
 paste of text both ways (VMware's agent on a private X display, synced with
-Omarchy's clipboard); every `omacvm check` line. Not there yet: Omanotch.
+Omarchy's clipboard); Omanotch beside the notch; Cmd shortcuts like Cmd+Space in
+full screen; the GPU in Chrome (WebGL); every `omacvm check` line.
 
 It is the slowest of the three routes in the browser: Speedometer 3.1 in
 Chromium reached about 66% of the Mac's own Chrome headless and 59% on the
 desktop, on an M4 Mac mini with 4 or 8 vCPUs alike (Parallels: 99.6% and
 92%, UTM: 79% and about 65%, measured on an M4 Max). So: Parallels for speed,
 VMware Fusion for every display and copy and paste for free, UTM for the
-lightest setup. The plan and the test results:
-[docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
+lightest setup. Everything about the route:
+[docs/routes/vmware-fusion.md](docs/routes/vmware-fusion.md); the plan and
+the test log: [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
 
 ## Requirements
 
@@ -199,7 +201,7 @@ omacvm            # or: omacvm build
 ```
 
 <p align="center">
-  <img src="docs/build.svg" alt="A terminal running omacvm: live installer, Arch Linux ARM, Omarchy from omarchy-mac, OmacVM on the Mac and in the VM, then the Omarchy desktop." width="100%">
+  <img src="docs/images/build.svg" alt="A terminal running omacvm: live installer, Arch Linux ARM, Omarchy from omarchy-mac, OmacVM on the Mac and in the VM, then the Omarchy desktop." width="100%">
 </p>
 
 It first shows what it found on your Mac (Xcode's command line tools,
@@ -283,7 +285,7 @@ again. Volume and brightness keys always change the Mac, with Omarchy's popup
 while you are in the VM.
 
 <p align="center">
-  <img src="docs/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
+  <img src="docs/images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
 </p>
 
 ## Switch features, on any VM
@@ -351,7 +353,7 @@ password) stay with you; the agent hands them over.
 ## How it works
 
 <p align="center">
-  <img src="docs/bridge.svg" alt="The Mac's menu bar and Omarchy's bar connected over the VM network: Wi-Fi signal, AirPods connecting and Night Shift travel across as events." width="100%">
+  <img src="docs/images/bridge.svg" alt="The Mac's menu bar and Omarchy's bar connected over the VM network: Wi-Fi signal, AirPods connecting and Night Shift travel across as events." width="100%">
 </p>
 
 The VM and the Mac talk over the VM's private network: the Mac is `10.211.55.2`
@@ -370,7 +372,7 @@ the VM needs a token.
   the Mac's pointer, so only Omarchy's shows.
 
 <p align="center">
-  <img src="docs/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
+  <img src="docs/images/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
 </p>
 
 - **Displays** (`src/display/`, Parallels): Parallels tells the guest the size,
@@ -384,7 +386,7 @@ the VM needs a token.
   instead of hoarding.
 
 <p align="center">
-  <img src="docs/wallpaper.svg" alt="Switching Omarchy's theme in the VM changes the Mac's desktop wallpaper to match." width="100%">
+  <img src="docs/images/wallpaper.svg" alt="Switching Omarchy's theme in the VM changes the Mac's desktop wallpaper to match." width="100%">
 </p>
 
 With two VMs running, the wallpaper follows whichever changed its theme last.
@@ -417,7 +419,8 @@ rounds. The whole story, with every measurement and the analysis scripts, is in
 Try it with `omacvm enable scroll-momentum`, go back with `omacvm disable scroll-momentum`.
 
 The whole build, every VM setting and the dead ends we hit are in
-[AGENTS.md](AGENTS.md).
+[AGENTS.md](AGENTS.md). More background (each route, benchmarks, findings) is
+in [docs/](docs/README.md).
 
 ## How fast
 
@@ -434,7 +437,9 @@ Measured on a MacBook Pro M4 Max: Parallels Desktop Pro (trial) with 16 vCPUs an
 
 UTM's Speedometer numbers are with OmacVM's UTM setting (UTM's Vulkan driver
 off); out of the box UTM scored 24.8. Its Geekbench run was on an earlier
-Omarchy VM with the same 16 vCPUs.
+Omarchy VM with the same 16 vCPUs. New runs of all three routes, with Google
+Chrome on both sides, are in progress; how they are measured, so you can run
+them yourself: [docs/benchmarks](docs/benchmarks/README.md).
 
 ## With Omanotch: the bar beside the notch
 
@@ -448,6 +453,8 @@ with a notch (`omacvm enable omanotch` on an existing VM).
 ## Troubleshooting
 
 - **First stop**: `omacvm check` names what is wrong and what to do.
+- **Less obvious problems** (most of them on VMware Fusion), each with its
+  cause and fix: [docs/troubleshooting.md](docs/troubleshooting.md).
 - **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
   show it. System Settings › Menu Bar (on older macOS: Control Center) ›
   Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
