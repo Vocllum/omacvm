@@ -291,7 +291,10 @@ apply_preferred_modes() {
     # command. Update Omarchy's single-output catch-all mode and dynamic scale;
     # its placement, color, and other policy remain intact, while an explicit
     # per-output user rule still wins.
-    rule="hl.monitor({ output = \"\", mode = \"$mode\", scale = \"$scale\" })"
+    # OmacVM: this output only, at 0x0. A catch-all rule ("", auto position)
+    # also hit Omanotch's hidden NOTCH output; the screen then sat to the
+    # right of NOTCH, NOTCH followed it, and both kept moving right.
+    rule="hl.monitor({ output = \"$output\", mode = \"$mode\", position = \"0x0\", scale = \"$scale\" })"
     if ! response=$(hyprctl eval "$rule" 2>&1); then
       printf 'omacvm-display-sync: failed to apply %s to %s: %s\n' \
         "$mode" "$output" "$response" >&2
