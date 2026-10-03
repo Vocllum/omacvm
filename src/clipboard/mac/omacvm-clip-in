@@ -3,8 +3,10 @@
 # Parallels Tools syncs Mac -> guest on Hyprland but not guest -> Mac, so the
 # guest writes each copied text to the Parallels shared folder "clip" and this
 # picks it up.
+# The check runs every 0.3 s on zsh builtins (stat and sleep), so it starts no
+# process until something was copied.
 export LC_CTYPE=UTF-8
-zmodload zsh/system; zmodload -F zsh/stat b:zstat
+zmodload zsh/system; zmodload -F zsh/stat b:zstat; zmodload zsh/zselect
 f="$HOME/.local/share/omacvm/clip/guest-clipboard"
 MAX=4194304   # 4 MiB
 
@@ -19,12 +21,17 @@ read_clip() {
   return $r
 }
 
-last="$(stat -f '%Fm %z' "$f" 2>/dev/null)"   # ignore whatever is there at start
+typeset -A s
+# The guest replaces the file (write, then rename), so its inode changes with
+# every copy; mtime and size cover an in-place write.
+# Sets REPLY (no $(...), which would fork).
+stamp() { REPLY=; zstat -L -H s -- "$f" 2>/dev/null && REPLY="$s[inode] $s[mtime] $s[size]"; }
+stamp; last=$REPLY   # ignore whatever is there at start
 while true; do
-  sleep 0.3
-  cur="$(stat -f '%Fm %z' "$f" 2>/dev/null)" || continue
-  [[ "$cur" == "$last" ]] && continue
-  last="$cur"
+  zselect -t 30
+  stamp || continue
+  [[ "$REPLY" == "$last" ]] && continue
+  last=$REPLY
   new="$(read_clip)" || continue
   [[ -n "$new" && "$new" != "$(pbpaste)" ]] && read_clip | pbcopy
 done
