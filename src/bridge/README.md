@@ -197,6 +197,12 @@ taken the last frame yet skips the next, so a slow VM holds up nobody. A VM
 that stops reading for 2 seconds is dropped. The first `start` ever makes
 macOS ask for the camera; until it is answered the VM shows black.
 
+Both are only for VMs: from 127.0.0.1 or from one of the Mac's own
+addresses they answer `403`. The token is a plain file, so otherwise any
+program of yours on the Mac could read it and use the camera under the
+Bridge's permission, without macOS asking for it. OmacVM.app's VMs use their
+virtio port.
+
 `GET /camera/status`: `{"permission": "granted"|"not-determined"|"denied"|"restricted", "camera": "MacBook Pro Camera", "on": false, "readers": 0, "connections": 0}`.
 
 `OMACVM_CAMERA=test` in the Bridge's environment sends a moving test picture

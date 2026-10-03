@@ -27,6 +27,23 @@ func localAddress(_ fd: Int32) -> String? {
   return r == 0 && sin.sin_family == sa_family_t(AF_INET) ? ipv4String(sin.sin_addr) : nil
 }
 
+/// A connection from a program on this Mac rather than a VM: from 127.x, or
+/// from one of the Mac's own addresses (a Mac program that connects to
+/// 10.211.55.2 comes from 10.211.55.2, or from any address it binds to first).
+func fromThisMac(_ fd: Int32, peer: String) -> Bool {
+  if peer.hasPrefix("127.") || peer == localAddress(fd) { return true }
+  var list: UnsafeMutablePointer<ifaddrs>?
+  guard getifaddrs(&list) == 0 else { return true }   // cannot tell: refuse
+  defer { freeifaddrs(list) }
+  var p = list
+  while let a = p?.pointee {
+    if let sa = a.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET),
+       ipv4String(UnsafeRawPointer(sa).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr) == peer { return true }
+    p = a.ifa_next
+  }
+  return false
+}
+
 func authorized(_ header: String?) -> Bool {
   guard let h = header, h.hasPrefix("Bearer ") else { return false }
   let given = Array(h.dropFirst(7).trimmingCharacters(in: .whitespaces).utf8)
@@ -370,6 +387,12 @@ func handle(_ fd: Int32, peer: String) {
     } catch {
       respond(fd, 500, ["error": "\(error)"])
     }
+  // The camera is only for VMs. A Mac program could read the token file and
+  // would get frames under the Bridge's camera permission, without asking
+  // macOS itself. OmacVM.app's VMs use their virtio port, not 127.0.0.1.
+  case ("GET", let p) where (p == "/camera" || p == "/camera/status") && fromThisMac(fd, peer: peer):
+    log("403 \(path) from \(peer): the camera is only for VMs")
+    respond(fd, 403, ["error": "the camera is only for VMs, not for programs on this Mac"])
   case ("GET", "/camera/status"):
     respond(fd, 200, camera.status())
   case ("GET", "/camera"):
