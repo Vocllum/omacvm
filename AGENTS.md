@@ -33,8 +33,9 @@ UTM, or choose their password: hand those over, never work around them.
      "Omarchy N" when a VM of that name exists in either app.
   2. Show the person the plan and explain the choices: Parallels (fast, every
      display, paid: Standard 4 CPUs / 8 GB per VM), UTM (free, one display,
-     slower) or VMware Fusion (free, every display, slowest in the browser,
-     about 15 more build minutes); the resource tiers; each feature (`omacvm features --json` has
+     slower) or VMware Fusion (free, every display, GPU in Chrome, about 70 %
+     of the Mac in the browser, about 15 more build minutes, Broadcom sign-in to
+     download); the resource tiers; each feature (`omacvm features --json` has
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)

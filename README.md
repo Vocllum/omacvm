@@ -110,55 +110,62 @@ More in [With a coding agent](#with-a-coding-agent).
 
 ## Three routes: Parallels, UTM or VMware Fusion
 
-**Parallels Desktop is the recommended route**: Omarchy runs at native speed,
-on every display. **UTM is free** and gets almost everything else. **VMware
-Fusion is free too**, with every display, and the slowest in the browser
-(new, see below).
+OmacVM builds the same Omarchy VM in any of these three apps. Everything in
+[What you get](#what-you-get) works on all three, except the display rows below.
+They differ in price, speed and displays.
 
-| | Parallels Desktop | UTM |
-|---|---|---|
-| **Speed: Speedometer 3.1, Chrome** (Mac native: 46.3) | **46.1**, native (Pro, 16 vCPUs) | **36.7** headless, about **30** on the desktop |
-| Why | | UTM's QEMU emulates the interrupt controller in software, so waking a thread on another CPU costs about twice as long (47 µs vs 25 µs) |
-| Displays | every display, in the macOS arrangement, native Retina, 120 Hz, follows window and display changes live | one display, native Retina, 120 Hz, fixed from boot (UTM's GPU path goes blank on live mode changes) |
-| CPUs and memory per VM | **Standard: 4 CPUs / 8 GB.** Pro (and the trial): up to 18 CPUs / 128 GB | no limit |
-| Per-display workspaces | ✓ | (one display) |
-| Wi-Fi, Bluetooth, audio, media keys, Night Shift, True Tone, Wi-Fi QR (OmacVM Bridge) | ✓ | ✓ |
-| Trackpad gestures (OmacVM Gestures) | ✓ | ✓ |
-| **macOS-native scroll momentum** *(experimental)* | ✓ tuned and tested here | ✓ same code, less tested |
-| Bar beside the notch ([Omanotch](https://github.com/gillesgoetsch/omanotch)) | ✓ | ✓ |
-| Wallpaper follows the Omarchy theme | ✓ | ✓ |
-| Clipboard both ways | ✓ (Parallels Tools + OmacVM's VM → Mac helper) | ✓ (UTM's SPICE daemon + OmacVM's Wayland agent) |
-| Memory tuning, snapshots in GRUB, keyboard, Cmd+V, optional memory-optimized kernel | ✓ | ✓ |
-| OmacVM icon for the VM | ✓ (Dock) | ✓ (UTM's library) |
-| Cost | paid: Standard works; **Pro** for more than 4 CPUs / 8 GB | free; needs **UTM 5 (beta)**: `brew install --cask utm@beta` |
+**Which one?** Want the fastest VM and fine with paying: Parallels. Want it free
+and use external displays: VMware Fusion. Want it free and open source, and one
+screen is enough: UTM.
 
-### New: VMware Fusion
+| | Parallels Desktop | UTM 5 | VMware Fusion 26 |
+|---|---|---|---|
+| **Best for** | speed, least to set up | free and open source, one screen | free, with external displays |
+| **Price** | | | |
+| Cost | paid | **free**, open source | **free**, also for work |
+| CPUs and memory per VM | Standard: 4 CPUs, 8 GB<br>Pro or trial: more | **no licence cap** | **no licence cap** |
+| **Speed** (the Mac itself = 100 %) | | | |
+| Web apps: Speedometer 3.1 in Chrome | **about 92 %**<br>(earlier measurement) | about 65 %<br>(earlier measurement) | 70 % |
+| **Graphics** | | | |
+| GPU path | virgl (OpenGL) | virgl (OpenGL) | vmwgfx (SVGA3D), with a Hyprland fix OmacVM builds |
+| GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ |
+| **Displays** | | | |
+| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** |
+| Native Retina, 120 Hz | ✓ | ✓ | ✓ (120 Hz as reported by the guest) |
+| Resolution changes | **live** | fixed at boot, reboot to change | **live** |
+| **Mac integration** | | | |
+| Wi-Fi, Bluetooth, audio, Night Shift, True Tone, wallpaper (OmacVM Bridge) | ✓ | ✓ | ✓ |
+| Media keys with Omarchy's popup | ✓ | ✓ | ✓ |
+| Trackpad gestures, Omanotch | ✓ | ✓ | ✓ |
+| macOS-native scroll momentum *(experimental)* | ✓ most tested | ✓ | ✓ |
+| Copy and paste text, both ways | ✓ | ✓ | ✓ when the pointer enters or leaves the VM |
+| Cmd+Space and other Cmd shortcuts in full screen | ✓ after one Parallels setting | ✓ | ✓ |
+| Keyboard layout, memory tuning, snapshots | ✓ | ✓ | ✓ |
+| **Setup** | | | |
+| Get the app | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in |
+| Before first use | set *Send macOS system shortcuts* to Always | start UTM from the Dock or Spotlight, never in the background | allow Accessibility for Fusion |
+| Omarchy updates | as usual | as usual | each Hyprland update also rebuilds Hyprland (10 to 20 minutes) |
+| Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** |
+| Status | most tested | UTM 5 is still a beta | newest route |
 
-VMware Fusion Pro is free, and `omacvm build --vm-type fusion` builds the same
-Omarchy VM in it. Stock Omarchy shows a black screen on Fusion: its GPU driver
-(`vmwgfx`) hands Hyprland buffers it cannot release, and every app dies on its
-first frame. OmacVM builds Hyprland with a one-file fix for that (by
-Pascal-0x90, [hyprwm/Hyprland#12966](https://github.com/hyprwm/Hyprland/discussions/12966)),
-and a pacman hook builds it again after every Hyprland update (10 to 20
-minutes, inside `omarchy update`).
+Speed: VMware Fusion 26.0.1 measured on 2026-10-03 on a MacBook Pro M4 Max, 16
+CPUs and 48 GB, Google Chrome 154 on the Mac and in the VM (Speedometer 3.1:
+43.9 vs 62.9). Parallels and UTM are from an earlier measurement with Chrome on
+the same Mac (see [How fast](#how-fast)). New measurements of all three with
+one method, GPU tests included, are under way: [docs/benchmarks](docs/benchmarks/README.md).
+None of the three apps gives Linux Vulkan or OpenCL, so there is no GPU compute
+in any of them.
 
-What works so far: the desktop and apps on the GPU; every display in full
-screen, laid out like macOS's, and Omarchy following the window when it is not
-full screen (OmacVM builds VMware Tools for Arch Linux ARM, which does not
-package them); OmacVM Bridge (Wi-Fi, Bluetooth, audio, Night Shift,
-wallpaper); the media keys and trackpad gestures in full screen; copy and
-paste of text both ways (VMware's agent on a private X display, synced with
-Omarchy's clipboard); Omanotch beside the notch; Cmd shortcuts like Cmd+Space in
-full screen; the GPU in Chrome (WebGL); every `omacvm check` line.
+### About the Fusion route
 
-It is the slowest of the three routes in the browser: Speedometer 3.1 in
-Chromium reached about 66% of the Mac's own Chrome headless and 59% on the
-desktop, on an M4 Mac mini with 4 or 8 vCPUs alike (Parallels: 99.6% and
-92%, UTM: 79% and about 65%, measured on an M4 Max). So: Parallels for speed,
-VMware Fusion for every display and copy and paste for free, UTM for the
-lightest setup. Everything about the route:
-[docs/routes/vmware-fusion.md](docs/routes/vmware-fusion.md); the plan and
-the test log: [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
+Stock Omarchy shows a black screen on Fusion. Fusion's GPU driver (`vmwgfx`)
+hands Hyprland buffers it can't release, so every app dies on its first frame.
+OmacVM builds Hyprland with a one-file fix for that (by Pascal-0x90,
+[hyprwm/Hyprland#12966](https://github.com/hyprwm/Hyprland/discussions/12966))
+and builds it again after every Hyprland update. It also builds VMware Tools
+itself, because Arch Linux ARM doesn't package them. They give you the display
+layout and copy and paste. Everything about the route:
+[docs/routes/vmware-fusion.md](docs/routes/vmware-fusion.md).
 
 ## Requirements
 
