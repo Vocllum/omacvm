@@ -374,11 +374,30 @@ static void send_cursors(void) {
     send_cursor("pointer", hand, nominal);
 }
 
+// VMware Fusion moves the Mac's pointer when the guest moves its cursor, so
+// on Fusion the guest cursor is never moved from here: that pulled the Mac's
+// pointer straight back out of the strip.
+static int on_vmware(void) {
+    static int v = -1;
+    if (v >= 0) return v;
+    char vendor[64] = "";
+    FILE *f = fopen("/sys/class/dmi/id/sys_vendor", "r");
+    if (f) {
+        if (!fgets(vendor, sizeof vendor, f)) vendor[0] = 0;
+        fclose(f);
+    }
+    return v = strstr(vendor, "VMware") != NULL;
+}
+
 // Hides or shows the guest's own cursor (while the pointer is over the strip
 // the helper shows the guest's cursor images itself).
 static void set_guest_cursor_visible(int visible) {
     if (visible) {
         hypr_eval("hl.config({ cursor = { invisible = false } })");
+        return;
+    }
+    if (on_vmware()) {
+        hypr_eval("hl.config({ cursor = { invisible = true } })");
         return;
     }
     // Hyprland applies `invisible` only at its next repaint, and nothing
@@ -404,6 +423,10 @@ static void set_guest_cursor_visible(int visible) {
 // display arranged above ("up"). Without this the cursor would reappear where
 // it was hidden and jump once Parallels reports the next position.
 static void show_guest_cursor_at_exit(const char *dir, double strip_x, double depth) {
+    if (on_vmware()) {   // Fusion already puts the cursor where the Mac's pointer is
+        set_guest_cursor_visible(1);
+        return;
+    }
     char *j = hypr_request("j/monitors all");
     double x, y, w, s;
     if (!j || monitor_field(j, cfg_screen, "x", &x) || monitor_field(j, cfg_screen, "y", &y) ||
