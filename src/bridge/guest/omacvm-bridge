@@ -1,7 +1,9 @@
 #!/bin/bash
 # omacvm-bridge (guest side): small client for the OmacVM Bridge on the Mac.
-#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events [--external]
-#     (--external: osd events also for brightness changed on the Mac itself)
+#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events [--external] [--direct]
+#     (--external: osd events also for brightness changed on the Mac itself;
+#      events come from the session's omacvm-bridge-events when it runs,
+#      --direct: straight from the Mac)
 #   omacvm-bridge volume +5 | -5 | 40        percent; +/- = relative, unmutes when raising
 #   omacvm-bridge mute [on|off|toggle]       default: toggle
 #   omacvm-bridge mic-volume 60 | mic-mute [on|off|toggle]
@@ -14,7 +16,8 @@
 #   omacvm-bridge bluetooth settings         the Mac's Bluetooth settings (to pair a device)
 #   omacvm-bridge wallpaper <image> [theme]  make it the Mac's wallpaper
 # Env: OMACVM_BRIDGE_URL (default: the Mac's address from /etc/omacvm/env, port 47831),
-#      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token)
+#      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token),
+#      OMACVM_BRIDGE_EVENTS_SOCKET (default $XDG_RUNTIME_DIR/omacvm-bridge-events.sock)
 set -euo pipefail
 [[ -r /etc/omacvm/env ]] && source /etc/omacvm/env   # OMACVM_VM_TYPE, OMACVM_HOST (guest/install.sh)
 URL=${OMACVM_BRIDGE_URL:-http://${OMACVM_HOST:-10.211.55.2}:47831}
@@ -71,7 +74,19 @@ case ${1:-} in
       settings) post /bluetooth/settings '{}' ;;
       *) echo "bluetooth: power, connect, disconnect, forget or settings" >&2; exit 2 ;;
     esac ;;
-  events) if [[ ${2:-} == --external ]]; then req -N "$URL/events?osd=external"; else req -N "$URL/events"; fi ;;
+  events)
+    q=""; direct=0
+    for a in "${@:2}"; do
+      case $a in --external) q="?osd=external" ;; --direct) direct=1 ;; *) echo "events: --external, --direct" >&2; exit 2 ;; esac
+    done
+    # One stream per session (omacvm-bridge-events.socket); nobody listening
+    # there (curl's 7): straight to the Mac, as before.
+    SOCK=${OMACVM_BRIDGE_EVENTS_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm-bridge-events.sock}
+    if (( ! direct )) && [[ -S $SOCK ]]; then
+      rc=0; curl -sN --fail --unix-socket "$SOCK" "http://omacvm-bridge/events$q" || rc=$?
+      (( rc == 7 )) || exit "$rc"
+    fi
+    req -N "$URL/events$q" ;;
   volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
   mute) check_switch mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}")}" ;;
   mic-volume) check_percent mic-volume "${2:-}"; post /audio/volume "$(level_json volume "$2" ', "scope": "input"')" ;;
@@ -93,5 +108,5 @@ case ${1:-} in
     req -X POST -H 'Content-Type: application/octet-stream' -H "X-Omarchy-Theme: ${3:-}" \
       --data-binary "@$2" "$URL/wallpaper" ;;
   password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
-  *) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

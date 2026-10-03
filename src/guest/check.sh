@@ -81,6 +81,12 @@ if [[ $BRIDGE == on ]]; then
   else bad "Night Shift / True Tone" "no answer from the Bridge"; fi
   if as_user bash -c 'timeout 4 omacvm-bridge events 2>/dev/null | grep -m1 -q "^event:"'; then ok "live updates" "event stream"
   else bad "live updates" "no events from the Bridge"; fi
+  # The widgets and the OSD share one stream (omacvm-bridge-events); a second
+  # connection can be a request in flight.
+  n=$(ss -Htn state established "dst $HOST:47831" | wc -l)
+  if ! user_active omacvm-bridge-events.socket; then bad "shared event stream" "omacvm-bridge-events.socket not active (omacvm apply)"
+  elif (( n <= 2 )); then ok "shared event stream" "$n connection(s) to the Mac"
+  else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)

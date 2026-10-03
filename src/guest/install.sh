@@ -189,7 +189,8 @@ if [[ ${F[bridge]} == on ]]; then
 elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   # Disabling the clones brings Omarchy's own Bluetooth, Wi-Fi and audio widgets back.
   log "bridge: off"
-  user_ctl disable --now omacvm-bridge-osd.service >/dev/null 2>&1 || true
+  user_ctl disable --now omacvm-bridge-osd.service omacvm-bridge-events.socket >/dev/null 2>&1 || true
+  user_ctl stop omacvm-bridge-events.service >/dev/null 2>&1 || true
   sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
     'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
      for p in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
