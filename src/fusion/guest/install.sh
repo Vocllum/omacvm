@@ -84,14 +84,17 @@ pref("gfx.blacklist.webgl-use-hardware", 1);
 JS
 
 M=$H/.config/hypr/monitors.lua
+# Written next to it and moved into place, only when it changes: Hyprland
+# reloads on every write.
+tmp=$(mktemp "$M.XXXXXX")
 # Ours already: only the first mode changes, the rest stays as you left it.
 if head -1 "$M" 2>/dev/null | grep -q '^-- OmacVM, VMware Fusion'; then
-  sed -i "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|" "$M"
+  sed "s|^\(hl.monitor({ output = \"Virtual-1\", mode = \)\"[^\"]*\"|\1\"$MODE\"|" "$M" > "$tmp"
 else
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" 2>/dev/null | head -1)
 [[ -n $scale ]] || { w=${MODE%%x*}; (( w >= 3000 )) && scale=2 || scale=1; }
 gdk=$(printf '%.0f' "$scale")
-cat > "$M" <<LUA
+cat > "$tmp" <<LUA
 -- OmacVM, VMware Fusion: every output VMware Fusion gives the VM (one per Mac
 -- display in full screen), placed by omacvm-fusion-displays as Fusion lays them
 -- out. Virtual-1 starts at the Mac's display mode until Fusion's layout
@@ -104,7 +107,7 @@ hl.monitor({ output = "Virtual-1", mode = "$MODE", position = "0x0", scale = oma
 hl.monitor({ output = "", mode = "preferred", position = "auto", scale = omarchy_monitor_scale })
 LUA
 fi
-chown "$U:$U" "$M"
+if cmp -s "$tmp" "$M"; then rm -f "$tmp"; else chmod 644 "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$M"; fi
 scale=$(sed -n 's/^local omarchy_monitor_scale = \([0-9.]*\).*/\1/p' "$M" | head -1)
 if systemctl --user -M "$U@" daemon-reload 2>/dev/null; then
   systemctl --user -M "$U@" restart omacvm-fusion-displays.service 2>/dev/null || true
