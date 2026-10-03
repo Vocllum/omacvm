@@ -146,6 +146,14 @@ parallels)
   # Parallels keeps both settings in undocumented files: hints, not failures.
   parallels_sends_shortcuts && ok "Cmd+Space etc. to the VM" "Send macOS system shortcuts: Always" \
     || skip "Cmd+Space etc. to the VM" "set Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > Send macOS system shortcuts: Always" human
+  # Every Mac display in full screen needs Parallels' own full screen (not
+  # macOS's native one) with "Use all displays" (new VMs get both).
+  pvs="$(vm_bundle "$VM")/config.pvs"
+  if grep -q '<UseAllDisplays>1' "$pvs" 2>/dev/null && grep -q '<UseNativeFullScreen>0' "$pvs" 2>/dev/null; then
+    ok "full screen on every display" "Parallels' full screen, all displays"
+  else
+    skip "full screen on every display" "stop the VM, then Parallels Desktop > the VM's Configure > Options > Full Screen: turn on \"Use all displays\", turn off \"Use macOS full screen\"" human
+  fi
   parallels_profile_emptied && ok "Cmd+C/V/X as Super" "Parallels' Linux profile emptied" \
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
 utm)
