@@ -7,6 +7,8 @@
 #   app_ip NAME         127.0.0.1:PORT while it runs
 #   app_start NAME      start it in the app (its window opens)
 #   app_other_running NAME  another app VM that runs, if any
+# omacvm apply writes guest-pointer ("omarchy") into the folder once the VM
+# draws Omarchy's own pointer: the app hides the Mac's pointer only then.
 
 app_vms_root() {
   local r
