@@ -101,14 +101,26 @@ final class OSDEvents {
   private var brightness: Int?
   private var brightnessQuietUntil = Date.distantPast
   private var timer: DispatchSourceTimer?
+  private var polling = false
 
+  /// The brightness poll runs only while a client asked for external events
+  /// (`/events?osd=external`): nothing else uses it.
   func start() {
     let t = DispatchSource.makeTimerSource(queue: q)
-    t.schedule(deadline: .now(), repeating: 0.5)
+    t.schedule(deadline: .now(), repeating: 0.5, leeway: .milliseconds(100))
     t.setEventHandler { [self] in pollBrightness() }
-    t.resume()
-    timer = t
+    timer = t   // created suspended
+    hub.onExternalOSD = { on in self.poll(on) }
     q.async { self.volume = audio.outputSnap() }
+  }
+
+  private func poll(_ on: Bool) {
+    q.async { [self] in
+      guard on != polling, let timer else { return }
+      polling = on
+      if on { brightness = nil; timer.resume() } else { timer.suspend() }   // a fresh baseline: no stale jump
+      log("osd: external brightness changes \(on ? "followed" : "not followed")")
+    }
   }
 
   private func emit(_ kind: String, value: Int?, muted: Bool, source: String, device: String?) {
@@ -155,7 +167,7 @@ final class OSDEvents {
   // No public change notification for brightness: poll, and report jumps of 2+
   // points per half second (keys, slider), not auto-brightness drift.
   private func pollBrightness() {
-    guard hub.hasClients, let v = Brightness.get() else { return }
+    guard let v = Brightness.get() else { return }
     let p = percent(v), old = brightness
     brightness = p
     if let old, abs(p - old) >= 2, Date() > brightnessQuietUntil {
@@ -184,6 +196,7 @@ final class MediaKeys {
 
   func start() {
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
+    t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
     check()
   }

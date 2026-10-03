@@ -7,6 +7,7 @@
 #      add "external" to also show changes made on the Mac outside the VM).
 set -uo pipefail
 SOURCES=" ${OMACVM_BRIDGE_OSD_SOURCES:-keys api} "
+EXT=(); [[ $SOURCES == *" external "* ]] && EXT=(--external)   # the Mac then follows its brightness
 
 show() {
   local kind value muted source icon
@@ -28,6 +29,6 @@ while true; do
       "event: "*) event=${line#event: } ;;
       "data: "*) [[ $event == osd ]] && show "${line#data: }" ;;
     esac
-  done < <(omacvm-bridge events 2>/dev/null)
+  done < <(omacvm-bridge events "${EXT[@]}" 2>/dev/null)
   sleep 3   # Mac asleep, helper restarting, or Parallels network down: reconnect
 done

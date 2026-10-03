@@ -151,7 +151,7 @@ panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 
 | event | when |
 |---|---|
-| `wifi` | power, SSID, BSSID, link, mode changes (CoreWLAN events, ~0.3 s); RSSI re-read every 5 s |
+| `wifi` | power, SSID, BSSID, link, mode changes (CoreWLAN events, ~0.3 s); RSSI re-read every 5 s while a client is connected, sent at once when the bar's signal level changes, else at most every 30 s |
 | `audio` | default device, volume, mute, devices added/removed (CoreAudio listeners) |
 | `display` | Night Shift (its own notification), True Tone, brightness |
 | `bluetooth` | power, devices connecting and disconnecting (IOBluetooth notifications), anything else within 5 s; battery re-read every minute while something is connected |
@@ -160,7 +160,9 @@ panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 
 `source`: `keys` = a media key caught while the VM was full screen, `api` = a
 request from the VM, `external` = anything else (macOS slider, AirPods, keys
-outside the VM). `: ping` every 15 s; `retry: 3000`.
+outside the VM). Volume and mute changes come as `external` always; brightness
+changes made on the Mac only to clients that asked with `GET /events?osd=external`
+(the Bridge then reads the brightness every 0.5 s). `: ping` every 15 s; `retry: 3000`.
 
 ### Wallpaper
 
