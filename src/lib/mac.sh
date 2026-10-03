@@ -10,7 +10,7 @@ LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 # their host keys are not remembered.
 gssh() {
   local ip=$1; shift
-  ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
+  ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
 }
 
