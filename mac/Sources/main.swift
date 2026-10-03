@@ -62,6 +62,9 @@ final class GuestInfo {
     var owner: String?
     /// The VM's name in that app, from "vmname" (nil: not said).
     var name: String?
+    /// It said "hello" (owner is known, or it never will be).
+    var saidHello = false
+    let since = Date()
     /// On its lock screen (see StripView.locked).
     var locked = false
     var cursorImages: [String: (CGImage, CGPoint, Int)] = [:]
@@ -161,8 +164,12 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         }
         if let f = front {
             let candidates = connected.map { GuestCandidate(id: $0.id, owner: $0.owner, name: $0.name) }
-            // One guest needs no title (and no Accessibility permission).
-            let title = candidates.count > 1 ? windowTitle(f) : nil
+            // One guest per app needs no title (and no Accessibility
+            // permission). A guest that just connected says its app first.
+            let settled = candidates.filter { c in
+                guests[c.id].map { $0.saidHello || Date().timeIntervalSince($0.since) > 2 } ?? false
+            }
+            let title = GuestPicker.needsTitle(settled, front: f.owner) ? windowTitle(f) : nil
             if let pick = GuestPicker.pick(candidates, front: FrontWindow(owner: f.owner, title: title),
                                            current: state.active) {
                 activate(pick, title: title)
@@ -416,6 +423,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1.
             guest.owner = link.viaOmacVMApp(guest.id) ? OmacVMApp.owner
                 : GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
+            guest.saidHello = true
             Log.info("guest \(guest.id) runs in \(hv) (\(guest.owner ?? "any VM app"))")
             return true
         } else if text.hasPrefix("vmname ") {

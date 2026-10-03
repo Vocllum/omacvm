@@ -46,6 +46,14 @@ enum GuestPicker {
         return choose(fits, front: front, current: current)
     }
 
+    /// Whether the window title can change the pick: two or more guests can
+    /// run in the front app and one of them has a name. Otherwise no title
+    /// (and no Accessibility permission) is needed.
+    static func needsTitle(_ guests: [GuestCandidate], front owner: String) -> Bool {
+        let fits = guests.filter { $0.owner == nil || $0.owner == owner }
+        return fits.count > 1 && fits.contains { !($0.name ?? "").isEmpty }
+    }
+
     private static func choose(_ set: [GuestCandidate], front: FrontWindow, current: Int?) -> Int {
         let cur = set.first { $0.id == current }
         if let cur, cur.owner == front.owner { return cur.id }

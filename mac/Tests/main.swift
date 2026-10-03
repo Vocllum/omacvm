@@ -74,6 +74,14 @@ check(pick([g(1, P, "Alpha"), g(2, P, "Beta")], P, "Gamma", current: nil), 1, "n
 check(pick([g(1, P, ""), g(2, P, "Beta")], P, "Beta", current: 1), 2, "empty name never matches")
 check(pick([g(1, P, "Beta"), g(2, nil, "Beta")], P, "Beta", current: nil), 1, "equal names: the front app's guest")
 
+// A title is only needed when it can change the pick.
+check(GuestPicker.needsTitle([g(1, P, "Omarchy")], front: P), false, "one guest")
+check(GuestPicker.needsTitle([g(1, P, "Omarchy"), g(2, "OmacVM", "Omarchy")], front: P), false, "one guest per app")
+check(GuestPicker.needsTitle([g(1, P, "Omarchy"), g(2, U, nil)], front: U), false, "one guest per app, unnamed")
+check(GuestPicker.needsTitle(two, front: P), true, "two VMs of one app")
+check(GuestPicker.needsTitle([g(1, P, "Omarchy"), g(2, nil, nil)], front: P), true, "a guest of any app")
+check(GuestPicker.needsTitle([g(1, P, nil), g(2, P, nil)], front: P), false, "no names: the title cannot tell them apart")
+
 // ParkState: only the served guest is parked; switching unparks the old one first.
 var st = ParkState()
 var parkedGuests = Set<Int>()
