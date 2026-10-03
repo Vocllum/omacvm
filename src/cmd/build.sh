@@ -132,7 +132,7 @@ if [[ -z $TYPE ]]; then
   ui_select pick "Where should Omarchy run?" 0 \
     "Parallels Desktop|near-native speed, every display · paid" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
-    "VMware Fusion|free · one display, GPU, live resolution · OmacVM builds Hyprland with a fix (new)"
+    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it (new)"
   case $pick in 0) TYPE=parallels ;; 1) TYPE=utm ;; *) TYPE=fusion ;; esac
   say "    Comparison: $README_ROUTES"
 fi
@@ -156,12 +156,13 @@ case $TYPE in
     else wait_for_app utm; fi
     : ;;
   fusion)
-    if (( YES )); then have_fusion || needs_person "VMware Fusion is not installed (brew install --cask vmware-fusion, then open it once)"
+    if (( YES )); then have_fusion || needs_person "VMware Fusion is not installed: download it from support.broadcom.com (free, needs a sign-in), then open it once"
     else wait_for_app fusion; fi
     vm_network_ok fusion || needs_person "VMware Fusion's NAT network is missing (see above)" ;;
   *) usage "--vm-type parallels, utm or fusion" ;;
 esac
-# A name is taken in either app: omacvm --vm NAME has to find one VM.
+[[ $VM =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]] || usage "--vm-name: letters, digits, spaces, dots, _ and - only (got '$VM')"
+# A name is taken in any app: omacvm --vm NAME has to find one VM.
 vm_taken() {
   [[ -e "$HOME/Parallels/$1.pvm" || -e $(fusion_bundle "$1") ]] || vms_list | awk -F'\t' -v n="$1" '$1 == n { f = 1 } END { exit !f }'
 }
@@ -440,8 +441,7 @@ elif [[ $TYPE == fusion ]]; then
   "$R/src/vm/live/build-live.sh" --root-size-gib 16 --raw-image "$LIVE" --ssh-key "$KEY.pub"
   log "VMware Fusion VM with a ${DISK_GB} GB NVMe disk"
   VMX=$(fusion_create "$VM" "$CPUS" $((MEM_GB * 1024)) "$LIVE" "$DISK_GB")
-  mv "$LIVE" "$(fusion_bundle "$VM")/live.img"; LIVE="$(fusion_bundle "$VM")/live.img"
-  sed -i '' "s|FLAT \".*\" 0|FLAT \"$LIVE\" 0|" "$(fusion_bundle "$VM")/live.vmdk"
+  mv "$LIVE" "$(fusion_bundle "$VM")/live.img"; LIVE="$(fusion_bundle "$VM")/live.img"   # live.vmdk points here
   fusion_start "$VM"
   ui_spin_val IP "The live installer gets its address" fusion_ip "$VM" 300 || die "the live installer got no IP address"
 else

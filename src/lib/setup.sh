@@ -162,8 +162,8 @@ wait_for_app() {
       fusion)
         have_fusion && return 0
         hd "VMware Fusion is not installed"
-        say "    Free for personal use: brew install --cask vmware-fusion"
-        say "    Install it and open it once." ;;
+        fusion_install_help
+        say "    Then open it once." ;;
     esac
     read -r -p "  Press Return to check again, or q to quit: " a < "$TTY" || die "no answer (no terminal?)"
     [[ $a == q ]] && exit 1

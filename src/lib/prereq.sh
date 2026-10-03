@@ -36,7 +36,10 @@ missing_brew_tools() {
 }
 have_parallels() { [[ -d "/Applications/Parallels Desktop.app" && -x $PRLCTL ]]; }
 have_utm5() { [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )); }
-have_fusion() { [[ -x $VMRUN && -x $FUSION_LIB/vmcli ]] && (( $(fusion_version | cut -d. -f1) >= 13 )); }
+have_fusion() {
+  local v; v=$(fusion_version | cut -d. -f1)
+  [[ -x $VMRUN && -x $FUSION_LIB/vmcli && $v =~ ^[0-9]+$ ]] && (( v >= 13 ))
+}
 
 # The installs: ask (or stop with the command under --yes), run, check.
 prereq_install() {   # "what" "command" -> runs the command after asking
@@ -125,13 +128,25 @@ ensure_vm_app() {
       brew install --cask utm@beta || die "brew install --cask utm@beta failed: see https://github.com/utmapp/UTM/releases"
       open -a UTM 2>/dev/null || true ;;
     fusion)
+      # Free, but Broadcom only hands it out after a sign-in: no Homebrew package.
       have_fusion && return 0
-      ensure_homebrew
-      prereq_install "VMware Fusion" "brew install --cask vmware-fusion"
-      brew install --cask vmware-fusion || die "brew install --cask vmware-fusion failed: install it from https://www.vmware.com/products/desktop-hypervisor/workstation-and-fusion, then run omacvm again"
+      fusion_install_help
+      (( YES )) && needs_person "VMware Fusion is not installed (download it from Broadcom, see above)"
+      open "https://support.broadcom.com/group/ecx/productdownloads?subfamily=VMware%20Fusion" 2>/dev/null || true
+      ui_spin "Waiting for VMware Fusion in Applications (download it, drag it there)" bash -c '
+        for _ in $(seq 1440); do [[ -d "/Applications/VMware Fusion.app" ]] && exit 0; sleep 5; done; exit 1' ||
+        die "VMware Fusion is not in Applications yet: install it, then run omacvm again"
       open -a "VMware Fusion" 2>/dev/null || true
-      say "    VMware Fusion opens: follow its first steps (it asks for your Mac password once)." ;;
+      say "    VMware Fusion opens: follow its first steps (it asks for your Mac password once)."
+      have_fusion || needs_person "VMware Fusion 13 or newer is needed (found: $(fusion_version))" ;;
   esac
+}
+
+fusion_install_help() {
+  say "    VMware Fusion is free, but Broadcom asks you to sign in to download it:"
+  say "      1. support.broadcom.com: sign in (or create a free account)"
+  say "      2. My Downloads > VMware Fusion > the newest version > download"
+  say "      3. open the .dmg, drag VMware Fusion into Applications"
 }
 
 # The welcome: this Mac, and what the build needs.

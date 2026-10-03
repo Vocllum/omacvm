@@ -59,7 +59,7 @@ CID=fffffffe
 parentCID=ffffffff
 createType="monolithicFlat"
 
-RW $sectors FLAT "$live" 0
+RW $sectors FLAT "live.img" 0
 
 ddb.adapterType = "lsilogic"
 ddb.virtualHWVersion = "22"
