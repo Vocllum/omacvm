@@ -15,10 +15,11 @@ in more words.
   replaces an older app.
 - Omanotch is built in: it lives in `src/omanotch` and OmacVM installs it
   from there, on the Mac and in the VM, with no clone of its own repo.
-- Proofs between the VM and the Mac: the VM gives the Bridge's token to
-  Gestures, the Bridge and Omanotch only after they have proved they know it
-  (and the Mac address they answered on), so another program on the Mac
-  can't catch it.
+- Proofs between the VM and the Mac, so another program on the Mac can't pose
+  as Gestures, the Bridge or Omanotch: Gestures and Omanotch never get the
+  Bridge's token; the VM and the helper each prove they know it (HMAC-SHA256
+  over fresh nonces and the Mac address). The Bridge gets the token only
+  after its own proof checks out.
 - TODO battery
 - TODO camera
 - TODO microphone
