@@ -60,19 +60,24 @@ if [[ -n $VM ]]; then
   "$R/src/cmd/apply.sh" --vm "$VM" --no-mac
   exit
 fi
-done_any=0; stopped=()
+done_any=0; stopped=(); failed=()
 while IFS=$'\t' read -r name type state; do
   [[ -n $name ]] || continue
   if [[ $state != running ]]; then stopped+=("$name"); continue; fi
   ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || continue
-  v=$(vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p')
+  # Not reachable with OmacVM's key (another OS, or no OmacVM): skip it.
+  v=$(vm_probe "$ip" | sed -n 's/^OMACVM_VERSION=//p') || continue
   [[ -n $v ]] || continue
   log "VM '$name' (OmacVM $v)"
-  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac < /dev/null
+  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac < /dev/null || failed+=("$name")
   done_any=1
 done < <(vms_list)
 (( done_any )) || info "no running VM with OmacVM"
 if (( ${#stopped[@]} )); then
   info "not running, so not updated: $(printf '%s, ' "${stopped[@]}" | sed 's/, $//')"
   info "start one and run: omacvm update --vm NAME"
+fi
+if (( ${#failed[@]} )); then
+  echo "omacvm update: failed in $(printf '%s, ' "${failed[@]}" | sed 's/, $//') (see above)" >&2
+  exit 1
 fi
