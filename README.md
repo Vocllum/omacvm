@@ -146,8 +146,14 @@ full screen (OmacVM builds VMware Tools for Arch Linux ARM, which does not
 package them); OmacVM Bridge (Wi-Fi, Bluetooth, audio, Night Shift,
 wallpaper); the media keys and trackpad gestures in full screen; copy and
 paste of text both ways (VMware's agent on a private X display, synced with
-Omarchy's clipboard); every `omacvm check` line. Not there yet: Omanotch, a
-speed measurement. The plan and the test results:
+Omarchy's clipboard); every `omacvm check` line. Not there yet: Omanotch.
+
+It is the slowest of the three routes in the browser: Speedometer 3.1 in
+Chromium reached about 66% of the Mac's own Chrome headless and 59% on the
+desktop, on an M4 Mac mini with 4 or 8 vCPUs alike (Parallels: 99.6% and
+92%, UTM: 79% and about 65%, measured on an M4 Max). So: Parallels for speed,
+VMware Fusion for every display and copy and paste for free, UTM for the
+lightest setup. The plan and the test results:
 [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
 
 ## Requirements

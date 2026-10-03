@@ -96,6 +96,21 @@ Each one ends with `omacvm check` passing on a real Fusion VM.
 
 Out of scope for now: clipboard, more than one display, Omanotch on Fusion (separate repo).
 
+## Speed
+
+Speedometer 3.1, headless Chromium in the VM against headless Chrome on the Mac, same
+machine (M4 Mac mini, 10 cores, 16 GB), median of runs alternated with the Mac's:
+
+| | Mac | Fusion VM | VM / Mac |
+|---|---|---|---|
+| headless, 4 vCPUs | 54.5 | 35.3 | 65% |
+| headless, 8 vCPUs | 46.8–53.1 | 31.6–36.1 | 66–68% |
+| on the desktop, 8 vCPUs | about 53 | 31.2–31.6 | 59% |
+
+More vCPUs do not help. Upstream (M4 Max): Parallels 99.6% headless / 92% desktop, UTM
+79% / about 65%. Caveat: Arch's Chromium against Google's Chrome in all three, and a
+different Mac for the upstream numbers.
+
 ## Not verified yet
 
 - A long session, external displays in full screen, scale 2.
