@@ -187,7 +187,8 @@ def vmx_del(lines, prefix):
 
 def vmx_generalize(path, name):
     l = vmx_read(path)
-    for p in ("uuid.", "ethernet0.generatedAddress", "ethernet0.address", "vc.uuid", "sata0:1.",
+    l = [x for x in l if x.split("=", 1)[0].strip() != "ethernet0.address"]
+    for p in ("uuid.", "ethernet0.generatedAddress", "vc.uuid", "sata0:1.",
               "extendedConfigFile", "nvram", "displayName", "checkpoint.", "sata0:0.", "gui.lastPowered",
               "vmxstats.", "toolsInstallManager.", "tools.syncTime", "guestInfo.", "migrate.", "cleanShutdown",
               "softPowerOff", "usb:1.", "usb_xhci:", "monitor.phys_bits_used", "vmotion.", "svga.guestBackedPrimaryAware"):

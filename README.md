@@ -251,7 +251,10 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    minutes and fetches everything from Arch Linux ARM and omarchy-mac. The
    prebuilt VM is the same build, made for this OmacVM version without any
    user in it: a download of a few GB, then about 10 minutes. Either way you
-   get your own user, password, features, keyboard and timezone. `--prebuilt` or `--build` for scripts; details, what is in the
+   get your own user, password, features, keyboard and timezone. You can
+   also download a prebuilt VM by hand from the
+   [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it
+   in its app: it asks for your user and password on its first boot. `--prebuilt` or `--build` for scripts; details, what is in the
    images and how they are made: [docs/prebuilt.md](docs/prebuilt.md).
 3. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
