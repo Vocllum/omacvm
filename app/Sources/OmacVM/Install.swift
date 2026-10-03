@@ -8,6 +8,7 @@ enum Installer {
         let path = Bundle.main.bundleURL.deletingLastPathComponent().standardizedFileURL.path
         let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path
         return path == "/Applications" || path == home
+            || UserDefaults.standard.string(forKey: "installedPath") == Bundle.main.bundleURL.standardizedFileURL.path
             || UserDefaults.standard.bool(forKey: "skipInstall")
             || ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] != nil
     }
@@ -25,13 +26,24 @@ enum Installer {
         return !n.isEmpty && n.count <= 40 && !n.contains("/") && !n.contains(":") && !n.contains(",") && !n.hasPrefix(".")
     }
 
+    /// FOLDER/NAME.app is this very app: nothing to copy.
+    static func isSelf(name: String, in folder: URL) -> Bool {
+        folder.appendingPathComponent("\(name).app").standardizedFileURL.path == Bundle.main.bundleURL.standardizedFileURL.path
+    }
+
+    /// Remembers the copy in a folder of the user's choice as installed (the
+    /// copies share their settings: same bundle id).
+    static func markInstalled(_ app: URL) {
+        UserDefaults.standard.set(app.standardizedFileURL.path, forKey: "installedPath")
+    }
+
     /// Copies this app to FOLDER/NAME.app with NAME as its name, signs it again
     /// (ad hoc) and returns the new app.
     static func install(name: String, into folder: URL) throws -> URL {
         let fm = FileManager.default
         try fm.createDirectory(at: folder, withIntermediateDirectories: true)
         let target = folder.appendingPathComponent("\(name).app")
-        guard target.standardizedFileURL.path != Bundle.main.bundleURL.standardizedFileURL.path else {
+        guard !isSelf(name: name, in: folder) else {
             throw HelperError.io("this app is already there under that name")
         }
         if fm.fileExists(atPath: target.path) {
@@ -56,6 +68,7 @@ enum Installer {
         try sign.run()
         sign.waitUntilExit()
         guard sign.terminationStatus == 0 else { throw HelperError.io("could not sign \(target.path)") }
+        markInstalled(target)
         return target
     }
 }
@@ -119,6 +132,11 @@ struct InstallView: View {
     }
 
     private func install() {
+        if Installer.isSelf(name: name, in: folder) {
+            Installer.markInstalled(Bundle.main.bundleURL)
+            onDone()
+            return
+        }
         do {
             let app = try Installer.install(name: name, into: folder)
             let config = NSWorkspace.OpenConfiguration()
