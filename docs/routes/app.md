@@ -84,8 +84,10 @@ one VM at a time: the build stops at the start while another one runs.
 
 ## Not done yet
 
-- Bridge and Gestures: the Mac side listens on 127.0.0.1 too (branch
-  app-route), not installed yet.
+- The Bridge's features (Wi-Fi, Bluetooth, media keys and the rest) and
+  trackpad gestures: the build installs Bridge and Gestures on the Mac and
+  they accept the VM on 127.0.0.1 (below), but these are not confirmed on
+  this route yet.
 - One display at a time. The window can go to an external display and be full
   screen there, but Omarchy gets one screen, not one per Mac display.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);

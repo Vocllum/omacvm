@@ -39,12 +39,14 @@ Works: setup, VM build (about 8 minutes plus a 1.4 GB download the first
 time), window that Omarchy follows (native resolution, 120 Hz), full screen
 beside the notch (option), clipboard both ways, sound, WebGL in Chromium,
 Chrome, Brave and Firefox, clean shutdown on Quit, pause on Mac sleep,
-install under a chosen name.
+install under a chosen name, ⌘ keys as Super in full screen (through OmacVM
+Gestures, which the build installs on the Mac with the other helpers).
 
-Waiting: Bridge and Gestures on the Mac (omacvm branch `app-route`, needs the
-helpers installed), external displays.
+Waiting: external displays. Not confirmed on this route yet: the Bridge's
+features (Wi-Fi, Bluetooth, media keys) and trackpad gestures.
 
-Needs a person: Accessibility for the app (⌘ keys as Super in Omarchy).
+Needs a person: the permissions OmacVM's Mac helpers ask for; the app needs no
+Accessibility of its own.
 
 ## What the app does
 
