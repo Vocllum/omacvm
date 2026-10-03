@@ -63,7 +63,10 @@ final class Runner {
               "-device", "virtconsole,bus=vser0.0,nr=0,chardev=hvc0",
               // QEMU guest agent: a clean shutdown even when the power key is ignored.
               "-chardev", "socket,id=qga0,path=\(c.agentSocket.path),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0"]
+              "-device", "virtserialport,bus=vser0.0,nr=1,chardev=qga0,name=org.qemu.guest_agent.0",
+              // The clipboard, both ways (omacvm-clipboard in the VM).
+              "-chardev", "socket,id=clip0,path=\(c.clipboardSocket.path),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=2,chardev=clip0,name=org.omacvm.clipboard"]
         return a
     }
 
@@ -92,12 +95,14 @@ final class Runner {
             let status = proc.terminationStatus
             Task { @MainActor in
                 self?.stopObserving()
+                self?.clipboard?.stop()
                 self?.onExit?(status)
             }
         }
         try p.run()
         process = p
         observeSleep()
+        startClipboard()
     }
 
     /// Asks the guest to shut down: the power button, then the guest agent
@@ -118,6 +123,27 @@ final class Runner {
     func forceStop() { process?.terminate() }
 
     // MARK: Mac sleep: pause the VM before, resume after (from try-omarchy).
+
+    // MARK: Clipboard (try-omarchy's bridge), reconnected while QEMU runs.
+
+    private var clipboard: NativeClipboardBridge?
+
+    private func startClipboard() {
+        let path = config.clipboardSocket.path
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let bridge = try? NativeClipboardBridge(socketPath: path) {
+                    DispatchQueue.main.sync { self?.clipboard = bridge }
+                    try? bridge.run()
+                    bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
 
     private func observeSleep() {
         let center = NSWorkspace.shared.notificationCenter

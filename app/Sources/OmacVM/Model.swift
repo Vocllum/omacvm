@@ -108,6 +108,7 @@ struct VMConfig: Equatable {
     }
     var qmpSocket: URL { Paths.runDir.appendingPathComponent("\(id).qmp") }
     var agentSocket: URL { Paths.runDir.appendingPathComponent("\(id).qga") }
+    var clipboardSocket: URL { Paths.runDir.appendingPathComponent("\(id).clip") }
 
     func write() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
