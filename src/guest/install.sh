@@ -160,6 +160,16 @@ elif [[ -f $MARK ]]; then
   rm -f "$STAY" "$MARK"
 fi
 
+# Sound, speakers and microphone, on every route: PipeWire's ALSA, PulseAudio
+# and JACK parts (omarchy-mac installs them only on Apple hardware; the VM's
+# card is Parallels', Intel HDA on UTM and OmacVM.app, HD Audio on Fusion).
+# pipewire-jack replaces jack2.
+if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1; then
+  log "sound: PipeWire's ALSA, PulseAudio and JACK parts"
+  pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
+  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1 || true
+  user_ctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+fi
 case $TYPE in
   parallels)
     log "display";    "$R/display/guest/install.sh" "$U"

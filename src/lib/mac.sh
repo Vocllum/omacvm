@@ -225,6 +225,16 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
   die "UTM VM '$1' did not start (try quitting and reopening UTM, then run build.sh again)"
 }
 
+# utm_add_sound NAME: an Intel HDA sound card (speakers and microphone, through
+# UTM's default SPICE audio), for VMs built without one. The VM must be
+# stopped; UTM reloads config.plist. VMs outside UTM's own folder: unchanged.
+utm_add_sound() {
+  local c="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm/config.plist"
+  [[ -f $c ]] || return 0
+  [[ $(plutil -extract Sound json -o - "$c" 2>/dev/null) == "[]" ]] || return 0
+  plutil -replace Sound -json '[{"Hardware":"intel-hda"}]' "$c" && log "UTM: a sound card for '$1' (speakers and microphone)"
+}
+
 utm_wait_stopped() {   # <vm name>
   local i
   for ((i = 0; i < 180; i += 3)); do [[ $(utm_state "$1") == stopped ]] && return 0; sleep 3; done
@@ -311,6 +321,20 @@ fusion_start() {   # <vm name>
     sleep 3
   done
   [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"
+}
+
+# fusion_add_sound NAME: Fusion's HD Audio card (speakers and the Mac's
+# microphone), for VMs built without one. The VM must be stopped.
+fusion_add_sound() {
+  local x k v kv
+  x=$(fusion_vmx "$1") || return 0
+  grep -q '^sound.present = "TRUE"' "$x" && return 0
+  for kv in sound.present=TRUE sound.virtualDev=hdaudio sound.fileName=-1 sound.autodetect=TRUE; do
+    k=${kv%%=*}; v=${kv#*=}
+    sed -i '' "/^$(sed 's/\./\\./g' <<<"$k") /d" "$x"
+    printf '%s = "%s"\n' "$k" "$v" >> "$x"
+  done
+  log "VMware Fusion: a sound card for '$1' (speakers and microphone)"
 }
 
 fusion_wait_stopped() {   # <vm name>
