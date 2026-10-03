@@ -194,6 +194,8 @@ in_session() {
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
 if [[ ${F[omanotch]} == on ]]; then
+  # An empty notchcast is a broken install (seen once): build it again.
+  [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
     pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
