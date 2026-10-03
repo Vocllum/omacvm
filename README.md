@@ -538,4 +538,5 @@ affiliated with the Omarchy team, Parallels, UTM, VMware (Broadcom) or Apple.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The code OmacVM reuses from others is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
