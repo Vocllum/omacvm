@@ -227,11 +227,22 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
 
 # utm_add_sound NAME: an Intel HDA sound card (speakers and microphone, through
 # UTM's default SPICE audio), for VMs built without one. The VM must be
-# stopped; UTM reloads config.plist. VMs outside UTM's own folder: unchanged.
+# stopped. UTM keeps the configuration it read at its start (it would start
+# the VM without the card), so it is quit when no UTM VM runs (utm_start opens
+# it again); otherwise the card comes with UTM's next start. VMs outside UTM's
+# own folder: unchanged.
 utm_add_sound() {
-  local c="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm/config.plist"
+  local c="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm/config.plist" i
   [[ -f $c ]] || return 0
   [[ $(plutil -extract Sound json -o - "$c" 2>/dev/null) == "[]" ]] || return 0
+  if pgrep -xq UTM; then
+    if "$UTMCTL" list 2>/dev/null | awk 'NR > 1 && $2 == "started"' | grep -q .; then
+      log "UTM: '$1' gets its sound card (speakers and microphone) when UTM starts next"
+    else
+      osascript -e 'quit app "UTM"' >/dev/null 2>&1 || true
+      for ((i = 0; i < 30; i++)); do pgrep -xq UTM || break; sleep 1; done
+    fi
+  fi
   plutil -replace Sound -json '[{"Hardware":"intel-hda"}]' "$c" && log "UTM: a sound card for '$1' (speakers and microphone)"
 }
 
