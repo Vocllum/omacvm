@@ -194,7 +194,7 @@ if [[ -z $SOURCE ]]; then
   if (( PB_OK && ! YES )); then
     ui_select how "How should OmacVM make the VM?" 1 \
       "Build it yourself|about $(build_minutes) minutes, everything from Arch Linux ARM and omarchy-mac" \
-      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy $PB_OMARCHY, made for OmacVM $PB_VERSION"
+      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, made for OmacVM $PB_VERSION"
     (( how == 1 )) && SOURCE=prebuilt
   fi
 elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
