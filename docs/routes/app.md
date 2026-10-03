@@ -40,7 +40,8 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 
 - Bridge and Gestures: the Mac side listens on 127.0.0.1 too (branch
   app-route), not installed yet.
-- One display only; no external displays.
+- One display at a time. The window can go to an external display and be full
+  screen there, but Omarchy gets one screen, not one per Mac display.
 - The app needs Xcode's Command Line Tools on the Mac that builds it.
 
 ## How it talks to the Mac
@@ -57,3 +58,18 @@ the VM's SSH on `127.0.0.1:<port>`.
   program could connect. So both want the Bridge's token there: the Bridge on
   every request (as before), Gestures in its hello. The app makes the token
   when the Bridge has not, and puts it into the VM.
+
+## Why one display
+
+QEMU's macOS window (its "cocoa" display) shows one guest screen at a time:
+it has a single window and a single display listener, and its View menu
+switches between screens. Parallels and VMware Fusion open a window per
+display; QEMU on the Mac does not. Two ways to get there, neither done:
+
+- Teach the cocoa display one window per guest screen. Most of its code
+  assumes one window (global view, one GL context, mouse coordinates for one
+  screen), so this is a larger patch, plus routing the pointer to the right
+  screen in Hyprland. Several days.
+- QEMU's SDL display opens a window per screen, but it lacks everything the
+  cocoa patches add here: the window size the VM follows, the notch strip,
+  ⌘ as Super, pinch and smooth scrolling.
