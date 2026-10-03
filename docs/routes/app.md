@@ -23,6 +23,9 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 - Quit or the window's close button shuts Omarchy down cleanly. The Mac's
   sleep pauses the VM.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
+- Clipboard both ways, text and images (try-omarchy's agent, over a virtio
+  port, not the network).
+- Sound through the Mac (QEMU's HDA card; PipeWire in the VM).
 
 ## What needs a person
 
@@ -37,7 +40,6 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 - Full screen beside the notch: Omarchy's bar part works (it takes the strip's
   height); the Mac part waits for a test (the Mac was locked).
 - One display only; no external displays.
-- No clipboard between Mac and Omarchy yet.
 - The app needs Xcode's Command Line Tools on the Mac that builds it.
 
 ## How it talks to the Mac

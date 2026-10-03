@@ -5,6 +5,7 @@
 #  * macOS draws the pointer, so Hyprland's is hidden
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * sound (PipeWire's ALSA and PulseAudio parts)
+#  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -20,7 +21,15 @@ if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1;
 fi
 systemctl --user -M "$U@" restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
-install -m755 omacvm-display-sync omacvm-app-host /usr/local/bin/
+install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard /usr/local/bin/
+# Clipboard both ways, over a virtio port (the agent is try-omarchy's).
+pacman -S --needed --noconfirm wl-clipboard >/dev/null 2>&1 || true
+# uaccess: the logged-in user may open the port (before 73-seat-late.rules).
+install -m644 70-omacvm-clipboard.rules /etc/udev/rules.d/
+udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true
+install -m644 omacvm-clipboard.service /etc/systemd/user/
+systemctl --global enable omacvm-clipboard.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-clipboard.service 2>/dev/null || true
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
