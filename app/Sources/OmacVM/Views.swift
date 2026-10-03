@@ -238,7 +238,6 @@ struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
-    @State private var trusted = AXIsProcessTrusted()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -250,18 +249,6 @@ struct ReadyView: View {
             if Mac.hasNotch {
                 Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
-            }
-            if !trusted {
-                HStack {
-                    Text("⌘ shortcuts stay with macOS until you allow \(Product.name) under Accessibility.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Allow…") {
-                        let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
-                        _ = AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
-                        trusted = AXIsProcessTrusted()
-                    }
-                }
             }
             if let m = state.message { Text(m).foregroundStyle(.red) }
             HStack {

@@ -23,8 +23,8 @@ fi
 CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/OmacVM}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
 LIVE_RELEASE=v0.4.1
-# The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Gestures, Bridge.
-HOST_PORTS=47830,47831
+# The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
+HOST_PORTS=47811,47830,47831
 
 vm_load() {
   VM_DIR=$(cd "$1" && pwd)
