@@ -219,7 +219,7 @@ final class StripView: NSView {
     }
 
     /// Owner names of the VM windows (set by the controller).
-    var vmOwners: Set<String> = ["Parallels Desktop", "UTM"]
+    var vmOwners: Set<String> = ["Parallels Desktop", "UTM", "VMware Fusion"]
     /// The VM app whose guest feeds the strip (it draws its own cursor).
     var activeOwner: String?
 

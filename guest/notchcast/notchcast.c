@@ -8,7 +8,8 @@
 // Stream: TCP client to the Mac on port $NOTCHBAR_PORT (default 47811). The
 // Mac is found by itself on the hypervisors' shared (NAT) networks: the
 // default gateway (UTM, where the gateway is the Mac) and address .2 of that
-// network (Parallels, where .1 is its NAT and the Mac is .2) are tried in turn,
+// network (Parallels, where .1 is its NAT and the Mac is .2) are tried in turn
+// (VMware Fusion: .1 of the gateway's network, see host_candidates),
 // but only when that network is a known VM network ($NOTCHBAR_VM_NETS, default
 // 192.168.64.0/24 10.211.55.0/24 10.37.129.0/24): on a bridged network the
 // gateway is a real router. $NOTCHBAR_HOST (one address or a comma-separated
@@ -501,7 +502,7 @@ static void send_hello(void) {
         fclose(f);
     }
     const char *hv = strstr(vendor, "QEMU") ? "qemu" : strstr(vendor, "Parallels") ? "parallels"
-                   : strstr(vendor, "Apple") ? "apple" : "unknown";
+                   : strstr(vendor, "VMware") ? "vmware" : strstr(vendor, "Apple") ? "apple" : "unknown";
     snprintf(msg, sizeof msg, "hello %s", hv);
     send_text(msg);
 }
@@ -750,6 +751,21 @@ static int host_candidates(struct in_addr *out, int max) {
     }
     fclose(f);
     if (!gw) return 0;
+    // VMware Fusion: the gateway (.2) is Fusion's NAT, the Mac is .1, and the
+    // subnet is picked when Fusion is installed (any private network).
+    char vendor[64] = "";
+    FILE *v = fopen("/sys/class/dmi/id/sys_vendor", "r");
+    if (v) {
+        if (!fgets(vendor, sizeof vendor, v)) vendor[0] = 0;
+        fclose(v);
+    }
+    if (strstr(vendor, "VMware")) {
+        uint32_t g = ntohl(gw);
+        int priv = (g >> 24) == 10 || (g >> 20) == 0xAC1 || (g >> 16) == 0xC0A8;
+        if (!priv) return 0;
+        out[n++].s_addr = htonl((g & 0xffffff00u) | 1u);
+        return n;
+    }
     if (!on_vm_network(gw)) {
         static int warned;
         if (!warned++) LOG("the default route is not on a VM shared network (bridged networking?): set NOTCHBAR_HOST");

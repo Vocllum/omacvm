@@ -24,15 +24,30 @@ struct Settings {
     /// Interfaces that carry VM networks: Parallels and UTM (vmnet) use
     /// bridgeNNN, older Parallels versions vnicN.
     var interfacePrefixes: [String] { defaults.stringArray(forKey: "vmInterfacePrefixes") ?? ["bridge", "vnic"] }
-    /// The VM shared networks: UTM (vmnet), Parallels shared and host-only.
+    /// The VM shared networks: UTM (vmnet), Parallels shared and host-only,
+    /// and VMware Fusion's NAT network (its subnet is picked at install time).
     var vmSubnets: [String] {
-        defaults.stringArray(forKey: "vmSubnets") ?? ["192.168.64.0/24", "10.211.55.0/24", "10.37.129.0/24"]
+        defaults.stringArray(forKey: "vmSubnets") ?? ["192.168.64.0/24", "10.211.55.0/24", "10.37.129.0/24"] + [Settings.fusionSubnet()].compactMap { $0 }
     }
-    /// Owner names (app names) of the VM windows: Parallels Desktop and UTM.
+    /// Owner names (app names) of the VM windows: Parallels Desktop, UTM, VMware Fusion.
     var vmOwners: Set<String> {
         if let list = defaults.stringArray(forKey: "vmOwners"), !list.isEmpty { return Set(list) }
         if let one = defaults.string(forKey: "vmOwner") { return [one] }
-        return ["Parallels Desktop", "UTM"]
+        return ["Parallels Desktop", "UTM", "VMware Fusion"]
+    }
+
+    /// VMware Fusion's NAT network (vmnet8) as "a.b.c.0/24": the first
+    /// VNET_8_HOSTONLY_SUBNET line of its settings, private addresses only.
+    static func fusionSubnet() -> String? {
+        guard let s = try? String(contentsOfFile: "/Library/Preferences/VMware Fusion/networking", encoding: .utf8) else { return nil }
+        for line in s.split(separator: "\n") {
+            let f = line.split(whereSeparator: { $0 == " " || $0 == "\t" })
+            guard f.count >= 3, f[0] == "answer", f[1] == "VNET_8_HOSTONLY_SUBNET" else { continue }
+            let o = f[2].split(separator: ".").compactMap { UInt8($0) }
+            guard o.count == 4, o[0] == 10 || (o[0] == 172 && (16...31).contains(o[1])) || (o[0] == 192 && o[1] == 168) else { return nil }
+            return "\(o[0]).\(o[1]).\(o[2]).0/24"
+        }
+        return nil
     }
 }
 
@@ -298,7 +313,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
             Log.info(guestLocked ? "guest session locked: strip blank" : "guest session unlocked")
         } else if text.hasPrefix("hello ") {
             let hv = text.dropFirst("hello ".count)
-            guestOwner = hv == "parallels" ? "Parallels Desktop" : hv == "qemu" ? "UTM" : nil
+            guestOwner = hv == "parallels" ? "Parallels Desktop" : hv == "qemu" ? "UTM" : hv == "vmware" ? "VMware Fusion" : nil
             Log.info("guest runs in \(hv) (\(guestOwner ?? "any VM app"))")
             evaluate()
         } else if text.hasPrefix("targets ") {
