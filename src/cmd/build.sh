@@ -252,10 +252,11 @@ free_gb_at() {   # free GB on the drive of a folder, as Finder counts it
   echo "$g"
 }
 vm_dir_problem() {   # DIR -> a reason it does not work, or nothing
-  local mp fs dev
+  local fs dev
   [[ -d $1 && -w $1 ]] || { echo "not a folder you can write to"; return; }
-  mp=$(df -P "$1" | awk 'END { print $6 }')
-  fs=$(mount | awk -v m="$mp" '$3 == m { sub(/^\(/, "", $4); sub(/,$/, "", $4); print $4; exit }')
+  # By the device, not the mount point (which can have spaces).
+  dev=$(df -P "$1" | awk 'END { print $1 }')
+  fs=$(diskutil info -plist "$dev" 2>/dev/null | plutil -extract FilesystemType raw -o - - 2>/dev/null)
   case $fs in apfs|hfs) ;; *) echo "its drive is ${fs:-unknown}: a VM disk needs APFS or Mac OS Extended (Disk Utility can erase it as APFS)"; return ;; esac
   (( $(free_gb_at "$1") >= 30 )) || echo "only $(free_gb_at "$1") GB free on that drive (the VM needs about 30)"
 }
@@ -277,6 +278,7 @@ fi
 if [[ -n ${VM_DIR:-} ]]; then
   VM_DIR=${VM_DIR%/}
   p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "--vm-dir $VM_DIR: $p"
+  VM_DIR=$(cd "$VM_DIR" && pwd)   # absolute: the live build runs in its own folder
   dev=$(df -P "$VM_DIR" | awk 'END { print $1 }')
   if diskutil info "$dev" 2>/dev/null | grep -qE "Device Location: +External|Removable Media: +Removable"; then
     EXTERNAL=1
