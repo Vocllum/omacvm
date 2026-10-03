@@ -20,8 +20,9 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
   (120 Hz on a MacBook Pro).
 - GPU in browsers: WebGL 1 and 2 on the hardware in Chromium, Google Chrome,
   Brave and Firefox (`virgl (Apple M4 Max)`), no flags.
-- Quit or the window's close button shuts Omarchy down cleanly. The Mac's
-  sleep pauses the VM.
+- Quit, the window's close button, logging out and restarting the Mac shut
+  Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
+  the VM's clock is set to the Mac's.
 - Full screen beside the notch (option): the window covers the whole built-in
   display, Omarchy's bar takes the strip beside the camera (32 pt on a 14"),
   windows start below it. Native resolution and 120 Hz.
@@ -42,7 +43,8 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
   app-route), not installed yet.
 - One display at a time. The window can go to an external display and be full
   screen there, but Omarchy gets one screen, not one per Mac display.
-- The app needs Xcode's Command Line Tools on the Mac that builds it.
+- The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
+  it checks for them before a build and offers to install them.
 
 ## How it talks to the Mac
 
