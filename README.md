@@ -138,8 +138,8 @@ Free and open source, one display: UTM.
 | YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
 | GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
-| Idle desktop | 5.7 W · 18 h | 15.2 W · 6.6 h | **5.5 W · 18 h** | 6.2 W · 16 h |
-| Reading, scrolling a page | 7.3 W · 14 h | 19.3 W · 5.2 h | **5.9 W · 17 h** | 6.8 W · 15 h |
+| Idle desktop | 5.7 W · 18 h | being re-measured | **5.5 W · 18 h** | 6.2 W · 16 h |
+| Reading, scrolling a page | 7.3 W · 14 h | being re-measured | **5.9 W · 17 h** | 6.8 W · 15 h |
 | YouTube 4K | 24.2 W · 4.1 h | 39.2 W · 2.6 h | **20.4 W · 4.9 h** | 21.3 W · 4.7 h |
 | Every CPU core busy | 72 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 71 W · 1.4 h |
 | **Displays** | | | | |
@@ -173,10 +173,10 @@ single runs. Power is the whole Mac's draw from its battery telemetry, 3
 minutes per load; hours are 100 Wh over that draw, whole hours from 13 h up,
 one decimal below. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
 
-- **UTM's idle draw** is a bug in UTM's QEMU: a virtual CPU spins instead of
-  sleeping when the guest's timer ticks every millisecond
-  ([finding 15](docs/troubleshooting.md#15-utm-uses-15-w-while-omarchy-sits-idle)).
-  OmacVM.app runs a newer QEMU without it.
+- **UTM's idle and reading numbers** are being measured again. Our run gave
+  15 W at idle, but a later check showed about 5 W, so something was probably
+  still busy in the VM during our run
+  ([#32](https://github.com/gillesgoetsch/omacvm/issues/32)).
 - **MotionMark** needs steady frame timing. On the three virgl routes Chrome's
   frames come too unevenly, so every subtest stays at its minimum; on Fusion
   it measures normally.

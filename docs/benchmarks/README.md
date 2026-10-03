@@ -181,8 +181,8 @@ Power draw of the whole Mac (W), 3 minutes per load, brightness 50 %:
 
 | | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
 |---|---|---|---|---|---|
-| Idle | 6.1 | 5.7 | 15.2 | 5.5 | 6.2 |
-| Reading (light) | 6.6 | 7.3 | 19.3 | 5.9 | 6.8 |
+| Idle | 6.1 | 5.7 | (15.2) | 5.5 | 6.2 |
+| Reading (light) | 6.6 | 7.3 | (19.3) | 5.9 | 6.8 |
 | YouTube 4K (SDR) | 8.0 | 24.2 | 39.2 | 20.4 | 21.3 |
 | Every core busy | 75.3 | 72.2 | 61.3 | 73.9 | 71.0 |
 | WebGL Aquarium, 30,000 fish | 35.6 | 27.4 | 29.1 | 37.3 | 27.2 |
@@ -197,6 +197,9 @@ Notes:
 - An HDR video would make the Mac's own run unfair: macOS drives the display
   brighter for HDR. `video-bench.py` uses an SDR video (16.4 W with HDR on the
   Mac, 8.0 W with SDR).
-- UTM's idle and reading numbers come from a bug in UTM's QEMU
-  ([finding 15](../troubleshooting.md#15-utm-uses-15-w-while-omarchy-sits-idle)).
+- UTM's idle and reading numbers (in brackets) don't hold: a later check
+  showed about 5 W at idle, also with an app open. Something was probably
+  still busy in the VM during our run. They are being measured again
+  ([#32](https://github.com/gillesgoetsch/omacvm/issues/32),
+  [finding 15](../troubleshooting.md#15-utm-idle-power-is-being-measured-again)).
 - MotionMark: [finding 16](../troubleshooting.md#16-motionmark-gives-no-stable-result).
