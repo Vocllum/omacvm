@@ -33,7 +33,7 @@ prebuilt_make_vm() {
       python3 "$R/src/prebuilt/vmconfig.py" pvs-identity "$PVM/config.pvs" "$VM" "$PVM" \
         "$HOME/.local/share/omacvm/clip" "$CPUS" $((MEM_GB * 1024)) $((DISK_GB * 1024))
       python3 "$R/src/vm/pvs.py" "$PVM/config.pvs" omacvm --cpus "$CPUS" --memsize $((MEM_GB * 1024)) \
-        --description "Omarchy (omarchy-mac) on Arch Linux ARM, set up by OmacVM from a prebuilt VM"
+        --description "Omarchy (omarchy-mac) on Arch Linux ARM, built by OmacVM (prebuilt)"
       PB_SEED="$PVM/omacvm-seed.iso"
       prebuilt_seed "$PB_SEED"
       python3 "$R/src/prebuilt/vmconfig.py" pvs-seed "$PVM/config.pvs" "$PB_SEED"
@@ -86,6 +86,10 @@ prebuilt_make_vm() {
       ui_spin_val IP "The VM starts and gets its address" fusion_ip "$VM" 300 || die "the VM got no IP address" ;;
   esac
   prebuilt_cleanup
+  # The image has no SSH host keys: the first boot makes them, and OmacVM
+  # remembers them from here on (a VM of that name before this one: its key goes).
+  export OMA_PIN_NEW=1
+  OMA_PIN_RESET=1 vm_pin "$VM" "$TYPE"
   ui_spin "Waiting for SSH on $IP (the first boot sets up your user)" wait_ssh "$IP" 600 || die "no SSH on $IP"
   gssh "$IP" "cat /var/log/omacvm-firstboot.log 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' | grep '^==>' | sed 's/^==> /    /'" || true
   PB_TIMES+=", first boot $(( $(date +%s) - t0 ))s"
