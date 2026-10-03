@@ -218,7 +218,13 @@ in_session() {
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
 # Earlier versions cloned Omanotch into the user's home; this copy is used now.
-[[ -d $H/.local/share/omanotch/.git ]] && rm -rf "$H/.local/share/omanotch"
+if [[ -d $H/.local/share/omanotch/.git ]]; then
+  if [[ -z $(git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null) ]]; then
+    rm -rf "$H/.local/share/omanotch"
+  else
+    echo "  ~/.local/share/omanotch has local changes and is no longer used: left in place" >&2
+  fi
+fi
 # OmacVM.app too: its full screen sits below the notch like the other routes'
 # (its own notch-strip mode is an opt-in; Omanotch then leaves the strip alone).
 if [[ ${F[omanotch]} == on ]]; then

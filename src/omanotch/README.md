@@ -125,8 +125,8 @@ monitors too: [some numbers](docs/why-parallels.md).</sub>
 
 ## Install
 
-With OmacVM nothing to do: the `omanotch` feature (on by default on a MacBook
-with a notch, `omacvm enable omanotch` otherwise) installs both sides.
+With OmacVM nothing to do: the `omanotch` feature installs both sides. It is on
+by default on a MacBook with a notch (`omacvm enable omanotch` on an existing VM).
 
 By hand, from `src/omanotch` of an OmacVM checkout. In the VM, as your normal
 user:
