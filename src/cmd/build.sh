@@ -194,18 +194,12 @@ if [[ -z $SOURCE ]]; then
   if (( PB_OK && ! YES )); then
     ui_select how "How should OmacVM make the VM?" 1 \
       "Build it yourself|about $(build_minutes) minutes, everything from Arch Linux ARM and omarchy-mac" \
-      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, made for OmacVM $PB_VERSION"
+      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $(cat "$R/src/VERSION") on the way"
     (( how == 1 )) && SOURCE=prebuilt
   fi
 elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
-  why="no prebuilt $TYPE VM for OmacVM $(cat "$R/src/VERSION") on GitHub"
-  [[ -n ${PB_VERSION:-} && $PB_VERSION != "$(cat "$R/src/VERSION")" ]] &&
-    why="the prebuilt $TYPE VM is for OmacVM $PB_VERSION, this is OmacVM $(cat "$R/src/VERSION")"
-  if (( YES )); then
-    printf '\033[1;31merror:\033[0m %s; omacvm build --build builds it here\n' "$why" >&2; exit 1
-  fi
-  say "    $why."
-  ask_yn "Build it yourself instead (about $(build_minutes) minutes)?" y || exit 1
+  # No image for this app and OmacVM version (or no connection): build it here.
+  (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
   SOURCE=build
 fi
 [[ $VM =~ ^[A-Za-z0-9][A-Za-z0-9\ ._-]*$ ]] || usage "--vm-name: letters, digits, spaces, dots, _ and - only (got '$VM')"

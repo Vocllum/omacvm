@@ -7,16 +7,17 @@
                                            size, unpacked_kb, disk_gb, created)
   manifest.py parts MANIFEST               one line per part: NAME SIZE SHA256
   manifest.py release RELEASES.json VERSION ROUTE
-                                           from GitHub's release list: the tag and the
-                                           manifest's URL for this version and route
-                                           (exact tag prebuilt-VERSION first, else the
-                                           newest prebuilt-VERSION-*)
+                                           from GitHub's release list: TAG URL IMAGE_VERSION
+                                           of the newest image for ROUTE with the same
+                                           major version, up to VERSION
+  manifest.py local DIR VERSION ROUTE      the same from a folder: NAME IMAGE_VERSION
   manifest.py asset RELEASES.json TAG NAME the download URL of one asset
 """
 import datetime
 import hashlib
 import json
 import os
+import re
 import sys
 
 
@@ -56,6 +57,28 @@ def write(a):
     print(out)
 
 
+def vtuple(v):
+    return tuple(int(x) for x in v.split("."))
+
+
+def pick(cands, version, route):
+    """cands: (tag, published, asset name, url) -> (VERSION, cand) of the best."""
+    want = re.compile(r"^omacvm-prebuilt-(\d+\.\d+\.\d+)-%s\.json$" % re.escape(route))
+    mine = vtuple(version)
+    best = None
+    for c in cands:
+        m = want.match(c[2])
+        if not m:
+            continue
+        v = vtuple(m.group(1))
+        if v[0] != mine[0] or v > mine:
+            continue
+        key = (v, c[1])
+        if best is None or key > best[0]:
+            best = (key, c)
+    return (".".join(map(str, best[0][0])), best[1]) if best else None
+
+
 def main(a):
     if len(a) < 2:
         sys.exit(__doc__)
@@ -69,20 +92,23 @@ def main(a):
         for p in json.load(open(a[2]))["parts"]:
             print(p["name"], p["size"], p["sha256"])
     elif cmd == "release":
+        # The newest image for this route with the same major version and a
+        # version up to ours (the first omacvm apply brings the guest side
+        # to ours): prints TAG URL VERSION.
         rels, version, route = json.load(open(a[2])), a[3], a[4]
-        want = "omacvm-prebuilt-%s-%s.json" % (version, route)
-        cands = []
-        for r in rels:
-            t = r.get("tag_name", "")
-            if r.get("draft") or not (t == "prebuilt-" + version or t.startswith("prebuilt-%s-" % version)):
-                continue
-            for x in r.get("assets", []):
-                if x["name"] == want:
-                    cands.append((t == "prebuilt-" + version, r.get("published_at") or "", t, x["browser_download_url"]))
-        if not cands:
+        best = pick([(r.get("tag_name", ""), r.get("published_at") or "", x["name"], x["browser_download_url"])
+                     for r in rels if not r.get("draft") and r.get("tag_name", "").startswith("prebuilt-")
+                     for x in r.get("assets", [])], version, route)
+        if not best:
             sys.exit(1)
-        best = max(cands)   # the exact tag first, then the newest
-        print(best[2], best[3])
+        print(best[1][0], best[1][3], best[0])
+    elif cmd == "local":
+        # the same from a folder of files: prints NAME VERSION
+        names = [(None, "", n, None) for n in os.listdir(a[2])]
+        best = pick(names, a[3], a[4])
+        if not best:
+            sys.exit(1)
+        print(best[1][2], best[0])
     elif cmd == "asset":
         for r in json.load(open(a[2])):
             if r.get("tag_name") == a[3]:

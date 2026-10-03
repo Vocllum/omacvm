@@ -26,9 +26,8 @@ What happens:
 
 1. The questions are the same as for a build: app, resources, folder,
    features, user, password.
-2. The image for this OmacVM version and app is downloaded from the GitHub
-   release `prebuilt-VERSION` (or the newest `prebuilt-VERSION-*`
-   pre-release), in parts of at most 1.9 GB, each checked against the
+2. The image for this app is downloaded from a GitHub release whose tag
+   starts with `prebuilt-` (see below which one), in parts of at most 1.9 GB, each checked against the
    manifest's SHA-256. Interrupted downloads resume. The parts go to
    `~/Library/Caches/omacvm/prebuilt/` and are deleted after unpacking
    (`OMACVM_PREBUILT_KEEP=1` keeps them).
@@ -47,9 +46,11 @@ What happens:
    Tools from your own Parallels Desktop). Then the VM shuts down once, the
    seed is detached and deleted, and the VM starts again.
 
-The image must be for the same OmacVM version (the manifest says which).
-Otherwise OmacVM says so and offers to build instead (`--yes`: it stops; use
-`--build`).
+OmacVM takes the newest image with its own major version and a version up to
+its own (OmacVM 2.5.0 uses a 2.4.0 image when there is no newer one): the
+first `omacvm apply` brings the VM side to the current version anyway. With no
+such image (or no connection), `--prebuilt` builds the VM here instead and
+says so.
 
 ## Downloading one by hand
 

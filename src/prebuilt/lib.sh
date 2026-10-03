@@ -11,31 +11,38 @@ UTM_DOCS=$HOME/Library/Containers/com.utmapp.UTM/Data/Documents
 
 PREBUILT_CACHE=$HOME/Library/Caches/omacvm/prebuilt
 
-# prebuilt_lookup TYPE: is there an image for this OmacVM version and route?
-# Sets PB_TAG, PB_MANIFEST (local file), PB_SIZE (bytes), PB_OMARCHY,
-# PB_SOURCE (base URL or folder). $OMACVM_PREBUILT_SOURCE: a folder with the
-# files (tests); $OMACVM_PREBUILT_TAG: that release instead of the newest one.
+# prebuilt_lookup TYPE: the newest image for this app with OmacVM's major
+# version and a version up to this one (the first omacvm apply brings its
+# guest side to this version). Sets PB_TAG, PB_MANIFEST (local file), PB_SIZE
+# (bytes), PB_OMARCHY, PB_VERSION, PB_SOURCE (base URL or folder).
+# $OMACVM_PREBUILT_SOURCE: a folder with the files (tests);
+# $OMACVM_PREBUILT_TAG: only that release.
 prebuilt_lookup() {
-  local type=$1 version base rel url
+  local type=$1 version rel url name iv
   version=$(cat "$R/src/VERSION")
-  base=omacvm-prebuilt-$version-$type
   mkdir -p "$PREBUILT_CACHE/$type"
-  PB_MANIFEST=$PREBUILT_CACHE/$type/$base.json
+  PB_VERSION=""
   if [[ -n ${OMACVM_PREBUILT_SOURCE:-} ]]; then
-    [[ -f $OMACVM_PREBUILT_SOURCE/$base.json ]] || return 1
-    cp "$OMACVM_PREBUILT_SOURCE/$base.json" "$PB_MANIFEST"
+    read -r name iv < <(python3 "$R/src/prebuilt/manifest.py" local "$OMACVM_PREBUILT_SOURCE" "$version" "$type") || return 1
+    [[ -n ${name:-} ]] || return 1
+    PB_MANIFEST=$PREBUILT_CACHE/$type/$name
+    cp "$OMACVM_PREBUILT_SOURCE/$name" "$PB_MANIFEST"
     PB_TAG=local; PB_SOURCE=$OMACVM_PREBUILT_SOURCE
   else
     rel=$(mktemp)
     curl -fsSL --max-time 20 -H 'Accept: application/vnd.github+json' \
       "https://api.github.com/repos/$PREBUILT_REPO/releases?per_page=100" -o "$rel" 2>/dev/null || { rm -f "$rel"; return 1; }
     if [[ -n ${OMACVM_PREBUILT_TAG:-} ]]; then
-      url=$(python3 "$R/src/prebuilt/manifest.py" asset "$rel" "$OMACVM_PREBUILT_TAG" "$base.json") && PB_TAG=$OMACVM_PREBUILT_TAG
-    else
-      read -r PB_TAG url < <(python3 "$R/src/prebuilt/manifest.py" release "$rel" "$version" "$type")
+      python3 - "$rel" "$OMACVM_PREBUILT_TAG" > "$rel.one" <<'PY2'
+import json, sys
+print(json.dumps([r for r in json.load(open(sys.argv[1])) if r.get("tag_name") == sys.argv[2]]))
+PY2
+      mv "$rel.one" "$rel"
     fi
+    read -r PB_TAG url iv < <(python3 "$R/src/prebuilt/manifest.py" release "$rel" "$version" "$type") || true
     rm -f "$rel"
     [[ -n ${url:-} ]] || return 1
+    PB_MANIFEST=$PREBUILT_CACHE/$type/${url##*/}
     curl -fsSL --max-time 30 "$url" -o "$PB_MANIFEST" || return 1
     PB_SOURCE=${url%/*}
   fi
@@ -45,7 +52,7 @@ prebuilt_lookup() {
   PB_SIZE=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" size)
   PB_BUNDLE=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" bundle)
   PB_DISK_GB=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" disk_gb)
-  [[ $PB_VERSION == "$version" ]]   # an image for another OmacVM version is no match
+  [[ $PB_VERSION == "${iv:-$PB_VERSION}" ]]
 }
 
 pb_gb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
