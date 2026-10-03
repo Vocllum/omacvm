@@ -172,9 +172,11 @@ case $TYPE in
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
 if [[ ${F[battery]} == on ]]; then
-  log "the Mac's battery"; "$R/battery/guest/install.sh" on
+  log "the Mac's battery"
+  "$R/battery/guest/install.sh" on || log "the Mac's battery: not installed (see above)"
 elif [[ -f /etc/systemd/system/omacvm-battery.service ]]; then
-  log "the Mac's battery: off"; "$R/battery/guest/install.sh" off
+  log "the Mac's battery: off"
+  "$R/battery/guest/install.sh" off || log "the Mac's battery: not removed (see above)"
 fi
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
