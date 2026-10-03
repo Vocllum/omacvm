@@ -49,6 +49,9 @@ OmacVM's version.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).
 - Sound through the Mac (QEMU's HDA card; PipeWire in the VM).
+- The Mac's battery in Omarchy's bar, on a MacBook: charge, charging, time
+  left, Omarchy's battery panel and its low-battery warning (try-omarchy's
+  bridge, over a virtio port; [how it works](../../src/battery/README.md)).
 
 ## From the omacvm command
 
@@ -103,6 +106,10 @@ the VM's SSH on `127.0.0.1:<port>`.
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
   (`OMACVM_SLIRP_HOST_PORTS`).
+- The clipboard and the Mac's battery do not use the network: each has its
+  own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
+  only the app's user can open. The battery goes one way; the VM can only ask
+  for a fresh reading.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
   program could connect, or listen in their place while they are not
   running. So the VM gives the Bridge's token to neither before it has proved

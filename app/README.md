@@ -39,7 +39,7 @@ Works: setup, VM build (about 8 minutes plus a 1.4 GB download the first
 time), window that Omarchy follows (native resolution, 120 Hz), full screen
 beside the notch (option), clipboard both ways, sound, WebGL in Chromium,
 Chrome, Brave and Firefox, clean shutdown on Quit, pause on Mac sleep,
-install under a chosen name, ⌘ keys as Super in full screen (through OmacVM
+install under a chosen name, the Mac's battery in Omarchy's bar, ⌘ keys as Super in full screen (through OmacVM
 Gestures, which the build installs on the Mac with the other helpers).
 
 Waiting: external displays. Not confirmed on this route yet: the Bridge's

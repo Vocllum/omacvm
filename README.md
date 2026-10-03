@@ -99,6 +99,7 @@ More in [With a coding agent](#with-a-coding-agent).
 | **Night Shift and True Tone** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon, lit while it is on. A click opens a panel like Omarchy's own: Night Shift, its strength and True Tone, all on the Mac (Super+Ctrl+N switches Night Shift directly). It replaces Omarchy's own night light, so the screen is never tinted twice |
 | **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
 | **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
+| **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge, charging and time left, as on a laptop, and Omarchy warns when it runs low (the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
 | **Your keyboard layout** | Taken from the Mac |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
@@ -157,6 +158,7 @@ Free and open source, one display: UTM.
 | Media keys, trackpad gestures, Cmd shortcuts | ✓ | ✓ | ✓ | coming |
 | The bar beside the notch | ✓ Omanotch | ✓ Omanotch | ✓ Omanotch | ✓ built in |
 | Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
+| The Mac's battery in the bar | ✓ Parallels' own | ✓ through OmacVM Bridge | ✓ through OmacVM Bridge | ✓ built in |
 | **Setup** | | | | |
 | Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
 | Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
@@ -365,8 +367,8 @@ omacvm check            # --vm NAME for another VM
 ```
 
 Goes through every feature on the Mac and in the running VM (permissions, the
-Bridge, the bar widgets, gestures, scroll momentum, clipboard and pointer, kernel,
-memory, Omanotch) and prints `ok` / `FAIL` with what to do about each failure.
+Bridge, the bar widgets, gestures, scroll momentum, clipboard and pointer, the
+battery, kernel, memory, Omanotch) and prints `ok` / `FAIL` with what to do about each failure.
 It only reads; nothing is changed. `omacvm vms` lists your VMs and their
 OmacVM version.
 
@@ -415,6 +417,10 @@ needs a token.
 - **Omanotch** (`src/omanotch/`, on a MacBook with a notch): `notchcast` in the
   VM streams Omarchy's bar to Omanotch.app on the Mac, which shows it beside
   the notch. [How it works](src/omanotch/README.md).
+- **The Mac's battery** (`src/battery/`, UTM, VMware Fusion and OmacVM.app on a
+  MacBook): a small kernel module shows it to the VM as a real battery, which
+  UPower and Omarchy's bar read; the Bridge (or OmacVM.app itself) sends every
+  change. [How it works](src/battery/README.md).
 
 <p align="center">
   <img src="docs/images/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
@@ -532,10 +538,13 @@ and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team,
 Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
 [omarchy-arm-utm](https://github.com/ggalancs/omarchy-arm-utm), whose UTM
 findings (virtio-gpu settings, UTM's scripting) shaped the UTM route and
-whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The bar
+whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The Mac's
+battery in the VM (kernel module, agent, the Mac's side) comes from
+try-omarchy; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The bar
 widgets are clones of Omarchy's own. OmacVM is a community project, not
 affiliated with the Omarchy team, Parallels, UTM, VMware (Broadcom) or Apple.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE); the parts from others under their own licences in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

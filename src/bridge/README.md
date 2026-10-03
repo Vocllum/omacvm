@@ -1,6 +1,6 @@
 # OmacVM Bridge
 
-The Mac's Wi-Fi, Bluetooth, audio, media keys and display, inside the Omarchy
+The Mac's Wi-Fi, Bluetooth, audio, media keys, display and battery, inside the Omarchy
 VM. The VM only has a virtual Ethernet card and a virtual sound card; the bridge is a
 small Mac menu-bar app that serves the real thing as JSON over the private
 VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-Sent Events.
@@ -17,7 +17,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Bar widgets | `plugins/omacvm.bluetooth`, `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's Bluetooth, network and audio widgets; Super+Ctrl+B opens the Bluetooth one), `plugins/omacvm.nightshift` |
 
 Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, IOBluetooth,
-CoreBluetooth (the permission), AppKit, Security, and the private
+CoreBluetooth (the permission), IOKit (the battery), AppKit, Security, and the private
 DisplayServices and CoreBrightness (brightness, Night Shift, True Tone,
 keyboard light). Bluetooth power and forgetting a device use IOBluetooth's
 private `IOBluetoothPreferenceSetControllerPowerState` and
@@ -47,7 +47,7 @@ never gets the token, not even by passing on a proof from the Bridge on
 10.211.55.2. The client wraps all of it:
 
 ```bash
-omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events
+omacvm-bridge state | scan [--cached] | audio | display | bluetooth | battery | events
 omacvm-bridge volume +5 | mute | mic-volume 60 | output <uid>
 omacvm-bridge brightness -5 | night-shift toggle | night-shift strength 70 | true-tone off
 omacvm-bridge password [ssid]
@@ -153,10 +153,28 @@ curl "${H[@]}" -d '{}'                                    $B/bluetooth/settings 
 after about 15 s). Pairing a new device needs macOS's own dialog, so the
 panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 
+### Battery
+
+`GET /battery`: the Mac's battery, for UTM and VMware Fusion VMs (their
+`omacvm-battery` agent shows it in Omarchy's bar, see `../battery/README.md`;
+OmacVM.app passes the same on its own port, Parallels gives the VM its own):
+
+```json
+{"type":"state","present":true,"percentage":57,"state":"discharging","acConnected":false,
+ "timeToEmptySeconds":8100,"timeToFullSeconds":null,"chargeLimit":80,
+ "chargeNowMicroAh":2832900,"chargeFullMicroAh":4970000,"chargeFullDesignMicroAh":6075000,
+ "voltageMicroV":12537000,"cycleCount":213}
+```
+
+`state`: `charging`, `discharging`, `full`, `not-charging` (on the charger,
+held at the limit) or `unknown`. `chargeLimit`: the limit set in macOS
+(read from powerd's settings), else `null`. A Mac without a battery:
+`present: false`, `percentage: null`, `acConnected: true`. Read-only.
+
 ### Events
 
 `GET /events` (Server-Sent Events): on connect the current `wifi`, `audio`,
-`display` and `bluetooth`; then
+`display`, `bluetooth` and `battery`; then
 
 | event | when |
 |---|---|
@@ -165,6 +183,7 @@ panel's "Pair a new device…" opens the Mac's Bluetooth settings.
 | `display` | Night Shift (its own notification), True Tone, brightness |
 | `bluetooth` | power, devices connecting and disconnecting (IOBluetooth notifications), anything else within 5 s; battery re-read every minute while something is connected |
 | `scan` | an active scan finished, or macOS refreshed its scan cache (≤ every 10 s) |
+| `battery` | charge, charging, the charger, time left (IOKit notifications); voltage and charge in µAh at most every 30 s |
 | `osd` | `{"type":"osd","kind":"volume"\|"mute"\|"brightness"\|"keyboard","value":0-100,"muted":bool,"source":"keys"\|"api"\|"external","device":"…"}` |
 
 `source`: `keys` = a media key caught while the VM was full screen, `api` = a
