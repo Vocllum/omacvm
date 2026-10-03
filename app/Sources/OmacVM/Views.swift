@@ -195,6 +195,27 @@ struct BuildView: View {
     }
 }
 
+extension ReadyView {
+    /// Moves the VM's folder to the Trash after a plain confirmation.
+    func deleteVM() {
+        let alert = NSAlert()
+        alert.messageText = "Delete \(state.config.name)?"
+        alert.informativeText = "The VM's disk and everything in Omarchy goes to the Trash."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Delete")
+        alert.buttons[1].hasDestructiveAction = true
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        do {
+            try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
+            let fresh = AppState()
+            state.config = fresh.config
+            state.screen = fresh.config.isReady ? .ready : .setup
+        } catch {
+            state.message = "Could not delete: \(error.localizedDescription)"
+        }
+    }
+}
+
 struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
@@ -227,6 +248,7 @@ struct ReadyView: View {
             if let m = state.message { Text(m).foregroundStyle(.red) }
             HStack {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
+                Button("Delete…") { deleteVM() }
                 Spacer()
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
