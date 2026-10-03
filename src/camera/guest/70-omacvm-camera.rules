@@ -1,0 +1,4 @@
+# OmacVM: the Mac's camera for the logged-in user (uaccess, before 73-seat-late.rules)
+# and the video group; OmacVM.app's virtio port for omacvm-camera.
+KERNEL=="video42", SUBSYSTEM=="video4linux", GROUP="video", MODE="0660", TAG+="uaccess"
+SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.camera", GROUP="video", MODE="0660", TAG+="uaccess"

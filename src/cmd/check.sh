@@ -146,6 +146,11 @@ if [[ $BRIDGE == on ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
   else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
 else skip "Bridge" "off (chosen at setup)"; fi
+# The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
+if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
+  running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
+    || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
