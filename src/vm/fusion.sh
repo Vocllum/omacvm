@@ -13,6 +13,16 @@ vmx_set() {   # <vmx> <key> <value>: set or add one line
 
 vmx_del() { sed -i '' "/^$(sed 's/\./\\./g' <<<"$2")/d" "$1"; }   # <vmx> <key prefix>: drop those lines
 
+# fusion_mac_displays -> "COUNT WIDTH HEIGHT": the Mac's displays and the
+# pixel size of their whole arrangement (at least 2560x1600, Fusion's default).
+fusion_mac_displays() {
+  swift -e 'import AppKit
+    let s = NSScreen.screens
+    let px = s.map { $0.frame.applying(CGAffineTransform(scaleX: $0.backingScaleFactor, y: $0.backingScaleFactor)) }
+    let w = Int(px.map { $0.maxX }.max()! - px.map { $0.minX }.min()!), h = Int(px.map { $0.maxY }.max()! - px.map { $0.minY }.min()!)
+    print(s.count, max(w, 2560), max(h, 1600))' 2>/dev/null || echo "1 2560 1600"
+}
+
 # fusion_create NAME CPUS MEMORY_MB LIVE_IMAGE DISK_GB
 # Like the VM the Fusion route was tested with: UEFI, 3D acceleration on the
 # vmwgfx GPU, an Intel e1000e NIC on Fusion's NAT network (Arch Linux ARM's
@@ -66,6 +76,13 @@ EOF
   vmx_set "$x" usb:0.present TRUE
   vmx_set "$x" usb:0.deviceType hid
   vmx_set "$x" gui.fitGuestUsingNativeDisplayResolution TRUE
+  # One guest display per Mac display in full screen; the framebuffer must
+  # hold the whole arrangement.
+  read -r n w h < <(fusion_mac_displays)
+  vmx_set "$x" svga.numDisplays "$n"
+  vmx_set "$x" svga.maxWidth "$w"
+  vmx_set "$x" svga.maxHeight "$h"
+  vmx_set "$x" gui.fullScreenOnAllHostDisplays TRUE
   echo "$x"
 }
 
