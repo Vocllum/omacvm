@@ -85,7 +85,9 @@ struct VMConfig: Equatable {
     var timeZone = "UTC"
     var language = "en_US.UTF-8"
     var keyboard = "us"
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=\(Mac.hasNotch ? "on" : "off") mac-clock=on idle-lock=on autologin=off thp-kernel=off"
+    // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
+    // so an app VM (10.0.2.2) never reaches it.
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
 
