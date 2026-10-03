@@ -14,7 +14,7 @@ ALARM=https://raw.githubusercontent.com/archlinuxarm/PKGBUILDs/master/core/linux
 W=$(getent passwd "$U" | cut -d: -f6)/.cache/omacvm/linux-aarch64-thp
 
 latest=$(curl -fsSL "$ALARM/PKGBUILD" | sed -n 's/^pkgver=//p; s/^pkgrel=//p' | paste -sd- -)
-have=$(pacman -Q linux-aarch64-thp 2>/dev/null | awk '{ print $2 }')
+have=$(pacman -Q linux-aarch64-thp 2>/dev/null | awk '{ print $2 }' || true)   # none yet: build
 if [[ -n $latest && $have == "$latest" && -z ${OMACVM_REBUILD_KERNEL:-} ]]; then
   echo "linux-aarch64-thp $have is ALARM's current kernel: nothing to build"
   exit 0
