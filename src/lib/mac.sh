@@ -119,8 +119,9 @@ utm_ip() {   # <vm name> [seconds]: the guest's address on UTM's shared network
     # the QEMU guest agent knows; without it, UTM's DHCP server (bootpd) does
     ip=$("$UTMCTL" ip-address "$1" 2>/dev/null | grep -m1 -E '^192\.168\.[0-9]+\.[0-9]+$') && { echo "$ip"; return 0; }
     local mac
-    mac=$(osascript -e "tell application \"UTM\"" -e "copy (configuration of virtual machine named \"$1\") to c" \
-            -e "get address of item 1 of (network interfaces of c)" -e "end tell" 2>/dev/null |
+    # the name goes in as an argument, never into the script's source
+    mac=$(osascript -e 'on run argv' -e 'tell application "UTM"' -e 'copy (configuration of virtual machine named (item 1 of argv)) to c' \
+            -e 'get address of item 1 of (network interfaces of c)' -e 'end tell' -e 'end run' "$1" 2>/dev/null |
           tr 'A-F' 'a-f' | sed 's/:0/:/g; s/^0//')
     if [[ -n $mac ]]; then
       ip=$(awk -v m="1,$mac" '/ip_address=/ { split($0, a, "="); ip = a[2] } /hw_address=/ { split($0, b, "="); if (b[2] == m) print ip }' /var/db/dhcpd_leases 2>/dev/null | tail -1)
