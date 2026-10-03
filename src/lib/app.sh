@@ -73,7 +73,8 @@ app_ip() {   # NAME [seconds]: only when that QEMU itself holds the port (not
 }
 
 app_other_running() {   # NAME -> another app VM that runs (the app runs one at a time)
-  app_list | awk -F'\t' -v n="$1" '$1 != n && $3 == "running" { print $1; f = 1; exit } END { exit !f }'
+  # No early exit in awk: app_list would get SIGPIPE and pipefail fail the test.
+  app_list | awk -F'\t' -v n="$1" '$1 != n && $3 == "running" && !f { print $1; f = 1 } END { exit !f }'
 }
 
 app_start() {
