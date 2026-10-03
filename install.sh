@@ -4,7 +4,8 @@
 # builds one). From GitHub in one line:
 #   curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash
 # From a clone: ./install.sh (links that clone instead). --no-start: only install.
-# OMACVM_REF=<branch or tag> installs that instead of main.
+# A branch or tag instead of main (also switches an existing ~/.omacvm):
+#   curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | OMACVM_REF=<branch or tag> bash
 set -euo pipefail
 REPO=https://github.com/gillesgoetsch/omacvm.git
 START=1
@@ -77,7 +78,18 @@ if [[ -z $here ]]; then
   fi
   # A clone that failed half-way (no .git) is OmacVM's own leftover: start over.
   [[ -d $here && ! -d $here/.git ]] && rm -rf "$here"
-  if [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
+  if [[ -d $here/.git && -n ${OMACVM_REF:-} ]]; then
+    [[ -z $(git -C "$here" status --porcelain --untracked-files=no) ]] ||
+      { echo "$here has local changes: not switching it to $OMACVM_REF" >&2; exit 1; }
+    say "updating $here to $OMACVM_REF"
+    if git -C "$here" ls-remote --exit-code --heads origin "$OMACVM_REF" >/dev/null; then
+      git -C "$here" fetch -q origin "+refs/heads/$OMACVM_REF:refs/remotes/origin/$OMACVM_REF"
+      git -C "$here" checkout -q -B "$OMACVM_REF" --track "origin/$OMACVM_REF"
+    else
+      git -C "$here" fetch -q origin "+refs/tags/$OMACVM_REF:refs/tags/$OMACVM_REF"
+      git -C "$here" checkout -q --detach "refs/tags/$OMACVM_REF"
+    fi
+  elif [[ -d $here/.git ]]; then say "updating $here"; git -C "$here" pull -q --ff-only
   else say "OmacVM -> $here"; git clone -q ${OMACVM_REF:+--branch "$OMACVM_REF"} "$REPO" "$here"; fi
 fi
 
