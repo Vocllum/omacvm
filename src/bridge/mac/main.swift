@@ -6,7 +6,8 @@
 // HTTP/1.1 on port 47831 of the Mac's address on each VM network (10.211.55.2
 // for Parallels, 192.168.64.1 for UTM, .1 of VMware Fusion's NAT network; never 0.0.0.0). Every request needs "Authorization: Bearer <token>",
 // except the one the VM makes first, to check it talks to the Bridge before it sends the token:
-//   GET  /proof?nonce=N    {"proof": HMAC-SHA256(token, "omacvm-bridge mac N")}, N 32 hex digits
+//   GET  /proof?nonce=N    {"proof": HMAC-SHA256(token, "omacvm-bridge mac <addr> N")}, N 32 hex digits,
+//                          <addr> the Mac address the request came in on
 //   GET  /state            Wi-Fi state
 //   GET  /scan[?cached=1]  nearby networks, one entry per SSID; cached=1 = the
 //                          system's scan cache (instant, no radio scan)

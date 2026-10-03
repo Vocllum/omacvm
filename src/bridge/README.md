@@ -39,10 +39,12 @@ survive rebuilds (see `../lib/sign.sh`).
 
 Every request needs `Authorization: Bearer <token>`; JSON in and out, errors
 are `{"error": "…"}`. Only `GET /proof?nonce=N` (N: 32 hex digits) needs no
-token: it answers `{"proof": HMAC-SHA256(token, "omacvm-bridge mac N")}`, and
-the client checks that before every request, so a program listening in the
-Bridge's place (on 127.0.0.1 for OmacVM.app any Mac program could) never gets
-the token. The client wraps all of it:
+token: it answers `{"proof": HMAC-SHA256(token, "omacvm-bridge mac <addr> N")}`,
+`<addr>` the Mac address the request came in on, and the client checks that
+(with its own Mac address: 127.0.0.1 for OmacVM.app) before every request, so
+a program listening in the Bridge's place (on 127.0.0.1 any Mac program could)
+never gets the token, not even by passing on a proof from the Bridge on
+10.211.55.2. The client wraps all of it:
 
 ```bash
 omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events

@@ -8,12 +8,23 @@ struct APIError: Error {
   init(_ status: Int, _ message: String) { self.status = status; self.message = message }
 }
 
-/// GET /proof: HMAC-SHA256(token, "omacvm-bridge mac <nonce>") in hex. The VM
-/// checks it before it sends the token, so a program listening in the
-/// Bridge's place (on 127.0.0.1 any Mac program could) never gets it.
-func proof(_ nonce: String) -> String {
-  HMAC<SHA256>.authenticationCode(for: Data("omacvm-bridge mac \(nonce)".utf8), using: SymmetricKey(data: token))
+/// GET /proof: HMAC-SHA256(token, "omacvm-bridge mac <addr> <nonce>") in hex,
+/// <addr> the Mac address the request came in on. The VM checks it, its own
+/// Mac address included, before it sends the token, so a program listening in
+/// the Bridge's place (on 127.0.0.1 any Mac program could) never gets it, not
+/// even by fetching a proof from the Bridge on 10.211.55.2.
+func proof(_ nonce: String, at addr: String) -> String {
+  HMAC<SHA256>.authenticationCode(for: Data("omacvm-bridge mac \(addr) \(nonce)".utf8), using: SymmetricKey(data: token))
     .map { String(format: "%02x", $0) }.joined()
+}
+
+/// The Mac address a connection came in on.
+func localAddress(_ fd: Int32) -> String? {
+  var sin = sockaddr_in(), len = socklen_t(MemoryLayout<sockaddr_in>.size)
+  let r = withUnsafeMutablePointer(to: &sin) {
+    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+  }
+  return r == 0 && sin.sin_family == sa_family_t(AF_INET) ? ipv4String(sin.sin_addr) : nil
 }
 
 func authorized(_ header: String?) -> Bool {
@@ -283,7 +294,8 @@ func handle(_ fd: Int32, peer: String) {
           n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
       respond(fd, 400, ["error": "nonce: 32 hex digits"]); return
     }
-    respond(fd, 200, ["proof": proof(n)])
+    guard let at = localAddress(fd) else { respond(fd, 500, ["error": "no local address"]); return }
+    respond(fd, 200, ["proof": proof(n, at: at)])
     return
   }
   guard authorized(headers["authorization"]) else {

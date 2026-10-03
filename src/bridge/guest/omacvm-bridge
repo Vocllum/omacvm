@@ -21,16 +21,20 @@ URL=${OMACVM_BRIDGE_URL:-http://${OMACVM_HOST:-10.211.55.2}:47831}
 TOKEN_FILE=${OMACVM_BRIDGE_TOKEN_FILE:-$HOME/.config/omacvm-bridge/token}
 
 # The token only to a Bridge that first proved it knows it (HMAC-SHA256 of a
-# fresh nonce): on 127.0.0.1 (OmacVM.app) any Mac program could listen in its
-# place. Bridges from before /proof get no token: omacvm update.
+# fresh nonce and the Mac address it answered on): on 127.0.0.1 (OmacVM.app)
+# any Mac program could listen in its place, and pass on a proof from the
+# Bridge on 10.211.55.2 but for the address. Bridges from before /proof get no
+# token: omacvm update.
+MAC_ADDR=${URL#*://}; MAC_ADDR=${MAC_ADDR%%[:/]*}
+[[ ${OMACVM_VM_TYPE:-} == app ]] && MAC_ADDR=127.0.0.1   # OmacVM.app's 10.0.2.2 is the Mac's 127.0.0.1
 proven() {
   local n p
   n=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
   p=$(curl -sS -m 5 "${URL%/}/proof?nonce=$n" 2>/dev/null | jq -r '.proof // empty' 2>/dev/null) || p=""
   python3 -c 'import hashlib, hmac, sys
 t = open(sys.argv[1], "rb").read().strip()
-w = hmac.new(t, b"omacvm-bridge mac " + sys.argv[2].encode(), hashlib.sha256).hexdigest()
-sys.exit(not hmac.compare_digest(w.encode(), sys.argv[3].encode()))' "$TOKEN_FILE" "$n" "$p" 2>/dev/null
+w = hmac.new(t, f"omacvm-bridge mac {sys.argv[2]} {sys.argv[3]}".encode(), hashlib.sha256).hexdigest()
+sys.exit(not hmac.compare_digest(w.encode(), sys.argv[4].encode()))' "$TOKEN_FILE" "$MAC_ADDR" "$n" "$p" 2>/dev/null
 }
 # The token goes in via a header file, so it never shows up in `ps`.
 req() {
