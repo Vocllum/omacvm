@@ -8,8 +8,8 @@ APP=build/OmacVMBridge.app
 ID=org.omacvm.bridge
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 ../../icon/make-icns.sh "$APP/Contents/Resources/OmacVM.icns"
-swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$APP/Contents/MacOS/omacvm-bridge" main.swift wifi.swift audio.swift server.swift keys.swift display.swift wallpaper.swift bluetooth.swift battery.swift \
-  -framework AppKit -framework CoreWLAN -framework CoreLocation -framework CoreAudio -framework AudioToolbox -framework ApplicationServices -framework Security -framework SystemConfiguration -framework IOBluetooth -framework CoreBluetooth -framework IOKit
+swiftc -O -swift-version 5 -target arm64-apple-macos13.0 -o "$APP/Contents/MacOS/omacvm-bridge" main.swift wifi.swift audio.swift server.swift keys.swift display.swift wallpaper.swift bluetooth.swift battery.swift camera.swift \
+  -framework AppKit -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework CoreWLAN -framework CoreLocation -framework CoreAudio -framework AudioToolbox -framework ApplicationServices -framework Security -framework SystemConfiguration -framework IOBluetooth -framework CoreBluetooth -framework IOKit
 WHY="OmacVM Bridge reads the name of the Wi-Fi network this Mac is on, and of nearby networks, to show them in your Linux VM's status bar. macOS only reveals Wi-Fi network names to apps with Location Services access. No location is ever read or stored."
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
@@ -27,6 +27,7 @@ cat > "$APP/Contents/Info.plist" <<PL
   <key>LSUIElement</key><true/>
   <key>NSLocationUsageDescription</key><string>$WHY</string>
   <key>NSLocationWhenInUseUsageDescription</key><string>$WHY</string>
+  <key>NSCameraUsageDescription</key><string>OmacVM Bridge passes this Mac's camera to Linux apps in your VM (UTM, VMware Fusion). The camera is on only while one of them uses it.</string>
   <key>NSBluetoothAlwaysUsageDescription</key><string>OmacVM Bridge shows this Mac's Bluetooth devices in your Linux VM's status bar, and connects, disconnects or forgets them when you ask there.</string>
 </dict></plist>
 PL

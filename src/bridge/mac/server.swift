@@ -372,9 +372,21 @@ func handle(_ fd: Int32, peer: String) {
     } catch {
       respond(fd, 500, ["error": "\(error)"])
     }
+  case ("GET", "/camera/status"):
+    respond(fd, 200, camera.status())
+  case ("GET", "/camera"):
+    // From here on the connection carries the camera (camera.swift): the VM
+    // says start and stop, the Bridge sends frames while it is started.
+    guard camera.canAttach else { respond(fd, 503, ["error": "too many camera connections"]); return }
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: application/x-omacvm-camera\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+    guard writeAll(fd, Data(head.utf8)) else { close(fd); return }
+    var forever = timeval()
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &forever, socklen_t(MemoryLayout<timeval>.size))
+    camera.attach(fd: fd, label: peer, leftover: Data(buf[headEnd.upperBound...]))
   case ("POST", "/power"), ("POST", "/join"), ("POST", "/disconnect"):
     respond(fd, 501, ["error": "Wi-Fi control is not implemented yet (stage 2)"])
-  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/battery"), (_, "/wifi/password"), (_, "/events"):
+  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/battery"), (_, "/wifi/password"), (_, "/events"),
+       (_, "/camera"), (_, "/camera/status"):
     respond(fd, 405, ["error": "method not allowed"])
   default:
     respond(fd, 404, ["error": "not found"])

@@ -27,6 +27,10 @@
 //   POST /bluetooth/settings   opens the Mac's Bluetooth settings (pairing)
 //   POST /wallpaper        image body: the Mac's wallpaper (and lock-screen background)
 //   GET  /battery          the Mac's battery (battery.swift), for UTM and VMware Fusion VMs
+//   GET  /camera           the connection then carries the Mac's camera (camera.swift): the VM
+//                          sends {"type":"start"|"stop"} lines, the Bridge 1280x720 NV12 frames
+//                          while started (macOS asks for the camera permission the first time)
+//   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
@@ -127,6 +131,7 @@ let hub = Hub([
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
 let osdEvents = OSDEvents()
+let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
 let menuBar = MenuBar()
 
