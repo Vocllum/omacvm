@@ -1,10 +1,25 @@
-# OmacVM.app (draft)
+# OmacVM.app
 
 Omarchy in its own Mac app, without Parallels, UTM or VMware Fusion. The app
 brings QEMU (built from try-omarchy's patched source) and runs it with Apple's
 Hypervisor framework. The GPU goes through VirGL on the Mac's OpenGL.
 
-Status: work in progress, not released. Source: `~/omacvm-app` (local).
+Source: [`app/`](../../app/README.md) in this repo (the launcher, QEMU's build
+scripts and patches, the VM build script); it carries OmacVM's `src/` and has
+OmacVM's version.
+
+## Get it
+
+- `omacvm build --vm-type app`: when the app is missing, OmacVM offers to
+  download it (below) and goes on with the build.
+- Or download `OmacVM-<version>.zip` from the
+  [releases](https://github.com/gillesgoetsch/omacvm/releases), unzip it and
+  open it: it offers to install itself in Applications. Downloaded with a
+  browser, macOS blocks it the first time: click Open Anyway in System
+  Settings › Privacy & Security.
+
+`omacvm update` replaces an older OmacVM.app with the one for its version
+(not while the app is open), and keeps the name it was installed under.
 
 ## What works
 
@@ -44,7 +59,13 @@ are the same as for the other routes; the VM goes into the app's VMs folder
 
 1. It finds the app in /Applications or ~/Applications by its bundle id
    (`org.omacvm.app`, under any name it was installed as). Not installed:
-   it says where to get it (the GitHub release) and stops (exit 3).
+   after asking, it downloads `OmacVM-<version>.zip` (this OmacVM's version)
+   from the GitHub release `v<version>` with curl, checks it against the
+   `.sha256` next to it, and puts it in /Applications (or ~/Applications when
+   /Applications is not writable). curl sets no quarantine attribute, so
+   Gatekeeper does not stop the app. Releases from before the app have no
+   zip: it says so and stops (exit 3). With `--yes` it installs nothing and
+   stops with the command to run (exit 3).
 2. It writes the VM's `vm.env` as the app does (name, CPUs, memory, disk,
    a free SSH port from 52222, user, hostname, timezone, language, keyboard,
    features) and runs the app's `Contents/Resources/scripts/create-vm.sh`
