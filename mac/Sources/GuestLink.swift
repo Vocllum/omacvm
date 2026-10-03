@@ -97,6 +97,7 @@ final class GuestLink {
         var authorized: Bool
         /// Its "vmname" as sent (127.0.0.1 only).
         var vmName: String?
+        let since = Date()
 
         init(id: Int, peer: UInt32, iface: VMInterface, connection: NWConnection) {
             self.id = id
@@ -301,11 +302,15 @@ final class GuestLink {
 
     /// An OmacVM.app guest that says the name of another one is that VM again
     /// (a rebooted VM whose old connection never closed): the old one goes.
+    /// Not when the old one connected in the last 10 s: a reboot takes longer,
+    /// so that is a second VM with the same name (a copied disk), and the two
+    /// would keep replacing each other.
     private func replaceSameName(_ g: Guest, _ messages: [GuestMessage]) {
         for case let .text(t) in messages where t.hasPrefix("vmname ") {
             let name = String(t.dropFirst("vmname ".count))
             g.vmName = name
-            for o in guests.values where o !== g && o.iface == g.iface && o.vmName == name {
+            for o in guests.values where o !== g && o.iface == g.iface && o.vmName == name
+                && Date().timeIntervalSince(o.since) > 10 {
                 Log.info("guest \(g.id) is VM \(o.id) again; dropping \(o.id)")
                 let oc = o.connection
                 oc.cancel()
