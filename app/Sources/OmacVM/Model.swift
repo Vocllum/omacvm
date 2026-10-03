@@ -85,7 +85,7 @@ struct VMConfig: Equatable {
     var timeZone = "UTC"
     var language = "en_US.UTF-8"
     var keyboard = "us"
-    var features = "bridge=off wallpaper=off gestures=off scroll-momentum=off omanotch=off idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=\(Mac.hasNotch ? "on" : "off") mac-clock=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
     var disk: URL { folder.appendingPathComponent("disk.img") }
@@ -158,14 +158,17 @@ struct VMConfig: Equatable {
         return c
     }
 
-    /// The VM the app manages (one for now): the first folder with a vm.env.
+    /// The VM the app manages (one at a time): the one named with --vm NAME,
+    /// else the first folder with a vm.env.
     static func existing() -> VMConfig? {
         let root = Paths.vmsRoot
         let items = (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? []
-        for item in items.sorted(by: { $0.path < $1.path }) {
-            if let c = load(from: item) { return c }
+        let all = items.sorted(by: { $0.path < $1.path }).compactMap { load(from: $0) }
+        let args = CommandLine.arguments
+        if let i = args.firstIndex(of: "--vm"), i + 1 < args.count {
+            return all.first { $0.name == args[i + 1] || $0.folder.lastPathComponent == args[i + 1] }
         }
-        return nil
+        return all.first
     }
 }
 
@@ -270,7 +273,7 @@ enum Settings {
     }
     /// Full screen also covers the strip beside the notch; Omarchy's bar goes there.
     static var useNotch: Bool {
-        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
+        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? Mac.hasNotch }
         set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
     }
 }
