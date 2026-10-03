@@ -24,6 +24,8 @@ TESTS = {
         "start": "benchmarkController.startBenchmark()",
         "done": "(() => { const r = document.querySelector('#results .score');"
                 " return r && document.querySelector('#results.selected') ? r.textContent.trim().split(' ')[0] : '' })()",
+        # Each subtest's score: one at its minimum drags the whole score down.
+        "detail": "(document.querySelector('#results-tables') || document.body).innerText.replace(/\\s+/g, ' ').slice(0, 1500)",
         "timeout": 900,
     },
     # WebGL Aquarium: real 3D load, frames per second with 30,000 fish,
@@ -138,6 +140,8 @@ def main():
         score = dt.js(t["done"])
         if score:
             print(score)
+            if "detail" in t:   # to stderr, for the log
+                print(dt.js(t["detail"]), file=sys.stderr)
             return
     raise SystemExit(f"{sys.argv[1]}: no score after {t['timeout']} s")
 

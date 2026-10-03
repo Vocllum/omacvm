@@ -1,7 +1,7 @@
 #!/bin/bash
 # Power draw of the whole Mac under the same loads, on the Mac itself or with
 # one VM doing the work, to compare routes and estimate battery life.
-#   power-suite.sh [--vm USER@IP] [--seconds N] [--only idle,light,video,cpu,gpu] [OUT.jsonl]
+#   power-suite.sh [--vm USER@IP[:PORT]] [--seconds N] [--only idle,light,video,cpu,gpu] [OUT.jsonl]
 # Run on the Mac, with nothing else open (other VMs and their apps quit, the
 # VM under test in full screen on the built-in display, fixed brightness).
 # Loads, each for N seconds (default 180, plus up to a minute: see power.sh)
@@ -35,17 +35,19 @@ swiftc -O -o "$BR" "$here/brightness.swift" 2>/dev/null || BR=""
 caffeinate -d -i -w $$ &
 say() { printf '\033[1;32m==>\033[0m %s\n' "$*" >&2; }
 K=(-i "$HOME/.ssh/omacvm" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR)
+# USER@HOST:PORT (OmacVM.app: root@127.0.0.1:52222)
+if [[ $VM == *:* ]]; then K+=(-p "${VM##*:}"); VM=${VM%:*}; fi
 CHROME_MAC="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PORT=9339
 
 # Run a command as the desktop user in the VM's session (or on the Mac).
 in_vm() {
-  ssh "${K[@]}" "${VM#*@}" "U=\$(id -nu 1000); SIG=\$(ls -t /run/user/1000/hypr | head -1)
+  ssh "${K[@]}" "$VM" "U=\$(id -nu 1000); SIG=\$(ls -t /run/user/1000/hypr | head -1)
     sudo -u \$U env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-1 HYPRLAND_INSTANCE_SIGNATURE=\$SIG HOME=/home/\$U $1"
 }
 chrome_start() {   # url
   if [[ -n $VM ]]; then
-    in_vm "bash -c 'P=/tmp/omacvm-power; rm -rf \$P; mkdir -p \$P; setsid google-chrome-stable --user-data-dir=\$P --remote-debugging-port=$PORT --no-first-run --no-default-browser-check --start-fullscreen \"$1\" >/dev/null 2>&1 &'"
+    in_vm "bash -c 'P=/tmp/omacvm-power; rm -rf \$P; mkdir -p \$P; setsid google-chrome-stable --ozone-platform=wayland --user-data-dir=\$P --remote-debugging-port=$PORT --no-first-run --no-default-browser-check --start-fullscreen \"$1\" >/dev/null 2>&1 &'"
   else
     P=$(mktemp -d); "$CHROME_MAC" --user-data-dir="$P" --remote-debugging-port=$PORT --no-first-run --no-default-browser-check --start-fullscreen "$1" >/dev/null 2>&1 &
   fi
@@ -90,9 +92,9 @@ if want cpu; then
 def spin(_):
     while True: pass
 with m.get_context("fork").Pool(m.cpu_count()) as p: p.map(spin, range(m.cpu_count()))'
-  if [[ -n $VM ]]; then ssh "${K[@]}" "${VM#*@}" "python3 -c '$loop'" & else python3 -c "$loop" & fi
+  if [[ -n $VM ]]; then ssh "${K[@]}" "$VM" "python3 -c '$loop'" & else python3 -c "$loop" & fi
   ld=$!; measure cpu
-  if [[ -n $VM ]]; then ssh "${K[@]}" "${VM#*@}" "pkill -f 'multiprocessing as [m]'" || true; fi
+  if [[ -n $VM ]]; then ssh "${K[@]}" "$VM" "pkill -f 'multiprocessing as [m]'" || true; fi
   kill $ld 2>/dev/null || true; pkill -f 'multiprocessing as [m]' || true; wait $ld 2>/dev/null || true
 fi
 if want gpu; then

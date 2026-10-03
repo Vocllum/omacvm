@@ -42,7 +42,8 @@ def arg(name, default):
 
 def main():
     port = int(arg("--port", 9222))
-    video = arg("--video", "LXb3EKWsInQ")   # "COSTA RICA IN 4K 60fps HDR (ULTRA HD)"
+    # SDR on purpose: HDR video makes the Mac's display brighter (more power) than a VM's.
+    video = arg("--video", "aqz-KE-bpKQ")   # "Big Buck Bunny 60fps 4K", Blender Foundation
     seconds = int(arg("--seconds", 60))
     # YouTube refuses embeds without a page around them (error 153): serve one.
     page = (f'<!doctype html><body style="margin:0;background:#000">'

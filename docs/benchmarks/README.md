@@ -4,11 +4,6 @@ How OmacVM measures the three routes against the Mac itself, so anyone can run
 the same tests and get numbers that compare. The results so far are at the
 end. The tools are in [`src/bench/`](../../src/bench).
 
-> [!NOTE]
-> **In progress.** The new runs (Google Chrome on both sides, 16 CPUs and 48 GB
-> per VM) are not complete. Older numbers in the README used another method and
-> don't compare with these.
-
 ## What we measure
 
 | Test | What it tells you | Mac | VMs |
@@ -160,41 +155,43 @@ browser.geekbench.com and prints only a link. `bench.sh` saves the link;
 scores from the page. Geekbench's site turns away plain downloads, so curl
 does not work. Your results are public on Geekbench's site.
 
-## Results so far
+## Results
 
-2026-10-03, MacBook Pro M4 Max, macOS 15.7.4, Google Chrome 154. Medians of 3
-runs. **In progress:** empty cells are not measured yet.
+2026-10-03, MacBook Pro 16" M4 Max, macOS 15.7.4, 16 CPUs and 48 GB per VM, in
+full screen on the built-in display (3456x2160 at 120 Hz), Google Chrome 154,
+OmacVM 2.3.0. Parallels Desktop 27.0.2 (Pro trial), UTM 5.0.6, VMware Fusion
+26.0.1, OmacVM.app (preview, QEMU 11.1.1 from try-omarchy).
 
-| | Mac | Parallels | UTM | VMware Fusion 26.0.1 |
-|---|---|---|---|---|
-| Speedometer 3.1 | 62.9 | to be measured again with Chrome | | 43.9 (70 %) |
-| MotionMark 1.3.1 | 5865 | | | |
-| WebGL Aquarium (fps) | | | | |
-| Geekbench 7 single-core | | | | |
-| Geekbench 7 multi-core | | | | |
-| Geekbench 7 GPU | | ✗ | ✗ | ✗ |
-| glmark2 | ✗ | | | |
+| | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
+|---|---|---|---|---|---|
+| Geekbench 7 single-core | 3267 | 3164 | 2944 | 3054 | 3183 |
+| Geekbench 7 multi-core | 27290 | 26218 | 24414 | 27037 | 26984 |
+| Speedometer 3.1 (median of 3) | 62.9 | 42.4 | 32.9 | 44.4 | 43.8 |
+| MotionMark 1.3.1 | 5865 | no stable result | no stable result | 2368 | no stable result |
+| glmark2 | no macOS version | 7306 | 964 | 1813 | 1017 |
+| Geekbench 7 GPU | 207885 (Metal) | ✗ | ✗ | ✗ | ✗ |
+| YouTube 4K decoder | AV1, hardware | VP9, CPU | VP9, CPU | VP9, CPU (1.6 % dropped) | VP9, CPU |
 
-The single runs:
+Power draw of the whole Mac (W), 3 minutes per load, brightness 50 %:
 
-| Test | Where | Runs | Median |
-|---|---|---|---|
-| Speedometer 3.1 | Mac | | 62.9 |
-| MotionMark 1.3.1 | Mac | 5973, 5865, 5854 | 5865 |
-| Speedometer 3.1 | Fusion, Chrome 154 in the VM | 43.9, 44.4, 43.2 | 43.9 |
+| | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
+|---|---|---|---|---|---|
+| Idle | 6.1 | 5.7 | 15.2 | 5.5 | 6.2 |
+| Reading (light) | 6.6 | 7.3 | 19.3 | 5.9 | 6.8 |
+| YouTube 4K (SDR) | 8.0 | 24.2 | 39.2 | 20.4 | 21.3 |
+| Every core busy | 75.3 | 72.2 | 61.3 | 73.9 | 71.0 |
+| WebGL Aquarium, 30,000 fish | 35.6 | 27.4 | 29.1 | 37.3 | 27.2 |
 
-Not counted: Parallels' Speedometer 35.4 was measured with Arch's Chromium 153
-in the VM, not Chrome. It will be measured again.
+Notes:
 
-### Older numbers
-
-The README's "How fast" table and the Fusion numbers in
-[experiments/vmware-fusion.md](../experiments/vmware-fusion.md) were measured
-before this method: partly headless, partly with Arch's Chromium in the VM, on
-other VM sizes and, for Fusion, on an M4 Mac mini. Don't mix them with the
-table above.
-
-## Draft README section
-
-The comparison of the three routes for the README, with placeholders for these
-numbers, is in [routes/comparison-draft.md](../routes/comparison-draft.md).
+- The VMs' idle can be a little below the Mac's: on the Mac the desktop and
+  Terminal showed, in the VMs Omarchy's dark desktop, and this Mac's mini-LED
+  display draws less for dark content.
+- The WebGL row is not a GPU efficiency number: each route draws a different
+  number of frames per second.
+- An HDR video would make the Mac's own run unfair: macOS drives the display
+  brighter for HDR. `video-bench.py` uses an SDR video (16.4 W with HDR on the
+  Mac, 8.0 W with SDR).
+- UTM's idle and reading numbers come from a bug in UTM's QEMU
+  ([finding 15](../troubleshooting.md#15-utm-uses-15-w-while-omarchy-sits-idle)).
+- MotionMark: [finding 16](../troubleshooting.md#16-motionmark-gives-no-stable-result).

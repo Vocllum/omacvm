@@ -24,6 +24,8 @@ else than the cause. Recipes and the general failure table are in
 | 12 | UTM | [Moving a UTM VM deletes it](#12-utm-moving-a-vm-and-changing-its-config) |
 | 13 | Fusion | [Security review of PR #1](#13-security-review-of-the-fusion-route-pr-1) |
 | 14 | UTM | [Chrome has no GPU, then WebGL comes out empty](#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty) |
+| 15 | UTM | [UTM uses 15 W while Omarchy sits idle](#15-utm-uses-15-w-while-omarchy-sits-idle) |
+| 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -245,3 +247,32 @@ on the branch.
 - **Note:** video is decoded on the CPU: UTM's VA-API lists no decode
   profiles. Chrome's "Video Decode: Hardware accelerated" is only a flag.
 - **Where:** `src/utm/guest/install.sh`, `src/vm/utm.sh`, `src/cmd/apply.sh`.
+
+## 15. UTM uses 15 W while Omarchy sits idle
+
+- **Symptom:** with an idle Omarchy desktop on UTM, the whole Mac draws about
+  15 W; Parallels, Fusion and OmacVM.app draw 5.5 to 6.2 W. One of UTM's QEMU
+  threads runs at 100 % on the Mac while every CPU in Linux is idle.
+- **Cause:** a bug in UTM's QEMU (`hvf_wfi()`): a virtual CPU only sleeps if
+  its next timer is more than 2 ms away. Linux ticks every millisecond
+  (HZ=1000) on a CPU that hasn't stopped its tick, so that CPU spins in and
+  out of the guest instead of sleeping: up to 170,000 idle calls a second.
+  Fixed in newer QEMU (OmacVM.app's runtime has it) and in
+  [qemu-utm#5](https://github.com/helixml/qemu-utm/pull/5); UTM 5.0.6 still
+  ships the old code.
+- **Check:** in the VM, `grep -E "^cpu: |idle_calls" /proc/timer_list` shows
+  millions of idle calls on some CPUs; on the Mac, `ps -M -p $(pgrep -x
+  QEMULauncher)` shows one thread near 100 %.
+- **Fix:** none in OmacVM yet; it needs a fixed UTM. A guest kernel with
+  HZ=250 (4 ms ticks) would avoid it and is the next thing to try.
+
+## 16. MotionMark gives no stable result
+
+- **Symptom:** MotionMark 1.3.1 scores 1 to 4 on Parallels, UTM and
+  OmacVM.app, with ±100 % to ±1900 % per subtest; every subtest stays at its
+  minimum. On Fusion it measures normally (2368 at 120 fps, ±9 %).
+- **Cause:** MotionMark raises each scene's complexity until the frame rate
+  drops, which needs steady frame timing. Chrome's frames on the virgl routes
+  come too unevenly for that, even at the lowest complexity. Animations and
+  scrolling still look smooth in use; the benchmark can't settle.
+- **Where:** `src/bench/browser-bench.py` prints the subtest breakdown.
