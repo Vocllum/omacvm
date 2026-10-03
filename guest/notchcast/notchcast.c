@@ -16,6 +16,9 @@
 // list) sets the Mac's address explicitly. Each
 // change is sent as the bounding box of changed pixels, LZ4-compressed. A full
 // frame is sent after every (re)connect.
+// OmacVM.app's VMs (OMACVM_VM_TYPE=app) reach the Mac's 127.0.0.1, where any
+// Mac program could listen: there both sides first prove they know OmacVM's
+// Bridge token (see handshake), and the token itself is never sent.
 //
 // Input/control: the helper sends text lines; they are validated and passed to
 // the bar's "notchbar" IPC target (`qs ipc call`), never through a shell.
@@ -43,8 +46,10 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/mman.h>
+#include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -173,10 +178,13 @@ static void send_rect_locked(const uint8_t *src, uint32_t x, uint32_t y, uint32_
 }
 
 // Caller holds `lock`.
-static void send_text_locked(const char *s) {
+static int send_text_fd(int fd, const char *s) {
     struct text_header th = {.magic = TEXT_MAGIC, .len = (uint32_t)strlen(s)};
-    if (sock_fd >= 0 && (write_all(sock_fd, &th, sizeof th) || write_all(sock_fd, s, th.len)))
-        drop_socket_locked();
+    return write_all(fd, &th, sizeof th) || write_all(fd, s, th.len) ? -1 : 0;
+}
+
+static void send_text_locked(const char *s) {
+    if (sock_fd >= 0 && send_text_fd(sock_fd, s)) drop_socket_locked();
 }
 
 static void send_text(const char *s) {
@@ -519,17 +527,17 @@ static void save_strip_height(int h) {
 #define OMACVM_ENV "/etc/omacvm/env"
 #endif
 
-// The VM's name in its app, base64, as OmacVM writes it (OMACVM_VM_NAME_B64=…
-// in /etc/omacvm/env; the last one counts). 0 when there is none.
-static int vm_name_b64(char *out, size_t size) {
+// A value from OmacVM's /etc/omacvm/env (KEY=value, maybe quoted; the last
+// one counts). 0 when there is none.
+static int omacvm_env(const char *key, char *out, size_t size) {
     char line[512];
     int found = 0;
+    size_t kl = strlen(key);
     FILE *f = fopen(OMACVM_ENV, "r");
     if (!f) return 0;
     while (fgets(line, sizeof line, f)) {
-        static const char key[] = "OMACVM_VM_NAME_B64=";
-        if (strncmp(line, key, sizeof key - 1)) continue;
-        char *v = line + sizeof key - 1;
+        if (strncmp(line, key, kl) || line[kl] != '=') continue;
+        char *v = line + kl + 1;
         v[strcspn(v, "\r\n")] = 0;
         size_t n = strlen(v);
         if (n >= 2 && (*v == '"' || *v == '\'') && v[n - 1] == *v) {
@@ -537,29 +545,192 @@ static int vm_name_b64(char *out, size_t size) {
             v++;
             n -= 2;
         }
-        found = n > 0 && n < size && strspn(v, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") == n;
+        found = n > 0 && n < size;
         if (found) memcpy(out, v, n + 1);
     }
     fclose(f);
     return found;
 }
 
+// The VM's name in its app, base64, as OmacVM writes it (OMACVM_VM_NAME_B64).
+static int vm_name_b64(char *out, size_t size) {
+    return omacvm_env("OMACVM_VM_NAME_B64", out, size) &&
+           strspn(out, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=") == strlen(out);
+}
+
+// ------------------------------------------------------------ handshake --
 // OmacVM.app's VMs reach the helper on the Mac's 127.0.0.1, where any Mac
-// program could connect, so the helper wants OmacVM's Bridge token as the
-// first message ("auth <token>"); other helpers ignore it. Caller holds lock.
-static void send_auth_locked(void) {
+// program could connect, or listen in the helper's place. So both sides prove
+// they know OmacVM's Bridge token, the helper first, and the token itself
+// never goes over the wire:
+//   challenge <guest nonce>      from here, 32 hex digits
+//   proof <mac nonce> <proof>    the helper: HMAC-SHA256(token,
+//                                "omanotch mac <addr> <guest nonce> <mac nonce>"), hex;
+//                                <addr>: the Mac address it accepted on
+//   proof <proof>                from here, the same with "vm"
+// <addr> must be 127.0.0.1, so a proof that a listener there fetched from a
+// helper on another address fails. Other VMs skip this: there the VM network
+// is the check.
+
+// SHA-256 (FIPS 180-4) and HMAC, just for the handshake.
+struct sha256 {
+    uint32_t h[8];
+    uint64_t len;
+    uint8_t buf[64];
+    size_t n;
+};
+
+static const uint32_t sha256_k[64] = {
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+};
+
+#define ROR(x, n) ((x) >> (n) | (x) << (32 - (n)))
+
+static void sha256_block(struct sha256 *s, const uint8_t *p) {
+    uint32_t w[64], v[8];
+    for (int i = 0; i < 16; i++)
+        w[i] = (uint32_t)p[4 * i] << 24 | (uint32_t)p[4 * i + 1] << 16 | (uint32_t)p[4 * i + 2] << 8 | p[4 * i + 3];
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = ROR(w[i - 15], 7) ^ ROR(w[i - 15], 18) ^ w[i - 15] >> 3;
+        uint32_t s1 = ROR(w[i - 2], 17) ^ ROR(w[i - 2], 19) ^ w[i - 2] >> 10;
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    memcpy(v, s->h, sizeof v);
+    for (int i = 0; i < 64; i++) {
+        uint32_t t1 = v[7] + (ROR(v[4], 6) ^ ROR(v[4], 11) ^ ROR(v[4], 25)) + ((v[4] & v[5]) ^ (~v[4] & v[6])) +
+                      sha256_k[i] + w[i];
+        uint32_t t2 = (ROR(v[0], 2) ^ ROR(v[0], 13) ^ ROR(v[0], 22)) + ((v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]));
+        memmove(v + 1, v, 7 * sizeof *v);
+        v[4] += t1;
+        v[0] = t1 + t2;
+    }
+    for (int i = 0; i < 8; i++) s->h[i] += v[i];
+}
+
+static void sha256_init(struct sha256 *s) {
+    static const uint32_t h0[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    memcpy(s->h, h0, sizeof h0);
+    s->len = 0;
+    s->n = 0;
+}
+
+static void sha256_update(struct sha256 *s, const void *data, size_t len) {
+    const uint8_t *p = data;
+    s->len += len;
+    while (len) {
+        size_t k = 64 - s->n < len ? 64 - s->n : len;
+        memcpy(s->buf + s->n, p, k);
+        s->n += k;
+        p += k;
+        len -= k;
+        if (s->n == 64) {
+            sha256_block(s, s->buf);
+            s->n = 0;
+        }
+    }
+}
+
+static void sha256_final(struct sha256 *s, uint8_t out[32]) {
+    uint64_t bits = s->len * 8;
+    uint8_t pad = 0x80, zero = 0, lenb[8];
+    sha256_update(s, &pad, 1);
+    while (s->n != 56) sha256_update(s, &zero, 1);
+    for (int i = 0; i < 8; i++) lenb[i] = (uint8_t)(bits >> (56 - 8 * i));
+    sha256_update(s, lenb, 8);
+    for (int i = 0; i < 32; i++) out[i] = (uint8_t)(s->h[i / 4] >> (24 - 8 * (i % 4)));
+}
+
+// HMAC-SHA256(key, msg) in hex.
+static void hmac_sha256_hex(const char *key, const char *msg, char out[65]) {
+    uint8_t k[64] = {0}, pad[64], inner[32], mac[32];
+    size_t kl = strlen(key);
+    struct sha256 s;
+    if (kl > 64) {
+        sha256_init(&s);
+        sha256_update(&s, key, kl);
+        sha256_final(&s, k);
+    } else {
+        memcpy(k, key, kl);
+    }
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
+    sha256_init(&s);
+    sha256_update(&s, pad, 64);
+    sha256_update(&s, msg, strlen(msg));
+    sha256_final(&s, inner);
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5c;
+    sha256_init(&s);
+    sha256_update(&s, pad, 64);
+    sha256_update(&s, inner, 32);
+    sha256_final(&s, mac);
+    for (int i = 0; i < 32; i++) snprintf(out + 2 * i, 3, "%02x", mac[i]);
+}
+
+// The Bridge's token as OmacVM puts it into the VM; 0 when there is none.
+static int bridge_token(char *tok, size_t size) {
     const char *home = getenv("HOME");
-    if (!home) return;
-    char path[512], tok[160] = "", authmsg[200];
+    char path[512];
+    if (!home) return 0;
     snprintf(path, sizeof path, "%s/.config/omacvm-bridge/token", home);
     FILE *t = fopen(path, "r");
-    if (!t) return;
-    if (!fgets(tok, sizeof tok, t)) tok[0] = 0;
+    if (!t) return 0;
+    if (!fgets(tok, (int)size, t)) tok[0] = 0;
     fclose(t);
     tok[strcspn(tok, "\r\n")] = 0;
-    if (strlen(tok) < 32 || strspn(tok, "0123456789abcdefABCDEF") != strlen(tok)) return;
-    snprintf(authmsg, sizeof authmsg, "auth %s", tok);
-    send_text_locked(authmsg);
+    return strlen(tok) >= 32 && strspn(tok, "0123456789abcdefABCDEF") == strlen(tok);
+}
+
+static int proof_ok(const char *a, const char *b) {  // constant time, 64 hex digits each
+    unsigned char diff = 0;
+    for (int i = 0; i < 64; i++) diff |= (unsigned char)(a[i] ^ b[i]);
+    return diff == 0;
+}
+
+// The handshake above on a fresh connection; 0 once both proofs are through.
+static int handshake(int fd, const char *tok) {
+    uint8_t r[16];
+    char gn[33], mn[33], got[65], want[65], mine[65], msg[160], line[256];
+    if (getrandom(r, sizeof r, 0) != (ssize_t)sizeof r) return -1;
+    for (int i = 0; i < 16; i++) snprintf(gn + 2 * i, 3, "%02x", r[i]);
+    snprintf(msg, sizeof msg, "challenge %s", gn);
+    if (send_text_fd(fd, msg)) return -1;
+    struct timeval tv = {.tv_sec = 3};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    size_t n = 0;
+    while (n < sizeof line - 1 && !memchr(line, '\n', n)) {
+        ssize_t k = recv(fd, line + n, sizeof line - 1 - n, 0);
+        if (k < 0 && errno == EINTR) continue;
+        if (k <= 0) {
+            LOG("the helper answered no proof (Omanotch on the Mac from before the handshake? update it)");
+            return -1;
+        }
+        n += (size_t)k;
+    }
+    line[n] = 0;
+    line[strcspn(line, "\n")] = 0;
+    if (sscanf(line, "proof %32[0-9a-f] %64[0-9a-f]", mn, got) != 2 || strlen(mn) != 32 || strlen(got) != 64) {
+        LOG("the helper answered no proof: not talking to it");
+        return -1;
+    }
+    snprintf(msg, sizeof msg, "omanotch mac 127.0.0.1 %s %s", gn, mn);
+    hmac_sha256_hex(tok, msg, want);
+    if (!proof_ok(got, want)) {
+        LOG("the helper did not prove it knows the Bridge's token: not talking to it");
+        return -1;
+    }
+    snprintf(msg, sizeof msg, "omanotch vm 127.0.0.1 %s %s", gn, mn);
+    hmac_sha256_hex(tok, msg, mine);
+    snprintf(msg, sizeof msg, "proof %s", mine);
+    tv.tv_sec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    return send_text_fd(fd, msg);
 }
 
 // Tells the helper which hypervisor this guest runs in, so it only takes this
@@ -881,6 +1052,15 @@ static void *net_thread(void *unused) {
             usleep(2000 * 1000);
             continue;
         }
+        // OmacVM.app: the handshake needs the Bridge's token.
+        char type[16] = "", tok[160] = "";
+        int app = omacvm_env("OMACVM_VM_TYPE", type, sizeof type) && !strcmp(type, "app");
+        if (app && !bridge_token(tok, sizeof tok)) {
+            static int warned;
+            if (!warned++) LOG("no Bridge token yet (~/.config/omacvm-bridge/token): waiting for it");
+            usleep(2000 * 1000);
+            continue;
+        }
         struct sockaddr_in sa = {.sin_family = AF_INET, .sin_port = htons((uint16_t)cfg_port),
                                  .sin_addr = hosts[attempt++ % (unsigned)nh]};
         int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -902,10 +1082,16 @@ static void *net_thread(void *unused) {
         inet_ntop(AF_INET, &sa.sin_addr, ip, sizeof ip);
         LOG("connected to %s:%d", ip, cfg_port);
         double connected_at = now_ms();
+        int refused = app && handshake(fd, tok);
+        explicit_bzero(tok, sizeof tok);
+        if (refused) {
+            close(fd);
+            sleep(3);
+            continue;
+        }
 
         pthread_mutex_lock(&lock);
         sock_fd = fd;
-        send_auth_locked();
         if (session_locked) send_text_locked("lock 1");
         else if (have_frame) send_rect_locked(prev, 0, 0, W, H);  // keyframe
         pthread_mutex_unlock(&lock);
