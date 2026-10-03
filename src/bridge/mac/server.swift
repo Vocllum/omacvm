@@ -84,6 +84,17 @@ final class Hub {
   private let feeds: [Feed]
   private var clients: [Int32: String] = [:]
   private var external = Set<Int32>()   // clients that asked for external OSD events
+  // One read source per client: a client never sends after its request, so
+  // readable means it closed (or reset). Without this a closed client stays
+  // counted until the next write fails, and writes are rare now.
+  private var watchers: [Int32: DispatchSourceRead] = [:]
+
+  private func drop(_ fd: Int32) {
+    guard let peer = clients.removeValue(forKey: fd) else { return }
+    external.remove(fd)
+    if let w = watchers.removeValue(forKey: fd) { w.cancel() } else { close(fd) }   // the cancel handler closes it
+    log("events: \(peer) disconnected (\(clients.count) left)")
+  }
   private var lastSend = Date()
   private var timer: DispatchSourceTimer?
   /// Called (on the hub's queue) when the first client asks for external OSD
@@ -148,10 +159,7 @@ final class Hub {
     lastSend = Date()
     let data = Data(msg.utf8)
     let hadExternal = !external.isEmpty
-    for (fd, peer) in clients where !writeAll(fd, data) {
-      close(fd); clients[fd] = nil; external.remove(fd)
-      log("events: \(peer) disconnected (\(clients.count) left)")
-    }
+    for (fd, _) in clients where !writeAll(fd, data) { drop(fd) }
     if hadExternal && external.isEmpty { onExternalOSD?(false) }
   }
 
@@ -163,6 +171,19 @@ final class Hub {
       let head = httpHead(200, "text/event-stream", length: nil, extra: "X-Accel-Buffering: no\r\n")
       guard writeAll(fd, head + Data(first.utf8)) else { close(fd); return }
       clients[fd] = peer
+      let w = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
+      w.setEventHandler { [self] in
+        var b = [UInt8](repeating: 0, count: 256)
+        let n = recv(fd, &b, b.count, MSG_DONTWAIT)
+        if n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+          let hadExternal = !external.isEmpty
+          drop(fd)
+          if hadExternal && external.isEmpty { onExternalOSD?(false) }
+        }
+      }
+      w.setCancelHandler { close(fd) }
+      watchers[fd] = w
+      w.resume()
       if externalOSD { external.insert(fd); if external.count == 1 { onExternalOSD?(true) } }
       log("events: \(peer) connected (\(clients.count) client\(clients.count == 1 ? "" : "s"))")
     }
