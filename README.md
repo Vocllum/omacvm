@@ -141,10 +141,11 @@ and a pacman hook builds it again after every Hyprland update (10 to 20
 minutes, inside `omarchy update`).
 
 What works so far: the desktop and apps on the GPU, live resolution changes,
-the Mac's display mode from boot, every `omacvm check` line. Not there yet:
-more than one display, the clipboard (VMware's tools are not in Arch Linux
-ARM), Omanotch; trackpad gestures, media keys and the Bridge are written but
-not yet tried on a Mac. The plan and the test results:
+the Mac's display mode from boot, OmacVM Bridge (Wi-Fi, Bluetooth, audio,
+Night Shift, wallpaper) and the media keys in full screen, every `omacvm
+check` line. Not there yet: more than one display, the clipboard (VMware's
+tools are not in Arch Linux ARM), Omanotch; trackpad gestures are written but
+not yet tried. The plan and the test results:
 [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
 
 ## Requirements
