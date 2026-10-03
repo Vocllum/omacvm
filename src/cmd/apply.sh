@@ -132,6 +132,7 @@ COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycac
 fargs=""
 for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
 [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
+on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 
 if [[ $TYPE == parallels ]]; then

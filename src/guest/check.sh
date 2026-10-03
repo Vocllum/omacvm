@@ -48,6 +48,7 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
+MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -218,6 +219,12 @@ if [[ $IDLE_LOCK == off ]]; then
   else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
 [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
+if [[ $MAC_CLOCK == on ]]; then
+  f=$(jq -r '.bar.layout.right[-1] | select(.id == "omarchy.clock") | .format' "$H/.config/omarchy/shell.json" 2>/dev/null)
+  if [[ -n $f ]]; then ok "the Mac's clock" "far right, $f"
+  elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
+  else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
+fi
 
 section "Omanotch"
 if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then

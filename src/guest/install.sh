@@ -3,9 +3,9 @@
 # Mac, in Parallels or UTM. Run as root inside the VM from a copy of this
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
-#                    [--display WxH@Hz] [--feature NAME=on|off]...
+#                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, idle-lock, autologin, thp-kernel) with its defaults; a feature
+# omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
 # --thp-kernel and --autologin still work.
@@ -15,7 +15,7 @@
 # Needs, for the bridge, the token from the Mac in ~/.config/omacvm-bridge/token.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-U=""; KB="us"; TYPE=""; MODE=""
+U=""; KB="us"; TYPE=""; MODE=""; CLOCK_FMT=""
 FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
@@ -29,6 +29,7 @@ while (( $# )); do
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
     --host) HOST_GIVEN=$2; shift 2 ;;
+    --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
     --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
     --no-thp-kernel) SET[thp-kernel]=off; shift ;;
     --thp-kernel) SET[thp-kernel]=on; shift ;;
@@ -129,6 +130,13 @@ fi
 # turning the feature back on never undoes a Stay Awake the user chose.
 STAY=$H/.local/state/omarchy/indicators/stay-awake
 MARK=$H/.local/state/omacvm/stay-awake-by-omacvm
+# The Mac's clock: --clock-format-b64 comes from clock/mac-clock.swift (apply.sh).
+if [[ ${F[mac-clock]} == on ]]; then
+  if [[ -n $CLOCK_FMT ]]; then log "clock"; "$R/clock/guest/clock.sh" "$U" on "$CLOCK_FMT"; fi
+else
+  "$R/clock/guest/clock.sh" "$U" off
+fi
+
 if [[ ${F[idle-lock]} == off ]]; then
   log "idle screensaver and lock: off (the Mac's lock protects the VM)"
   install -d -o "$U" -g "$U" "$(dirname "$STAY")" "$(dirname "$MARK")"
