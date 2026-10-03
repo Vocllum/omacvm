@@ -249,7 +249,7 @@ elif pacman -Q linux-aarch64-thp >/dev/null 2>&1; then
   # the VM no longer runs it (this run, or the next one after a reboot).
   G=/etc/default/grub
   sed -i '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' $G
-  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64"' >> $G
+  grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/Image"' >> $G   # linux-aarch64's
   if [[ $(uname -r) == *thp* ]]; then
     log "memory-optimized kernel: off, Arch Linux ARM's own kernel from the next boot"
   else

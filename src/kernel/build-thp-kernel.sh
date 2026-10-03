@@ -18,7 +18,7 @@ G=/etc/default/grub
 # pointed GRUB back at the stock kernel).
 grub_default_thp() {
   grep -qx 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' $G && return 0
-  sed -i '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64\(-thp\)\{0,1\}"$/d' $G
+  sed -i -e '/^GRUB_TOP_LEVEL="\/boot\/vmlinuz-linux-aarch64-thp"$/d' -e '/^GRUB_TOP_LEVEL="\/boot\/Image"$/d' $G
   grep -q '^GRUB_TOP_LEVEL=' $G || echo 'GRUB_TOP_LEVEL="/boot/vmlinuz-linux-aarch64-thp"' >> $G
   grep -q '^GRUB_DISABLE_LINUX_UUID=' $G || echo 'GRUB_DISABLE_LINUX_UUID=false' >> $G
   grub-mkconfig -o /boot/grub/grub.cfg 2>&1 | tail -2
