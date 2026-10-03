@@ -7,6 +7,9 @@ struct StripGeometry: Equatable {
     /// Camera housing, as x offsets from the left edge of the display.
     var notchLeft: CGFloat
     var notchRight: CGFloat
+    /// The camera housing's height (the display's top safe-area inset), in
+    /// points; a little less than the strip (the menu bar's height).
+    var notchHeight: CGFloat
     /// The VM's full-screen window on the built-in display.
     var windowID: CGWindowID
     /// App that owns it ("Parallels Desktop", "UTM").
@@ -59,6 +62,7 @@ enum StripDetector {
             return StripGeometry(frame: frame,
                                  notchLeft: left.maxX - screen.frame.minX,
                                  notchRight: right.minX - screen.frame.minX,
+                                 notchHeight: screen.safeAreaInsets.top,
                                  windowID: CGWindowID((w[kCGWindowNumber as String] as? Int) ?? 0),
                                  owner: owner,
                                  ownerPID: pid_t((w[kCGWindowOwnerPID as String] as? Int) ?? 0),
