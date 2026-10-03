@@ -86,7 +86,7 @@ while (( $# )); do
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,21s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,26s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --no-*) feature_flag "${1#--no-}" off; shift ;;
     --*) feature_flag "${1#--}" on; shift ;;
     *) usage "unknown option $1 (see --help)" ;;
@@ -398,7 +398,7 @@ if (( PLAN && JSON )); then
     printf '%s"%s": %s' "$( ((k)) && echo ', ')" "${FEATS[$k]}" "$( ((FEATS[k+1])) && echo true || echo false)"
     cmd+=" --feature ${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)"
   done
-  printf '},\n  "minutes": "30-70",\n  "needs_human": ['
+  printf '},\n  "minutes": "%s",\n  "needs_human": [' "$([[ $TYPE == fusion ]] && echo 45-85 || echo 30-70)"
   first=1
   while IFS= read -r step; do
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0

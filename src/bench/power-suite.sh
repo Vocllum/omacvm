@@ -15,7 +15,8 @@
 # and read after it ("brightness" in each line: if it moved, the Mac's
 # automatic brightness is on; turn it off in System Settings > Displays).
 # In a VM it needs Google Chrome (install-chrome.sh) and this folder in
-# /opt/omacvm-bench; SSH as root with ~/.ssh/omacvm. Measures with power.sh,
+# /usr/local/share/omacvm/bench (omacvm apply or update puts it there); SSH as
+# root with ~/.ssh/omacvm. Measures with power.sh,
 # so don't touch the Mac meanwhile, and keep other programs quiet.
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -39,6 +40,7 @@ K=(-i "$HOME/.ssh/omacvm" -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKn
 if [[ $VM == *:* ]]; then K+=(-p "${VM##*:}"); VM=${VM%:*}; fi
 CHROME_MAC="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 PORT=9339
+VM_BENCH=/usr/local/share/omacvm/bench   # where omacvm apply copies src/bench
 
 # Run a command as the desktop user in the VM's session (or on the Mac).
 in_vm() {
@@ -67,10 +69,13 @@ measure() {   # label: settle, then power.sh; prints and appends one JSON line
   sed "s/^{/{\"where\": \"${VM:-mac}\", \"brightness\": $b, /" <<<"$line" | tee -a "$OUT"
 }
 serve_reading() {   # -> URL of pages/reading.html where Chrome runs
-  if [[ -n $VM ]]; then echo "file:///opt/omacvm-bench/pages/reading.html"
+  if [[ -n $VM ]]; then echo "file://$VM_BENCH/pages/reading.html"
   else echo "file://$here/pages/reading.html"; fi
 }
 
+if [[ -n $VM ]] && { want light || want video; } && ! ssh "${K[@]}" "$VM" "test -f $VM_BENCH/pages/reading.html -a -f $VM_BENCH/video-bench.py" </dev/null; then
+  echo "power-suite.sh: $VM_BENCH not found in the VM (no SSH, or run omacvm update first)" >&2; exit 1
+fi
 if want idle; then say "idle"; measure idle; fi
 if want light; then
   say "light: scrolling text"; chrome_start "$(serve_reading)"; measure light; chrome_stop
@@ -78,7 +83,7 @@ fi
 if want video; then
   say "video: YouTube 4K"; chrome_start about:blank
   if [[ -n $VM ]]; then
-    in_vm "python3 /opt/omacvm-bench/video-bench.py --port $PORT --seconds $((SECS + 150))" > /tmp/omacvm-video.json &
+    in_vm "python3 $VM_BENCH/video-bench.py --port $PORT --seconds $((SECS + 150))" > /tmp/omacvm-video.json &
   else
     python3 "$here/video-bench.py" --port $PORT --seconds $((SECS + 150)) > /tmp/omacvm-video.json &
   fi

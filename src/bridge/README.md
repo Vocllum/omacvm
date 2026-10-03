@@ -3,12 +3,12 @@
 The Mac's Wi-Fi, Bluetooth, audio, media keys and display, inside the Omarchy
 VM. The VM only has a virtual Ethernet card and a virtual sound card; the bridge is a
 small Mac menu-bar app that serves the real thing as JSON over the private
-VM network (Parallels or UTM) and pushes every change as Server-Sent Events.
+VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-Sent Events.
 
 | Part | Where |
 |---|---|
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
-| Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network) and `192.168.64.1` (UTM's), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
+| Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network), `192.168.64.1` (UTM's) and the `.1` of VMware Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in `/Library/Preferences/VMware Fusion/networking`), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
 | Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`) |
@@ -187,7 +187,7 @@ off from the VM keeps the API reachable (tested), so it can switch it back on.
 
 ## Media keys
 
-While **Parallels or UTM is frontmost with the VM covering a whole display**, volume
+While **Parallels, UTM or VMware Fusion is frontmost with the VM covering a whole display**, volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
 and shown by Omarchy's own OSD in the VM. Anything else, or any key while the

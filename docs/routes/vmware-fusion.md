@@ -12,9 +12,10 @@ breaks. The plan and test log from when the route was built is in
   The guest reports 120 Hz.
 - Stock Omarchy shows a black screen on Fusion. OmacVM builds a fixed Hyprland,
   and builds it again after every Hyprland update (10 to 20 minutes).
-- Speedometer 3.1 in Chrome reached 70 % of the Mac. Parallels and UTM are
-  being measured the same way ([benchmarks](../benchmarks/README.md)).
-- The newest of the three routes.
+- Speedometer 3.1 in Chrome reached 71 % of the Mac, the best of the four ways
+  ([comparison](../../README.md#four-ways-parallels-utm-vmware-fusion-or-omacvmapp),
+  [benchmarks](../benchmarks/README.md)).
+- The newest of the three VM apps OmacVM builds for.
 
 ## What you need
 
@@ -67,7 +68,7 @@ building it.
 | Media keys and trackpad gestures in full screen | ✓ |
 | Cmd shortcuts in full screen | ✓ (through OmacVM Gestures) |
 | Copy and paste text, both ways | ✓, Fusion syncs when the pointer enters or leaves the VM |
-| Omanotch | needs Omanotch's `fusion` branch ([finding 4](../troubleshooting.md#4-fusion-no-hover-or-clicks-on-omanotchs-strip), [5](../troubleshooting.md#5-fusion-omanotch-cannot-find-the-mac)) |
+| Omanotch | ✓ (Omanotch's main branch; [finding 4](../troubleshooting.md#4-fusion-no-hover-or-clicks-on-omanotchs-strip), [5](../troubleshooting.md#5-fusion-omanotch-cannot-find-the-mac)) |
 | `omacvm check` | every line passes |
 | GPU compute (Vulkan, OpenCL) | ✗ Fusion offers neither to Linux. Same on Parallels and UTM |
 

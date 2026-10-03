@@ -138,9 +138,9 @@ Free and open source, one display: UTM.
 | YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
 | GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
-| Idle desktop | 5.7 W · 17 h | 15.2 W · 7 h | **5.5 W · 18 h** | 6.2 W · 16 h |
-| Reading, scrolling a page | 7.3 W · 14 h | 19.3 W · 5 h | **5.9 W · 17 h** | 6.8 W · 15 h |
-| YouTube 4K | 24.2 W · 4 h | 39.2 W · 2.6 h | **20.4 W · 5 h** | 21.3 W · 4.7 h |
+| Idle desktop | 5.7 W · 18 h | 15.2 W · 6.6 h | **5.5 W · 18 h** | 6.2 W · 16 h |
+| Reading, scrolling a page | 7.3 W · 14 h | 19.3 W · 5.2 h | **5.9 W · 17 h** | 6.8 W · 15 h |
+| YouTube 4K | 24.2 W · 4.1 h | 39.2 W · 2.6 h | **20.4 W · 4.9 h** | 21.3 W · 4.7 h |
 | Every CPU core busy | 72 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 71 W · 1.4 h |
 | **Displays** | | | | |
 | External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** | not yet |
@@ -170,7 +170,8 @@ CPUs and 48 GB per VM, one VM at a time in full screen on the built-in
 display, nothing else open, brightness at 50 %, Google Chrome 154 on the Mac
 and in each VM, OmacVM 2.3.0. Speedometer is the median of 3 runs, the rest
 single runs. Power is the whole Mac's draw from its battery telemetry, 3
-minutes per load. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
+minutes per load; hours are 100 Wh over that draw, whole hours from 13 h up,
+one decimal below. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
 
 - **UTM's idle draw** is a bug in UTM's QEMU: a virtual CPU spins instead of
   sleeping when the guest's timer ticks every millisecond
@@ -272,8 +273,9 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
 4. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
 
-Then it shows a summary and starts: 30 to 70 minutes in numbered steps,
-mostly downloads and Omarchy's install, with the whole log in
+Then it shows a summary and starts: 30 to 70 minutes in numbered steps
+(VMware Fusion about 15 more: it builds Hyprland with a fix), mostly
+downloads and Omarchy's install, with the whole log in
 `~/Library/Logs/omacvm-build-*.log`. A VM window opens on the way: that is the temporary
 installer, leave it alone. Parallels Desktop may also show its own windows on
 the way (sign in, continue the trial): click through them, the build waits. `omacvm build --dry-run` asks everything and stops
@@ -390,8 +392,9 @@ password) stay with you; the agent hands them over.
 </p>
 
 The VM and the Mac talk over the VM's private network: the Mac is `10.211.55.2`
-for Parallels and `192.168.64.1` for UTM. Nothing listens anywhere else, and
-the VM needs a token.
+for Parallels, `192.168.64.1` for UTM and the `.1` of Fusion's NAT network
+(Fusion picks it when installed). Nothing listens anywhere else, and the VM
+needs a token.
 
 - **OmacVM Bridge** (`src/bridge/`) is a small menu-bar app. It reads the Mac's
   Wi-Fi (CoreWLAN), Bluetooth (IOBluetooth), audio (CoreAudio) and display
