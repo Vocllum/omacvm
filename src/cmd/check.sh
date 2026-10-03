@@ -188,12 +188,10 @@ utm)
   esac ;;
 esac
 if [[ $TYPE == app ]]; then
-  # The app's own notch mode follows the omanotch feature (omacvm apply sets it).
+  # The notch strip is the app's own switch (on its start screen).
   n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  if [[ $(feat omanotch off) == on ]]; then
-    [[ $n == 1 ]] && ok "notch mode (app)" "full screen covers the strip beside the notch" \
-      || skip "notch mode (app)" "turned off in OmacVM.app (its start screen turns it back on)"
-  else [[ $n == 1 ]] && skip "notch mode (app)" "on in the app, off for this VM" || skip "notch mode (app)" "off"; fi
+  [[ $n == 1 ]] && skip "notch strip (app)" "full screen covers it (no Space of its own)" \
+    || skip "notch strip (app)" "off: full screen in its own Space, below the notch"
   # QEMU's full grab sends Cmd shortcuts to Omarchy only with Accessibility.
   d=$(app_dir "$VM")
   if grep -q "Could not create event tap" "$d/logs/qemu.log" 2>/dev/null; then

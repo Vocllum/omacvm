@@ -2,7 +2,6 @@
 # OmacVM.app specifics, guest side. Run as root inside the VM: ./install.sh <desktop-user>
 #  * the display follows the Mac window (omacvm-display-sync, from try-omarchy);
 #    in full screen beside the notch, Omarchy's bar fills the strip
-#  * macOS draws the pointer, so Hyprland's is hidden
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * sound (PipeWire's ALSA and PulseAudio parts)
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)

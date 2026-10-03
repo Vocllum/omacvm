@@ -104,11 +104,9 @@ if (( MAC )); then
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   "$R/src/mac/install.sh" "${args[@]}"
   if [[ $TYPE == app ]]; then
-    # OmacVM.app draws the notch strip itself: its full screen covers it and
-    # Omarchy's bar moves there. The omanotch feature switches that, only when
-    # it changes: the app's own switch stays the user's choice otherwise.
-    n=$(on omanotch && echo on || echo off)
-    [[ $n != "$notch_had" ]] && defaults write org.omacvm.app useNotch -bool "$([[ $n == on ]] && echo true || echo false)"
+    # OmacVM.app: covering the notch strip is the app's own switch (its full
+    # screen then has no Space of its own), so apply leaves it alone.
+    :
   elif on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then
       log "Omanotch on the Mac"
