@@ -13,6 +13,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon` |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`, and goes only to a Bridge that proved it knows it, see API) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
+| Shared event stream | `guest/omacvm-bridge-events`, user socket `omacvm-bridge-events.socket` (`$XDG_RUNTIME_DIR/omacvm-bridge-events.sock`): one `/events` connection to the Mac per VM; `omacvm-bridge events` reads from it, so the widgets and the OSD keep their interface (see Events) |
 | Night light | `guest/omarchy-toggle-nightlight` in `/usr/local/bin`, ahead of Omarchy's: Super+Ctrl+N and the menu switch the Mac's Night Shift |
 | Bar widgets | `plugins/omacvm.bluetooth`, `plugins/omacvm.wifi`, `plugins/omacvm.audio` (clones of Omarchy's Bluetooth, network and audio widgets; Super+Ctrl+B opens the Bluetooth one), `plugins/omacvm.nightshift` |
 
@@ -172,6 +173,18 @@ request from the VM, `external` = anything else (macOS slider, AirPods, keys
 outside the VM). Volume and mute changes come as `external` always; brightness
 changes made on the Mac only to clients that asked with `GET /events?osd=external`
 (the Bridge then reads the brightness every 0.5 s). `: ping` every 15 s; `retry: 3000`.
+
+In the VM, the bar widgets and the OSD follower share one stream:
+`omacvm-bridge events` connects to `omacvm-bridge-events` (a user service
+started by its socket), which keeps a single `omacvm-bridge events --direct`
+to the Mac (the proof and the token as for every request). A new reader
+first gets the latest event of each kind, as from the Mac. The Mac stream is
+opened with `?osd=external` while a reader asked for it, closed 30 s after
+the last reader left, and when it ends or stays silent for 20 s every reader
+is closed, so each one sees what it saw before (the stream ends, it reconnects
+after 3 s). Without the socket (an older install, the service failing)
+`omacvm-bridge events` goes straight to the Mac. Log: `journalctl --user -u
+omacvm-bridge-events`.
 
 ### Wallpaper
 
