@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Reading</title>
+<style>body{font:18px/1.6 Georgia,serif;max-width:46em;margin:2em auto;padding:0 1em;color:#222;background:#fafaf7}</style>
+<body>
+<script>
+// "Light" load for power-suite.sh: a long text page that scrolls slowly, like reading.
+const words = "the quick brown fox jumps over a lazy dog while omarchy runs in a virtual machine on a mac and nobody notices".split(" ");
+let html = "";
+for (let p = 0; p < 400; p++) {
+  html += "<h2>Section " + (p + 1) + "</h2><p>";
+  for (let w = 0; w < 120; w++) html += words[(p * 7 + w * 3) % words.length] + " ";
+  html += "</p>";
+}
+document.body.insertAdjacentHTML("beforeend", html);
+let y = 0;
+setInterval(() => { y += 40; if (y > document.body.scrollHeight) y = 0; window.scrollTo({top: y, behavior: "smooth"}); }, 1000);
+</script>
