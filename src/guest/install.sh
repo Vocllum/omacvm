@@ -230,9 +230,28 @@ if [[ ${F[omanotch]} == on ]]; then
   chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   user_ctl daemon-reload 2>/dev/null || true
   user_ctl try-restart notchcast.service 2>/dev/null || true
+  # Notifications right under the strip, not a bar's height lower (see the script).
+  install -Dm755 "$R/guest/omanotch-notifications.sh" /usr/local/lib/omacvm/omanotch-notifications.sh
+  install -Dm644 /dev/stdin /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook <<'HOOK'
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Target = usr/share/omarchy/shell/plugins/notifications/Service.qml
+
+[Action]
+Description = OmacVM: Omarchy's notifications under Omanotch's strip
+When = PostTransaction
+Exec = /usr/local/lib/omacvm/omanotch-notifications.sh on
+HOOK
+  if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then
+    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"
+  fi
 elif [[ -x $H/.local/bin/notchcast ]]; then
   log "Omanotch: off"
   systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
+  rm -f /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
+  [[ -n $("$R/guest/omanotch-notifications.sh" off || true) ]] && { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
   if [[ -f $H/.local/share/omanotch/guest/uninstall.sh ]]; then
     in_session bash "$H/.local/share/omanotch/guest/uninstall.sh" >/dev/null 2>&1 || true
   else
