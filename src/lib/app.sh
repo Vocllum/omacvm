@@ -17,8 +17,8 @@ app_env() {   # DIR KEY: one value from vm.env (single quotes stripped)
   sed -n "s/^$2=//p" "$1/vm.env" 2>/dev/null | tail -1 | sed "s/^'\(.*\)'\$/\1/"
 }
 
-app_running_dir() {   # DIR: its QEMU runs (the disk is on its command line)
-  ps -axo args= 2>/dev/null | grep -F -- "file=$1/disk.img," | grep -vq grep
+app_running_dir() {   # DIR: its QEMU runs (the disk is on its command line, commas doubled)
+  ps -axo args= 2>/dev/null | grep -F -- "file=${1//,/,,}/disk.img," | grep -vq grep
 }
 
 app_list() {
@@ -51,6 +51,7 @@ app_ip() {   # NAME [seconds]
 }
 
 app_start() {
-  open -b org.omacvm.app --args --start --vm "$1" || return 1
+  # -n: a new launcher passes the request on when one already runs.
+  open -n -b org.omacvm.app --args --start --vm "$1" || return 1
   app_ip "$1" 60
 }

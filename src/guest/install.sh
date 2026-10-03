@@ -171,8 +171,9 @@ case $TYPE in
 esac
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
+# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super,
+# so it stays (OmacVM.app's QEMU sends Cmd itself).
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true

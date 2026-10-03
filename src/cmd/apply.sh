@@ -58,7 +58,7 @@ NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 # Its SSH host key: remembered now when there is none yet, checked after that.
 export OMA_PIN_NEW=1
 if [[ -n $IP ]]; then
-  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
+  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm, fusion or app" >&2; exit 2; }
   if [[ -n $VM ]]; then vm_pin "$VM" "$TYPE"
   else VM="the VM at $IP"; NAMED=0; OMA_PIN=""; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; export OMA_PIN OMA_PIN_ARGS; fi   # an address is no identity (DHCP reuses it): no key kept
 else
@@ -83,6 +83,7 @@ had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
+notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # OmacVM.app: see below
 if [[ -z $had ]]; then   # new to OmacVM: the defaults, Omanotch with a notch
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
@@ -104,8 +105,10 @@ if (( MAC )); then
   "$R/src/mac/install.sh" "${args[@]}"
   if [[ $TYPE == app ]]; then
     # OmacVM.app draws the notch strip itself: its full screen covers it and
-    # Omarchy's bar moves there. The omanotch feature switches that.
-    defaults write org.omacvm.app useNotch -bool "$(on omanotch && echo true || echo false)"
+    # Omarchy's bar moves there. The omanotch feature switches that, only when
+    # it changes: the app's own switch stays the user's choice otherwise.
+    n=$(on omanotch && echo on || echo off)
+    [[ $n != "$notch_had" ]] && defaults write org.omacvm.app useNotch -bool "$([[ $n == on ]] && echo true || echo false)"
   elif on omanotch; then
     if [[ ! -d $HOME/omanotch ]]; then
       log "Omanotch on the Mac"

@@ -46,7 +46,7 @@ if [[ -z $IP ]]; then
   IFS=$'\t' read -r VM TYPE IP <<<"$r"
   [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM or VMware Fusion VM named '$VM' (or pass --vm-type and --ip)"
+[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
              [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || stop 1 "no IP for VM '$VM' (is it running?)" ;;
@@ -192,7 +192,7 @@ if [[ $TYPE == app ]]; then
   n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
   if [[ $(feat omanotch off) == on ]]; then
     [[ $n == 1 ]] && ok "notch mode (app)" "full screen covers the strip beside the notch" \
-      || bad "notch mode (app)" "off in OmacVM.app (omacvm apply --vm \"$VM\" turns it on)"
+      || skip "notch mode (app)" "turned off in OmacVM.app (its start screen turns it back on)"
   else [[ $n == 1 ]] && skip "notch mode (app)" "on in the app, off for this VM" || skip "notch mode (app)" "off"; fi
   # QEMU's full grab sends Cmd shortcuts to Omarchy only with Accessibility.
   d=$(app_dir "$VM")

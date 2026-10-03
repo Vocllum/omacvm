@@ -153,7 +153,7 @@ resolve_vm() {
       fi
     fi
   fi
-  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM or VMware Fusion VM named '$VM'" >&2; exit 2; }
+  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2; exit 2; }
   vm_pin "$VM" "$TYPE"
   IP=""
   # DHCP leases outlive a stopped VM: only a running one has an address.
