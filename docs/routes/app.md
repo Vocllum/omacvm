@@ -62,16 +62,20 @@ the VM's SSH on `127.0.0.1:<port>`.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
   program could connect, or listen in their place while they are not
   running. So the VM gives the Bridge's token to neither before it has proved
-  it knows it (HMAC-SHA256 of a fresh nonce): Gestures then wants the VM's
-  own proof (the token never goes over the wire, and the VM acts on no key
-  or gesture before the proof); the Bridge gets the token on each request
-  after `GET /proof`. VMs from before still send the token straight away and
-  keep working until their next `omacvm apply`. The app makes the token when
-  the Bridge has not, and puts it into the VM.
+  it knows it (HMAC-SHA256 of a fresh nonce and the Mac address it answered
+  on, which must be 127.0.0.1: a proof passed on from the helper on
+  10.211.55.2 fails): Gestures then wants the VM's own proof (the token
+  never goes over the wire, and the VM acts on no key or gesture before the
+  proof); the Bridge gets the token on each request after `GET /proof`.
+  The app makes the token when the Bridge has not, and puts it into the VM.
+- Not covered yet, so the token is not safe from Mac programs on this route:
+  VMs set up before the proof still send the token straight away (to
+  whatever listens) until their next `omacvm apply`; and with Omanotch on,
+  its notchcast sends the token itself (`auth <token>`) to 47811, so any
+  program on the Mac's 127.0.0.1:47811 gets it. Omanotch should move to the
+  same proof.
 - Omanotch (47811) needs a version that serves 127.0.0.1; `omacvm apply` and
-  `omacvm check` say when the one on the Mac is older. Its notchcast still
-  sends the token itself (`auth <token>`), so it should move to the same
-  proof.
+  `omacvm check` say when the one on the Mac is older.
 - `omacvm apply` writes `guest-pointer` into the VM's folder once the VM
   draws Omarchy's own pointer; VMs set up before that still need the Mac's
   pointer (QEMU's `show-cursor=on`).
