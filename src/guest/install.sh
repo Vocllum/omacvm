@@ -28,6 +28,7 @@ while (( $# )); do
     --keyboard) KB=$2; shift 2 ;;
     --vm-type) TYPE=$2; shift 2 ;;
     --display) MODE=$2; shift 2 ;;
+    --host) HOST_GIVEN=$2; shift 2 ;;
     --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
     --no-thp-kernel) SET[thp-kernel]=off; shift ;;
     --thp-kernel) SET[thp-kernel]=on; shift ;;
@@ -79,9 +80,8 @@ case $TYPE in
   parallels) HOST=10.211.55.2 ;;
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
-  fusion) HOST=$(ip route show default | awk '{ print $3; exit }')
-          [[ -n $HOST ]] || { echo "guest/install.sh: no default route, cannot find the Mac" >&2; exit 1; }
-          HOST=${HOST%.*}.1
+  fusion) HOST=${HOST_GIVEN:-}   # from the Mac (apply.sh): the gateway's network may not be Fusion's
+          [[ $HOST =~ ^[0-9]+\.[0-9]+\.[0-9]+\.1$ ]] || { echo "guest/install.sh: VMware Fusion needs --host (the Mac's address on Fusion's network)" >&2; exit 2; }
           [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
   *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
 esac
@@ -247,4 +247,5 @@ if [[ -f $RS ]]; then
 fi
 mkinitcpio -P >/dev/null 2>&1 || true
 grub-mkconfig -o /boot/grub/grub.cfg >/dev/null 2>&1 || true
+[[ $TYPE == fusion ]] && "$R/fusion/guest/dns.sh" off   # back to Fusion's DNS, which follows the Mac's
 log "OmacVM guest side installed for $U (reboot to apply everything)"
