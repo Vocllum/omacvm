@@ -250,7 +250,8 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
 2. **Build it yourself or download a prebuilt VM.** Building takes 30 to 70
    minutes and fetches everything from Arch Linux ARM and omarchy-mac. The
    prebuilt VM is the same build, made for this OmacVM version without any
-   user in it: a download of a few GB, then about 10 minutes. Either way you
+   user in it: a download of 3.5 to 6 GB, then a few minutes (6 minutes in
+   all for Parallels on a fast connection). Either way you
    get your own user, password, features, keyboard and timezone. You can
    also download a prebuilt VM by hand from the
    [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it

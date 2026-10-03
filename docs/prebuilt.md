@@ -5,6 +5,15 @@ downloads and Omarchy's install) or download one that is already built
 (faster). Both end the same way: your user, your password, your features,
 OmacVM on the Mac and in the VM.
 
+| | Parallels | UTM | VMware Fusion |
+|---|---|---|---|
+| Download | 3.7 GB | 3.5 GB | 6.0 GB |
+| `omacvm build --prebuilt` (measured, M4 Max, fast connection) | 6 min | about 4 min | about 5 min |
+| `omacvm build` (building it here) | 30-70 min | 30-70 min | 45-85 min |
+
+The Fusion image is larger: it carries Hyprland with OmacVM's vmwgfx fix and
+VMware Tools, both built in the VM, and their build tools.
+
 ## Using one
 
 ```bash

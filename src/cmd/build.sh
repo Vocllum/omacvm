@@ -454,7 +454,7 @@ if (( PLAN && JSON )); then
   else
     printf '  "prebuilt": {"available": false},\n'
   fi
-  [[ $SOURCE == prebuilt ]] && mins="10-25 plus the download" || mins=$(build_minutes | sed 's/ to /-/')
+  [[ $SOURCE == prebuilt ]] && mins="3-10 plus the download" || mins=$(build_minutes | sed 's/ to /-/')
   printf '  "minutes": "%s",\n  "needs_human": [' "$mins"
   first=1
   while IFS= read -r step; do
