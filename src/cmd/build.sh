@@ -126,8 +126,9 @@ if (( ! JSON )); then
 fi
 
 # What the build needs: Xcode's command line tools and Homebrew (installed
-# after asking), then Homebrew's zstd, e2fsprogs and OpenSSL. A plan only reports.
-if (( PLAN )); then
+# after asking), then Homebrew's zstd, e2fsprogs and OpenSSL. A plan or a dry
+# run only reports.
+if (( DRY )); then
   have_xcode_tools || needs_person "Xcode's command line tools are missing: xcode-select --install"
 else
   ensure_xcode_tools
@@ -151,7 +152,7 @@ if [[ -z $TYPE ]]; then
   say "    Comparison: $README_ROUTES"
 fi
 # The app itself: installed now (after asking) when it is missing.
-(( PLAN )) || ensure_vm_app "$TYPE"
+(( DRY )) || ensure_vm_app "$TYPE"
 CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; P_EDITION=""; P_TRIAL=""
 case $TYPE in
   parallels)
@@ -416,7 +417,9 @@ if (( PLAN && JSON )); then
   first=1
   while IFS= read -r step; do
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0
-  done < <(echo "Choose the password for $U in Omarchy (OMACVM_PASSWORD for --yes)."; human_steps)
+  done < <(have_homebrew || echo "Install Homebrew (https://brew.sh): /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
+           bt=$(missing_brew_tools); [[ -z $bt ]] || echo "Install Homebrew's tools for the build: brew install $bt"
+           echo "Choose the password for $U in Omarchy (OMACVM_PASSWORD for --yes)."; human_steps)
   printf '\n  ],\n  "command": %s\n}\n' "$(json_str "$cmd")"
   DONE=1; exit 0
 fi
