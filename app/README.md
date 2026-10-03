@@ -33,7 +33,9 @@ scripts/package-release.sh          # dist/OmacVM-<version>.zip and .sha256
 With `OMACVM_SIGN_ID` the app, its QEMU and QEMU's libraries are signed with
 that Developer ID, the hardened runtime and a timestamp; QEMU gets
 `runtime/qemu-hvf.entitlements` (Hypervisor, microphone), the app
-`app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc.
+`app/OmacVM.entitlements` (microphone). Without it the build is signed ad hoc,
+and `package-release.sh` refuses it: a release needs the Developer ID of team
+722686Y34B.
 Check the unzipped app with `codesign --verify --deep --strict` and
 `spctl -a -vv -t exec`: until it is notarized, spctl says "Unnotarized
 Developer ID", and a browser download needs Open Anyway the first time.
