@@ -66,6 +66,12 @@ feature_flag() {   # NAME on|off
   [[ $2 == on || $2 == off ]] || usage "--feature $1=$2: on or off"
 }
 while (( $# )); do
+  # A missing value is a usage error (set -u would end the build with exit 0
+  # on macOS's bash 3.2, because of the EXIT trap).
+  case $1 in
+    --vm-type|--vm-name|--vm-dir|--graphics-gb|--resources|--cpus|--memory-gb|--disk-gb|--user|--full-name|--hostname|--feature|--parallels-edition|--channel)
+      [[ $# -ge 2 ]] || usage "$1 needs a value" ;;
+  esac
   case $1 in
     --vm-type) TYPE=$2; shift 2 ;;
     --vm-name) VM=$2; NAME_GIVEN=1; shift 2 ;;
@@ -467,13 +473,17 @@ mkdir -p "$HOME/Library/Logs"
 exec > >(tee -a "$BUILD_LOG") 2>&1
 UI_LOG=$BUILD_LOG
 build_end() {
-  local rc=$?
-  (( rc == 0 )) && return
+  local rc=$1
+  # Bash 3.2 reports 0 here after a set -u abort: only the end of the script
+  # counts as done.
+  (( rc == 0 && ${BUILD_DONE:-0} )) && return
+  (( rc )) || rc=1
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
   printf 'Fix what it says and run omacvm again (a half-built VM can be deleted in %s first).\n' \
     "$(case $TYPE in (parallels) echo "Parallels Desktop" ;; (utm) echo UTM ;; (fusion) echo "VMware Fusion" ;; esac)"
+  return "$rc"
 }
-trap 'build_end; ui_restore' EXIT
+trap 'build_end $? && rc=0 || rc=$?; ui_restore; exit $rc' EXIT
 
 KEY=~/.ssh/omacvm
 [[ -f $KEY ]] || { log "SSH key for the VM: $KEY"; mkdir -p "$(dirname "$KEY")" && chmod 700 "$(dirname "$KEY")"; ssh-keygen -t ed25519 -N "" -C "omacvm" -f "$KEY" -q; }
@@ -614,3 +624,4 @@ $mac_steps
   Check everything: omacvm check --vm "$VM"
   Switch features later: omacvm features --vm "$VM"
 EOF
+BUILD_DONE=1
