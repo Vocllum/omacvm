@@ -230,6 +230,7 @@ reads that as a best guess and `parallels_shortcuts_alert` reminds the user
 | `svga.numDisplays`, `svga.maxWidth`/`maxHeight`, `gui.fullScreenOnAllHostDisplays` | the Mac's display count, its arrangement in pixels, TRUE | one guest display per Mac display in full screen |
 | guest VMware Tools | `open-vm-tools` built from Arch's recipe with `makepkg -A` (`--without-gtkmm4`), `[resolutionKMS] enable=true`, rebuilt when `vmtoolsd` misses a library | Fusion sends its display layout (`DisplayTopology_Set`) only to a guest running the tools; without them every Mac display shows the same screen |
 | guest user unit `omacvm-fusion-displays` | applies vmwgfx's suggested positions (`omacvm-fusion-layout`, libdrm) with `hyprctl eval hl.monitor{…}` on every DRM change and config reload | Hyprland ignores suggested positions |
+| guest user unit `omacvm-fusion-clipboard` | Xvfb `:99`, VMware's agent (`vmware-user`, dndcp) on it, Wayland ↔ `:99` clipboard sync (`wl-paste --watch`, `xsel`); the tools' autostart entry hidden in `~/.config/autostart` | on XWayland Hyprland owns the X11 clipboard and refuses clients without an X11 window in focus (`XWM.cpp`: "xwayland not in focus"); the agent finds a new copy by TIMESTAMP, which xclip answers with the text |
 | guest Hyprland | built with `src/fusion/guest/hyprland-vmwgfx-dmabuf.patch`, stock kept as `/usr/bin/Hyprland.stock`, `/var/lib/omacvm/hyprland-vmwgfx` = version + checksum | without it every GPU client dies (`invalid arguments for wl_surface.attach`), SDDM's greeter first |
 
 The Mac is `.1` on Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in
@@ -314,6 +315,7 @@ guest's gateway is `.2`.
 | Fusion VM: black screen at SDDM, `invalid arguments for wl_surface.attach` in the journal | stock Hyprland on vmwgfx (e.g. an update the hook could not rebuild) | `omacvm apply`, or in the VM `/usr/local/share/omacvm/fusion/guest/build-hyprland.sh` (log `/var/cache/omacvm/hyprland-vmwgfx/build.log`) |
 | Fusion VM: `no such host` during a build | Fusion's NAT DNS | `src/fusion/guest/dns.sh` |
 | Testing the hook with `pacman -S hyprland` downgrades Hyprland | Arch's `extra` comes before Omarchy's repo | `pacman -S omarchy/hyprland` |
+| Fusion VM: copy and paste does nothing | Fusion exchanges clipboards only when the pointer enters or leaves the VM; or the agent runs on Hyprland's X11 display | move into / out of the VM; `omacvm check` (one `vmtoolsd -n vmusr`, `DISPLAY=:99`) |
 
 ## 8. Hard-won rules (do NOT)
 

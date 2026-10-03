@@ -69,7 +69,13 @@ A third VM type, `fusion`, next to `parallels` and `utm`.
   ignores them). Tested: three 2560x1440 displays in the macOS arrangement, windowed mode
   following the window, switching between them, a reboot. New VMs get `svga.numDisplays`
   = the Mac's display count and `gui.fullScreenOnAllHostDisplays`.
-- **Clipboard.** None from VMware. Later, over the Bridge.
+- **Clipboard.** VMware Tools' agent (`vmware-user`, dndcp plugin; built with GTK 3:
+  with gtkmm 4 it does not compile against libsigc++ 3) exchanges an X11 clipboard with
+  Fusion when the pointer enters or leaves the VM. On Hyprland's XWayland that fails: Hyprland
+  owns the X11 clipboard and refuses X11 clients without an X11 window in focus. The agent
+  gets a private Xvfb display instead, and `omacvm-fusion-clipboard` syncs it with Wayland's
+  clipboard. `xsel`, not `xclip`: the agent detects a new copy by the selection's TIMESTAMP,
+  which xclip answers with the text. Tested both ways by hand, and after a reboot.
 - **Full-screen capture** (media keys, gestures, pointer): add Fusion's process name next
   to `prl_client_app` and `UTM`.
 

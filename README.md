@@ -144,9 +144,10 @@ What works so far: the desktop and apps on the GPU; every display in full
 screen, laid out like macOS's, and Omarchy following the window when it is not
 full screen (OmacVM builds VMware Tools for Arch Linux ARM, which does not
 package them); OmacVM Bridge (Wi-Fi, Bluetooth, audio, Night Shift,
-wallpaper); the media keys and trackpad gestures in full screen; every
-`omacvm check` line. Not there yet: the clipboard, Omanotch, a speed
-measurement. The plan and the test results:
+wallpaper); the media keys and trackpad gestures in full screen; copy and
+paste of text both ways (VMware's agent on a private X display, synced with
+Omarchy's clipboard); every `omacvm check` line. Not there yet: Omanotch, a
+speed measurement. The plan and the test results:
 [docs/experiments/vmware-fusion.md](docs/experiments/vmware-fusion.md).
 
 ## Requirements
