@@ -54,15 +54,27 @@ Status: work in progress, not released. Source: `~/omacvm-app` (local).
 QEMU's user network: the Mac is `10.0.2.2` for the VM, and the Mac reaches
 the VM's SSH on `127.0.0.1:<port>`.
 
-- The VM reaches only two of the Mac's local ports through `10.0.2.2`:
-  47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
+- The VM reaches only three of the Mac's local ports through `10.0.2.2`:
+  47811 (Omanotch), 47830 (Gestures) and 47831 (Bridge). Everything else the Mac runs on
   127.0.0.1 (dev servers, databases) is refused, like on the other routes.
   The app's QEMU carries a libslirp patch for that
   (`OMACVM_SLIRP_HOST_PORTS`).
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
-  program could connect. So both want the Bridge's token there: the Bridge on
-  every request (as before), Gestures in its hello. The app makes the token
-  when the Bridge has not, and puts it into the VM.
+  program could connect, or listen in their place while they are not
+  running. So the VM gives the Bridge's token to neither before it has proved
+  it knows it (HMAC-SHA256 of a fresh nonce): Gestures then wants the VM's
+  own proof (the token never goes over the wire, and the VM acts on no key
+  or gesture before the proof); the Bridge gets the token on each request
+  after `GET /proof`. VMs from before still send the token straight away and
+  keep working until their next `omacvm apply`. The app makes the token when
+  the Bridge has not, and puts it into the VM.
+- Omanotch (47811) needs a version that serves 127.0.0.1; `omacvm apply` and
+  `omacvm check` say when the one on the Mac is older. Its notchcast still
+  sends the token itself (`auth <token>`), so it should move to the same
+  proof.
+- `omacvm apply` writes `guest-pointer` into the VM's folder once the VM
+  draws Omarchy's own pointer; VMs set up before that still need the Mac's
+  pointer (QEMU's `show-cursor=on`).
 
 ## Why one display
 
