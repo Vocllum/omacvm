@@ -103,6 +103,7 @@ final class Runner {
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
+            env["OMACVM_GL_PRESENT_ON_TICK"] = "1"
         }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")

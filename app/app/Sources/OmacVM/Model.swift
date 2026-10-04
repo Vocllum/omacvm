@@ -306,7 +306,8 @@ enum Mac {
 /// The launcher's own preferences.
 enum Settings {
     /// The GPU path of 2.6.0 (fences polled every 1 ms, frames drawn by a
-    /// CAOpenGLLayer), if the faster one ever misbehaves on a Mac.
+    /// CAOpenGLLayer on QEMU's 30 ms refresh), if the faster one ever
+    /// misbehaves on a Mac.
     /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
     static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
     static var startFullScreen: Bool {
