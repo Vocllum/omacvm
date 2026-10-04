@@ -37,6 +37,10 @@ in more words.
   when it doesn't. OmacVM.app asks for it when it starts a VM; its QEMU
   starts the recording on a thread of its own, so a slow start never stops
   the VM (the VM records silence until the microphone runs).
+- WebGL pages no longer hang in OmacVM.app. Basemark Web 3.0 stopped at its
+  fifth test because the app's virglrenderer turned shaders that read integer
+  textures into GLSL the Mac refuses (finding 23 in
+  [docs/troubleshooting.md](docs/troubleshooting.md)).
 - Omanotch can make its bar exactly as tall as the notch:
   `defaults write ch.gillesgoetsch.omanotch flush -bool true`. Off by default.
 - The Mac's keyboard light goes three steps dimmer than macOS's lowest with
