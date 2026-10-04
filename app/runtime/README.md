@@ -38,8 +38,8 @@ commit 82927e9. Changes here:
   (from the guest) could name a register past the translator's outputs: an
   assertion aborted QEMU; found by the fuzzer, replayed in every build
 - `patches/virgl-gl-error-skip-command.patch`: a GL error after a guest
-  command skips that command; the context keeps running (out of memory and a
-  lost GL context still end it)
+  command no longer stops the context (out of memory and a lost GL context
+  still do); the GL ignored the failed call, the rest of the command ran
 - `patches/virgl-buffer-binding-checks.patch`,
   `patches/virgl-draw-range-checks.patch`,
   `patches/virgl-uniform-buffer-checks.patch`,
@@ -49,6 +49,15 @@ commit 82927e9. Changes here:
   indirect commands and uniform blocks are checked before any GL call; a draw
   that fails is skipped; run-time shader array indexes are clamped (ADR 0017).
   Checked by `Tests/virgl/test-gpu-ranges.c`
+- `patches/virgl-vertex-format-checks.patch`,
+  `patches/virgl-uniform-buffer-alignment.patch`,
+  `patches/virgl-uniform-block-array.patch`,
+  `patches/virgl-draw-gl-error-check.patch`: a GL call the Mac's GL refuses
+  keeps older state that the checks never saw. Vertex formats and buffer
+  offsets the GL would refuse are refused first, uniform block arrays are
+  named and bound as the shader declares them, and a GL error while a draw is
+  set up skips the draw (ADR 0017). Checked by `Tests/virgl/test-gpu-ranges.c`
+  cases 30-34 and `gl-oracle.c`
 - `patches/virgl-venus-robust-buffer-access.patch`: Venus devices always get
   robust buffer access where the host's Vulkan device offers it (MoltenVK
   does), whatever the guest asked for
