@@ -6,9 +6,9 @@ in more words.
 ## Unreleased
 
 - OmacVM.app: videos are decoded by the Mac's media engine. YouTube in 4K at
-  60 fps plays in Google Chrome with the VM's CPU nearly idle (H.264, VP9,
-  AV1); Firefox gets H.264 and VP9. Arch Linux ARM's Chromium cannot (built
-  without VA-API). See [docs/video-decode.md](docs/video-decode.md).
+  60 fps plays in Google Chrome or Brave with the VM's CPU nearly idle
+  (H.264, VP9, AV1); Firefox gets H.264 and VP9, mpv H.264, VP9 and HEVC.
+  Arch Linux ARM's Chromium cannot (built without VA-API). See [docs/video-decode.md](docs/video-decode.md).
 
 ## 2.6.0
 
