@@ -19,6 +19,10 @@ IOSurface contexts cannot be made, the window falls back to it as well.
 OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 (checks orientation and colours). Applies after qemu-cocoa-gl-present-on-flush.
 
+Upstream: not sent (changes how QEMU's Cocoa display draws).
+Test: OMACVM_GL_DUMP frame and a capture of the window match the guest's
+grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
+
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -56,6 +56,10 @@

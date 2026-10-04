@@ -7,6 +7,9 @@ was given by hv_vm_map, so the guest never sees the blob (Venus: the ring
 stays empty and every Vulkan call hangs). Under HVF use the subregion
 mapping, which HVF maps on its own.
 
+Upstream: not sent (an HVF-only bug).
+Test: Venus vkmark and vkcube in an app VM.
+
 --- a/hw/display/virtio-gpu-virgl.c
 +++ b/hw/display/virtio-gpu-virgl.c
 @@ -19,6 +19,7 @@

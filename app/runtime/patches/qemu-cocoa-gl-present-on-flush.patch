@@ -10,6 +10,9 @@ OMACVM_GL_PRESENT_ON_TICK=1 restores the old behaviour, OMACVM_GL_FPS=1
 prints the frames shown per second on stderr. Applies after the
 texture-borrowing and GPU-resolution patches.
 
+Upstream: not sent; small enough to offer.
+Test: OMACVM_GL_FPS=1 shows 60 frames/s on a 60 Hz display (was the 30 ms tick).
+
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 index abc53b5..8626546 100644
 --- a/ui/cocoa.m
