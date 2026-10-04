@@ -100,6 +100,10 @@ final class Runner {
         // ports: Omanotch, Gestures and Bridge (patched libslirp).
         env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
         env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
+        if Settings.gpuSafeMode {
+            env["OMACVM_VIRGL_POLL_FENCES"] = "1"
+            env["OMACVM_GL_PRESENT"] = "layer"
+        }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
