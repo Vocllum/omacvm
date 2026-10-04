@@ -3,15 +3,18 @@ Subject: [PATCH] cocoa: no Dock, menu bar or hot corner from inside full screen
 
 What: the other displays' full-screen windows ask macOS for the same
 presentation as the main window (Dock and menu bar hidden, not auto-hidden),
-and while the VM has the pointer in full screen the Mac's cursor is kept
-3 points off the corners of its display. Both follow the immersive option
-(on by default; immersive=off keeps macOS's behaviour).
+and while the VM has the pointer in full screen the Mac's cursor never
+reaches a corner of its display: within 200 points of a corner it is
+detached from the mouse and QEMU moves it from the mouse's motion, at least
+3 points from the corner's edges. Both follow the immersive option (on by
+default; immersive=off keeps macOS's behaviour).
 
 Why: in the user's 2.8.0/2.9.0 RC test the Dock came up at the edge of the
 external display (its full-screen Space used macOS's default auto-hide), and
 a hot corner set to "put display to sleep" fired from inside the full-screen
-VM. The guest's pointer is absolute, so it only stops 3 points short of a
-corner; it reaches every edge as before.
+VM. Moving the cursor back after it reached the corner does not help (tried:
+the display still went to sleep), so the cursor must never get there. The
+guest's pointer is absolute, so it only stops 3 points short of a corner.
 
 Upstream: not applicable (OmacVM's display windows; QEMU has one window).
 Test: full screen on the MacBook and an external display: the pointer pushed
@@ -19,89 +22,145 @@ into each corner and along each edge shows no Dock, no menu bar, no hot
 corner (notes: display-bugs track).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 646ffb6..f7425b9 100644
+index 646ffb6..26bf285 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -466,6 +466,7 @@ static bool omacvm_map_pointer(int output, double u, double v,
+@@ -466,6 +466,8 @@ static bool omacvm_map_pointer(int output, double u, double v,
  static int omacvm_active_outputs(void);
  static bool omacvm_is_our_window(NSWindow *w);
  static bool omacvm_pointer_over_ours(void);
-+static void omacvm_guard_corners(void);
++static void omacvm_guard_corners(NSEvent *event);
++static void omacvm_corner_release(void);
  static bool omacvm_is_head_console(unsigned int index);
  static bool omacvm_test_mode(void);
  static void omacvm_displays_update(void);
-@@ -1535,6 +1536,9 @@ - (void) handleMouseEvent:(NSEvent *)event
+@@ -1535,6 +1537,9 @@ - (void) handleMouseEvent:(NSEvent *)event
      if (!isMouseGrabbed) {
          return;
      }
 +    if (isAbsoluteEnabled) {
-+        omacvm_guard_corners();
++        omacvm_guard_corners(event);
 +    }
  
      with_bql(^{
          if (isAbsoluteEnabled &&
-@@ -1783,6 +1787,9 @@ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+@@ -1652,6 +1657,7 @@ - (void) grabMouse
+     else
+         [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
+     [self hideCursor];
++    omacvm_corner_release();
+     CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
+     isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
+ }
+@@ -1665,6 +1671,7 @@ - (void) ungrabMouse
+     else
+         [[self window] setTitle:@"QEMU"];
+     [self unhideCursor];
++    omacvm_corner_release();
+     CGAssociateMouseAndMouseCursorPosition(TRUE);
+     isMouseGrabbed = FALSE;
+     [self raiseAllButtons];
+@@ -1685,6 +1692,7 @@ - (void) notifyMouseModeChange {
+         if (isAbsoluteEnabled) {
+             [self ungrabMouse];
+         } else {
++            omacvm_corner_release();
+             CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
+         }
+     }
+@@ -1783,6 +1791,9 @@ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
          }
          [self grabMouse];
      }
 +    if (isAbsoluteEnabled) {
-+        omacvm_guard_corners();
++        omacvm_guard_corners(event);
 +    }
      with_bql(^{
          if (button >= 0) {
              qemu_input_queue_btn(dcl.con, button, down);
-@@ -3277,6 +3284,50 @@ static bool omacvm_main_full_screen(void)
+@@ -3277,6 +3288,81 @@ static bool omacvm_main_full_screen(void)
             ([[cocoaView window] styleMask] & NSWindowStyleMaskFullScreen);
  }
  
 +/*
-+ * While the VM has the pointer in full screen, the Mac's cursor stays off the
-+ * very corners of its display: a corner is a macOS hot corner (one put the
-+ * Mac's display to sleep from inside the VM). The guest's pointer is
-+ * absolute, so it simply stops 3 points short of the corner. Off with
-+ * immersive=off; leaving full screen or the VM gives the cursor back as before.
++ * While the VM has the pointer in full screen, the Mac's cursor never reaches
++ * the very corners of its display: a corner is a macOS hot corner (one put
++ * the Mac's display to sleep from inside the VM). Moving the cursor back after
++ * it got there is too late (the Dock already saw it), so near a corner the
++ * cursor is detached from the mouse and moved by QEMU from the mouse's
++ * motion, never closer than 3 points to the corner's edges. The guest's
++ * pointer is absolute, so it simply stops short of the corner. Off with
++ * immersive=off; leaving full screen or the VM gives the cursor back.
 + */
-+static void omacvm_guard_corners(void)
++static bool omacvm_corner_held;
++static CGPoint omacvm_corner_pos;
++
++static void omacvm_corner_release(void)
 +{
-+    const CGFloat g = 3;
++    if (omacvm_corner_held) {
++        omacvm_corner_held = false;
++        CGAssociateMouseAndMouseCursorPosition(true);
++    }
++}
++
++static void omacvm_guard_corners(NSEvent *event)
++{
++    const CGFloat zone = 200, g = 3;
 +    CGDirectDisplayID id;
 +    uint32_t n = 0;
-+    CGEventRef e;
-+    CGPoint p, q;
++    CGPoint p;
 +    CGRect r;
-+    bool left, right, top, bottom;
++    CGFloat dx, dy;
 +
 +    if (!immersive_mode_enabled || !omacvm_main_full_screen()) {
++        omacvm_corner_release();
 +        return;
 +    }
-+    e = CGEventCreate(NULL);
-+    if (!e) {
-+        return;
++    if (omacvm_corner_held) {
++        /* Detached: the cursor goes where the mouse's motion takes it. */
++        p = omacvm_corner_pos;
++        p.x += [event deltaX];
++        p.y += [event deltaY];
++    } else {
++        CGEventRef e = CGEventCreate(NULL);
++        if (!e) {
++            return;
++        }
++        p = CGEventGetLocation(e);
++        CFRelease(e);
 +    }
-+    p = CGEventGetLocation(e);
-+    CFRelease(e);
 +    if (CGGetDisplaysWithPoint(p, 1, &id, &n) != kCGErrorSuccess || n == 0) {
-+        return;
++        /* Past the outer edge of the displays: stay on the one it was on. */
++        if (CGGetDisplaysWithPoint(omacvm_corner_pos, 1, &id, &n) != kCGErrorSuccess ||
++            n == 0) {
++            omacvm_corner_release();
++            return;
++        }
 +    }
 +    r = CGDisplayBounds(id);
-+    left = p.x < CGRectGetMinX(r) + g;
-+    right = p.x > CGRectGetMaxX(r) - 1 - g;
-+    top = p.y < CGRectGetMinY(r) + g;
-+    bottom = p.y > CGRectGetMaxY(r) - 1 - g;
-+    if (!((left || right) && (top || bottom))) {
-+        return;
++    p.x = MIN(MAX(p.x, CGRectGetMinX(r)), CGRectGetMaxX(r) - 1);
++    p.y = MIN(MAX(p.y, CGRectGetMinY(r)), CGRectGetMaxY(r) - 1);
++    dx = MIN(p.x - CGRectGetMinX(r), CGRectGetMaxX(r) - 1 - p.x);
++    dy = MIN(p.y - CGRectGetMinY(r), CGRectGetMaxY(r) - 1 - p.y);
++    if (dx < zone && dy < zone) {
++        p.x = MIN(MAX(p.x, CGRectGetMinX(r) + g), CGRectGetMaxX(r) - 1 - g);
++        p.y = MIN(MAX(p.y, CGRectGetMinY(r) + g), CGRectGetMaxY(r) - 1 - g);
++        if (!omacvm_corner_held) {
++            omacvm_corner_held = true;
++            CGAssociateMouseAndMouseCursorPosition(false);
++        }
++        omacvm_corner_pos = p;
++        CGWarpMouseCursorPosition(p);
++    } else if (omacvm_corner_held) {
++        CGWarpMouseCursorPosition(p);
++        omacvm_corner_release();
 +    }
-+    q.x = left ? CGRectGetMinX(r) + g : CGRectGetMaxX(r) - 1 - g;
-+    q.y = top ? CGRectGetMinY(r) + g : CGRectGetMaxY(r) - 1 - g;
-+    CGWarpMouseCursorPosition(q);
-+    /* Without this the cursor freezes for a moment after a warp. */
-+    CGAssociateMouseAndMouseCursorPosition(true);
 +}
 +
  /* A display's rectangle in points, top-left origin (CoreGraphics' global space). */
  static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
  {
-@@ -3692,6 +3743,22 @@ - (BOOL)windowShouldClose:(id)sender
+@@ -3692,6 +3778,22 @@ - (BOOL)windowShouldClose:(id)sender
      return NO;
  }
  
