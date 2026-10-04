@@ -167,7 +167,6 @@ on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swif
 # Its name, so the Mac's gestures helper tells it from another VM in the same app.
 (( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
-gestures_legacy_forget "$IP"   # its daemon says the token now
 # OmacVM.app: this VM now draws Omarchy's own pointer. The app hides the Mac's
 # over the window only for a VM with this file; VMs set up by older versions
 # hid Omarchy's pointer and need the Mac's until they get this apply.

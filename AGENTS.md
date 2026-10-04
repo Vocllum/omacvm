@@ -191,13 +191,12 @@ OmacVM.app: virtio port org.omacvm.battery ─────▶ omacvm-battery (ro
   (Parallels), `UTM` or `VMware Fusion`, and its window covers a display (the strip beside the
   notch excepted).
 - Gestures protocol (one line each, `src/gestures/mac/omacvm-gestures.c`
-  header): the guest says `H <gestures> <glide> <token> <name>` right after connecting
-  (the Bridge's token, which the Mac checks on every listener; the VM's name
-  in base64, `OMACVM_VM_NAME_B64` in `/etc/omacvm/env`, from `omacvm apply`). Daemons from
-  before the token (no token; a 1.x daemon says nothing: gestures on, scroll
-  momentum off) are let in only from MAC addresses in `~/Library/Application
-  Support/omacvm/gestures-legacy` (written once by `src/mac/install.sh`,
-  `omacvm apply` takes each VM off). All VMs of one app share its network, so
+  header): both sides first prove they know the Bridge's token (`C`, `M`,
+  then the guest's `R <gestures> <glide> <proof> <name>`; the VM's name in
+  base64, `OMACVM_VM_NAME_B64` in `/etc/omacvm/env`, from `omacvm apply`).
+  Daemons from 2.4 and 2.5 say `H <gestures> <glide> <token> <name>` (the
+  token itself) and are still let in; daemons without a token (2.3 and older)
+  are refused until `omacvm update`. All VMs of one app share its network, so
   the helper reads the title of the app's front window (Accessibility) and
   sends frames, keys and the capture state only to the VM whose name it holds
   (the exact name first, else the longest name in the title); without a match
