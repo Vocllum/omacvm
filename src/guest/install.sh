@@ -108,7 +108,7 @@ log "features: $(for f in "${FEATURES[@]}"; do printf '%s=%s ' "$f" "${F[$f]}"; 
 
 # A VM from a prebuilt image of OmacVM 2.5 or 2.6: first boot left absolute
 # links into the image's placeholder home (Omarchy's wallpaper: a black desktop).
-OLD=$(sed -n 's/^OMACVM_PREBUILT_USER=//p' /var/lib/omacvm/prebuilt/image 2>/dev/null)
+OLD=$(sed -n 's/^OMACVM_PREBUILT_USER=//p' /var/lib/omacvm/prebuilt/image 2>/dev/null || true)
 if [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
   n=0
   while IFS= read -r -d '' l; do
