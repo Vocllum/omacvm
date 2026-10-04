@@ -58,10 +58,13 @@ beside the notch (option), clipboard both ways, sound and the microphone,
 the Mac's camera (on only while a Linux app reads it), WebGL in Chromium,
 Chrome, Brave and Firefox, clean shutdown on Quit, pause on Mac sleep,
 install under a chosen name, the Mac's battery in Omarchy's bar, ⌘ keys as Super in full screen (through OmacVM
-Gestures, which the build installs on the Mac with the other helpers).
+Gestures, which the build installs on the Mac with the other helpers),
+every Mac display in full screen (one window and one Omarchy output per
+display, placed as in macOS; "Use external displays" in Omarchy's display
+panel switches it off).
 
-Waiting: external displays. Not confirmed on this route yet: the Bridge's
-features (Wi-Fi, Bluetooth, media keys) and trackpad gestures.
+Not confirmed on this route yet: the Bridge's features (Wi-Fi, Bluetooth,
+media keys) and trackpad gestures.
 
 Needs a person: the permissions OmacVM's Mac helpers ask for; the app needs no
 Accessibility of its own.
