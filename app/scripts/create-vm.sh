@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build a new OmacVM VM from nothing: Arch Linux ARM + Omarchy (omarchy-mac) on
-# one raw disk that boots through UEFI and GRUB. 30-60 minutes, mostly downloads.
+# one raw disk that boots through UEFI and GRUB. 10-30 minutes, mostly downloads.
 #
 #   create-vm.sh VM_DIR        (OMACVM_CREATE_NO_MAC=1: without the Mac helpers)
 #
