@@ -9,23 +9,28 @@ it shows as P3 (234,51,35), the sRGB red.
 
 A 10-bit scanout (GL_RGB10_A2: Hyprland with bitdepth 10, needs a guest
 virtio-gpu that offers 10-bit planes) now keeps its depth: the present
-surfaces become half float. With OMACVM_GL_HDR=1 that output is taken as
+surfaces become half float (8 bytes a pixel, still capped at the largest
+display like the 8-bit ones). With OMACVM_GL_HDR=1 that output is taken as
 BT.2100 PQ (Hyprland's cm "hdr"): the surfaces are tagged PQ and the layer
-asks for EDR headroom, so HDR in the guest shows as HDR on the Mac.
-Measured on the MacBook: the screen's EDR headroom goes from 1.0 to 4.2
-while the VM shows HDR; Hyprland's desktop at sdrbrightness 3 reads 2.9x
-SDR white, an HDR10 test clip in mpv shows 0.8 to 2.9x SDR white; PQ
-203 nits maps to SDR white (BT.2408).
+asks for EDR headroom, so HDR in the guest shows as HDR on the Mac. The
+app sets OMACVM_GL_HDR=1 only when a display has EDR headroom.
+Measured on the MacBook's XDR panel: the EDR headroom goes from 1.0 to
+8.8-16 while the VM shows HDR; PQ bars of 100/203/400/600/1000 nits from
+a client that sends PQ (GStreamer waylandsink) read 0.37/0.60/0.89/1.10/
+1.50x SDR white (Hyprland 0.56 tone-maps the top); Hyprland's desktop at
+sdrbrightness 3 reads 2.95x SDR white. mpv 0.41 on OpenGL sends no image
+description, so Hyprland shows it as SDR.
 
 OMACVM_GL_COLOR=native leaves the surfaces untagged (the old colours).
 
-Upstream: not sent (OmacVM's IOSurface present). Tests: scratchpad tools
-(colors.html + snapcolor; snaphdr), see docs/architecture/graphics.md.
+Upstream: not sent (OmacVM's IOSurface present).
+Tests: tests/graphics/pacing (colors.html + snapcolor.swift for the
+colours, snaphdr.swift for EDR values, mkclip.sh for the PQ bars), see
+docs/architecture/graphics.md section 12.
 Applies after qemu-cocoa-gl-present-vsync.patch.
-
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -2920,6 +2920,19 @@
+@@ -2913,6 +2913,19 @@
  static IOSurfaceRef present_surf[PRESENT_SURFACES];
  static GLuint present_tex[PRESENT_SURFACES];
  static uint32_t present_w, present_h;
@@ -45,18 +50,15 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
  static unsigned present_next;
  static dispatch_queue_t present_queue;
  static QEMUTimer *present_timer;
-@@ -3043,12 +3056,48 @@
+@@ -3099,15 +3112,50 @@
          }
      }
      present_w = present_h = 0;
 +    present_deep = false;
  }
  
--/* present_ctx is current. */
--static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h)
 +static bool cocoa_gl_present_hdr_wanted(void)
- {
--    if (w == present_w && h == present_h && present_surf[0]) {
++{
 +    if (present_hdr < 0) {
 +        const char *e = getenv("OMACVM_GL_HDR");
 +        present_hdr = e && !strcmp(e, "1");
@@ -79,7 +81,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
 +                                      kCGColorSpaceSRGB);
 +}
 +
-+/* Main thread or the commit queue: EDR only while showing HDR. */
++/* The thread that commits a frame: EDR only while showing HDR. */
 +static void cocoa_gl_layer_follow(CALayer *layer, IOSurfaceRef surf)
 +{
 +    BOOL hdr = IOSurfaceGetPixelFormat(surf) == 'RGhA' &&
@@ -89,15 +91,27 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
 +    }
 +}
 +
-+/* present_ctx is current. */
+ /*
+  * present_ctx is current. Surfaces for a w x h frame, capped at the
+  * largest display. Made again at most every PRESENT_REALLOC_NS: until
+  * then the frame is drawn scaled into the surfaces there are, and the
+  * timer comes back to make the right ones.
+  */
+-static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h)
 +static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h, bool deep)
-+{
-+    if (w == present_w && h == present_h && deep == present_deep &&
-+        present_surf[0]) {
-         return true;
+ {
+     uint64_t cap = qatomic_read(&present_cap);
+     uint32_t cap_w = cap >> 32, cap_h = (uint32_t)cap;
+@@ -3122,7 +3170,7 @@
+         h = MAX(1, (uint32_t)(h * scale));
      }
-     cocoa_gl_present_free();
-@@ -3059,28 +3108,42 @@
+     if (present_surf[0]) {
+-        if (w == present_w && h == present_h) {
++        if (w == present_w && h == present_h && deep == present_deep) {
+             return true;
+         }
+         if (now - present_alloc_ns < PRESENT_REALLOC_NS) {
+@@ -3138,28 +3186,42 @@
      NSDictionary *props = @{
          (id)kIOSurfaceWidth: @(w),
          (id)kIOSurfaceHeight: @(h),
@@ -136,10 +150,10 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
 +                                    deep ? GL_HALF_FLOAT :
 +                                           GL_UNSIGNED_INT_8_8_8_8_REV,
 +                                    present_surf[i], 0) == kCGLNoError;
-     }
++    }
 +    if (cs_plist) {
 +        CFRelease(cs_plist);
-+    }
+     }
 +    CGColorSpaceRelease(cs);
      glBindTexture(GL_TEXTURE_RECTANGLE, 0);
 +    if (!ok) {
@@ -152,17 +166,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
      present_next = 0;
      return true;
  }
-@@ -3094,7 +3157,8 @@
-     const char *path = getenv("OMACVM_GL_DUMP");
-     FILE *f;
- 
--    if (!path || access(path, F_OK) == 0 || !(f = fopen(path, "wb"))) {
-+    if (!path || IOSurfaceGetPixelFormat(surf) != 'BGRA' ||
-+        access(path, F_OK) == 0 || !(f = fopen(path, "wb"))) {
-         return;
-     }
-     IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
-@@ -3147,7 +3211,21 @@
+@@ -3198,7 +3260,21 @@
      }
      CGLSetCurrentContext(present_ctx);
  
@@ -185,7 +189,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
          CGLSetCurrentContext(prev);
          return false;
      }
-@@ -3230,6 +3308,7 @@
+@@ -3293,6 +3369,7 @@
              NSString *f = filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
              [layer setMagnificationFilter:f];
              [layer setMinificationFilter:f];
@@ -193,11 +197,11 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
              [layer setContents:(id)surf];
              [CATransaction commit];
              IOSurfaceDecrementUseCount(surf);
-@@ -3437,6 +3516,7 @@
-         NSString *f = show.filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
-         [layer setMagnificationFilter:f];
-         [layer setMinificationFilter:f];
-+        cocoa_gl_layer_follow(layer, show.surf);
-         [layer setContents:(id)show.surf];
-         [CATransaction commit];
-         surface_put(show.surf);
+@@ -3375,6 +3452,7 @@
+     [CATransaction setDisableActions:YES];
+     [layer setMagnificationFilter:f];
+     [layer setMinificationFilter:f];
++    cocoa_gl_layer_follow(layer, surf);
+     [layer setContents:(id)surf];
+     [CATransaction commit];
+ }
