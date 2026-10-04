@@ -36,7 +36,12 @@ fi
 
 fail=0
 for f in "${files[@]}"; do
-  fmt=nv12   # 10-bit video comes out as P010
+  # The frames are read in the surfaces' own layout: NV12 with OmacVM's shim,
+  # I420 with Mesa's driver alone (FFmpeg picks it when offered; converting
+  # on the way out goes through the GPU and is not what is checked here).
+  # 10-bit video comes out as P010.
+  fmt=nv12
+  [[ ${LIBVA_DRIVER_NAME:-} == omacvm ]] || fmt=yuv420p
   [[ $(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$f") == *10* ]] && fmt=p010le
   ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -frames 600 -pix_fmt $fmt -f framemd5 "$tmp/sw.md5"
   if ! ffmpeg -nostdin -hide_banner -loglevel error -y -hwaccel vaapi -hwaccel_device "$dev" \
