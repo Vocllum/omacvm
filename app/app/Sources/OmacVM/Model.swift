@@ -126,6 +126,7 @@ struct VMConfig: Equatable {
     var clipboardSocket: URL { Paths.runDir.appendingPathComponent("\(id).clip") }
     var batterySocket: URL { Paths.runDir.appendingPathComponent("\(id).batt") }
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
+    var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
 
     func write() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
