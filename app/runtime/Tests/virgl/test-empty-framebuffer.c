@@ -5,20 +5,24 @@
  * draw-buffers.html). Apple's GL has no ARB_framebuffer_no_attachments and
  * answered the draw with GL_INVALID_FRAMEBUFFER_OPERATION, which stopped the
  * guest's whole context: Chrome drew nothing for the rest of its life.
- * The draws must be accepted and the context must keep working. */
-#include <OpenGL/OpenGL.h>
+ * The draws must be accepted, the context must keep working, and an occlusion
+ * query must count every fragment of the viewport, with the depth test on
+ * (there is no depth buffer, so every fragment passes). */
 #include <stdio.h>
 #include <string.h>
 #include <sys/uio.h>
+#include <unistd.h>
 #include "virglrenderer.h"
 #include "virgl_hw.h"
 #include "virgl_protocol.h"
+#define CGL_CONTEXT_RENDERER_CALLBACKS
+#include "cgl-context.h"
 
 /* Gallium values the protocol uses (pipe/p_defines.h needs the whole tree). */
 enum { TEST_SHADER_VERTEX = 0, TEST_SHADER_FRAGMENT = 1, TEST_PRIM_TRIANGLES = 4,
-       TEST_TEXTURE_2D = 2, TEST_CLEAR_COLOR0 = 1 << 2 };
+       TEST_BUFFER = 0, TEST_TEXTURE_2D = 2, TEST_CLEAR_COLOR0 = 1 << 2,
+       TEST_FUNC_LESS = 1, TEST_QUERY_OCCLUSION_COUNTER = 0 };
 
-static CGLContextObj main_ctx;
 static int failures;
 
 static void check(int ok, const char *what)
@@ -26,56 +30,6 @@ static void check(int ok, const char *what)
    printf("%s: %s\n", ok ? "ok" : "FAIL", what);
    failures += !ok;
 }
-
-static void write_fence(void *cookie, uint32_t fence)
-{
-   (void)cookie;
-   (void)fence;
-}
-
-static CGLContextObj new_context(CGLContextObj share)
-{
-   CGLPixelFormatAttribute attrs[] = {
-      kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core, 0
-   };
-   CGLPixelFormatObj pix = NULL;
-   CGLContextObj ctx = NULL;
-   GLint n = 0;
-   if (CGLChoosePixelFormat(attrs, &pix, &n) || !pix)
-      return NULL;
-   CGLCreateContext(pix, share, &ctx);
-   CGLReleasePixelFormat(pix);
-   return ctx;
-}
-
-static virgl_renderer_gl_context create_gl_context(void *cookie, int scanout,
-                                                   struct virgl_renderer_gl_ctx_param *param)
-{
-   (void)cookie;
-   (void)scanout;
-   return new_context(param->shared ? main_ctx : NULL);
-}
-
-static void destroy_gl_context(void *cookie, virgl_renderer_gl_context ctx)
-{
-   (void)cookie;
-   CGLDestroyContext(ctx);
-}
-
-static int make_current(void *cookie, int scanout, virgl_renderer_gl_context ctx)
-{
-   (void)cookie;
-   (void)scanout;
-   return CGLSetCurrentContext(ctx) ? -1 : 0;
-}
-
-static struct virgl_renderer_callbacks callbacks = {
-   .version = 1,
-   .write_fence = write_fence,
-   .create_gl_context = create_gl_context,
-   .destroy_gl_context = destroy_gl_context,
-   .make_current = make_current,
-};
 
 struct cmds {
    uint32_t dw[1024];
@@ -85,6 +39,12 @@ struct cmds {
 static void emit(struct cmds *c, uint32_t v)
 {
    c->dw[c->n++] = v;
+}
+
+static void emit_float(struct cmds *c, float f)
+{
+   union { float f; uint32_t u; } v = { f };
+   emit(c, v.u);
 }
 
 static void emit_shader(struct cmds *c, uint32_t handle, uint32_t type, const char *text)
@@ -125,18 +85,47 @@ static void emit_framebuffer(struct cmds *c, uint32_t nr_cbufs, uint32_t surface
       emit(c, surface);
 }
 
+static void emit_viewport(struct cmds *c, float width, float height)
+{
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_VIEWPORT_STATE, 0, VIRGL_SET_VIEWPORT_STATE_SIZE(1)));
+   emit(c, 0);                      /* start slot */
+   emit_float(c, width / 2);
+   emit_float(c, height / 2);
+   emit_float(c, 0.5f);
+   emit_float(c, width / 2);
+   emit_float(c, height / 2);
+   emit_float(c, 0.5f);
+}
+
+static void emit_query(struct cmds *c, uint32_t cmd, uint32_t handle)
+{
+   emit(c, VIRGL_CMD0(cmd, 0, 1));
+   emit(c, handle);
+}
+
 static void emit_clear_red(struct cmds *c)
 {
-   union { float f; uint32_t u; } one = { 1.0f };
    emit(c, VIRGL_CMD0(VIRGL_CCMD_CLEAR, 0, VIRGL_OBJ_CLEAR_SIZE));
    emit(c, TEST_CLEAR_COLOR0);
-   emit(c, one.u);
-   emit(c, 0);
-   emit(c, 0);
-   emit(c, one.u);
+   emit_float(c, 1.0f);
+   emit_float(c, 0.0f);
+   emit_float(c, 0.0f);
+   emit_float(c, 1.0f);
    emit(c, 0);                      /* depth (double) */
    emit(c, 0);
    emit(c, 0);                      /* stencil */
+}
+
+/* A result that is not ready when asked for is written when a later fence of
+ * the context retires (QEMU makes one per guest submit). */
+static void wait_for_query(volatile struct virgl_host_query_state *state)
+{
+   static uint32_t fence_id;
+   for (int i = 0; i < 2000 && state->query_state != VIRGL_QUERY_STATE_DONE; i++) {
+      virgl_renderer_create_fence(++fence_id, 1);
+      virgl_renderer_poll();
+      usleep(1000);
+   }
 }
 
 static int submit(int ctx_id, struct cmds *c)
@@ -146,12 +135,22 @@ static int submit(int ctx_id, struct cmds *c)
    return r;
 }
 
+/* A triangle that covers the whole viewport, from gl_VertexID alone:
+ * (-1,-1), (3,-1), (-1,3). */
 static const char *vs_text =
    "VERT\n"
-   "DCL IN[0]\n"
+   "DCL SV[0], VERTEXID\n"
    "DCL OUT[0], POSITION\n"
-   "  0: MOV OUT[0], IN[0]\n"
-   "  1: END\n";
+   "DCL TEMP[0]\n"
+   "IMM[0] UINT32 {1, 2, 0, 0}\n"
+   "IMM[1] FLT32 {    4.0000,    -1.0000,     0.5000,     1.0000}\n"
+   "  0: AND TEMP[0].x, SV[0].xxxx, IMM[0].xxxx\n"
+   "  1: AND TEMP[0].y, SV[0].xxxx, IMM[0].yyyy\n"
+   "  2: USHR TEMP[0].y, TEMP[0].yyyy, IMM[0].xxxx\n"
+   "  3: U2F TEMP[0].xy, TEMP[0].xyyy\n"
+   "  4: MAD OUT[0].xy, TEMP[0].xyyy, IMM[1].xxxx, IMM[1].yyyy\n"
+   "  5: MOV OUT[0].zw, IMM[1].zzzw\n"
+   "  6: END\n";
 
 static const char *fs_text =
    "FRAG\n"
@@ -163,13 +162,12 @@ static const char *fs_text =
 int main(void)
 {
    setvbuf(stdout, NULL, _IONBF, 0);
-   main_ctx = new_context(NULL);
-   if (!main_ctx || CGLSetCurrentContext(main_ctx)) {
+   if (!cgl_init_renderer_main()) {
       printf("skip: no OpenGL context on this Mac\n");
       return 0;
    }
    static int cookie;
-   if (virgl_renderer_init(&cookie, 0, &callbacks)) {
+   if (virgl_renderer_init(&cookie, 0, &cgl_renderer_callbacks)) {
       printf("FAIL: virgl_renderer_init\n");
       return 1;
    }
@@ -183,6 +181,25 @@ int main(void)
    };
    check(!virgl_renderer_resource_create(&args, NULL, 0), "colour buffer");
    virgl_renderer_ctx_attach_resource(1, 5);
+
+   /* where the occlusion query results go: guest memory, no GL object */
+   struct virgl_host_query_state query_result[2];
+   memset(query_result, 0, sizeof(query_result));
+   struct iovec query_iov[2] = {
+      { &query_result[0], sizeof(query_result[0]) },
+      { &query_result[1], sizeof(query_result[1]) },
+   };
+   for (uint32_t i = 0; i < 2; i++) {
+      struct virgl_renderer_resource_create_args qargs = {
+         .handle = 7 + i, .target = TEST_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
+         .bind = VIRGL_BIND_CUSTOM, .width = sizeof(query_result[0]), .height = 1,
+         .depth = 1, .array_size = 1,
+      };
+      check(!virgl_renderer_resource_create(&qargs, NULL, 0) &&
+            !virgl_renderer_resource_attach_iov(7 + i, &query_iov[i], 1),
+            "query buffer");
+      virgl_renderer_ctx_attach_resource(1, 7 + i);
+   }
 
    struct cmds c = { .n = 0 };
    emit(&c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_SURFACE, VIRGL_OBJ_SURFACE_SIZE));
@@ -219,6 +236,57 @@ int main(void)
          pixels[0] == 0xff0000ff && pixels[16 * 16 - 1] == 0xff0000ff,
          "the colour buffer is cleared corner to corner");
 
+   /* No attachments, a 64x48 viewport, depth test on (less, with writes):
+    * each of two draws over the whole viewport passes 64 * 48 samples. With a
+    * 1x1 stand-in or a depth test against it, they counted 1 and 0. */
+   emit(&c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_DSA, VIRGL_OBJ_DSA_SIZE));
+   emit(&c, 20);
+   emit(&c, VIRGL_OBJ_DSA_S0_DEPTH_ENABLE(1) | VIRGL_OBJ_DSA_S0_DEPTH_WRITEMASK(1) |
+            VIRGL_OBJ_DSA_S0_DEPTH_FUNC(TEST_FUNC_LESS));
+   emit(&c, 0);
+   emit(&c, 0);
+   emit(&c, 0);
+   emit(&c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_DSA, 1));
+   emit(&c, 20);
+   for (uint32_t i = 0; i < 2; i++) {
+      emit(&c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_QUERY, VIRGL_OBJ_QUERY_SIZE));
+      emit(&c, 30 + i);
+      emit(&c, TEST_QUERY_OCCLUSION_COUNTER);
+      emit(&c, 0);                  /* offset */
+      emit(&c, 7 + i);              /* result buffer */
+   }
+   emit_framebuffer(&c, 0, 0);
+   emit_viewport(&c, 64, 48);
+   for (uint32_t i = 0; i < 2; i++) {
+      emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 30 + i);
+      emit_draw(&c);
+      emit_query(&c, VIRGL_CCMD_END_QUERY, 30 + i);
+   }
+   for (uint32_t i = 0; i < 2; i++) {
+      emit(&c, VIRGL_CMD0(VIRGL_CCMD_GET_QUERY_RESULT, 0, 2));
+      emit(&c, 30 + i);
+      emit(&c, 1);                  /* wait */
+   }
+   check(submit(1, &c) == 0, "occlusion queries without attachments are accepted");
+   char what[96];
+   for (uint32_t i = 0; i < 2; i++) {
+      wait_for_query(&query_result[i]);
+      snprintf(what, sizeof(what), "draw %u counts every sample of the 64x48 viewport: %llu", i + 1,
+               (unsigned long long)query_result[i].result);
+      check(query_result[i].query_state == VIRGL_QUERY_STATE_DONE &&
+            query_result[i].result == 64 * 48, what);
+   }
+
+   emit_framebuffer(&c, 1, 6);
+   emit_viewport(&c, 16, 16);
+   emit_clear_red(&c);
+   emit_draw(&c);
+   check(submit(1, &c) == 0, "the colour buffer works again after the queries");
+
+   for (uint32_t i = 0; i < 2; i++) {
+      virgl_renderer_ctx_detach_resource(1, 7 + i);
+      virgl_renderer_resource_unref(7 + i);
+   }
    virgl_renderer_ctx_detach_resource(1, 5);
    virgl_renderer_context_destroy(1);
    virgl_renderer_resource_unref(5);
