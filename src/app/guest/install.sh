@@ -5,13 +5,15 @@
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
+#  * every Mac display in full screen (omacvm-displays; the switch
+#    "Use external displays" in the bar's display menu)
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
 H=$(getent passwd "$U" | cut -d: -f6)
 pacman -S --needed --noconfirm qemu-guest-agent python >/dev/null 2>&1 || true
 systemctl enable --now qemu-guest-agent >/dev/null 2>&1 || true
-install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard /usr/local/bin/
+install -m755 omacvm-display-sync omacvm-app-host omacvm-clipboard omacvm-displays /usr/local/bin/
 # Clipboard both ways, over a virtio port (the agent is try-omarchy's).
 pacman -S --needed --noconfirm wl-clipboard >/dev/null 2>&1 || true
 # uaccess: the logged-in user may open the port (before 73-seat-late.rules).
@@ -20,6 +22,10 @@ udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-p
 install -m644 omacvm-clipboard.service /etc/systemd/user/
 systemctl --global enable omacvm-clipboard.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-clipboard.service 2>/dev/null || true
+# The Mac's displays (over a virtio port; the same uaccess rule).
+install -m644 omacvm-displays.service /etc/systemd/user/
+systemctl --global enable omacvm-displays.service >/dev/null 2>&1 || true
+systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-displays.service 2>/dev/null || true
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
@@ -31,4 +37,4 @@ grep -qxF 'require("hypr.omacvm_app")' "$B" || {
   printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' >> "$B"; chown "$U:$U" "$B"; }
 A=$H/.config/hypr/autostart.lua
 grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
-echo "OmacVM.app: display sync, guest agent"
+echo "OmacVM.app: display sync, every Mac display, guest agent"

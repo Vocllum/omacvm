@@ -496,6 +496,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patc
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdown.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
+# OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
