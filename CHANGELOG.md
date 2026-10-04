@@ -22,6 +22,9 @@ in more words.
   MacBook whichever display holds the main window (OmacVM.app tells the VM
   which output is the built-in display). Before, with the main window on an
   external display, the MacBook showed two bars.
+- A display that moves in the layout (plugging displays in and out, or
+  starting the VM in full screen) keeps its wallpaper and bar. Before, it
+  could stay dark grey without a bar until the shell was restarted.
 - Omanotch: after a shell restart the bar is parked under the strip again
   within seconds; before, the MacBook could show two bars.
 - Per-display workspaces handle more than two displays (Virtual-3 gets
