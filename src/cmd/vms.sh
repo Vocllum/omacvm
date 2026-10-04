@@ -3,7 +3,9 @@
 # the running ones over SSH; stopped VMs are not started).
 # --json: {"omacvm", "vms": [{"name", "type", "state", "ip", "omacvm",
 # "reachable", "features": {NAME: true|false}}]}; omacvm = the version in the
-# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in.
+# VM (null: none, or stopped), reachable = OmacVM's SSH key gets in; state
+# "unknown": UTM runs but does not answer this terminal (not allowed to
+# control UTM yet, or over SSH).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -13,7 +15,7 @@ features_load
 JSON=0
 case ${1:-} in
   --json) JSON=1 ;;
-  -h|--help) sed -n '2,6s/^# \{0,1\}//p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
   "") ;;
   *) echo "omacvm vms: unknown option $1" >&2; exit 2 ;;
 esac

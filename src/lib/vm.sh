@@ -15,7 +15,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/app.sh"
 # AppleEvents: over SSH, or where this terminal may not control UTM, it fails;
 # while macOS still asks about it, it waits up to 10 minutes.
 utm_ctl_list() { perl -e 'alarm shift; exec @ARGV' 15 "$UTMCTL" list 2>/dev/null; }
-UTM_NO_ANSWER="UTM did not answer: run omacvm in Terminal on the Mac and allow it to control UTM"
+UTM_NO_ANSWER="UTM did not answer: run omacvm in a terminal app on the Mac and allow it to control UTM"
 
 vms_list() {
   local u=""
@@ -148,24 +148,28 @@ ssh_setup_command() {
 # the only running VM. With "start", a stopped VM is started; without, IP stays
 # empty for it. Exits 2 when it cannot tell which VM ("soft": returns 1).
 resolve_vm() {
-  local running
+  local running list state
+  list=$(vms_list)   # once: it can take 15 s while UTM does not answer
   if [[ -z ${VM:-} ]]; then
-    if vms_list | cut -f1 | grep -qxF Omarchy; then VM=Omarchy
+    if cut -f1 <<<"$list" | grep -qxF Omarchy; then VM=Omarchy
     else
-      running=$(vms_list | awk -F'\t' '$3 == "running" { print $1 }')
+      running=$(awk -F'\t' '$3 == "running" { print $1 }' <<<"$list")
       if [[ $(grep -c . <<<"$running") == 1 ]]; then VM=$running
       else
         [[ ${1:-} == soft ]] && return 1
-        echo "omacvm: which VM? pass --vm NAME (your VMs: $(vms_list | cut -f1 | paste -sd, - | sed 's/,/, /g'))" >&2
+        echo "omacvm: which VM? pass --vm NAME (your VMs: $(cut -f1 <<<"$list" | paste -sd, - | sed 's/,/, /g'))" >&2
         exit 2
       fi
     fi
   fi
-  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2; exit 2; }
+  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type_in "$VM" <<<"$list") || { echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2; exit 2; }
   vm_pin "$VM" "$TYPE"
   IP=""
+  state=$(awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && $2 == t { print $3; exit }' <<<"$list")
+  # UTM does not answer: the VM may well run, so never start it
+  [[ $state == unknown ]] && { echo "omacvm: '$VM': $UTM_NO_ANSWER" >&2; exit 3; }
   # DHCP leases outlive a stopped VM: only a running one has an address.
-  if vms_list | awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && $2 == t && $3 == "running" { f = 1 } END { exit !f }'; then
+  if [[ $state == running ]]; then
     IP=$(vm_find_ip "$VM" "$TYPE" 30 2>/dev/null) || IP=""
   fi
   if [[ -z $IP && ${1:-} == start ]]; then
@@ -182,8 +186,9 @@ resolve_vm() {
 # vm_type NAME -> parallels | utm | fusion (replaces mac.sh's, without starting UTM); a
 # name in both: the running one, else a usable one (Parallels first), and an
 # "invalid" Parallels VM (its files are gone) last.
-vm_type() {
-  vms_list | awk -F'\t' -v n="$1" '
+vm_type() { vms_list | vm_type_in "$1"; }
+vm_type_in() {   # NAME, vms_list's lines on stdin
+  awk -F'\t' -v n="$1" '
     $1 == n { if ($3 == "running") run = $2
               else if ($3 == "invalid") bad = $2
               else if (!any || $2 == "parallels") any = $2 }

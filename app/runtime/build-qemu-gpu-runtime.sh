@@ -259,7 +259,7 @@ work_dir=
 # say): then the scratch files go to macOS's temp folder.
 scratch_root="$native_dir/.build/tmp"
 if [[ $scratch_root == *[[:space:]]* ]]; then
-  scratch_root=$(cd "${TMPDIR:-/private/tmp}" && pwd -P)
+  scratch_root=$(cd "${TMPDIR:-/private/tmp}" && pwd -P) || die "no temp folder: ${TMPDIR:-/private/tmp}"
   [[ $scratch_root != *[[:space:]]* ]] || die "build OmacVM from a folder without spaces in its path"
 fi
 remove_work_dir() {
