@@ -10,6 +10,9 @@ measure what reaches the Mac's screen, not what the guest thinks it drew.
 | `hdrcss.html` | guest | CSS `color(rec2100-pq ...)` bars at 100/203/400/600/1000 nits and SDR white (Chrome HDR check; Chrome 154 still clips them at SDR white) |
 | `sckpace.swift` | Mac | ScreenCaptureKit capture of the VM window; counts how far the frame number moved per WindowServer frame; with `QMP=` also key -> screen latency |
 | `snapcolor.swift` | Mac | the colour bars as seen on screen, converted to Display P3 and sRGB |
+| `ufopace.swift` | Mac | the same for testufo.com: per WindowServer frame, how far the UFO of the 120 fps lane moved (cross-correlation against the median background); `new_frames_per_s` and steps (1 = a new frame each refresh, 2 = one skipped) |
+| `vdisplay.m` | Mac | a virtual display at any refresh rate (CGVirtualDisplay, private API), e.g. `vdisplay 1920 1080 144 300` for a 144 Hz screen (build: `clang -fobjc-arc -framework Foundation -framework CoreGraphics -framework AppKit vdisplay.m -o vdisplay`) |
+| `mkclip.sh` | guest | PQ test bars at 100/203/400/600/1000 nits (8-bit HEVC: the guest's x265 has no 10-bit) |
 | `snaphdr.swift` | Mac | one frame in extended linear Display P3 (1.0 = SDR white; `pq` as 2nd argument: in PQ), plus each screen's EDR headroom |
 
 Build the Mac tools with `swiftc -O <file>.swift -o <name>` (the calling app
@@ -33,4 +36,9 @@ With tagged surfaces guest red is Display P3 (234,51,35); untagged (255,0,0).
 
 HDR: guest at 10 bits with `cm = "hdr"` (see ADR 0021), QEMU with
 `OMACVM_GL_HDR=1`, then `./snaphdr <id>`: values above 1.0 are HDR, and the
-built-in screen's "edr now" rises above 1.0.
+built-in screen's "edr now" rises above 1.0. Use a client that sends a PQ
+image description, e.g. `gst-launch-1.0 filesrc location=hdr10-bars.mkv !
+matroskademux ! h265parse ! avdec_h265 ! videoconvert !
+video/x-raw,format=RGB10A2_LE ! waylandsink fullscreen=true` (mpv on OpenGL
+does not send one). Reset Hyprland's `sdrbrightness` between tests: it
+scales SDR surfaces and can pass for HDR.

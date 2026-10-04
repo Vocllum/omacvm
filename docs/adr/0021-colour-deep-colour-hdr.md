@@ -47,10 +47,17 @@ in the guest (`omacvm-virtio-gpu-build`, needs the kernel headers).
   187 MB at 2880x1620 instead of 93 MB).
 - HDR works end to end with a guest monitor rule (`bitdepth = 10,
   cm = "hdr", supports_hdr = 1, max_luminance = 1600, sdr_max_luminance =
-  203`): the MacBook's EDR headroom goes to 4.2, PQ 203 nits is SDR white on
-  the Mac. How bright HDR video ends up depends on the guest's tone mapping
-  (mpv needs `--target-colorspace-hint-mode=source --hdr-reference-white=203`
-  today).
+  203`), which `omacvm-display-sync` writes by itself when the app's hidden
+  `hdr` switch is on and the 10-bit module runs: the MacBook's EDR headroom
+  goes to 4.2-16, PQ 203 nits is SDR white on the Mac. Proof with a client
+  that sends a PQ image description (GStreamer `waylandsink`): bars at
+  100/203/400/600/1000 nits show at 0.37/0.60/0.89/1.10/1.50 times SDR
+  white (Hyprland 0.56 compresses the top).
+- Most players do not send one yet: mpv 0.41 on OpenGL only reads the
+  preferred description (its hint needs a Vulkan swapchain, so Venus), Chrome
+  154 clips CSS `rec2100-pq` at SDR white. They show as SDR. (An earlier note
+  here said mpv showed up to 2.9x; that run had Hyprland's `sdrbrightness`
+  left at 3 from the test before.)
 - With 3a a wrong combination (QEMU told HDR, guest 10-bit SDR) shows wrong
-  colours; 3b/3c remove that. The guest module must be rebuilt for each new
-  kernel (a pacman hook is the next step).
+  colours; 3b/3c remove that. The guest module is rebuilt for new kernels by
+  a pacman hook once HDR was turned on.
