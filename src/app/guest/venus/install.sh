@@ -1,6 +1,7 @@
 #!/bin/bash
 # Venus extras for OmacVM.app VMs: Vulkan (Venus), OpenCL (rusticl on Zink on
-# Venus) and WebGPU in Firefox. Run as root inside the VM: ./install.sh
+# Venus), WebGPU in Firefox and, from an extra launcher, in Chromium/Chrome.
+# Run as root inside the VM: ./install.sh
 # Only does something when the VM runs with Venus (the app's hidden switch:
 # defaults write org.omacvm.app venus -bool true); --force builds anyway.
 #
@@ -10,6 +11,8 @@
 #   /etc/OpenCL/vendors/omacvm-rusticl.icd      OpenCL (rusticl, Zink)
 #   /etc/environment.d/90-omacvm-venus.conf     RUSTICL_ENABLE=zink, distro venus off
 #   Firefox: omacvm-webgpu.js                   WebGPU on
+#   omacvm-chromium-webgpu (+ omacvm-chrome-webgpu) and a "Chromium (WebGPU)"
+#   menu entry: Chromium with its compositor on Vulkan, which WebGPU needs
 # ./install.sh --remove undoes all of it.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -20,9 +23,13 @@ ICD=/etc/vulkan/icd.d/omacvm_venus_icd.json
 CLICD=/etc/OpenCL/vendors/omacvm-rusticl.icd
 ENVF=/etc/environment.d/90-omacvm-venus.conf
 FFPREF=/usr/lib/firefox/defaults/pref/omacvm-webgpu.js
+LAUNCH=/usr/local/bin/omacvm-chromium-webgpu
+LAUNCH2=/usr/local/bin/omacvm-chrome-webgpu
+DESK=/usr/share/applications/omacvm-chromium-webgpu.desktop
 
 remove() {
-  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$FFPREF" /var/cache/omacvm/mesa-build
+  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$FFPREF" "$LAUNCH" "$LAUNCH2" "$DESK" \
+    /var/cache/omacvm/mesa-build
   echo "OmacVM Venus extras removed"
 }
 
@@ -79,4 +86,7 @@ CONF
 if [[ -d /usr/lib/firefox ]]; then
   install -Dm644 omacvm-webgpu.js "$FFPREF"
 fi
-echo "OmacVM Venus extras: Mesa $MESA_VERSION in $PREFIX (Vulkan, OpenCL); Firefox WebGPU"
+install -Dm755 omacvm-chromium-webgpu "$LAUNCH"
+ln -sf omacvm-chromium-webgpu "$LAUNCH2"
+[[ -x /usr/bin/chromium ]] && install -Dm644 omacvm-chromium-webgpu.desktop "$DESK"
+echo "OmacVM Venus extras: Mesa $MESA_VERSION in $PREFIX (Vulkan, OpenCL); WebGPU in Firefox and omacvm-chromium-webgpu"
