@@ -67,26 +67,6 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 
 ¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in about 12 minutes
 
-You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
-fast, but out of the box it feels like a guest:
-
-- **Full screen wastes the notch.** The VM sits below the camera housing and
-  leaves a black strip across the top of your MacBook's screen.
-- **The trackpad doesn't swipe.** Three- and four-finger swipes and pinch go to
-  macOS's Mission Control and Spaces, never to Omarchy's workspaces.
-- **Scrolling doesn't feel like a Mac.** The VM app turns your trackpad into a
-  wheel; macOS's acceleration and momentum get lost on the way.
-- **The bar shows a virtual network card**, not your Wi-Fi, no Bluetooth at
-  all, and none of the Mac's audio devices.
-- **The Mac's keys aren't Omarchy's.** Volume and brightness open macOS's
-  popups, Cmd+Space opens Spotlight, and Parallels turns Cmd+C/V into Ctrl.
-- **External displays ignore your macOS arrangement.**
-
-**OmacVM** fixes all of that and builds the VM for you: Arch Linux ARM,
-[omarchy-mac](https://github.com/omacom/omarchy-mac) and the glue on both sides
-of the VM, with [Omanotch](src/omanotch/README.md) putting
-Omarchy's bar beside the notch.
-
 > [!NOTE]
 > **Got an M1 or M2 Mac?** You can run Omarchy natively on
 > [Asahi Linux](https://asahilinux.org) instead. OmacVM is for **M3, M4 and
