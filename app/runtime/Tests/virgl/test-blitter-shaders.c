@@ -94,17 +94,29 @@ int main(void)
                                                      BLIT_MANUAL_SRGB_DECODE |
                                                      BLIT_MANUAL_SRGB_ENCODE));
    }
-   static const enum tgsi_texture_type depth_targets[] = {
-      TGSI_TEXTURE_2D, TGSI_TEXTURE_RECT, TGSI_TEXTURE_CUBE, TGSI_TEXTURE_2D_ARRAY,
+   /* Depth blits at the host's GLSL version and at 1.50, where cube map arrays
+    * still need their extension line. */
+   static const struct {
+      const char *name;
+      enum tgsi_texture_type target;
+   } depth_targets[] = {
+      {"2D", TGSI_TEXTURE_2D}, {"RECT", TGSI_TEXTURE_RECT}, {"CUBE", TGSI_TEXTURE_CUBE},
+      {"2D_ARRAY", TGSI_TEXTURE_2D_ARRAY}, {"CUBE_ARRAY", TGSI_TEXTURE_CUBE_ARRAY},
    };
-   for (unsigned t = 0; t < ARRAY_SIZE(depth_targets); t++) {
-      snprintf(name, sizeof(name), "depth target %d", depth_targets[t]);
-      failed |= link_with_vs(name, blit.vs, blit_build_frag_depth(&blit, depth_targets[t], false));
+   const int depth_versions[] = { vrend_renderer_get_glsl_version(), 150 };
+   for (unsigned v = 0; v < ARRAY_SIZE(depth_versions); v++) {
+      blit_set_glsl_version(&blit, depth_versions[v]);
+      GLuint vs = blit_shader_build_and_check(&blit, GL_VERTEX_SHADER, VS_PASSTHROUGH_GL);
+      for (unsigned t = 0; t < ARRAY_SIZE(depth_targets); t++) {
+         snprintf(name, sizeof(name), "depth %s (GLSL %d)", depth_targets[t].name, blit.glsl_ver);
+         failed |= link_with_vs(name, vs, blit_build_frag_depth(&blit, depth_targets[t].target, false));
+      }
+      snprintf(name, sizeof(name), "depth 2D_MSAA (GLSL %d)", blit.glsl_ver);
+      failed |= link_with_vs(name, vs, blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_MSAA, true));
+      snprintf(name, sizeof(name), "depth 2D_ARRAY_MSAA (GLSL %d)", blit.glsl_ver);
+      failed |= link_with_vs(name, vs, blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_ARRAY_MSAA, true));
+      glDeleteShader(vs);
    }
-   failed |= link_with_vs("depth 2D_MSAA", blit.vs,
-                          blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_MSAA, true));
-   failed |= link_with_vs("depth 2D_ARRAY_MSAA", blit.vs,
-                          blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_ARRAY_MSAA, true));
    glDeleteShader(blit.vs);
    return failed;
 }

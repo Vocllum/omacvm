@@ -5,14 +5,17 @@ follows the host's GLSL version, the same number the shader translator gets
 (vrend_renderer_get_glsl_version(), new): 4.00 if the host has it (macOS: 4.10),
 1.50 from 1.50, else 1.30 as before. The ARB_texture_multisample (colour and
 depth multisample blits) and ARB_texture_cube_map_array "#extension" lines are
-left out where that version has them in core. GLES is unchanged.
+left out where that version has them in core, and depth blits from cube map
+arrays get the cube map array line below 4.00 (they did not compile there,
+an upstream bug). GLES is unchanged.
 Why: Apple's core profile refuses GLSL 1.30, so the blit vertex shader failed at
 every QEMU start ("version '130' is not supported") and every blit that needs a
 shader (format conversion, swizzle, sRGB, depth, multisample resolve to another
 format) drew nothing.
 Upstreamable; not sent.
 Tests: Tests/virgl/test-blitter-shaders.c (builds the blitter's real shaders for
-every target and type with the Mac's OpenGL and links them).
+every target and type with the Mac's OpenGL and links them; depth blits also
+at GLSL 1.50).
 --- a/src/vrend/vrend_blitter.c
 +++ b/src/vrend/vrend_blitter.c
 @@ -62,6 +62,9 @@
@@ -79,7 +82,7 @@ every target and type with the Mac's OpenGL and links them).
  }
  
  static GLuint blit_build_frag_depth(struct vrend_blitter_ctx *blit_ctx, enum tgsi_texture_type tgsi_tex_target, bool msaa)
-@@ -352,11 +358,14 @@
+@@ -352,19 +358,28 @@
  
     blit_get_swizzle(tgsi_tex_target, flags, &swizzle_and_type);
  
@@ -96,10 +99,17 @@ every target and type with the Mac's OpenGL and links them).
 +      snprintf(shader_buf, 4096,
 +               swizzle_and_type.is_array ? FS_TEXFETCH_DS_MSAA_ARRAY_GLES : FS_TEXFETCH_DS_MSAA_GLES,
 +               vrend_shader_samplertypeconv(blit_ctx->use_gles, tgsi_tex_target), swizzle_and_type.type, swizzle_and_type.swizzle);
++   else if (!blit_ctx->use_gles)
++      snprintf(shader_buf, 4096, FS_TEXFETCH_DS_GL,
++               (tgsi_tex_target == TGSI_TEXTURE_CUBE_ARRAY ||
++                tgsi_tex_target == TGSI_TEXTURE_SHADOWCUBE_ARRAY) && blit_ctx->glsl_ver < 400 ?
++                  "#extension GL_ARB_texture_cube_map_array : require\n" : "",
++               vrend_shader_samplertypeconv(blit_ctx->use_gles, tgsi_tex_target), swizzle_and_type.swizzle);
     else
-       snprintf(shader_buf, 4096, blit_ctx->use_gles ? FS_TEXFETCH_DS_GLES : FS_TEXFETCH_DS_GL,
+-      snprintf(shader_buf, 4096, blit_ctx->use_gles ? FS_TEXFETCH_DS_GLES : FS_TEXFETCH_DS_GL,
++      snprintf(shader_buf, 4096, FS_TEXFETCH_DS_GLES,
           vrend_shader_samplertypeconv(blit_ctx->use_gles, tgsi_tex_target), swizzle_and_type.swizzle);
-@@ -364,7 +373,7 @@
+ 
     VREND_DEBUG(dbg_blit, NULL, "-- Blit FS depth shader MSAA: %d -----------------\n"
                 "%s\n---------------------------------------\n", msaa, shader_buf);
  
@@ -108,7 +118,7 @@ every target and type with the Mac's OpenGL and links them).
  }
  
  static GLuint blit_get_frag_tex_writedepth(struct vrend_blitter_ctx *blit_ctx, enum pipe_texture_target pipe_tex_target, unsigned nr_samples)
-@@ -453,6 +462,20 @@
+@@ -453,6 +468,20 @@
     return prog_id;
  }
  
@@ -129,7 +139,7 @@ every target and type with the Mac's OpenGL and links them).
  static void vrend_renderer_init_blit_ctx(struct vrend_blitter_ctx *blit_ctx)
  {
     struct virgl_gl_ctx_param ctx_params;
-@@ -482,11 +505,12 @@
+@@ -482,11 +511,12 @@
     }
  
     vrend_sync_make_current(blit_ctx->gl_context);
@@ -166,7 +176,12 @@ every target and type with the Mac's OpenGL and links them).
     "// Blitter\n"                               \
  
  #define HEADER_GLES                             \
-@@ -170,7 +169,7 @@
+@@ -166,11 +165,11 @@
+    "   gl_FragDepth = float(texture(samp, tc%s).x);\n"  \
+    "}\n"
+ 
+-#define FS_TEXFETCH_DS_GL HEADER_GL FS_TEXFETCH_DS_BODY
++#define FS_TEXFETCH_DS_GL HEADER_GL "%s" FS_TEXFETCH_DS_BODY
  #define FS_TEXFETCH_DS_GLES HEADER_GLES FS_TEXFETCH_DS_BODY
  
  #define FS_TEXFETCH_DS_MSAA_BODY                                         \
