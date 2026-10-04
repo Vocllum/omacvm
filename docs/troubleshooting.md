@@ -32,6 +32,7 @@ else than the cause. Recipes and the general failure table are in
 | 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
 | 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
 | 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
+| 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -427,3 +428,30 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   (and says to restart).
 - **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`,
   `src/cmd/check.sh`.
+
+## 23. app: Chrome hangs in Basemark Web 3.0, the screen flickers
+
+- **Symptom:** in OmacVM.app (2.6.0), Basemark Web 3.0 in Google Chrome
+  stops at test 5 of 20, the page flickers and no score comes, even after
+  15 minutes. It finishes on the Mac and in Parallels, UTM and Fusion. WebGL
+  Aquarium and the desktop keep working.
+- **Cause:** the app's virglrenderer turns the guest's shaders (TGSI) into
+  GLSL for the Mac's OpenGL 4.1. One of the patches it is built with
+  (`virglrenderer-a8-shader-swizzle-texture.patch`, for alpha-only textures)
+  reads every `texture()` result into a `vec4`. On an integer texture
+  (`usampler2D`) that gives `uintBitsToFloat(vec4)`, which does not exist, so
+  Apple's compiler refuses the shader. The VM's `logs/qemu.log` says
+  `Shader failed to compile`, `ERROR: 0:273: No matching function for call to
+  uintBitsToFloat(vec4)`, then `context 11 failed to dispatch DRAW_VBO` and
+  `ctrl 0x106, error 0x1200` for every later command: virglrenderer stops
+  that GL context for good, and Chrome's GPU process keeps drawing into a
+  dead context. The patch also put the write mask on that `vec4`
+  (`vec4 val = texture(...).x`), which does not compile either.
+- **Fix:** `app/runtime/patches/virgl-texture-integer-samplers.patch`: the
+  temporary has the sampler's own type (`vec4`, `uvec4`, `ivec4`), the write
+  mask goes on the assignment only. Each runtime build compiles these
+  shaders with the Mac's OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`),
+  and `app/scripts/gpu-check.sh` runs Aquarium and Basemark in an app VM and
+  reads `qemu.log` for refused shaders.
+- **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
+  `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.

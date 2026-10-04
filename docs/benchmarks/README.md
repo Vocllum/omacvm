@@ -92,6 +92,25 @@ bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,gpu,glmark
 Each result is one JSON line: host, OS, test, run, value, and the browser
 version or Geekbench link.
 
+### GPU check for OmacVM.app
+
+A quick check that the app's GPU path still works after a change to its
+runtime (QEMU, virglrenderer, their patches). With the VM running and its
+desktop user logged in, on the Mac:
+
+```bash
+app/scripts/gpu-check.sh ~/Library/Application\ Support/OmacVM/VMs/<name> [RUNS]
+```
+
+It installs Google Chrome in the VM when missing, runs WebGL Aquarium and
+Basemark Web 3.0 there (`bench.sh --only aquarium,basemark`), and fails when
+either gives no number or when the VM's `logs/qemu.log` shows a shader or GPU
+command the Mac refused. One refused shader stops that GL context in the VM
+for good: that was Basemark's hang at test 5 in 2.6.0
+([finding 23](../troubleshooting.md#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers)).
+Each runtime build also compiles the shaders of that case with the Mac's
+OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`).
+
 ## Power draw and battery life
 
 How much power the whole Mac draws while Omarchy runs in a VM, against the
