@@ -92,6 +92,7 @@ virgl_buffer_checks_patch="$native_dir/patches/virgl-buffer-binding-checks.patch
 virgl_draw_checks_patch="$native_dir/patches/virgl-draw-range-checks.patch"
 virgl_ubo_checks_patch="$native_dir/patches/virgl-uniform-buffer-checks.patch"
 virgl_index_clamp_patch="$native_dir/patches/virgl-shader-index-clamp.patch"
+virgl_vertex_format_patch="$native_dir/patches/virgl-vertex-format-checks.patch"
 virgl_venus_robust_patch="$native_dir/patches/virgl-venus-robust-buffer-access.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
@@ -135,6 +136,7 @@ virgl_buffer_checks_patch_sha256=8ec68618b2688ede52afcd286283c80e84787bf2e4ccfa5
 virgl_draw_checks_patch_sha256=7e598ae7643be3fcec9a67fd999d90dffaca2280980cd34a4e1e623a44d36151
 virgl_ubo_checks_patch_sha256=fdb2c662933bfee31c0f9f871cd69126e0261e1bab767e9334407da2da3b72ff
 virgl_index_clamp_patch_sha256=cab18c535c5ed46d2d6c8785c7096c280288d9aff9f30b499c48487ad2c3d933
+virgl_vertex_format_patch_sha256=dd1ad464871635c753622037d5f188af821028ade1093866f99e969e53a96ad6
 virgl_venus_robust_patch_sha256=60686e2e47b95b2f4496d1b66caa3b51c307ca21391bf77015c4e10142016b98
 virgl_venus_lost_patch_sha256=3e486f99a7e18c0309e4e66952bca102f860b588b67780ae2ef58b1999a50862
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
@@ -692,6 +694,11 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_ubo_checks_patch"
 # OmacVM: array indexes a guest shader computes stay inside their arrays.
 verify_file_sha "Shader index clamp" "$virgl_index_clamp_patch" "$virgl_index_clamp_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_index_clamp_patch"
+# OmacVM: a GL call the Mac's GL refuses keeps older state the checks above never saw.
+# Vertex formats and buffer offsets the GL would refuse are refused first, uniform block
+# arrays are bound as declared, and a GL error while a draw is set up skips the draw.
+verify_file_sha "Vertex format checks" "$virgl_vertex_format_patch" "$virgl_vertex_format_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_format_patch"
 # OmacVM: Venus devices always get robust buffer access where the host device has it.
 verify_file_sha "Venus robust buffer access" "$virgl_venus_robust_patch" "$virgl_venus_robust_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_venus_robust_patch"
