@@ -15,12 +15,12 @@ OUT=${OUT:-$H/results/soak-$(date +%Y%m%d-%H%M%S).json}; ART=${OUT%.json}; mkdir
 QPID=$("$V" pid); [ -z "$QPID" ] && { echo "VM not running"; exit 1; }
 QLOG=$("$V" log); QLOG0=$(wc -l < "$QLOG")
 G=/tmp/omacvm-soak
-FENCE='cat /sys/kernel/debug/dri/*/virtio-gpu-irq-fence 2>/dev/null | head -1'
 
 # Loads (guest, as the desktop user; all stop by themselves after MIN minutes + margin)
 "$V" ssh "rm -rf $G; mkdir -p $G; chmod 777 $G"
 "$V" ssh "cat > $G/webgl.html" < "$H/guest/soak-webgl.html"
 "$V" ssh "cat > $G/server.py" < "$H/guest/soak-server.py"
+"$V" ssh "cat > $G/probe.py" < "$H/guest/soak-probe.py"
 "$V" ssh "ffmpeg -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=60 -t 20 -c:v libx264 -pix_fmt yuv420p $G/v.mp4"
 "$V" ssh "chown -R \$(id -un 1000) $G"
 T=$(( MIN*60 + 60 ))
@@ -28,7 +28,7 @@ if [ $VK = 1 ]; then GPUJOB="vkmark --winsys wayland"; else GPUJOB="glmark2-es2-
 "$V" session bash -c "cd $G; nohup timeout $T python3 server.py >/dev/null 2>&1 &
   nohup timeout $T bash -c 'while :; do $GPUJOB >> $G/gpu.txt 2>&1; echo LOOP >> $G/gpu.txt; done' >/dev/null 2>&1 &
   nohup timeout $T google-chrome-stable --user-data-dir=$G/prof --no-first-run --ozone-platform=wayland --disable-background-timer-throttling --disable-renderer-backgrounding http://127.0.0.1:8766/webgl.html >/dev/null 2>&1 &
-  nohup timeout $T mpv --loop=inf --hwdec=auto --really-quiet --vo=gpu --term-status-msg='\${estimated-frame-number} \${frame-drop-count}' --term-osd=force $G/v.mp4 > $G/mpv.txt 2>&1 &"
+  nohup timeout $T mpv --loop=inf --hwdec=auto --really-quiet --vo=gpu --input-ipc-server=$G/mpv.sock $G/v.mp4 > $G/mpv.txt 2>&1 &"
 
 sample_qemu() { sample "$QPID" 3 1 -file "$ART/qemu-sample-$1.txt" >/dev/null 2>&1; }
 end=$(( $(date +%s) + MIN*60 )); verdict=pass; why=""; misses=0; paused=0
@@ -42,15 +42,14 @@ while [ "$(date +%s)" -lt $end ]; do
     end=$((end + IV)); sig_since=$now; prog_since=$now; paused=$((paused + IV)); continue
   fi
   read -r cpu rss < <(ps -o %cpu=,rss= -p "$QPID")
-  g=$("$V" ssh -o ConnectTimeout=8 "echo \$($FENCE) \$(grep -c LOOP $G/gpu.txt) \$(tail -1 $G/frames.txt 2>/dev/null || echo 0) \$(tr '\r' '\n' < $G/mpv.txt | grep -E '^[0-9]+ ' | tail -1) \$(awk '/MemAvailable/{print \$2}' /proc/meminfo)" 2>/dev/null)
+  g=$("$V" ssh -o ConnectTimeout=8 "python3 $G/probe.py $G" 2>/dev/null)
   if [ -z "$g" ]; then
     misses=$((misses+1)); echo "{\"t\":$now,\"heartbeat\":false,\"qemu_cpu\":$cpu,\"qemu_rss_kb\":$rss}" >> "$ART/samples.jsonl"
     [ $misses -ge 2 ] && { verdict=fail; why="no guest heartbeat for $((2*IV)) s"; sample_qemu hang; break; }
     continue
   fi
   misses=0
-  set -- $g   # fence <signalled> <emitted> <gpu loops> <webgl frames> <mpv frame> <mpv drops> <MemAvailable>
-  sig=$2 emit=$3 loops=$4 wf=$5 mf=${6:-0} md=${7:-0} mem=${8:-0}
+  read -r sig emit loops wf mf md mem <<< "$g"
   echo "{\"t\":$now,\"heartbeat\":true,\"fence_signalled\":$sig,\"fence_emitted\":$emit,\"gpu_loops\":$loops,\"webgl_frames\":$wf,\"video_frame\":$mf,\"video_drops\":$md,\"guest_mem_avail_kb\":$mem,\"qemu_cpu\":$cpu,\"qemu_rss_kb\":$rss}" >> "$ART/samples.jsonl"
   if [ "$sig" != "$last_sig" ] || [ "$sig" = "$emit" ]; then last_sig=$sig; sig_since=$now; fi
   [ $((now - sig_since)) -ge 45 ] && { verdict=fail; why="fence $sig stuck 45 s (emitted $emit)"; sample_qemu fence; break; }

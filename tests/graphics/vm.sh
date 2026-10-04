@@ -18,6 +18,7 @@ start)
   [ -n "$(qpid)" ] && { echo "already running"; exit 0; }
   FW=$(dirname "$RT")/firmware/edk2-aarch64-code.fd
   mkdir -p "$RUN" "$D/logs"
+  [ -s "$D/logs/qemu-graphics.log" ] && mv "$D/logs/qemu-graphics.log" "$D/logs/qemu-graphics.prev.log"
   OMACVM_PRODUCT_NAME="$VM" OMACVM_NOTCH=0 nohup "$RT/bin/qemu-system-aarch64" -name "$VM" \
     -machine virt,gic-version=3 -accel hvf -cpu host,pmu=off -smp "${CPUS:-6}" -m "${MEM_MB:-8192}M" -nodefaults \
     -action reboot=reset,shutdown=poweroff \
