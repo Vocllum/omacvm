@@ -76,7 +76,8 @@ vssh "rm -f /root/omacvm.env"   # it holds the password hash
 
 # ---------- 5. OmacVM in the VM ----------
 step 5 "Adding OmacVM to the VM"
-run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" --no-mac ||
+# A new system: forget the host key of an earlier VM of the same name.
+OMA_PIN_RESET=1 run_logged "$LOG/omacvm-install.log" "$HERE/apply-vm.sh" "$VM_DIR" --no-mac ||
   die "OmacVM did not install (log: $LOG/omacvm-install.log)"
 touch "$VM_DIR/ready"   # the VM works from here on, Mac helpers or not
 
