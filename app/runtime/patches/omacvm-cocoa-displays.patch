@@ -210,7 +210,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
          (omacvm_notch_mode() && !([w styleMask] & NSWindowStyleMaskFullScreen) &&
           [[w screen] safeAreaInsets].top > 0)) {
          omacvm_toggle_notch_full_screen();
-@@ -2915,13 +2999,1047 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2915,14 +2999,1062 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -221,10 +221,10 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  {
 -    return dcl->ops == &dcl_gl_ops;
 +    return dcl->ops == &dcl_gl_ops || omacvm_is_head_dcl(dcl);
-+}
-+
-+#endif
-+
+ }
+ 
+ #endif
+ 
 +/*
 + ------------------------------------------------------
 +    OmacVM: one window per Mac display
@@ -994,8 +994,8 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    omacvm_update_mac_layout();
 +    omacvm_send_layout();
 +    omacvm_full_next();
- }
- 
++}
++
 +/* The guest channel: org.omacvm.display (JSON lines). */
 +
 +static int omacvm_chan_fd = -1;
@@ -1067,6 +1067,19 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    omacvm_chan_write(line);
 +}
 +
++/*
++ * A number from the guest's JSON. Anything else (null, a string, an array)
++ * would raise an exception on -doubleValue and abort QEMU, so it is refused.
++ */
++static bool omacvm_json_number(id v, double *out)
++{
++    if (![v isKindOfClass:[NSNumber class]]) {
++        return false;
++    }
++    *out = [v doubleValue];
++    return isfinite(*out) && fabs(*out) < 1e7;
++}
++
 +/* Where Hyprland put its outputs (logical pixels), for the pointer. */
 +static void omacvm_guest_monitors(NSArray *monitors)
 +{
@@ -1080,9 +1093,10 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +            continue;
 +        }
 +        NSString *name = m[@"name"];
-+        double x = [m[@"x"] doubleValue], y = [m[@"y"] doubleValue];
-+        double w = [m[@"width"] doubleValue], h = [m[@"height"] doubleValue];
-+        if (w <= 0 || h <= 0) {
++        double x, y, w, h;
++        if (!omacvm_json_number(m[@"x"], &x) || !omacvm_json_number(m[@"y"], &y) ||
++            !omacvm_json_number(m[@"width"], &w) ||
++            !omacvm_json_number(m[@"height"], &h) || w <= 0 || h <= 0) {
 +            continue;
 +        }
 +        if (first) {
@@ -1230,7 +1244,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +            omacvm_outputs = i + 1;
 +        }
 +    }
- #endif
++#endif
 +    omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
 +    [[NSNotificationCenter defaultCenter]
 +        addObserverForName:NSApplicationDidChangeScreenParametersNotification
@@ -1256,10 +1270,11 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        [[cocoaView window] setFrame:r display:YES];
 +    }
 +}
- 
++
  static void cocoa_display_early_init(DisplayOptions *o)
  {
-@@ -2967,10 +4085,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+     assert(o->type == DISPLAY_TYPE_COCOA);
+@@ -2967,10 +4099,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1277,7 +1292,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -2985,6 +4109,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2985,6 +4123,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1285,7 +1300,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3037,6 +4162,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -3037,6 +4176,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          dcl.ops = &dcl_ops;
      }
  
