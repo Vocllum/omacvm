@@ -16,7 +16,7 @@ Tests: Tests/virgl/test-sampler-limit.c (fills the caps on the Mac's OpenGL and
 compares with every stage's limit; fails without this patch).
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -13549,8 +13549,30 @@
+@@ -13550,8 +13550,30 @@
      *
      * Now we send the "correct" value, to ensure good behavior from old guest
      * drivers, but it is not "useful" for any other purpose.

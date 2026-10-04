@@ -7,11 +7,14 @@
  * guest's whole context: Chrome drew nothing for the rest of its life.
  * The draws must be accepted, the context must keep working, and an occlusion
  * query must count every fragment of the viewport, with the depth test on
- * (there is no depth buffer, so every fragment passes). */
+ * (there is no depth buffer, so every fragment passes). The stand-in for
+ * "no attachments" must be reused while the guest switches back and forth,
+ * also above 2048x2048, and freed when it has not been used for a while. */
 #include <stdio.h>
 #include <string.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#include <OpenGL/gl3.h>
 #include "virglrenderer.h"
 #include "virgl_hw.h"
 #include "virgl_protocol.h"
@@ -135,6 +138,65 @@ static int submit(int ctx_id, struct cmds *c)
    return r;
 }
 
+/* The size of the renderer's stand-in for "no attachments", read from GL:
+ * the depth renderbuffer of the framebuffer the last submit left bound (its
+ * GL context is still current). A new stand-in starts at 1x1 and only grows
+ * with the viewports of the draws that use it, so its size tells a reused one
+ * from a new one. 0x0 when there is none. */
+static void stand_in_size(GLint *width, GLint *height)
+{
+   GLint type = GL_NONE, name = 0;
+   *width = *height = 0;
+   glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
+   if (type != GL_RENDERBUFFER)
+      return;
+   glGetFramebufferAttachmentParameteriv(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                         GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
+   glBindRenderbuffer(GL_RENDERBUFFER, name);
+   glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, width);
+   glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, height);
+   glBindRenderbuffer(GL_RENDERBUFFER, 0);
+}
+
+static void check_stand_in(int width, int height, const char *what)
+{
+   GLint w, h;
+   char text[160];
+   stand_in_size(&w, &h);
+   snprintf(text, sizeof(text), "%s: stand-in %dx%d (expected %dx%d)", what, w, h, width, height);
+   check(w == width && h == height, text);
+}
+
+/* No attachments, viewport width x height, one draw counted by query
+ * (handle), the result asked for. */
+static void emit_counted_draw(struct cmds *c, float width, float height, uint32_t query)
+{
+   emit_framebuffer(c, 0, 0);
+   emit_viewport(c, width, height);
+   emit_query(c, VIRGL_CCMD_BEGIN_QUERY, query);
+   emit_draw(c);
+   emit_query(c, VIRGL_CCMD_END_QUERY, query);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_GET_QUERY_RESULT, 0, 2));
+   emit(c, query);
+   emit(c, 1);                      /* wait */
+}
+
+/* count framebuffer changes with the colour buffer and draws draws */
+static int submit_colour_work(int ctx_id, struct cmds *c, int changes, int draws)
+{
+   int r = 0;
+   for (int i = 0; i < changes || i < draws; i++) {
+      if (i < changes)
+         emit_framebuffer(c, 1, 6);
+      if (i < draws)
+         emit_draw(c);
+      if (c->n > 1000 - 32)
+         r |= submit(ctx_id, c);
+   }
+   return r | submit(ctx_id, c);
+}
+
 /* A triangle that covers the whole viewport, from gl_VertexID alone:
  * (-1,-1), (3,-1), (-1,3). */
 static const char *vs_text =
@@ -183,14 +245,13 @@ int main(void)
    virgl_renderer_ctx_attach_resource(1, 5);
 
    /* where the occlusion query results go: guest memory, no GL object */
-   struct virgl_host_query_state query_result[3];
+   enum { QUERIES = 6 };
+   struct virgl_host_query_state query_result[QUERIES];
    memset(query_result, 0, sizeof(query_result));
-   struct iovec query_iov[3] = {
-      { &query_result[0], sizeof(query_result[0]) },
-      { &query_result[1], sizeof(query_result[1]) },
-      { &query_result[2], sizeof(query_result[2]) },
-   };
-   for (uint32_t i = 0; i < 3; i++) {
+   struct iovec query_iov[QUERIES];
+   for (uint32_t i = 0; i < QUERIES; i++) {
+      query_iov[i].iov_base = &query_result[i];
+      query_iov[i].iov_len = sizeof(query_result[i]);
       struct virgl_renderer_resource_create_args qargs = {
          .handle = 7 + i, .target = TEST_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
          .bind = VIRGL_BIND_CUSTOM, .width = sizeof(query_result[0]), .height = 1,
@@ -249,7 +310,7 @@ int main(void)
    emit(&c, 0);
    emit(&c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_DSA, 1));
    emit(&c, 20);
-   for (uint32_t i = 0; i < 3; i++) {
+   for (uint32_t i = 0; i < QUERIES; i++) {
       emit(&c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_QUERY, VIRGL_OBJ_QUERY_SIZE));
       emit(&c, 30 + i);
       emit(&c, TEST_QUERY_OCCLUSION_COUNTER);
@@ -284,29 +345,64 @@ int main(void)
    emit_draw(&c);
    check(submit(1, &c) == 0, "the colour buffer works again after the queries");
 
-   /* 70 framebuffer changes without "no attachments" free the stand-in
-    * (VREND_FB_PLACEHOLDER_IDLE); the next draw without attachments makes a
-    * new one at the new viewport's size. */
-   for (int i = 0; i < 70; i++)
+   /* A stand-in larger than 2048x2048 (a Retina-size window): it is made
+    * for the draw and reused while the guest switches between "no
+    * attachments" and a colour buffer: after ten round trips with smaller
+    * viewports it still has the first draw's size (a new one would be 32x16). */
+   emit_counted_draw(&c, 4096, 1100, 32);
+   check(submit(1, &c) == 0, "a 4096x1100 draw without attachments");
+   check_stand_in(4096, 1100, "made at the size of the draw");
+   for (int i = 0; i < 10; i++) {
       emit_framebuffer(&c, 1, 6);
-   check(submit(1, &c) == 0, "70 framebuffer changes with the colour buffer");
-   emit_framebuffer(&c, 0, 0);
-   emit_viewport(&c, 32, 16);
-   emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 32);
-   emit_draw(&c);
-   emit_query(&c, VIRGL_CCMD_END_QUERY, 32);
-   emit(&c, VIRGL_CMD0(VIRGL_CCMD_GET_QUERY_RESULT, 0, 2));
-   emit(&c, 32);
-   emit(&c, 1);
-   emit_framebuffer(&c, 1, 6);
-   check(submit(1, &c) == 0, "no attachments again, then the colour buffer again");
+      emit_viewport(&c, 16, 16);
+      emit_draw(&c);
+      emit_framebuffer(&c, 0, 0);
+      emit_viewport(&c, 32, 16);
+      emit_draw(&c);
+   }
+   check(submit(1, &c) == 0, "ten switches between the colour buffer and none");
+   check_stand_in(4096, 1100, "reused across switches");
    wait_for_query(&query_result[2]);
-   snprintf(what, sizeof(what), "a new stand-in counts every sample of the 32x16 viewport: %llu",
+   snprintf(what, sizeof(what), "the large stand-in counts every sample of the 4096x1100 viewport: %llu",
             (unsigned long long)query_result[2].result);
-   check(query_result[2].query_state == VIRGL_QUERY_STATE_DONE && query_result[2].result == 32 * 16,
+   check(query_result[2].query_state == VIRGL_QUERY_STATE_DONE &&
+         query_result[2].result == 4096 * 1100, what);
+
+   /* 70 framebuffer changes without it (VREND_FB_PLACEHOLDER_IDLE = 64) free
+    * it; the next draw without attachments makes a new one at its own size. */
+   check(submit_colour_work(1, &c, 70, 0) == 0, "70 framebuffer changes with the colour buffer");
+   emit_counted_draw(&c, 32, 16, 33);
+   check(submit(1, &c) == 0, "no attachments again");
+   check_stand_in(32, 16, "freed after 70 changes, a new one");
+   wait_for_query(&query_result[3]);
+   snprintf(what, sizeof(what), "the new stand-in counts every sample of the 32x16 viewport: %llu",
+            (unsigned long long)query_result[3].result);
+   check(query_result[3].query_state == VIRGL_QUERY_STATE_DONE && query_result[3].result == 32 * 16,
          what);
 
-   for (uint32_t i = 0; i < 3; i++) {
+   /* Draws without it (VREND_FB_PLACEHOLDER_IDLE_DRAWS = 4096): 1000 keep it,
+    * 4200 free it. */
+   check(submit_colour_work(1, &c, 1, 1000) == 0, "1000 draws into the colour buffer");
+   emit_counted_draw(&c, 16, 8, 34);
+   check(submit(1, &c) == 0, "no attachments after 1000 draws");
+   check_stand_in(32, 16, "kept after 1000 draws without it");
+   check(submit_colour_work(1, &c, 1, 4200) == 0, "4200 draws into the colour buffer");
+   emit_counted_draw(&c, 16, 8, 35);
+   check(submit(1, &c) == 0, "no attachments after 4200 draws");
+   check_stand_in(16, 8, "freed after 4200 draws without it, a new one");
+   for (uint32_t i = 4; i < 6; i++) {
+      wait_for_query(&query_result[i]);
+      snprintf(what, sizeof(what), "16x8 viewport, query %u: %llu", i,
+               (unsigned long long)query_result[i].result);
+      check(query_result[i].query_state == VIRGL_QUERY_STATE_DONE &&
+            query_result[i].result == 16 * 8, what);
+   }
+
+   emit_framebuffer(&c, 1, 6);
+   check(submit(1, &c) == 0, "the colour buffer again");
+   check_stand_in(0, 0, "detached from the colour buffer");
+
+   for (uint32_t i = 0; i < QUERIES; i++) {
       virgl_renderer_ctx_detach_resource(1, 7 + i);
       virgl_renderer_resource_unref(7 + i);
    }

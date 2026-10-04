@@ -61,8 +61,9 @@ refused shader skips its draws, a lost context is reported to the guest).
 - GLSL 3.30 instead of 1.40/1.50 changes nothing for the guest: the translation
   writes no construct that 3.30 core removed; the build tests compile it.
 - A framebuffer whose draw buffers are all GL_NONE costs a depth renderbuffer of
-  the viewport's size (2 bytes a pixel, at most 8192x8192 = 128 MiB, freed after
-  64 framebuffer changes without it); occlusion queries in it count every
+  the viewport's size (2 bytes a pixel, at most 8192x8192 = 128 MiB, kept while
+  the guest switches back and forth, freed after 64 framebuffer changes or 4096
+  draws without it); occlusion queries in it count every
   fragment. Before, the context died. The guest does not send its framebuffer's
   size (only with `VIRGL_CAP_FB_NO_ATTACH`), so a viewport larger than the
   framebuffer counts fragments outside it. Advertising that cap would give the

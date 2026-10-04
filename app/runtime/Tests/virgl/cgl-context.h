@@ -12,6 +12,7 @@
 #include <dlfcn.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 static struct {
    int (*choose)(const int *, void **, int *);
@@ -37,10 +38,14 @@ static bool cgl_load(void)
 }
 
 /* A core profile context (3.2 core and later: 4.1 on the Mac) that shares
- * objects with share (may be NULL), or NULL. */
+ * objects with share (may be NULL), or NULL. With OMACVM_TEST_SOFTWARE_GL=1
+ * it is on Apple's software renderer, not the GPU (STANDARDS section 14). */
 static void *cgl_core_context(void *share)
 {
-   const int attrs[] = {99 /* kCGLPFAOpenGLProfile */, 0x3200 /* 3.2 core and later */, 0};
+   const char *soft = getenv("OMACVM_TEST_SOFTWARE_GL");
+   const int attrs[] = {99 /* kCGLPFAOpenGLProfile */, 0x3200 /* 3.2 core and later */,
+                        soft && *soft == '1' ? 70 /* kCGLPFARendererID */ : 0,
+                        0x00020400 /* kCGLRendererGenericFloatID */, 0};
    void *pix = NULL, *ctx = NULL;
    int n = 0;
    if (!cgl_load() || cgl.choose(attrs, &pix, &n) || !pix)
