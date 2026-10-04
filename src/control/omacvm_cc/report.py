@@ -193,7 +193,7 @@ def taken_out(counts: dict) -> str:
     for kind, n in sorted(counts.items(), key=lambda kv: -kv[1]):
         noun = NOUNS.get(kind, kind)
         if n != 1:
-            noun = "addresses" if noun == "address" else ("Wi-Fi names" if noun == "Wi-Fi name" else noun + "s")
+            noun = noun + "es" if noun.endswith("address") else noun + "s"
         parts.append(f"{n} {noun}")
     return ", ".join(parts) if parts else "nothing personal found"
 

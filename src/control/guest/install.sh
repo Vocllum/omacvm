@@ -84,7 +84,14 @@ else
   rm -f /etc/systemd/user/omacvm-notify.service /etc/systemd/user/omacvm-notify.timer "$H/.config/systemd/user/timers.target.wants/omacvm-notify.timer"
   menu_line off
   if [[ -d $H/.config/omarchy/plugins/omacvm.control ]]; then
-    as_user omarchy plugin disable omacvm.control >/dev/null 2>&1 || true
+    # Without a running shell, out of its bar settings by hand (it reads them when it starts).
+    C=$H/.config/omarchy/shell.json
+    if ! as_user omarchy plugin disable omacvm.control >/dev/null 2>&1 && [[ -f $C ]]; then
+      tmp=$(mktemp "$C.XXXXXX")
+      if jq '(.bar.layout[]?) |= map(select(.id != "omacvm.control")) | (.plugins // empty) |= map(select(.id != "omacvm.control"))' "$C" > "$tmp"; then
+        chmod --reference="$C" "$tmp"; chown "$U:$U" "$tmp"; mv -f "$tmp" "$C"
+      else rm -f "$tmp"; fi
+    fi
     rm -rf "$H/.config/omarchy/plugins/omacvm.control"
     sed -i '/^omacvm\.control$/d' "$H/.local/state/omacvm/pending-plugins" 2>/dev/null || true
   fi

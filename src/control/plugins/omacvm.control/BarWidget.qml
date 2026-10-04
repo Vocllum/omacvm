@@ -39,7 +39,7 @@ BarWidget {
     id: button
     anchors.fill: parent
     bar: root.bar
-    text: "󰘳"
+    text: "󰘳"   // nf-md-apple_keyboard_command (U+F0633)
     active: root.problems > 0 || root.updates > 0
     tooltipText: root.problems > 0 ? "OmacVM: " + root.problems + (root.problems === 1 ? " feature needs" : " features need") + " a look"
                : root.updates > 0 ? "OmacVM: an update is out"
