@@ -294,23 +294,11 @@ func handle(_ fd: Int32, peer: String) {
   }
   while buf.count < 16384, buf.range(of: end) == nil, readMore() {}
   guard let headEnd = buf.range(of: end) else { close(fd); return }
-  let lines = String(decoding: buf[..<headEnd.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
-  let parts = lines[0].split(separator: " ")
-  guard parts.count == 3 else { respond(fd, 400, ["error": "bad request"]); return }
-  var headers: [String: String] = [:]
-  for l in lines.dropFirst() {
-    if let c = l.firstIndex(of: ":") {
-      headers[l[..<c].lowercased()] = l[l.index(after: c)...].trimmingCharacters(in: .whitespaces)
-    }
-  }
-  let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
-  let path = url?.path ?? "", query = url?.queryItems ?? []
+  guard let req = parseHead(Data(buf[..<headEnd.lowerBound])) else { respond(fd, 400, ["error": "bad request"]); return }
+  let method = req.method, path = req.path, query = req.query, headers = req.headers
 
   if method == "GET", path == "/proof" {   // no token: it is how the VM checks this is the Bridge
-    guard let n = query.first(where: { $0.name == "nonce" })?.value, n.count == 32,
-          n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
-      respond(fd, 400, ["error": "nonce: 32 hex digits"]); return
-    }
+    guard let n = proofNonce(query) else { respond(fd, 400, ["error": "nonce: 32 hex digits"]); return }
     guard let at = localAddress(fd) else { respond(fd, 500, ["error": "no local address"]); return }
     respond(fd, 200, ["proof": proof(n, at: at)])
     return
@@ -321,7 +309,7 @@ func handle(_ fd: Int32, peer: String) {
     return
   }
   // Bodies are small JSON, except a wallpaper image (read only after the token checked out).
-  guard let wanted = Int(headers["content-length"] ?? "0"), wanted >= 0 else {
+  guard let wanted = contentLength(headers) else {
     respond(fd, 400, ["error": "bad Content-Length"]); return
   }
   let limit = path == "/wallpaper" ? 48 << 20 : 65536
