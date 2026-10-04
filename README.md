@@ -12,6 +12,50 @@
   <img src="docs/images/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
 </p>
 
+| What you get in Omarchy | How you run it |
+|---|---|
+| 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
+| 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
+| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 2.9.0)* | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
+| 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. *(coming with 2.8.0)* | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
+| 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
+| ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
+| 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
+| 🔊 **Native volume and brightness**<br>Mac keys with Omarchy's popups, keyboard light with Shift+F1/F2. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
+| 📷 **Camera and microphone**<br>Video calls in the VM. | |
+| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
+
+**[See the full compatibility list per app below.](#which-app)**
+
+### Which app?
+
+**OmacVM.app** is the recommended way: free, open source, and the only one with hardware video and the full GPU. **UTM** is the free classic. **VMware Fusion** is free and supports external monitors. **Parallels** is the most polished, but paid.
+
+| | OmacVM.app | UTM | VMware Fusion | Parallels |
+|---|:---:|:---:|:---:|:---:|
+| **Price** | free | free | free | paid |
+| **Open source** | ✅ | ✅ | ❌ | ❌ |
+| Omanotch | ✅ | ✅ | ✅ | ✅ |
+| Hardware video decoding | ✅ | ❌ | ❌ | ❌ |
+| GPU in desktop and browsers | ✅ | ✅ | ✅ | ✅ |
+| Vulkan, WebGPU, OpenCL | 🔜 2.9.0 | ❌ | ❌ | ❌ |
+| External monitors | 🔜 2.8.0 | ❌ | ✅ | ✅ |
+| 120 Hz ProMotion | 🔜 2.9.0 | ✅ | ✅ | ✅ |
+| Trackpad gestures | ✅ | ✅ | ✅ | ✅ |
+| Momentum scrolling (optional) | ✅ | ✅ | ✅ | ✅ |
+| Cmd as Super | ✅ | ✅ | ✅ | ✅ ¹ |
+| Wi-Fi, Bluetooth, audio from the Mac | ✅ | ✅ | ✅ | ✅ |
+| Battery in the bar | ✅ | ✅ | ✅ | ✅ |
+| Volume, brightness, keyboard light | ✅ | ✅ | ✅ | ✅ |
+| Camera and microphone | ✅ | ✅ | ✅ | ✅ |
+| Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
+| Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
+| Prebuilt VM (5 min) | ❌ ³ | ✅ | ✅ | ✅ |
+| CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
+
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ the app builds its VM in about 12 minutes
+
+
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
 fast, but out of the box it feels like a guest:
 
