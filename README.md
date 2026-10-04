@@ -50,10 +50,10 @@
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
-| Prebuilt VM (5 min) | ❌ ³ | ✅ | ✅ | ✅ |
+| Prebuilt VM (5 min) | 🔜 ³ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ the app builds its VM in about 12 minutes
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in about 12 minutes
 
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
