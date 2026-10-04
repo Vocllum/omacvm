@@ -163,6 +163,21 @@ if [[ -n $miclog && -f $miclog ]]; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
 fi
+# Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
+# this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
+# MoltenVK when it cannot run.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  v=$(grep -o 'vulkan driver: .*' "$miclog" | tail -1)
+  case $v in
+    "") ;;
+    *kosmickrisp*) ok "Vulkan (Venus)" "KosmicKrisp" ;;
+    *MoltenVK*)
+      if grep -q 'unusable, trying MoltenVK' "$miclog"; then
+        ok "Vulkan (Venus)" "MoltenVK: KosmicKrisp could not run here (logs/qemu.log says why)"
+      else ok "Vulkan (Venus)" "MoltenVK"; fi ;;
+    *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
+  esac
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
