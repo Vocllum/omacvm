@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..4375dcb
+index 0000000..bd7a505
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2339 @@
+@@ -0,0 +1,2344 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -2395,8 +2395,12 @@ index 0000000..4375dcb
 +
 +    if (!codec || !target)
 +        return -1;
-+    if (!codec->have_desc || !codec->bits.size)
++    /* The guest may have destroyed the buffer it named earlier: use this one. */
++    codec->target = target;
++    if (!codec->have_desc || !codec->bits.size) {
++        codec->target = NULL;
 +        return 0;
++    }
 +
 +    switch (codec->kind) {
 +    case VT_KIND_H264:
@@ -2416,6 +2420,7 @@ index 0000000..4375dcb
 +    }
 +    codec->bits.size = 0;
 +    codec->have_desc = false;
++    codec->target = NULL;
 +    return ret;
 +}
 diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
