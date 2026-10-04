@@ -458,5 +458,10 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   shaders with the Mac's OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`),
   and `app/scripts/gpu-check.sh` runs Aquarium and Basemark in an app VM and
   reads `qemu.log` for refused shaders.
+  Tested on a new app VM (8 CPUs, 8 GB, a window, not full screen): with
+  2.6.0's runtime the same shader is refused at Basemark's test 5, later
+  WebGL tests score -1 and the tab stops answering; with the patch Basemark
+  finished 3 times in a row (1054, 772, 1073 in that small window, with other
+  VMs running on the Mac) and Aquarium still runs (19-21 fps).
 - **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
   `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.
