@@ -55,6 +55,16 @@ panel's full rate.
 - One refresh more delay: QEMU flush to screen 12.6-14.2 ms median, was
   5-7 ms.
   Option 1 would win it back (the guest renders right after the latch).
+- testufo.com on the 120 Hz panel (UFO position per WindowServer frame):
+  116.4-118.7 new frames a second with 3-4 skipped refreshes per 12 s, after
+  merging close frames only while the guest outpaces the display; installed
+  2.7.0 82-99 with 91-221 skips, gpu-native 76-90 with 203-324.
+- The link follows the window's screen (60, 120, 144 Hz), and so does the
+  guest's refresh (EDID).
+- Latency: Core Animation shows any commit made at least ~3 ms before the
+  vsync at that vsync, so the host cannot shorten the wait; it depends on the
+  guest's vblank phase. The 5-7 ms of the old path was survivor-biased (only
+  frames that came early were seen; the others were dropped).
 - `OMACVM_GL_VSYNC=0` restores showing frames when drawn.
 - Two more threads in QEMU (display link, commit queue); no BQL on either.
 - glmark2 (quick set, 8 runs each, bench lock): median 2764 vs 2829, -2 %,

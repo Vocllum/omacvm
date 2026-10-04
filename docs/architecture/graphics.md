@@ -517,15 +517,33 @@ bench lock and are indications only):
   one refresh and none into the next. The queue absorbs that: a late frame
   waits one refresh; once a second, if a frame was left over after every
   tick and none came late, one is skipped (the guest's EDID rate is a hair
-  faster than the display); a second flush within half a refresh replaces
-  the first. Five present surfaces (was three). ADR 0020.
+  faster than the display). A second flush within half a refresh replaces
+  the first only while the guest draws more than 1.25x the display's rate
+  (at the display's own rate close frames are jitter, both real). The link
+  follows the window's screen and asks for that screen's full rate (60, 120,
+  144 Hz) on every move; QEMU's EDID follows too, so the guest's vblank
+  timer switches with it. Five present surfaces (was three). ADR 0020.
+- **Latency**: Core Animation shows a commit at the next vsync if it lands
+  about 3 ms before it; committing earlier does not show it sooner. So the
+  delay from a finished guest frame to the glass is set by the guest's vblank
+  phase (free-running), between ~3 ms and one refresh more. Only a guest
+  vblank locked to the host's (ADR 0020 option 1, a guest module change)
+  can take the average half refresh off.
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
   BQL. The link pauses after 30 idle refreshes (pause and wake both on the
   main thread, so a frame never waits behind a paused link).
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
   the display. HDR needs the guest at 10 bits (guest module) with Hyprland's
-  `cm = "hdr"` and QEMU's `OMACVM_GL_HDR=1`. ADR 0021.
+  `cm = "hdr"` and QEMU's `OMACVM_GL_HDR=1`. The app's hidden switch
+  (`defaults write org.omacvm.app hdr -bool true`) sets QEMU's side and tells
+  the guest (SMBIOS `omacvm.hdr=1`); `omacvm-display-sync` then adds the HDR
+  fields to the output's rule once the 10-bit module runs. ADR 0021.
+- **HDR clients**: an app must hand Hyprland a PQ image description
+  (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
+  `--gpu-api=opengl` does not (it only reads the preferred description, its
+  hint needs a Vulkan swapchain), and Chrome 154 clips CSS `rec2100-pq` at
+  SDR white. Those show as SDR, correctly tone-mapped.
 - **Measuring** (`tests/graphics/pacing`):
   a pacing page draws its frame number as 16 bit cells; ScreenCaptureKit
   captures the VM window per WindowServer frame and counts how far the number
@@ -547,8 +565,29 @@ display) in the guest, bench lock held, 12 s per run):
 | external 60 Hz display: shown once (frames/s) | 82 % (52.1) | 99.7 % (60.0) |
 | glmark2 quick, 8 runs each, median | 2829 | 2764 (an earlier build) |
 | colour of guest `#ff0000` in Display P3 | (255,0,0) (oversaturated) | (234,51,35) (sRGB red) |
-| EDR headroom of the screen with HDR on | 1.0 | 4.2 |
+| EDR headroom of the screen with HDR on | 1.0 | 4.2-16 |
 
+testufo.com (the 120 fps lane, UFO position per WindowServer frame,
+`ufopace`), MacBook 120 Hz, bench lock, 12 s per run, new frames per second
+and refreshes that skipped a frame:
+
+| | new frames/s | skipped |
+|---|---|---|
+| 2.7.0 as installed (CAOpenGLLayer path) | 82.5-99.2 (one run 58.9) | 91-221 |
+| gpu-native (frames when drawn) | 76.4-90.4 | 203-324 |
+| `pacing-hdr` (merge always) | 107.4-119.6 | 5-72 |
+| `pacing-hdr` (merge only when the guest is faster) | 116.4-118.7 | 3-4 |
+
+The 2.6/2.7 path is not capped at 33 frames a second as once thought: it
+shows 80-99 of 120 but skips a frame on a fifth of the refreshes (judder).
+
+Window moved between displays: built-in 120 Hz, external 60 Hz (57-60 shown
+per second), a 144 Hz virtual display (guest at 143.94 Hz, 142.9 shown per
+second); the guest's refresh and the display link followed each move.
+
+HDR (PQ bars at 100/203/400/600/1000 nits in GStreamer's `waylandsink`):
+0.37 / 0.60 / 0.89 / 1.10 / 1.50 times SDR white on the MacBook's XDR panel
+(Hyprland 0.56 compresses the top; the host passes at least 2.95x).
 ## 13. Merging the tracks
 
 The tracks share one runtime. Order and overlaps known today:
