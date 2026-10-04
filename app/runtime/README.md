@@ -15,6 +15,16 @@ commit 82927e9. Changes here:
   GPU process hung (Basemark Web 3.0 at test 5). The build checks it with
   `Tests/virgl/test-integer-sampler-shader.c`, which compiles the generated
   GLSL with the Mac's OpenGL
+- GLSL and limits that Apple's core profile accepts (one refused shader or GL
+  error stopped the guest's whole GL context; the app drew black from then on):
+  `patches/virgl-shader-core-glsl-version.patch` (GLSL 3.30, no extensions that
+  are core), `virgl-shader-shadow-lod-extension.patch`,
+  `virgl-shader-float-ops-integer-outputs.patch`, `virgl-blitter-core-glsl-version.patch`,
+  `virgl-blitter-integer-msaa.patch`, `virgl-framebuffer-no-attachments.patch`,
+  `virgl-caps-sampler-limit.patch`. Checked at build time by
+  `Tests/virgl/test-core-glsl-shaders.c`, `test-blitter-shaders.c`,
+  `test-empty-framebuffer.c` and `test-sampler-limit.c` on the Mac's OpenGL
+  (docs/architecture/graphics.md, ADR 0018)
 
 Build: `./build-qemu-gpu-runtime.sh` (about 70 seconds, needs only the Command
 Line Tools). Output: `.build/qemu-gpu-runtime` and `.build/firmware`.
