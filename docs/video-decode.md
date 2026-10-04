@@ -11,7 +11,8 @@ second plays without dropped frames and the VM's CPU stays nearly idle.
 | H.264 | yes | patch tested, see below | no | no |
 | VP9 (YouTube) | yes | patch tested, see below | no | no |
 | AV1 (YouTube) | yes, Chromium-based browsers | – | no | no |
-| HEVC (8-bit) | yes: mpv, FFmpeg | – | no | no |
+| HEVC | yes: mpv, FFmpeg | – | no | no |
+| 10-bit (VP9 profile 2, HEVC Main 10, AV1) | yes | – | no | no |
 
 Browsers in an OmacVM.app VM:
 
@@ -85,9 +86,10 @@ put the shim in: the VM folder's `video-decode` file).
 - **AV1 in Firefox and mpv**: FFmpeg sends only the tile data of an AV1 frame,
   without its headers, and VideoToolbox needs the headers. Chrome sends the
   whole frame. So AV1 is offered to Chromium-based browsers only.
-- **HEVC**: Main (8-bit) only; long-term reference pictures from the SPS are
+- **HEVC**: Main and Main 10; long-term reference pictures from the SPS are
   not supported (rare).
-- **10-bit (VP9 profile 2, HEVC Main 10, HDR)**: not offered yet.
+- **HDR**: 10-bit video decodes (P010, bit-exact); how HDR looks is up to the
+  browser and Hyprland in the VM.
 - **Guests with Mesa older than 26.0** number the video profiles differently;
   `OMACVM_VIRGL_VIDEO_ABI=legacy` switches the backend to the old numbers.
   Upstream virglrenderer's copy of the numbers is the old one, so with a
