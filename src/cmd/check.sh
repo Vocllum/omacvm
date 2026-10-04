@@ -4,10 +4,10 @@
 # apply, or whenever something seems off:
 #   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY] [--json]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
-# per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
-# must be logged in to the VM.
-# --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status",
-# "detail", "needs_human"}]}; needs_human = only a person can fix it (a macOS
+# per feature (ok / WARN / FAIL / skip); exits 1 if anything failed (WARN:
+# works, but on a fallback). The desktop user must be logged in to the VM.
+# --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status"
+# (ok, warn, fail, skip), "detail", "needs_human"}]}; needs_human = only a person can fix it (a macOS
 # permission, a Parallels setting).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -69,6 +69,8 @@ line() {
 ok()   { line ok ok "$1" "${2:-}"; }
 bad()  { line fail FAIL "$1" "${2:-}" "${3:-}"; fails=$((fails + 1)); }
 skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
+# warn: works, but not as it should; does not fail the check.
+warn() { line warn WARN "$1" "${2:-}" "${3:-}"; }
 say_() { (( JSON )) || echo "$@"; }
 json_out() {   # the collected rows as JSON
   local first=1 st sec name detail human
@@ -162,6 +164,21 @@ if [[ -n $miclog && -f $miclog ]]; then
   if grep -q -e "Failed to start input audio queue" -e "SDL_OpenAudioDevice for recording failed" -e "no microphone permission yet" "$miclog"; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
+fi
+# Vulkan in an app VM (the hidden Venus switch): the Mac driver QEMU picked
+# this run (qemu.log starts fresh with each run). KosmicKrisp falls back to
+# MoltenVK when it cannot run.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  v=$(grep -o 'vulkan driver: .*' "$miclog" | tail -1)
+  case $v in
+    "") ;;
+    *kosmickrisp*) ok "Vulkan (Venus)" "KosmicKrisp" ;;
+    *MoltenVK*)
+      if grep -q 'unusable, trying MoltenVK' "$miclog"; then
+        warn "Vulkan (Venus)" "MoltenVK: KosmicKrisp could not run on this Mac, Vulkan has fewer features (logs/qemu.log says why)"
+      else ok "Vulkan (Venus)" "MoltenVK"; fi ;;
+    *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
+  esac
 fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
