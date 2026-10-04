@@ -9,7 +9,7 @@ in more words.
   VM's CPU. Google Chrome, Brave and Firefox (H.264 and VP9; AV1 in Chrome,
   not yet in Firefox), mpv, FFmpeg and GStreamer apps use it: YouTube in 4K
   at 60 fps plays with the VM's CPU nearly idle. HEVC and 10-bit video work
-  too (mpv, FFmpeg, GStreamer; in Chrome smoothly up to 1080p). Omarchy's own Chromium
+  too (mpv, FFmpeg, GStreamer; in Chrome HEVC stops after a seek for now). Omarchy's own Chromium
   (Arch Linux ARM) is built without VA-API and still decodes on the CPU; a
   route for it (V4L2) is planned. OmacVM installs no browser for this; Google
   Chrome for Linux ARM comes from `src/bench/install-chrome.sh`. See
