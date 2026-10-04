@@ -21,9 +21,9 @@ else
   OMACVM_SRC=$_root/omacvm/src
 fi
 [[ -x $QEMU && -f $FIRMWARE && -d $OMACVM_SRC ]] || die "the app is incomplete (QEMU, firmware or OmacVM missing under $_root)"
-CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/OmacVM}
+CACHE=${OMACVM_CACHE:-$HOME/Library/Caches/omacvm}
 KEY=${OMACVM_KEY:-$HOME/.ssh/omacvm}
-LIVE_RELEASE=v0.4.1
+source "$OMACVM_SRC/vm/live/release.sh"
 # The Mac's 127.0.0.1 ports the VM may reach as 10.0.2.2: Omanotch, Gestures, Bridge.
 HOST_PORTS=47811,47830,47831
 
@@ -67,16 +67,12 @@ live_fetch() {
   fi
   rm -f "$d/ok-$LIVE_RELEASE"
   dmg=$d/TryOmarchy-$LIVE_RELEASE.dmg
+  # The same folder as the omacvm command's (build-live.sh), so they share it.
   if [[ ! -f $dmg ]]; then
-    # The omacvm command keeps the same download.
-    local other=$HOME/Library/Caches/omacvm/live/TryOmarchy-$LIVE_RELEASE.dmg
-    if [[ -f $other ]]; then cp -c "$other" "$dmg" 2>/dev/null || cp "$other" "$dmg"
-    else
-      log "downloading try-omarchy $LIVE_RELEASE (1.4 GB)"
-      curl -fL --retry 3 --progress-bar -o "$dmg.part" \
-        "https://github.com/omacom/try-omarchy/releases/download/$LIVE_RELEASE/TryOmarchy.dmg"
-      mv "$dmg.part" "$dmg"
-    fi
+    log "downloading try-omarchy $LIVE_RELEASE (1.4 GB)"
+    curl -fL --retry 3 --progress-bar -o "$dmg.part" \
+      "https://github.com/omacom/try-omarchy/releases/download/$LIVE_RELEASE/TryOmarchy.dmg"
+    mv "$dmg.part" "$dmg"
   fi
   vol=$d/mnt; mkdir -p "$vol"
   hdiutil attach -nobrowse -readonly -mountpoint "$vol" "$dmg" >/dev/null || die "could not open $dmg"
