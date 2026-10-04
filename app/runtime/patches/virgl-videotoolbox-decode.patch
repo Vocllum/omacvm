@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..a43a0b5
+index 0000000..fd2e44a
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2324 @@
+@@ -0,0 +1,2327 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -2210,9 +2210,11 @@ index 0000000..a43a0b5
 +    }
 +    if (vt_supports(kCMVideoCodecType_VP9) && !getenv("OMACVM_VIDEO_NO_VP9")) {
 +        add_caps(caps, PIPE_VIDEO_PROFILE_VP9_PROFILE0, 8192, 8192, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_VP9_PROFILE2, 8192, 8192, PIPE_FORMAT_P010);
 +    }
 +    if (vt_supports(kCMVideoCodecType_HEVC) && !getenv("OMACVM_VIDEO_NO_HEVC")) {
 +        add_caps(caps, PIPE_VIDEO_PROFILE_HEVC_MAIN, 8192, 8192, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_HEVC_MAIN_10, 8192, 8192, PIPE_FORMAT_P010);
 +    }
 +    /* AV1 works only for guests that send whole temporal units (Chrome). */
 +    if (vt_supports(kCMVideoCodecType_AV1) && getenv("OMACVM_VIDEO_AV1") &&
@@ -2233,7 +2235,8 @@ index 0000000..a43a0b5
 +
 +    p = host_profile(args->profile);
 +    if (args->entrypoint != PIPE_VIDEO_ENTRYPOINT_BITSTREAM || kind_of(p) == VT_KIND_NONE ||
-+        (kind_of(p) == VT_KIND_HEVC && p != PIPE_VIDEO_PROFILE_HEVC_MAIN)) {
++        (kind_of(p) == VT_KIND_HEVC && p != PIPE_VIDEO_PROFILE_HEVC_MAIN &&
++         p != PIPE_VIDEO_PROFILE_HEVC_MAIN_10)) {
 +        virgl_warn("vt-video: unsupported profile %u entrypoint %u\n",
 +                   (unsigned)args->profile, (unsigned)args->entrypoint);
 +        return NULL;
