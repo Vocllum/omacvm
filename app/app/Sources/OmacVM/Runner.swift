@@ -50,7 +50,9 @@ final class Runner {
             "-device", "virtio-rng-pci,rng=rng0",
             // Linux reports free memory, so the Mac gets it back.
             "-device", "virtio-balloon-pci,free-page-reporting=on",
-            "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8",
+            // No recording without the microphone permission: QEMU's recording
+            // would wait minutes for an answer (the whole VM stops meanwhile).
+            "-audiodev", "sdl,id=snd0,timer-period=1000,out.buffer-count=8\(Runner.micAllowed ? "" : ",in.voices=0")",
             "-device", "intel-hda,id=hda0,romfile=",
             "-device", "hda-micro,bus=hda0.0,audiodev=snd0",
             "-serial", "none",
@@ -102,6 +104,9 @@ final class Runner {
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         let log = try FileHandle(forWritingTo: logURL)
+        if !Runner.micAllowed {
+            log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
+        }
         p.standardOutput = log
         p.standardError = log
         p.terminationHandler = { [weak self] proc in
@@ -126,6 +131,8 @@ final class Runner {
         startBattery()
         startCamera()
     }
+
+    static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
 
     /// Asks the guest to shut down: the power button, then the guest agent
     /// if Omarchy is still up after 20 seconds.

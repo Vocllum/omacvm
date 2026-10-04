@@ -159,7 +159,7 @@ case $TYPE in
   app) d=$(app_dir "$VM" 2>/dev/null) && miclog="$d/logs/qemu.log"; micapp="OmacVM" ;;
 esac
 if [[ -n $miclog && -f $miclog ]]; then
-  if grep -q -e "Failed to start input audio queue" -e "SDL_OpenAudioDevice for recording failed" "$miclog"; then
+  if grep -q -e "Failed to start input audio queue" -e "SDL_OpenAudioDevice for recording failed" -e "no microphone permission yet" "$miclog"; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
 fi
