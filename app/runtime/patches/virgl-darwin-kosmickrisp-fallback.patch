@@ -9,10 +9,12 @@ cannot run it would otherwise leave the guest without Vulkan (venus
 contexts fail) with no way back short of OMACVM_VULKAN_DRIVER=moltenvk.
 Upstream: not applicable (the driver choice is OmacVM's runtime layout,
 virgl-darwin-vulkan-beside.patch). Applies after that patch.
-Test: QEMU log shows "vulkan driver: .../kosmickrisp_mesa_icd.json" on the
-Mac mini (macOS 27); with the KosmicKrisp dylib made unloadable it shows
-"unusable, trying MoltenVK_icd.json" and vulkaninfo in the guest reports
-MoltenVK.
+Test: on the Mac mini (macOS 27) QEMU's log shows "vulkan driver:
+.../kosmickrisp_mesa_icd.json". With a runtime whose KosmicKrisp dylib is
+not a Mach-O file it logs "does not load", then "kosmickrisp_mesa_icd.json
+unusable, trying MoltenVK_icd.json"; the guest's vulkaninfo shows the Venus
+device without nullDescriptor, robustBufferAccess2 and logicOp, as with
+MoltenVK (KosmicKrisp has all three).
 
 --- a/src/venus/vkr_library.c
 +++ b/src/venus/vkr_library.c
