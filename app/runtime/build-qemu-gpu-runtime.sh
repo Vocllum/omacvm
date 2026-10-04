@@ -255,10 +255,17 @@ if [[ -n $archive_cache ]]; then
 fi
 
 work_dir=
+# QEMU's configure refuses a folder with spaces (a home on "Macintosh SSD",
+# say): then the scratch files go to macOS's temp folder.
+scratch_root="$native_dir/.build/tmp"
+if [[ $scratch_root == *[[:space:]]* ]]; then
+  scratch_root=$(cd "${TMPDIR:-/private/tmp}" && pwd -P)
+  [[ $scratch_root != *[[:space:]]* ]] || die "build OmacVM from a folder without spaces in its path"
+fi
 remove_work_dir() {
   local path=$1
   [[ -n $path && ( -e $path || -L $path ) ]] || return 0
-  [[ $path == "$native_dir"/.build/tmp/omarchy-qemu-source-build.* ]] || \
+  [[ $path == "$scratch_root"/omarchy-qemu-source-build.* ]] || \
     die "refusing to remove unexpected scratch path: $path"
   rm -rf -- "$path"
 }
@@ -281,8 +288,8 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-mkdir -p "$native_dir/.build/tmp"
-work_dir=$(mktemp -d "$native_dir/.build/tmp/omarchy-qemu-source-build.XXXXXX")
+mkdir -p "$scratch_root"
+work_dir=$(mktemp -d "$scratch_root/omarchy-qemu-source-build.XXXXXX")
 archive_dir="$work_dir/archives"
 listing_dir="$work_dir/listings"
 source_parent="$work_dir/source"
