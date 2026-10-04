@@ -93,6 +93,8 @@ on CGL, not on ANGLE.
 | virgl GL on Apple OpenGL 4.1 | shipped | `virgl-native-opengl.patch`, tap patches |
 | Scanout texture borrowing (no readback) | shipped | `qemu-texture-borrowing-11.1.patch` |
 | Integer-sampler shader fix (Basemark hang) | built: `gpu-hang` | `virgl-texture-integer-samplers.patch` |
+| Refused shader skips its draws (context lives) | built: `gpu-robust` | `virgl-shader-failure-skip-draws.patch`, section 13 |
+| Context loss reported to the guest (GL robustness) | built: `gpu-robust`; guest Mesa not installed by default | `virgl-context-loss-report.patch`, `src/app/guest/mesa/` |
 | Async fences (vrend-sync thread on macOS) | built: `gpu-native`, open hang | `qemu-cocoa-gl-async-fence.patch`, `virgl-darwin-thread-sync.patch` |
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
@@ -345,6 +347,8 @@ falls back and logs once.
 | `OMACVM_MAX_OUTPUTS`, `OMACVM_DISPLAY_SOCKET` | set by the launcher | heads and agent socket | built |
 | `OMACVM_DISPLAYS_DEBUG=1` | off | log the display port | built |
 | `OMACVM_BACKGROUND=1`, `OMACVM_COCOA_HIDDEN=1` | off | test only: window behind / no window | built |
+| `OMACVM_VIRGL_SHADER_FAILURES=lose` | skip | a shader the Mac's GL refuses loses the whole context (upstream behaviour) instead of skipping its draws | built (`gpu-robust`) |
+| `OMACVM_VIRGL_TEST_FAIL_GLSL=TEXT` | unset | test runtimes only (`OMACVM_RUNTIME_TEST_HOOKS=1` build): refuse shaders whose GLSL contains TEXT | built |
 | `OMACVM_TEST_SKIP_DISPLAYS`, `OMACVM_TEST_MAIN_DISPLAY` | off | test only: virtual displays | built |
 
 What the app records: QEMU's log (`qemu.log` in the VM folder) has the
@@ -370,9 +374,16 @@ What crosses and who checks it:
 
 - **virgl command streams and shaders**: virglrenderer's decoder (bounds,
   handles, formats). Upstream code plus our patches; every patch that touches
-  a decoder states its bounds check. A refused shader kills that guest
-  context only (Chrome then hangs, which is how the Basemark bug showed up);
-  reporting a context loss instead is planned.
+  a decoder states its bounds check. A shader the Mac's GL refuses skips its
+  draws; any other decoder error loses that guest context only, logs once, and
+  writes "guilty" into the guest's reset status buffer when it named one
+  (section 13). The status buffer must be guest memory (`VIRGL_BIND_CUSTOM`,
+  4 bytes or more); the host writes 4 bytes at offset 0 through the checked iov
+  helper. `Tests/virgl/fuzz-cmd-stream.sh` fuzzes command streams into a vrend
+  context on the Mac's GL (libFuzzer + ASan). Its first minutes found two
+  upstream bugs, both fixed: a NULL shader variant that crashed QEMU
+  (`virgl-shader-variant-null-checks.patch`) and shader sizes that asked for
+  4 GiB (`virgl-shader-size-limits.patch`).
 - **resource and blob sizes**: QEMU checks sizes against guest RAM and the
   hostmem window; blob sizes are rounded to the host page by QEMU, never
   trusted.
@@ -403,6 +414,7 @@ What crosses and who checks it:
 | Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs expectation, `OMACVM_GL_DUMP` frame upright with right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
+| Context loss | build time: `Tests/virgl/test-context-loss.c`; in a VM: `tests/graphics/context-loss.sh --expect contain|recover|dead` (Chrome WebGL), `guest/gl-lost.c` (GLES), `guest/vk-lost.c` (Venus) | `gpu-robust` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
 | Stability | 30 min soak per path (browser + video + glmark2 loop), sleep/wake, display plug/unplug | per track |
 
@@ -433,3 +445,9 @@ The tracks share one runtime. Order and overlaps known today:
    keep one.
 5. `gpu-native`'s branch has an earlier version of this document and ADR
    0010; this version replaces both.
+6. `gpu-robust` adds `virgl-shader-failure-skip-draws.patch` and
+   `virgl-context-loss-report.patch` after `virgl-texture-integer-samplers.patch`
+   (and a test-only patch behind `OMACVM_RUNTIME_TEST_HOOKS=1`). They apply
+   unchanged on `gpu-venus`'s tree (branch `gpu-robust-venus` builds and passes
+   the build-time test). The Venus hunk only adds a log line in
+   `vkr_context_on_ring_fatal`.
