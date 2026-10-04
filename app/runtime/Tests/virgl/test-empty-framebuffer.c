@@ -284,8 +284,12 @@ int main(void)
    emit_draw(&c);
    check(submit(1, &c) == 0, "the colour buffer works again after the queries");
 
-   /* The stand-in is freed with the colour buffer back and made again, at the
-    * new viewport's size, for the next draw without attachments. */
+   /* 70 framebuffer changes without "no attachments" free the stand-in
+    * (VREND_FB_PLACEHOLDER_IDLE); the next draw without attachments makes a
+    * new one at the new viewport's size. */
+   for (int i = 0; i < 70; i++)
+      emit_framebuffer(&c, 1, 6);
+   check(submit(1, &c) == 0, "70 framebuffer changes with the colour buffer");
    emit_framebuffer(&c, 0, 0);
    emit_viewport(&c, 32, 16);
    emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 32);

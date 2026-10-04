@@ -4,8 +4,9 @@ What: when the guest's framebuffer has no colour and no depth/stencil buffer and
 the host has no ARB_framebuffer_no_attachments, a DEPTH_COMPONENT16
 renderbuffer is attached to the host framebuffer while the guest draws
 without attachments: detached when the guest binds real buffers
-(unless its depth buffer took the place), kept for the next switch and freed
-after 64 framebuffer changes without it or with the guest context. It starts
+(unless its depth buffer took the place), kept for the next switch if it is at
+most 2048x2048 (8 MiB, larger ones are freed right away) and freed after 64
+framebuffer changes without it or with the guest context. It starts
 1x1 and draws make it as large as the first viewport (at most 8192x8192 =
 128 MiB and the host's renderbuffer limit), and while it is attached the guest's depth
 test is kept off, as GL behaves without a depth buffer; there is no stencil,
@@ -27,7 +28,8 @@ Tests: Tests/virgl/test-empty-framebuffer.c (public API on the Mac's OpenGL:
 draws without attachments are accepted, the context keeps working, a clear after
 switching back covers the whole colour buffer, occlusion queries with the depth
 test on count every sample of a 64x48 viewport twice, and of a 32x16 one after
-the stand-in was freed and made again; fails without this patch).
+70 framebuffer changes freed the stand-in and a new one was made; fails without
+this patch).
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
 @@ -384,6 +384,8 @@
@@ -59,13 +61,10 @@ the stand-in was freed and made again; fails without this patch).
  static GLenum tgsitargettogltarget(const enum pipe_texture_target target, int nr_samples);
  
  void vrend_update_stencil_state(struct vrend_sub_context *sub_ctx);
-@@ -3139,7 +3147,89 @@
-       vrend_fb_bind_texture_id(surf->texture, surf->gl_id, index, surf->level,
-                                first_layer != last_layer ? -1 : (GLint)first_layer,
-                                surf->nr_samples);
-+   }
-+}
-+
+@@ -3142,6 +3150,95 @@
+    }
+ }
+ 
 +/* Without ARB_framebuffer_no_attachments (macOS) the host GL refuses to draw
 + * or clear into a framebuffer that has no attachments (GL error, which stops
 + * the guest context). The guest has such a framebuffer when all its draw
@@ -75,12 +74,15 @@ the stand-in was freed and made again; fails without this patch).
 + * "unsupported"). Draws make it as large as the first viewport (the guest
 + * does not send its framebuffer size without VIRGL_CAP_FB_NO_ATTACH), at most
 + * VREND_FB_PLACEHOLDER_MAX square (128 MiB) and the host's renderbuffer limit,
-+ * kept while the guest switches framebuffers and freed after
++ * kept while the guest switches framebuffers (up to VREND_FB_PLACEHOLDER_KEEP
++ * pixels; larger ones are freed when detached) and freed after
 + * VREND_FB_PLACEHOLDER_IDLE framebuffer changes without it. While it is
 + * attached the depth test stays off, as GL does without a depth buffer
 + * (vrend_hw_emit_dsa). No stencil: the stencil test passes. */
 +#define VREND_FB_PLACEHOLDER_MAX 8192
 +#define VREND_FB_PLACEHOLDER_IDLE 64
++/* larger stand-ins are freed when detached (8 MiB) */
++#define VREND_FB_PLACEHOLDER_KEEP (2048 * 2048)
 +
 +static void vrend_hw_size_fb_placeholder(struct vrend_sub_context *sub_ctx)
 +{
@@ -139,17 +141,23 @@ the stand-in was freed and made again; fails without this patch).
 +      }
 +      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
 +                                sub_ctx->fb_placeholder_rb);
-+   } else if (!sub_ctx->zsurf ||
-+              !util_format_has_depth(util_format_description(sub_ctx->zsurf->format))) {
++   } else {
 +      /* unless the guest's depth buffer has taken its place already */
-+      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
-    }
++      if (!sub_ctx->zsurf ||
++          !util_format_has_depth(util_format_description(sub_ctx->zsurf->format)))
++         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
++      if ((int64_t)sub_ctx->fb_placeholder_width * sub_ctx->fb_placeholder_height >
++          VREND_FB_PLACEHOLDER_KEEP)
++         vrend_hw_free_fb_placeholder(sub_ctx);
++   }
 +   /* the guest's depth test is off while the stand-in is there, back after */
 +   vrend_hw_emit_dsa(sub_ctx);
- }
- 
++}
++
  static void vrend_hw_emit_framebuffer_state(struct vrend_sub_context *sub_ctx)
-@@ -3154,6 +3244,8 @@
+ {
+    static const GLenum buffers[8] = {
+@@ -3154,6 +3251,8 @@
        GL_COLOR_ATTACHMENT6,
        GL_COLOR_ATTACHMENT7,
     };
@@ -158,7 +166,7 @@ the stand-in was freed and made again; fails without this patch).
  
     if (sub_ctx->nr_cbufs == 0) {
        glReadBuffer(GL_NONE);
-@@ -6048,6 +6140,9 @@
+@@ -6048,6 +6147,9 @@
  
     if (ctx->sub->viewport_state_dirty)
        vrend_update_viewport_state(sub_ctx);
@@ -168,7 +176,7 @@ the stand-in was freed and made again; fails without this patch).
  
     if (ctx->sub->blend_state_dirty)
        vrend_patch_blend_state(sub_ctx);
-@@ -6714,7 +6809,8 @@
+@@ -6714,7 +6816,8 @@
  {
     struct pipe_depth_stencil_alpha_state *state = &sub_ctx->dsa_state;
  
@@ -178,7 +186,7 @@ the stand-in was freed and made again; fails without this patch).
        vrend_depth_test_enable(sub_ctx, true);
        glDepthFunc(GL_NEVER + state->depth.func);
        if (state->depth.writemask)
-@@ -8046,6 +8142,8 @@
+@@ -8046,6 +8149,8 @@
     if (sub->fb_id)
        glDeleteFramebuffers(1, &sub->fb_id);
  
