@@ -34,6 +34,9 @@ for a in "$@"; do
 done
 STAMPS=~/Library/Application\ Support/omacvm/installed
 mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
+# The omacvm the Bridge runs for the control centre's requests (control.swift
+# checks it belongs to this user and nobody else can write it).
+(umask 077; printf '%s\n' "$(cd "$R/.." && pwd)/omacvm" > ~/Library/Application\ Support/omacvm/cli)
 
 # install_app NAME LAUNCHD_LABEL DIR [ARGS...]: DIR/install.sh unless the same
 # sources and options are already installed and running.

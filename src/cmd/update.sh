@@ -1,5 +1,5 @@
 #!/bin/bash
-# omacvm update [--vm NAME] [--no-pull]: OmacVM up to date everywhere. This
+# omacvm update [--vm NAME] [--no-pull] [--commit C] [--transaction]: OmacVM up to date everywhere. This
 # checkout (git pull, when it is a clean clone), the Mac side that is
 # installed (Omanotch with it), OmacVM.app when it is installed and a newer
 # one is published (not while it runs), then OmacVM in every running VM that
@@ -7,23 +7,37 @@
 # Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
 # VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
 # built them) get the update, and with it the Bridge's token.
+# --commit C (the control centre's update, the commit of a release manifest the
+# Bridge verified): this checkout moves to C, only forward, instead of git pull.
+# --transaction: each VM as omacvm apply --transaction.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
-VM=""; PULL=1; ARGS=("$@")
+VM=""; PULL=1; ARGS=("$@"); COMMIT=""; APPLY_ARGS=()
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --no-pull) PULL=0; shift ;;
-    -h|--help) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --commit) COMMIT=$2; shift 2
+              [[ $COMMIT =~ ^[0-9a-f]{40}$ ]] || { echo "omacvm update: --commit: 40 hex digits" >&2; exit 2; } ;;
+    --transaction) APPLY_ARGS+=(--transaction); shift ;;
+    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 export OMA_KEY=~/.ssh/omacvm
 
 # ---------- this checkout ----------
-if (( PULL )) && git -C "$R" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+if [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
+  [[ -z $(git -C "$R" status --porcelain --untracked-files=no) ]] || die "this checkout has local changes: not moved to the release ($R)"
+  log "OmacVM: the release (${COMMIT:0:12})"
+  git -C "$R" fetch -q origin || die "git fetch failed in $R"
+  git -C "$R" cat-file -e "$COMMIT^{commit}" 2>/dev/null || die "the release's commit is not in $R's origin"
+  git -C "$R" merge-base --is-ancestor HEAD "$COMMIT" || die "the release is not ahead of this checkout: not moved"
+  git -C "$R" merge -q --ff-only "$COMMIT" || die "git merge failed in $R"
+  exec "$R/omacvm" update --no-pull ${ARGS[@]+"${ARGS[@]}"}
+elif [[ -z $COMMIT ]] && (( PULL )) && git -C "$R" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
   if [[ -n $(git -C "$R" status --porcelain --untracked-files=no) ]]; then
     info "this checkout has local changes: not pulling ($R)"
   else
@@ -72,7 +86,7 @@ fi
 
 # ---------- the VMs ----------
 if [[ -n $VM ]]; then
-  "$R/src/cmd/apply.sh" --vm "$VM" --no-mac
+  "$R/src/cmd/apply.sh" --vm "$VM" --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
   exit
 fi
 done_any=0; stopped=(); failed=()
@@ -93,7 +107,7 @@ while IFS=$'\t' read -r name type state; do
     continue
   fi
   log "VM '$name' (OmacVM $v)"
-  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac < /dev/null || failed+=("$name")
+  "$R/src/cmd/apply.sh" --vm "$name" --vm-type "$type" --ip "$ip" --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} < /dev/null || failed+=("$name")
   done_any=1
 done < <(vms_list)
 (( done_any )) || info "no running VM with OmacVM"

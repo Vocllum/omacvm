@@ -5,9 +5,13 @@
 #   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
-#                [--reset-host-key]
+#                [--reset-host-key] [--transaction]
 # Features: `omacvm features` lists them (src/features.tsv). Not given: what the
-# VM has (new to OmacVM: the defaults). --no-mac leaves the Mac side alone.
+# VM has (new to OmacVM: the defaults; a VM from before the control centre is
+# asked once whether it gets it, yes without a terminal). --no-mac leaves the
+# Mac side alone.
+# --transaction (the control centre's jobs): if the VM side fails, the VM's
+# earlier features are applied again and the run ends with "rolled back".
 # VM: the one named Omarchy, else the only running one. A stopped VM is
 # started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
 # Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
@@ -20,7 +24,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 features_load
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; KB=""; MODE=""; MAC=1; NAMED=1; TOKEN=1; TOOLS=1; TRANSACTION=0
 SETN=(); SETV=()
 set_feature() {   # NAME on|off
   feature_index "$1" >/dev/null || { echo "omacvm apply: unknown feature '$1' (omacvm features lists them)" >&2; exit 2; }
@@ -38,11 +42,12 @@ while (( $# )); do
     --display) MODE=$2; shift 2 ;;
     --no-mac) MAC=0; shift ;;
     --reset-host-key) export OMA_PIN_RESET=1; shift ;;
+    --transaction) TRANSACTION=1; shift ;;
     --no-token) TOKEN=0; shift ;;   # prebuilt images: no Bridge token in the VM
     --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
     --no-*) set_feature "${1#--no-}" off; shift ;;
-    -h|--help) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --*) f=${1#--}; feature_index "$f" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }
          set_feature "$f" on; shift ;;
     *) echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2 ;;
@@ -83,11 +88,21 @@ had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
+PREV=("${FV[@]}")   # what the VM has now: --transaction goes back to it
 notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # OmacVM.app: see below
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
+fi
+# A VM from before the control centre: one question (yes without a terminal).
+cc=$(feature_index control-centre)
+if [[ -n $had ]] && ! grep -q '^OMACVM_FEATURE_control_centre=' <<<"$probe" && [[ " ${SETN[*]:-} " != *" control-centre "* ]]; then
+  FV[$cc]=on
+  if { : < /dev/tty; } 2>/dev/null; then
+    source "$R/src/lib/setup.sh"
+    ask_yn "Add the OmacVM control centre to '$VM' (omacvm in Omarchy: features, updates, report a problem)?" y || FV[$cc]=off
+  fi
 fi
 for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
 before=("${FV[@]}"); features_fix
@@ -101,7 +116,8 @@ on() { [[ ${FV[$(feature_index "$1")]} == on ]]; }
 # its bar features off (OmacVM.app passes them itself).
 battery_via_bridge() { on battery && [[ $TYPE == utm || $TYPE == fusion ]]; }
 camera_via_bridge() { on camera && [[ $TYPE == utm || $TYPE == fusion ]]; }
-needs_bridge() { on bridge || battery_via_bridge || camera_via_bridge; }
+# The control centre asks the Mac through the Bridge (also with its bar features off).
+needs_bridge() { on bridge || battery_via_bridge || camera_via_bridge || on control-centre; }
 log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
 
@@ -115,7 +131,7 @@ if (( MAC )); then
   # app's own notch-strip mode is a separate switch in the app, which apply
   # leaves alone).
   on omanotch && args+=(--omanotch)
-  "$R/src/mac/install.sh" "${args[@]}"
+  "$R/src/mac/install.sh" "${args[@]}" || die "the Mac side did not install (see above); the VM was not changed"
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
     case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
@@ -158,13 +174,29 @@ log "OmacVM -> $IP:/usr/local/share/omacvm"
 COPYFILE_DISABLE=1 tar --no-xattrs -C "$R/src" --exclude build --exclude __pycache__ -czf - . |
   gssh "$IP" "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
               tar --no-same-owner -C /usr/local/share/omacvm -xzf - 2>/dev/null"
-fargs=""
-for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${FV[$i]}"; done
-[[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
-on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
-# Its name, so the Mac's gestures helper tells it from another VM in the same app.
-(( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
-gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
+# guest_install VALUE...: guest/install.sh with these features (one on|off per FN).
+guest_install() {
+  local fargs="" i v=("$@")
+  for ((i = 0; i < ${#FN[@]}; i++)); do fargs+=" --feature ${FN[$i]}=${v[$i]}"; done
+  [[ $TYPE == fusion ]] && fargs+=" --host $(fusion_host)"
+  [[ ${v[$(feature_index mac-clock)]} == on ]] && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swift" | base64)"
+  # Its name, so the Mac's gestures helper tells it from another VM in the same app.
+  (( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
+  gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
+}
+if ! guest_install "${FV[@]}"; then
+  if (( TRANSACTION )) && [[ -n $had && "${PREV[*]}" != "${FV[*]}" ]]; then
+    log "the VM side failed: back to the features '$VM' had"
+    guest_install "${PREV[@]}" || die "the VM side failed, and going back failed too: run omacvm apply --vm \"$VM\" again"
+    echo "omacvm apply: rolled back: '$VM' has its earlier features again (the step that failed is above)" >&2
+    exit 1
+  fi
+  die "the VM side failed (see above)"
+fi
+# What it has now, per part (src/release/parts.tsv): the control centre
+# compares it with an update's manifest.
+"$R/src/release/manifest.py" digests --src "$R/src" 2>/dev/null |
+  gssh "$IP" "install -Dm644 /dev/stdin /etc/omacvm/installed.json" || info "installed.json not written (the update list may show every part)"
 # OmacVM.app: this VM now draws Omarchy's own pointer. The app hides the Mac's
 # over the window only for a VM with this file; VMs set up by older versions
 # hid Omarchy's pointer and need the Mac's until they get this apply.

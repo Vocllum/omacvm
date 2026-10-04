@@ -1,13 +1,14 @@
 #!/bin/bash
 # omacvm features / enable / disable: a VM's OmacVM features.
 #   omacvm features [--vm NAME] [--json]     list them; in a terminal, switch them
-#   omacvm enable FEATURE... [--vm NAME] [--yes]
-#   omacvm disable FEATURE... [--vm NAME] [--yes]
+#   omacvm enable FEATURE... [--vm NAME] [--yes] [--transaction]
+#   omacvm disable FEATURE... [--vm NAME] [--yes] [--transaction]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery idle-lock autologin thp-kernel. A feature that needs another one brings it
+# mac-clock camera battery idle-lock autologin thp-kernel control-centre. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
-# they need, then the VM. A stopped VM is started.
+# they need, then the VM (--transaction: as omacvm apply's). A stopped VM is
+# started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
 # "default", "experimental", "available", "reason", "needs", "title", "summary"}]};
 # reason: why this Mac or VM cannot have it ("" when available).
@@ -22,14 +23,15 @@ source "$R/src/lib/setup.sh"
 source "$R/src/lib/features.sh"
 features_load
 MODE=$1; shift
-VM=""; TYPE=""; JSON=0; YES=0; WANT=()
+VM=""; TYPE=""; JSON=0; YES=0; WANT=(); APPLY_ARGS=()
 usage() { echo "omacvm $MODE: $*" >&2; exit 2; }
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --json) JSON=1; shift ;;
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --transaction) APPLY_ARGS+=(--transaction); shift ;;
+    -h|--help) sed -n '2,18s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) usage "unknown option $1 (see --help)" ;;
     *) feature_index "$1" >/dev/null || usage "unknown feature '$1' (omacvm features lists them)"
        WANT+=("$1"); shift ;;
@@ -161,4 +163,4 @@ printf '\n  On %s:\n%s' "$VM" "$summary"
 if (( ! YES )) && (( interactive )); then
   ask_yn "Apply?" y || exit 1
 fi
-exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}"
+exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}" ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
