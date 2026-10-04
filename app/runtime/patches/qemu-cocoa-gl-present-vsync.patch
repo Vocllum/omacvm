@@ -15,16 +15,19 @@ and once per refresh, 3 ms before the vsync, the oldest one is put on the
 layer. A display link on the window's screen (on a thread of its own: the
 main thread ran ticks milliseconds late now and then) times it; ProMotion
 is asked for the panel's full rate. A frame that comes less than half a
-refresh after the previous one replaces it; frames left over at every
-tick for a quarter second are trimmed one at a time, so the queue never
-holds more delay than the guest's timing needs. The link pauses after 30
+refresh after the previous one replaces it. Once a second, if a frame was
+left over after every tick and none came late, one frame is skipped, so
+the queue never holds more delay than the guest's timing needs (the guest's
+EDID rate is a hair faster than the display's: 120.006 vs 120.000 Hz). The link pauses after 30
 idle refreshes. Five present surfaces instead of three: one on screen, one
 committed but not latched yet, up to three queued.
 
-Result on the MacBook (120 Hz, bench lock, 12 s of a 120 fps page, three
-runs): 119.2-120.0 distinct frames a second on screen, 98.3-99.8 % of guest
-frames shown exactly once (gpu-native: 108-110, 74-82 %); QEMU flush to
-screen 10-14 ms median (gpu-native 5-7 ms), one refresh more. glmark2
+Result (bench lock, 12 s of a 120 fps page in Chrome, guest frames shown
+exactly once / distinct frames a second on screen; gpu-native in brackets):
+MacBook 120 Hz, three runs: 99.0-99.6 %, 119.8 (74-82 %, 108-110);
+virtual 120 Hz display: 98.2 %, 117.5 (55.5 %, 107.4); external 60 Hz:
+99.7 %, 60.0 (82 %, 52.1). QEMU flush to screen 12.6-14.2 ms median on the
+MacBook (gpu-native 5-7 ms): about one refresh more delay. glmark2
 quick, 8 runs each: median 2764 vs 2829 (-2 %, within the run-to-run
 spread of 2387-2972).
 
@@ -61,10 +64,11 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
  
  static int present_mode = -1;          /* 1: IOSurface, 0: CAOpenGLLayer */
  static CGLContextObj present_ctx;      /* QEMU thread: draws the surfaces */
-@@ -2921,6 +2926,59 @@
+@@ -2920,7 +2925,62 @@
+ static QEMUTimer *present_timer;
  static int64_t present_last_ns;
  static int64_t present_period_ns;
- 
++
 +/*
 + * Vsync present (default; OMACVM_GL_VSYNC=0 shows each frame as soon as the
 + * GPU is done, like before). The guest's vblank timer runs at the display's
@@ -86,7 +90,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 + * one retain each. Times are CACurrentMediaTime() seconds.
 + */
 +#define PRESENT_QUEUE 3
-+
+ 
 +@interface QemuPresentLink : NSObject
 +- (void)tick:(CADisplayLink *)link;
 +@end
@@ -103,7 +107,9 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +    int queued;
 +    int inflight;                       /* drawn, GPU not done yet */
 +    double period;                      /* refresh period of the link's screen */
-+    int behind;                         /* ticks in a row with frames left over */
++    int win_ticks;                      /* trim window: ticks so far, */
++    int win_min;                        /* fewest frames left after a tick, */
++    int win_late;                       /* refreshes that had no frame */
 +    unsigned ticks, shown, repeats, merged, dropped, busy;
 +    double wait_sum;
 +} present_sync;
@@ -121,7 +127,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
  static bool cocoa_gl_present_iosurface_wanted(void)
  {
      if (present_mode < 0) {
-@@ -2959,6 +3017,14 @@
+@@ -2959,6 +3019,14 @@
          hz = MAX(hz, [screen maximumFramesPerSecond]);
      }
      present_period_ns = NANOSECONDS_PER_SECOND / hz;
@@ -136,7 +142,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      return true;
  }
  
-@@ -3096,6 +3162,11 @@
+@@ -3096,6 +3164,11 @@
          /* All busy: try again after the next refresh. */
          CGLSetCurrentContext(prev);
          gl_dirty = true;
@@ -148,7 +154,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
          timer_mod(present_timer, qemu_clock_get_ns(QEMU_CLOCK_REALTIME) +
                                   present_period_ns);
          return true;
-@@ -3128,7 +3199,13 @@
+@@ -3128,7 +3201,13 @@
      gl_dirty = false;
  
      IOSurfaceRef surf = present_surf[n];
@@ -162,7 +168,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      /* Core Animation must not see the surface before the GPU wrote it. */
      IOSurfaceIncrementUseCount(surf);
      dispatch_async(present_queue, ^{
-@@ -3140,6 +3217,10 @@
+@@ -3140,6 +3219,10 @@
          }
          CGLSetCurrentContext(NULL);
          cocoa_gl_present_dump(surf);
@@ -173,7 +179,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
          dispatch_async(dispatch_get_main_queue(), ^{
              CALayer *layer = [cocoaView layer];
              [CATransaction begin];
-@@ -3168,6 +3249,20 @@
+@@ -3168,6 +3251,20 @@
      int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
  
      gl_dirty = true;
@@ -194,7 +200,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      if (now - present_last_ns >= present_period_ns) {
          timer_del(present_timer);
          cocoa_gl_present();
-@@ -3179,10 +3274,241 @@
+@@ -3179,10 +3276,247 @@
  static void cocoa_gl_present_timer(void *opaque)
  {
      if (gl_dirty) {
@@ -318,28 +324,34 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +                sizeof(PresentFrame) * present_sync.queued);
 +        present_sync.shown++;
 +        present_sync.wait_sum += now - show.flushed;
-+        /*
-+         * Frames left over at every tick for a quarter second: the guest
-+         * runs a little faster than the display, or the queue grew in a
-+         * hiccup. Skip one frame to get the delay back down.
-+         */
-+        if (present_sync.queued >= 2 && ++present_sync.behind >= 30) {
-+            drop = present_sync.queue[0];
-+            present_sync.queued--;
-+            memmove(&present_sync.queue[0], &present_sync.queue[1],
-+                    sizeof(PresentFrame) * present_sync.queued);
-+            present_sync.dropped++;
-+            present_sync.behind = 0;
-+        } else if (present_sync.queued < 2) {
-+            present_sync.behind = 0;
-+        }
++        present_sync.win_min = MIN(present_sync.win_min, present_sync.queued);
 +        present_idle_ticks = 0;
 +    } else {
 +        if (present_idle_ticks == 0) {
 +            /* A refresh without a new frame right after one with. */
 +            present_sync.repeats++;
++            present_sync.win_late++;
 +        }
 +        present_idle_ticks++;
++    }
++    /*
++     * Once a second: if a frame was left over after every tick and none came
++     * late, the queue holds a refresh of delay the guest's timing does not
++     * need (the guest runs a little faster than the display, or a hiccup
++     * filled it). Skip one frame to get the delay back down.
++     */
++    if (++present_sync.win_ticks >= (T > 0 ? lround(1 / T) : 60)) {
++        if (present_sync.win_min >= 1 && present_sync.win_min < INT_MAX &&
++            !present_sync.win_late && present_sync.queued) {
++            drop = present_sync.queue[0];
++            present_sync.queued--;
++            memmove(&present_sync.queue[0], &present_sync.queue[1],
++                    sizeof(PresentFrame) * present_sync.queued);
++            present_sync.dropped++;
++        }
++        present_sync.win_ticks = 0;
++        present_sync.win_min = INT_MAX;
++        present_sync.win_late = 0;
 +    }
 +    bool idle = present_idle_ticks > 30;
 +    os_unfair_lock_unlock(&present_lock);

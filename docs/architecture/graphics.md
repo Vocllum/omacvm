@@ -451,8 +451,10 @@ bench lock and are indications only):
 - **Why**: the guest's frames come at the display's rate but at their own
   phase; shown as soon as drawn, jitter around the latch put two frames into
   one refresh and none into the next. The queue absorbs that: a late frame
-  waits one refresh, frames left over for a quarter second are trimmed, a
-  second flush within half a refresh replaces the first. ADR 0016.
+  waits one refresh; once a second, if a frame was left over after every
+  tick and none came late, one is skipped (the guest's EDID rate is a hair
+  faster than the display); a second flush within half a refresh replaces
+  the first. Five present surfaces (was three). ADR 0016.
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
   BQL. The link pauses after 30 idle refreshes (pause and wake both on the
@@ -469,14 +471,17 @@ bench lock and are indications only):
   Display P3; HDR: a capture in extended linear P3 (1.0 = SDR white) plus the
   screen's EDR headroom.
 
-Numbers (MacBook built-in, 120 Hz, window 1440x810 pt, Chrome page at
-120.01 fps in the guest, bench lock held, 12 s per run):
+Numbers (window 1440x810 pt, Chrome page at 120.01 fps (60 on the 60 Hz
+display) in the guest, bench lock held, 12 s per run):
 
 | | gpu-native (frames when drawn) | `pacing-hdr` |
 |---|---|---|
-| distinct frames on screen per second | 107.9, 109.0, 108.9, 110.0 | 120.0, 119.4, 119.2 |
-| guest frames shown exactly once | 74-82 % | 98.3-99.8 % |
-| QEMU flush to screen, median | 5.2-7.2 ms | 10.2-14.4 ms |
+| MacBook 120 Hz: distinct frames on screen per second | 107.9, 109.0, 108.9, 110.0 | 119.8, 119.8, 119.8 |
+| MacBook 120 Hz: guest frames shown exactly once | 74-82 % | 99.0-99.6 % |
+| MacBook 120 Hz: QEMU flush to screen, median | 5.2-7.2 ms | 12.6-14.2 ms |
+| virtual 120 Hz display: shown once (frames/s) | 55.5 % (107.4) | 98.2 % (117.5) |
+| external 60 Hz display: shown once (frames/s) | 82 % (52.1) | 99.7 % (60.0) |
+| glmark2 quick, 8 runs each, median | 2829 | 2764 (an earlier build) |
 | colour of guest `#ff0000` in Display P3 | (255,0,0) (oversaturated) | (234,51,35) (sRGB red) |
 | EDR headroom of the screen with HDR on | 1.0 | 4.2 |
 
