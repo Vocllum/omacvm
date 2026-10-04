@@ -89,6 +89,7 @@ virgl_xfb_end_patch="$native_dir/patches/virgl-transform-feedback-end.patch"
 virgl_so_checks_patch="$native_dir/patches/virgl-stream-output-checks.patch"
 virgl_gl_error_patch="$native_dir/patches/virgl-gl-error-skip-command.patch"
 virgl_buffer_checks_patch="$native_dir/patches/virgl-buffer-binding-checks.patch"
+virgl_draw_checks_patch="$native_dir/patches/virgl-draw-range-checks.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -128,6 +129,7 @@ virgl_so_checks_patch_sha256=bf9c4f1eeeda2542fec37d225717a93299b165b5820b3d19366
 virgl_xfb_end_patch_sha256=d887f7ecf827e164ae05eed79eab089f5f076f93949776a1ac6d8f61700f7587
 virgl_gl_error_patch_sha256=ac9835d10c49ebdf461b633ad4c70e77a9f227db9c623b839a6d4827e299182a
 virgl_buffer_checks_patch_sha256=e4c88d550f781b6d42834bcd1b33f94b252f382f70fc206190419070bda0b7f1
+virgl_draw_checks_patch_sha256=aa0ddfdff93462c75e74fc2e6f419557537f7b1bcd5ee833e21b76b3cd7b3fa0
 virgl_venus_lost_patch_sha256=7c68192a607670b12cf46147e40a2603485b7f5d1941709b2df891e4f7e4f9ed
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -677,6 +679,8 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_gl_error_patch"
 # ranges and uniform blocks are checked before any GL call.
 verify_file_sha "Buffer binding checks" "$virgl_buffer_checks_patch" "$virgl_buffer_checks_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_buffer_checks_patch"
+verify_file_sha "Draw range checks" "$virgl_draw_checks_patch" "$virgl_draw_checks_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_draw_checks_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
