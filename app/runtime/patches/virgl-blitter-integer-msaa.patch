@@ -11,7 +11,7 @@ Tests: Tests/virgl/test-blitter-shaders.c "color 2D_MSAA uint/int",
 "color 2D_ARRAY_MSAA uint/int".
 --- a/src/vrend/vrend_blitter.c
 +++ b/src/vrend/vrend_blitter.c
-@@ -289,7 +289,9 @@ static GLuint blit_build_frag_tex_col(struct vrend_blitter_ctx *blit_ctx,
+@@ -289,7 +289,9 @@
     unsigned swizzle_flags = 0;
     char dest_swizzle_snippet[DEST_SWIZZLE_SNIPPET_SIZE] = "texel";
     const char *ext_str = "";

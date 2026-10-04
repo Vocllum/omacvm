@@ -117,8 +117,8 @@ virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5
 virgl_shader_core_glsl_version_patch_sha256=a770a393ffe1c674938ff9cd7383e9fcef69e9dee4b1a82edca3d8e8eb2aa22a
 virgl_shader_shadow_lod_patch_sha256=93fddfb526c5ff7bae62d3d0ed5fdec6d386207c5883041f80e45245d3609293
 virgl_shader_int_outputs_patch_sha256=3532681c93fcf014a99e88cf302179860a6a89677efed9d1d5f0a22647cb12cd
-virgl_blitter_core_glsl_version_patch_sha256=f11ace2d9b32a4c70e9a1072bca4e69a61023d193b2a087cf75fcb5c39e6fb91
-virgl_blitter_integer_msaa_patch_sha256=7c38f7998e5190deeec6d8012bcc42ad0ed26f0cc22ca1287b176348795b4334
+virgl_blitter_core_glsl_version_patch_sha256=393c966a31564cb4556929c8056f6fab72669b3a1caa3a7f14eb9bfb7e63c8f9
+virgl_blitter_integer_msaa_patch_sha256=eb113286234b36d976546c443df19d4faee76cd48448e77cc00b4e227277831e
 virgl_framebuffer_no_attachments_patch_sha256=33d3d12d1eac356957fd474c16412d5fe21d866c9d68c2661fa970b17266582d
 virgl_caps_sampler_limit_patch_sha256=bd12dbb5d8582f2bf2c4840f3b64f7dc7c759bde827d4bb17163c2596b113379
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
@@ -651,7 +651,7 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_int_tex_patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-thread-sync.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-in-process.patch"
-# OmacVM: where virglrenderer and Apple's core profile disagree (ADR 0018). Each gap made
+# OmacVM: where virglrenderer and Apple's core profile disagree (ADR 0019). Each gap made
 # one shader or draw stop the guest's whole GL context: the app drew black from then on.
 verify_file_sha "Core profile GLSL version patch" "$virgl_shader_core_glsl_version_patch" "$virgl_shader_core_glsl_version_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_shader_core_glsl_version_patch"

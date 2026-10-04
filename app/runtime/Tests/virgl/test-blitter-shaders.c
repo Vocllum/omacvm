@@ -4,28 +4,8 @@
  * swizzle, multisample resolve to another format, depth) drew nothing.
  * Builds the blitter's real shaders (vrend_blitter.c is compiled into this
  * test for its static functions) in a CGL core profile context, no window. */
-#include <dlfcn.h>
 #include "vrend/vrend_blitter.c"
-
-typedef int (*choose_fn)(const int *, void **, int *);
-typedef int (*create_fn)(void *, void *, void **);
-typedef int (*current_fn)(void *);
-
-static bool gl_init(void)
-{
-   void *cgl = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY);
-   if (!cgl)
-      return false;
-   choose_fn choose = (choose_fn)dlsym(cgl, "CGLChoosePixelFormat");
-   create_fn create = (create_fn)dlsym(cgl, "CGLCreateContext");
-   current_fn current = (current_fn)dlsym(cgl, "CGLSetCurrentContext");
-   if (!choose || !create || !current)
-      return false;
-   const int attrs[] = {99 /* kCGLPFAOpenGLProfile */, 0x3200 /* 3.2 core and later */, 0};
-   void *pix = NULL, *ctx = NULL;
-   int n = 0;
-   return !choose(attrs, &pix, &n) && pix && !create(pix, NULL, &ctx) && ctx && !current(ctx);
-}
+#include "cgl-context.h"
 
 static int link_with_vs(const char *name, GLuint vs, GLuint fs)
 {
@@ -51,13 +31,13 @@ static int link_with_vs(const char *name, GLuint vs, GLuint fs)
 
 int main(void)
 {
-   if (!gl_init()) {
+   if (!cgl_init_current()) {
       puts("SKIP: no OpenGL context here");
       return 0;
    }
    struct vrend_blitter_ctx blit = {0};
    blit.use_gles = !epoxy_is_desktop_gl();
-   blit_set_glsl_version(&blit, epoxy_gl_version());
+   blit_set_glsl_version(&blit, vrend_renderer_get_glsl_version());
    printf("blit shaders: %s", blit.glsl_header);
 
    blit.vs = blit_shader_build_and_check(&blit, GL_VERTEX_SHADER, VS_PASSTHROUGH_GL);
