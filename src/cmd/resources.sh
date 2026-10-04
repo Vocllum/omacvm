@@ -91,25 +91,30 @@ show_json() {   # CHANGED
   printf '}\n'
 }
 cpus_text() { (( $1 )) && echo "$1 CPUs" || echo "UTM's default CPUs"; }
+mem_text() { (( $1 % 1024 )) && echo "$1 MB" || echo "$(( $1 / 1024 )) GB"; }   # MB -> "6 GB", or "6000 MB" when not whole GB
 
 # No change asked: in a terminal, ask; else (or with --yes) say what it has.
 if [[ -z $RES$CPUS$MEM_GB ]]; then
   if (( JSON || YES )) || ! { : < "$TTY"; } 2>/dev/null; then
     if (( JSON )); then show_json false
     else
-      echo "'$VM' ($(app_label "$TYPE"), $STATE): $(cpus_text "$OLD_CPUS"), $(( OLD_MB / 1024 )) GB memory"
+      echo "'$VM' ($(app_label "$TYPE"), $STATE): $(cpus_text "$OLD_CPUS"), $(mem_text "$OLD_MB") memory"
       echo "This Mac: $mac_cores CPUs, $mac_mem_gb GB${LIMITED}. Change with --resources low|balanced|high|best, --cpus N or --memory-gb N."
     fi
     exit 0
   fi
   opts=()
   for t in 0 1 2 3; do tier_values "$t"; opts+=("${TIERS[$t]}|$T_CPUS CPUs, $T_MEM GB memory"); done
-  opts+=("Custom|choose CPUs and memory" "Keep|$(cpus_text "$OLD_CPUS"), $(( OLD_MB / 1024 )) GB memory, as it is")
+  opts+=("Custom|choose CPUs and memory" "Keep|$(cpus_text "$OLD_CPUS"), $(mem_text "$OLD_MB") memory, as it is")
   ui_select tier "How much of this Mac ($mac_cores CPUs, $mac_mem_gb GB${LIMITED}) should '$VM' get?" 5 "${opts[@]}"
   case $tier in
     5) exit 0 ;;
     4) CPUS=$(ask_value "CPUs (1-$CAP_CPUS)" "$OLD_CPUS" '^[0-9]+$')
-       MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$(( OLD_MB / 1024 ))" '^[0-9]+$') ;;
+       # Return keeps the memory exactly as it is (6000 MB stays 6000 MB, and
+       # a VM under 4 GB keeps what it has).
+       cur=$(mem_text "$OLD_MB"); cur=${cur% GB}
+       MEM_GB=$(ask_value "memory in GB (4-$CAP_MEM_GB)" "$cur" "^([0-9]+|$cur)\$")
+       [[ $MEM_GB == "$cur" ]] && MEM_GB="" ;;
     *) RES=$(tr '[:upper:]' '[:lower:]' <<<"${TIERS[$tier]}") ;;
   esac
 fi
@@ -127,7 +132,7 @@ fi
 [[ $NEW_MB == "$OLD_MB" ]] || (( NEW_MB >= 4096 && NEW_MB <= CAP_MEM_GB * 1024 )) || usage "--memory-gb: 4 to $CAP_MEM_GB GB$LIMITED"
 
 if [[ $NEW_CPUS == "$OLD_CPUS" && $NEW_MB == "$OLD_MB" ]]; then
-  if (( JSON )); then show_json false; else echo "'$VM' already has $NEW_CPUS CPUs and $(( NEW_MB / 1024 )) GB memory: nothing changed"; fi
+  if (( JSON )); then show_json false; else echo "'$VM' already has $(cpus_text "$NEW_CPUS") and $(mem_text "$NEW_MB") memory: nothing changed"; fi
   exit 0
 fi
 
@@ -146,7 +151,7 @@ fi
 res_set "$VM" "$TYPE" "$NEW_CPUS" "$NEW_MB" || die "could not change the CPUs and memory of '$VM' in its $(app_label "$TYPE") settings"
 OLD_CPUS=$NEW_CPUS; OLD_MB=$NEW_MB
 if (( JSON )); then show_json true; exit 0; fi
-msg="'$VM' now has $NEW_CPUS CPUs and $(( NEW_MB / 1024 )) GB memory"
+msg="'$VM' now has $(cpus_text "$NEW_CPUS") and $(mem_text "$NEW_MB") memory"
 [[ -n ${RES_NOTE:-} ]] && msg+="; $RES_NOTE"
 if [[ $STATE == running ]]; then echo "$msg. It runs now: this applies on the next start."
 else echo "$msg. This applies on the next start."; fi

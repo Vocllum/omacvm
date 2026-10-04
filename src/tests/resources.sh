@@ -175,7 +175,8 @@ if (( LIVE )); then
   PRLCTL=$REAL
   check "parallels pro: prlctl's error shown, nothing changed" eq "$rc $err $(res_get "$NAME" parallels) $(vm_state "$NAME")" "1 Parallels: only in Pro 2 6144 stopped"
 
-  # In a terminal (expect): --yes never asks.
+  # In a terminal (expect): --yes never asks; Custom with Return keeps the
+  # memory exactly, also under 4 GB.
   cat > "$T/drive.exp" <<'EXP'
 set timeout 15
 spawn {*}[lrange $argv 1 end]
@@ -190,6 +191,15 @@ EXP
   drive() { expect -f "$T/drive.exp" "$1" "$O" resources --vm "$NAME" --vm-type app "${@:2}"; }
   out=$(drive "" --yes 2>&1); rc=$?
   check "app, in a terminal, --yes: says what it has, asks nothing" eq "$rc $(grep -c 'Change with' <<<"$out") $(grep -c 'How much' <<<"$out")" "0 1 0"
+  res_env_set "$APPDIR/vm.env" 4 6000
+  out=$(drive "menu=5,CPUs=,memory in GB=" 2>&1); rc=$?
+  check "app, Custom, Return twice: 6000 MB stays 6000 MB" eq "$rc $(res_get "$NAME" app) $(grep -c 'nothing changed' <<<"$out")" "0 4 6000 1"
+  res_env_set "$APPDIR/vm.env" 4 3072
+  out=$(drive "menu=5,CPUs=,memory in GB=" 2>&1); rc=$?
+  check "app, Custom, Return under 4 GB: kept, no error" eq "$rc $(res_get "$NAME" app)" "0 4 3072"
+  out=$(drive "menu=5,CPUs=3,memory in GB=5" 2>&1); rc=$?
+  check "app, Custom, typed: 3 CPUs and 5 GB" eq "$rc $(res_get "$NAME" app)" "0 3 5120"
+
   # UTM with a saved state: refused while UTM runs ("paused") and while it is
   # closed (its registry; UTM "closed" through a pgrep that does not see it).
   if [[ -n $UTM_ID && ! -e $HOME/.omacvm-user-testing ]]; then
