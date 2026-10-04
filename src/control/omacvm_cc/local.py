@@ -92,6 +92,21 @@ class Local:
         return p if isinstance(p, dict) else {}
 
 
+def write_attention(problems: int, updates: int) -> None:
+    """~/.cache/omacvm/attention.json, which the bar item watches."""
+    path = os.path.join(os.path.dirname(cache_file()), "attention.json")
+    new = json.dumps({"problems": problems, "updates": updates})
+    if read(path) == new:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write(new)
+        os.replace(path + ".tmp", path)
+    except OSError:
+        pass
+
+
 def guest_checks(timeout: float = 90.0) -> list[S.Check] | None:
     """guest/check.sh --tsv, run as root by omacvm-check.socket (a fixed
     command; nothing is sent to it). None: the socket is not there."""
@@ -102,6 +117,10 @@ def guest_checks(timeout: float = 90.0) -> list[S.Check] | None:
     s.settimeout(timeout)
     try:
         s.connect(path)
+        try:
+            s.shutdown(socket.SHUT_WR)   # nothing to send
+        except OSError:
+            pass                         # it answered and closed already
         chunks = []
         while True:
             b = s.recv(65536)

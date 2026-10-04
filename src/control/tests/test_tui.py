@@ -38,6 +38,8 @@ async def settle(pilot, until, seconds=8.0):
         await pilot.pause(0.05)
         if until():
             return True
+    a = pilot.app
+    print("settle timed out:", a.c.hello, a.c.mac_error, a.c.vm_checks is not None, [w.name for w in a.workers])
     return False
 
 

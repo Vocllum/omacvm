@@ -78,6 +78,55 @@ def report_cli(args: list) -> int:
     return 0
 
 
+def notify() -> int:
+    """The user timer's run: one notice per new OmacVM version (none while
+    update checks are off on the Mac), and the bar item's dot."""
+    import json
+    import subprocess
+
+    from omacvm_cc.bridge import BridgeError
+    from omacvm_cc.controller import Controller
+    from omacvm_cc.local import cache_file
+
+    c = Controller()
+    try:
+        c.hello = c.bridge.hello()
+        u = c.bridge.updates()
+    except BridgeError:
+        return 0
+    m = u.get("manifest") if isinstance(u.get("manifest"), dict) else None
+    c.updates = u
+    c.local.save_cache(updates=u)
+    c.write_attention(c.rows())
+    if not u.get("checks_enabled", True) or not m:
+        return 0
+
+    def ver(v):
+        try:
+            return tuple(int(x) for x in str(v).split("."))
+        except ValueError:
+            return ()
+    if ver(m.get("version")) <= ver(c.local.version):
+        return 0
+    seen = os.path.join(os.path.dirname(cache_file()), "notified")
+    try:
+        with open(seen, encoding="utf-8") as f:
+            if f.read().strip() == m["version"]:
+                return 0
+    except OSError:
+        pass
+    with open(seen, "w", encoding="utf-8") as f:
+        f.write(m["version"])
+    n = sum(1 for r in c.rows() if r.update)
+    r = subprocess.run(["notify-send", "-a", "OmacVM", "-A", "open=Open", "-i", "system-software-update",
+                        f"OmacVM {m['version']} is out",
+                        f"{n} feature{'s' if n != 1 else ''} change. Open OmacVM to install it."],
+                       capture_output=True, text=True)
+    if r.stdout.strip() == "open":
+        subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm"], start_new_session=True)
+    return 0
+
+
 def main(args: list) -> int:
     cmd = args[0] if args else ""
     if cmd in ("-h", "--help", "help"):
@@ -93,6 +142,8 @@ def main(args: list) -> int:
         return 0
     if cmd == "report":
         return report_cli(args[1:])
+    if cmd == "notify":
+        return notify()
     if cmd == "status":
         from omacvm_cc import plain
         return plain.status("--json" in args)

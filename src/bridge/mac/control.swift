@@ -39,6 +39,14 @@ func spawn(_ argv: [String], env: [String: String], out: Int32) -> pid_t? {
   posix_spawnattr_setsigmask(&attr, &none)
   posix_spawnattr_setsigdefault(&attr, &all)
   posix_spawnattr_setflags(&attr, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
+  // The CLI answers for itself, not as part of the Bridge app: otherwise
+  // macOS counts its ssh to the VM as the Bridge reaching the local network
+  // (Local Network privacy) and refuses it. Terminal does the same for its
+  // shells. Missing on a macOS without it: spawned as before.
+  if let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim") {
+    typealias Disclaim = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32
+    _ = unsafeBitCast(sym, to: Disclaim.self)(&attr, 1)
+  }
   let cargv = argv.map { strdup($0) } + [nil]
   let cenv = env.map { strdup("\($0.key)=\($0.value)") } + [nil]
   defer { cargv.forEach { free($0) }; cenv.forEach { free($0) } }
@@ -145,6 +153,12 @@ final class Control {
 
   func start() {
     try? FileManager.default.createDirectory(atPath: jobsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    // Jobs older than a week go.
+    for f in (try? FileManager.default.contentsOfDirectory(atPath: jobsDir)) ?? [] {
+      let p = jobsDir + "/" + f
+      if let d = (try? FileManager.default.attributesOfItem(atPath: p))?[.modificationDate] as? Date,
+         Date().timeIntervalSince(d) > 7 * 86400 { try? FileManager.default.removeItem(atPath: p) }
+    }
     let t = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
     t.schedule(deadline: .now() + 60, repeating: 6 * 3600, leeway: .seconds(60))
     t.setEventHandler { [self] in weeklyCheck() }
@@ -216,6 +230,8 @@ final class Control {
         }
         commit = m.commit
       }
+      // A job started before a Bridge restart (an update reinstalls the Bridge) still counts.
+      if runningOnDisk(vmKey(vm)) { return refuse(PolicyError(409, "busy", "a job runs for this VM: wait for it")) }
       if let e = q.sync(execute: { limiter.admit(vmKey(vm)) }) { return refuse(e) }
       let argv = jobArgv(cli: cli, r, vm: vm.name, commit: commit)
       guard let j = startJob(argv, vm: vm, request: r) else {
@@ -315,6 +331,17 @@ final class Control {
       log("control: job \(id) (\(j.action) \(j.features.joined(separator: " "))) ended \(rc)")
     }
     return j
+  }
+
+  /// A job of this VM from an earlier Bridge run that has not ended.
+  private func runningOnDisk(_ vm: String) -> Bool {
+    for f in (try? FileManager.default.contentsOfDirectory(atPath: jobsDir)) ?? [] where f.hasSuffix(".json") {
+      let id = String(f.dropLast(5))
+      guard q.sync(execute: { jobs[id] }) == nil, let j = job(id), j.vm == vm,
+            !FileManager.default.fileExists(atPath: j.rcPath) else { continue }
+      if j.pid > 0 && kill(j.pid, 0) == 0 { return true }
+    }
+    return false
   }
 
   /// A job from this run, or one from before a restart (its files).

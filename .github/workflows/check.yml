@@ -1,5 +1,5 @@
 # Quick checks on every pull request and on main: syntax, ShellCheck errors,
-# the app's Swift build and Omanotch's offline tests. No signing, no VMs.
+# the app's Swift build, Omanotch's offline tests and the control centre's tests. No signing, no VMs.
 name: check
 
 on:
@@ -42,7 +42,24 @@ jobs:
           tr '\n' '\0' < "$RUNNER_TEMP/shell-files" | xargs -0 shellcheck -S error -s bash
 
       - name: Python compiles
-        run: git ls-files -z '*.py' | xargs -0 python3 -m py_compile
+        run: |
+          git ls-files -z '*.py' | xargs -0 python3 -m py_compile
+          python3 -m py_compile src/control/omacvm
+
+      - name: omacvm report runs on macOS's own python3
+        run: /usr/bin/python3 -c "import sys; sys.path.insert(0, 'src/control'); import omacvm_cc.report, omacvm_cc.collect, omacvm_cc.bridge, omacvm_cc.state"
+
+      - name: Control centre tests (state, redaction, Textual Pilot against a fake Mac)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q "textual==8.2.8" pytest
+          cd src/control && "$RUNNER_TEMP/venv/bin/python" -m pytest -q tests
+
+      - name: Bridge's control centre requests (allow-list, limits, manifest signatures)
+        run: src/bridge/mac/tests/run.sh
+
+      - name: Update parts cover src/
+        run: python3 src/release/manifest.py parts > /dev/null
 
       - name: OmacVM.app builds
         working-directory: app/app

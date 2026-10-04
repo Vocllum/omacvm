@@ -8,7 +8,7 @@ import time
 
 from . import state as S
 from .bridge import Bridge, BridgeError, Hello
-from .local import Local, guest_checks
+from .local import Local, guest_checks, write_attention
 
 ACTION_FOR = {True: "enable", False: "disable"}
 
@@ -128,6 +128,12 @@ class Controller:
 
     def poll(self, job_id: str) -> S.Job:
         return self._job(self.bridge.job(job_id))
+
+    def write_attention(self, rows: list[S.Row]) -> None:
+        """For the bar item: how many features need a look, and updates."""
+        problems = sum(1 for r in rows if r.status in (S.Status.FAILING, S.Status.NEEDS_PERSON))
+        updates = sum(1 for r in rows if r.update) if (self.updates or {}).get("checks_enabled", True) else 0
+        write_attention(problems, updates)
 
     def active_job(self) -> S.Job | None:
         return next((j for j in self.jobs.values() if j.active), None)

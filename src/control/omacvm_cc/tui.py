@@ -571,6 +571,8 @@ class ControlCentre(App):
 
     def refresh_all(self) -> None:
         self.rows = self.c.rows()
+        if self.c.vm_checks is not None and not self.c.from_cache:
+            self.c.write_attention(self.rows)
         for s in self.screen_stack:
             if hasattr(s, "redraw"):
                 s.redraw()

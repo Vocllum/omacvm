@@ -50,6 +50,7 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
+CONTROL=${OMACVM_FEATURE_control_centre:-off}
 MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
@@ -359,6 +360,21 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
   elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
+
+section "Control centre"
+FEATURE=control-centre
+if [[ $CONTROL == on ]]; then
+  check "omacvm" "/usr/local/bin/omacvm opens the control centre" test -x /usr/local/bin/omacvm
+  if python3 -c 'import textual' >/dev/null 2>&1; then ok "Textual" "$(pacman -Q python-textual 2>/dev/null | cut -d' ' -f2)"
+  else bad "Textual" "python-textual missing: omacvm shows plain text (omacvm apply on the Mac installs it)"; fi
+  check "checks for it" "omacvm-check.socket" systemctl is-active -q omacvm-check.socket
+  if grep -q '"omacvm": {' "$H/.config/omarchy/extensions/omarchy-menu.jsonc" 2>/dev/null; then ok "Omarchy menu" "OmacVM row"
+  else bad "Omarchy menu" "no OmacVM row in ~/.config/omarchy/extensions/omarchy-menu.jsonc (omacvm apply)"; fi
+  layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
+  if [[ " $layout " == *" omacvm.control "* ]]; then ok "bar item" "omacvm.control"
+  elif grep -qx omacvm.control "$H/.local/state/omacvm/pending-plugins" 2>/dev/null; then bad "bar item" "queued, not enabled yet (log out and in)"
+  else skip "bar item" "omacvm.control is not in the bar (Omarchy's bar settings add it back)"; fi
+else skip "control centre" "off (on the Mac: omacvm enable control-centre)"; fi
 
 (( TSV )) && exit $(( fails ? 1 : 0 ))
 echo

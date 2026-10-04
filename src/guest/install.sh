@@ -6,7 +6,7 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, control-centre) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -239,6 +239,12 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
     rm -f "$tmp" "$NL"
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
+fi
+# The control centre (omacvm in Omarchy): on, or gone again.
+if [[ ${F[control-centre]} == on ]]; then log "control centre (omacvm)"
+elif [[ -e /usr/local/bin/omacvm || -f /etc/systemd/system/omacvm-check.socket ]]; then log "control centre: off"; fi
+if [[ ${F[control-centre]} == on || -e /usr/local/bin/omacvm || -f /etc/systemd/system/omacvm-check.socket ]]; then
+  "$R/control/guest/install.sh" "$U" "${F[control-centre]}" || log "control centre: not set up (see above)"
 fi
 # The Mac's camera: Parallels passes it itself; elsewhere /dev/video42.
 if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi
