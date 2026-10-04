@@ -165,7 +165,7 @@ Free and open source, one display: UTM.
 | Sound and the Mac's microphone | ✓, the microphone once macOS allows Parallels it | ✓ | ✓, the microphone once macOS allows Fusion it | ✓, the microphone once macOS allows OmacVM it |
 | **Setup** | | | | |
 | Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
-| Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
+| Before first use | one Parallels setting | start UTM from the Dock; build in Terminal on the Mac (not over SSH) and allow it to control UTM | allow Accessibility for Fusion | allow Accessibility for OmacVM |
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
