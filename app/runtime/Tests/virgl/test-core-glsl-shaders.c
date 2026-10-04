@@ -176,6 +176,22 @@ int main(void)
                      "TXD TEMP[0].x, IN[0], IN[0].xyzz, IN[0].zyxx, SAMP[0], SHADOWCUBE\n"
                      "MOV OUT[0], TEMP[0].xxxx\nEND\n",
                      &key, "textureGrad", "GL_EXT_texture_shadow_lod", have_gl);
+   /* dEQP-GLES3.functional.shaders.texture_functions.texture.samplercubeshadow_bias_*:
+    * texture(samplerCubeShadow, P, bias) is core GLSL 1.30 and ESSL 3.00; the
+    * extension only adds lod forms and bias for array samplers. */
+   failed |= convert("texture() with a bias on a shadow cube sampler",
+                     "FRAG\nDCL IN[0], GENERIC[0], PERSPECTIVE\nDCL IN[1], GENERIC[1], PERSPECTIVE\n"
+                     "DCL OUT[0], COLOR\nDCL SAMP[0]\nDCL SVIEW[0], SHADOWCUBE, FLOAT\nDCL TEMP[0]\n"
+                     "TXB2 TEMP[0].x, IN[0], IN[1].xxxx, SAMP[0], SHADOWCUBE\n"
+                     "MOV OUT[0], TEMP[0].xxxx\nEND\n",
+                     &key, "texture(", "GL_EXT_texture_shadow_lod", have_gl);
+   /* The compare value of a gather is no bias either (GLSL 4.00). */
+   failed |= convert("textureGather on a shadow cube sampler",
+                     "FRAG\nDCL IN[0], GENERIC[0], PERSPECTIVE\nDCL OUT[0], COLOR\nDCL SAMP[0]\n"
+                     "DCL SVIEW[0], SHADOWCUBE, FLOAT\nDCL TEMP[0]\nIMM[0] UINT32 {0, 0, 0, 0}\n"
+                     "TG4 TEMP[0], IN[0], IMM[0].xxxx, SAMP[0], SHADOWCUBE\n"
+                     "MOV OUT[0], TEMP[0]\nEND\n",
+                     &key, "textureGather", "GL_EXT_texture_shadow_lod", have_gl);
 
    /* A plain float shader is unchanged apart from the version. */
    memset(&key, 0, sizeof(key));
