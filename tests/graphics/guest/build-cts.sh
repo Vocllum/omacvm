@@ -10,7 +10,7 @@ if [ ! -d $D/src/.git ]; then
 fi
 git -C $D/src fetch --depth 1 origin "$REF" && git -C $D/src checkout -q FETCH_HEAD
 git -C $D/src rev-parse HEAD > $D/commit
-python3 $D/src/external/fetch_sources.py >/dev/null
+python3 $D/src/external/fetch_sources.py --protocol https >/dev/null
 cmake -S $D/src -B $D/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDEQP_TARGET=surfaceless
 ninja -C $D/build deqp-gles2 deqp-gles3   # quick ones first
 ninja -C $D/build deqp-vk
