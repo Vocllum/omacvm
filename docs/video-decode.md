@@ -11,7 +11,7 @@ second plays without dropped frames and the VM's CPU stays nearly idle.
 | H.264 | yes | patch tested, see below | no | no |
 | VP9 (YouTube) | yes | patch tested, see below | no | no |
 | AV1 (YouTube) | yes, Chromium-based browsers | – | no | no |
-| HEVC | no | no | no | no |
+| HEVC (8-bit) | yes: mpv, FFmpeg | – | no | no |
 
 Browsers in an OmacVM.app VM:
 
@@ -19,9 +19,14 @@ Browsers in an OmacVM.app VM:
   VP9; `chrome://gpu` shows *Video Decode: Hardware accelerated* and
   `chrome://media-internals` *VaapiVideoDecoder*. Install it with
   `src/bench/install-chrome.sh` (Arch Linux ARM has no package).
-- **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below).
+- **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below; HEVC
+  Firefox does not hand to VA-API at all here).
+- **Brave** (Linux ARM): yes, like Chrome (tested with VP9).
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): no. Arch Linux
   ARM builds it without VA-API, so it always decodes on the CPU.
+- **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`): H.264, VP9 and HEVC.
+  Chrome does not play HEVC through it yet: importing its own frame buffers
+  for HEVC fails in Chrome (*Plane 0 is out of bounds*), H.264 and VP9 work.
 
 Check in the VM: `vainfo` lists `VAProfileH264*` and `VAProfileVP9Profile0`
 with `VAEntrypointVLD`.
@@ -58,8 +63,11 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   (`app/runtime/patches/virgl-videotoolbox-decode.patch`). VA-API hands over
   only the slices and parsed parameters, VideoToolbox wants whole frames with
   their parameter sets, so the backend rebuilds what is missing: H.264's SPS
-  and PPS from the picture parameters, AV1 frames cut out of the temporal
-  unit. VP9 frames arrive whole.
+  and PPS and HEVC's VPS, SPS and PPS from the picture parameters (HEVC's
+  slice headers get explicit reference picture sets, as VA-API does not pass
+  the SPS's), AV1 frames cut out of the temporal unit. VP9 frames arrive
+  whole. Tested bit-exact against software decoding (FFmpeg) with x264, x265
+  and libvpx streams and real 1080p clips.
 - The decoded frame is an IOSurface; the GPU copies it into the textures the
   VM sees (no CPU copy on the Mac's OpenGL).
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
@@ -77,9 +85,9 @@ put the shim in: the VM folder's `video-decode` file).
 - **AV1 in Firefox and mpv**: FFmpeg sends only the tile data of an AV1 frame,
   without its headers, and VideoToolbox needs the headers. Chrome sends the
   whole frame. So AV1 is offered to Chromium-based browsers only.
-- **HEVC**: VA-API does not carry the reference picture sets of HEVC's SPS,
-  so the SPS cannot be rebuilt for VideoToolbox. YouTube does not use HEVC.
-- **10-bit (VP9 profile 2, HDR)**: not offered yet.
+- **HEVC**: Main (8-bit) only; long-term reference pictures from the SPS are
+  not supported (rare).
+- **10-bit (VP9 profile 2, HEVC Main 10, HDR)**: not offered yet.
 - **Guests with Mesa older than 26.0** number the video profiles differently;
   `OMACVM_VIRGL_VIDEO_ABI=legacy` switches the backend to the old numbers.
   Upstream virglrenderer's copy of the numbers is the old one, so with a
