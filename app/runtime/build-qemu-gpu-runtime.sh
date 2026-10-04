@@ -77,6 +77,8 @@ slirp_patch="$native_dir/patches/libslirp-darwin-icmp-matching.patch"
 udp_patch="$native_dir/patches/libslirp-ipv4-udp-translation.patch"
 fence_poll_patch="$native_dir/patches/qemu-darwin-gpu-fence-poll.patch"
 virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
+virgl_videotoolbox_patch="$native_dir/patches/virgl-videotoolbox-decode.patch"
+hidden_window_patch="$native_dir/patches/qemu-cocoa-hidden-for-tests.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -105,6 +107,8 @@ memory_reclaim_patch_sha256=5d422130996b99145d017d4429df660a07c757388ef7d52cba38
 mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a674c3283800fab0
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
+virgl_videotoolbox_patch_sha256=6cfad3d9140fb48283c64fcd497e436a0e9f5d6ad5092729bfe72a21bf19d054
+hidden_window_patch_sha256=286aa59317d16f21cb0fe1dd42b6636995d24f1c65312175e40f36b14272dc93
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -258,7 +262,13 @@ remove_work_dir() {
 cleanup() {
   local exit_status=$?
   trap - EXIT HUP INT TERM
-  [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  # OMACVM_RUNTIME_KEEP_WORK=1 keeps the sources and build trees (for
+  # rebuilding one library by hand while working on a patch).
+  if [[ -n $work_dir && ${OMACVM_RUNTIME_KEEP_WORK:-} == 1 ]]; then
+    echo "[qemu-source-build] kept work dir: $work_dir" >&2
+  else
+    [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  fi
   exit "$exit_status"
 }
 
@@ -496,6 +506,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patc
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdown.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
+verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -613,6 +625,9 @@ for virgl_patch in "${virgl_patches[@]}"; do
 done
 verify_file_sha "Native OpenGL browser compatibility patch" "$virgl_native_patch" "$virgl_native_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_native_patch"
+# Video decode on the Mac's media engine: guest VA-API -> VideoToolbox.
+verify_file_sha "VideoToolbox video decode patch" "$virgl_videotoolbox_patch" "$virgl_videotoolbox_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_videotoolbox_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -626,7 +641,7 @@ env MACOSX_DEPLOYMENT_TARGET="$macos_deployment_target" \
   LDFLAGS="-mmacosx-version-min=$macos_deployment_target -Wl,-headerpad_max_install_names" \
   python3 "$meson" setup "$virgl_build" "$virgl_source" \
     --prefix="$virgl_root" --libdir=lib --buildtype=debugoptimized -Db_ndebug=false --wrap-mode=nodownload \
-    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=false -Dtracing=none
+    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=true -Dtracing=none
 "$ninja" ${ninja_jobs[@]+"${ninja_jobs[@]}"} -C "$virgl_build"
 # These test the actual shader generator and blend-state transitions, without a VM.
 env DYLD_LIBRARY_PATH="$private_libraries" \
