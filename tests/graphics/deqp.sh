@@ -31,6 +31,8 @@ esac
   wc -l < $C/$API-cases.txt"
 # dEQP surfaceless calls eglGetDisplay(NULL): without EGL_PLATFORM Mesa picks a window system
 [[ $API == gles* ]] && ENVS="EGL_PLATFORM=surfaceless $ENVS"
+# one failing case can poison the virgl context for the rest of the process: rerun after a Fail
+ENVS="DEQP_ISOLATE=${DEQP_ISOLATE:-1} $ENVS"
 T0=$(date +%s)
 "$V" ssh "cat $C/$API-cases.txt" > "$OUT.cases"
 # dEQP command lines stream per-case results to the host (OUT.events), so a case that takes
@@ -75,7 +77,7 @@ src, out, api, filt, stride, commit, renderer, secs = sys.argv[1:9]
 r = [json.loads(l) for l in open(src) if l.strip()]
 c = collections.Counter(x["status"] for x in r)
 ran = c["Pass"] + c["Fail"] + c["QualityWarning"] + c["CompatibilityWarning"] + c["Crash"] + c["Timeout"] + c["InternalError"] + c["ResourceError"] + c["HostCrash"] + c["VMHang"]
-res = {"suite": f"deqp-{api}", "cts_commit": commit, "renderer": renderer.strip(), "filter": filt, "stride": int(stride),
+res = {"suite": f"deqp-{api}", "isolate_after_fail": __import__("os").environ.get("DEQP_ISOLATE", "1") == "1", "cts_commit": commit, "renderer": renderer.strip(), "filter": filt, "stride": int(stride),
        "cases": len(r), "status": dict(c), "seconds": int(secs),
        "pass_rate": round((c["Pass"] + c["QualityWarning"] + c["CompatibilityWarning"]) / ran, 4) if ran else None,
        "not_supported": c["NotSupported"],

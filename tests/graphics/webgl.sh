@@ -30,8 +30,9 @@ while :; do
   [ "$n" = done ] && break
   now=$(date +%s)
   [ "$now" -ge $end ] && { status=time-limit; break; }
+  qp=$("$V" pid); [ -z "$qp" ] && { status=qemu-exited; break; }
   # paused by another track's benchmark (kill -STOP): the time limit and the stall clock wait
-  if [[ $(ps -o stat= -p "$("$V" pid)") == T* ]]; then end=$((end + 10)); since=$now; sleep 10; continue; fi
+  if [[ $(ps -o stat= -p "$qp") == T* ]]; then end=$((end + 10)); since=$now; sleep 10; continue; fi
   if [ -n "$n" ] && [ "$n" != "$last" ]; then last=$n; since=$now; fi
   if [ -n "$n" ] && [ $((now - since)) -ge $STALL ]; then
     hangs=$((hangs + 1))
@@ -43,7 +44,7 @@ while :; do
   sleep 10
 done
 "$V" ssh "pkill -f '/tmp/[w]ebgl-prof'; pkill -f '$G/[s]erver.py'; cat $G/commit" > "$OUT.commit" || true
-"$V" ssh "cat $G/out.jsonl" > "$OUT.jsonl"
+"$V" ssh "cat $G/out.jsonl" > "$OUT.jsonl" || true
 python3 - "$OUT.jsonl" "$OUT" "$VERSION" "$FILTER" "$status" "$(cat "$OUT.commit")" <<'PY'
 import json, sys
 src, out, version, filt, status, commit = sys.argv[1:7]
