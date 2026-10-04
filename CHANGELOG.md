@@ -22,6 +22,10 @@ in more words.
   21..30, and so on), and several workspaces of an unplugged display all
   come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
   the same file.
+- Omanotch no longer asks for Accessibility. It picks the VM for the strip by
+  the full-screen window's app; with two VMs of one app it keeps the one it
+  serves (or takes the one that connected last) instead of reading window
+  titles.
 
 ## 2.7.0
 
