@@ -812,15 +812,16 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   --archive-dir "$archive_dir"
 
-# The firmware must show the logo with the QEMU it ships with (HVF, no disk).
+# The firmware must show the logo and name the disk's boot entry as QEMU's
+# does, with the QEMU it ships with (Tests/firmware/test-firmware.py).
 if [[ $firmware == omacvm ]]; then
-  if python3 "$native_dir/Tests/firmware/test-boot-logo.py" \
+  if python3 "$native_dir/Tests/firmware/test-firmware.py" \
       "$native_dir/.build/qemu-gpu-runtime/bin/qemu-system-aarch64" \
       "$edk2_out/edk2-aarch64-code.fd" "$edk2_out/Logo.bmp"; then
     install -m 0644 "$edk2_out/edk2-aarch64-code.fd" "$firmware_dir/"
     echo "omacvm edk2-stable202408-omacvm (Omarchy boot logo, build-edk2.sh)" > "$firmware_dir/firmware-source"
   else
-    log "The edk2 build's boot test failed: using QEMU's prebuilt firmware (TianoCore logo)"
+    log "The edk2 build's firmware test failed: using QEMU's prebuilt firmware (TianoCore logo)"
     firmware=qemu
   fi
 fi

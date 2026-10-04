@@ -18,8 +18,8 @@ sharp. ArmVirtQemu shows it centred at the firmware's 1920 x 1080.
 
 Upstream: OmacVM only (branding), not for edk2 or QEMU.
 
-Test: Tests/firmware/test-boot-logo.py boots the built firmware without a disk
-and checks that the screen shows exactly this bitmap, centred
+Test: Tests/firmware/test-firmware.py boots the built firmware with an empty
+disk and checks that the screen shows exactly this bitmap, centred
 (build-qemu-gpu-runtime.sh runs it; on failure the build keeps QEMU's
 firmware).
 

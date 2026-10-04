@@ -10,12 +10,14 @@ Build OmacVM.app's UEFI firmware (edk2-aarch64-code.fd) on the Mac: edk2's
 ArmVirtQemu for AARCH64 from the edk2 release QEMU 11.1.1 ships
 (edk2-stable202408), built by QEMU's own helper with QEMU's own flags
 (DIR/roms/edk2-build.py and DIR/roms/edk2-build.config, build
-"armvirt.aa64", a DEBUG build as QEMU ships it). One change:
-patches/edk2-logo-omarchy.patch, Omarchy's boot logo instead of TianoCore's.
+"armvirt.aa64", a DEBUG build as QEMU ships it). Two patches:
+patches/edk2-logo-omarchy.patch, Omarchy's boot logo instead of TianoCore's,
+and patches/edk2-bootmanager-nvme-identify-align.patch, so that clang's build
+names the VM's disk as QEMU's GCC build does.
 
 DIR is the unpacked QEMU source (build-qemu-gpu-runtime.sh passes its own).
 Writes edk2-aarch64-code.fd (64 MiB, as QEMU's) and Logo.bmp (the logo it
-carries, for Tests/firmware/test-boot-logo.py) to the --out DIR.
+carries, for Tests/firmware/test-firmware.py) to the --out DIR.
 
 Toolchain: LLVM 18.1.8 (clang, lld; the official macOS arm64 release),
 acpica's iasl 20240827 and edk2's BaseTools, built with the Command Line
@@ -43,7 +45,9 @@ log() { echo "[edk2-build] $*"; }
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
 logo_patch="$native_dir/patches/edk2-logo-omarchy.patch"
-logo_patch_sha256=7f0cdfc5001534c9ef36bfde2ba98cb3317520f21530d1603cb71f6ca443b042
+logo_patch_sha256=d1763d4db5c616dd8b51d772127555d04d6e68070f8f72f379a69cf496038057
+nvme_patch="$native_dir/patches/edk2-bootmanager-nvme-identify-align.patch"
+nvme_patch_sha256=f1a494492426f1a1476e96c3682d0d171ef0ca43b386db07ef491e1dd118fda1
 # The logo the patch puts in (checked after applying it).
 logo_bmp_sha256=75d40490e502d2850e571ab78d4be84b62232279cfc4ec30d23404017f630670
 
@@ -90,6 +94,7 @@ sha_of() { shasum -a 256 "$1" | awk '{ print $1 }'; }
 check_sha() { [[ $(sha_of "$2") == "$3" ]] || die "$1 checksum mismatch: $2"; }
 
 check_sha "logo patch" "$logo_patch" "$logo_patch_sha256"
+check_sha "NVMe identify patch" "$nvme_patch" "$nvme_patch_sha256"
 [[ -d $qemu_source/roms && -f $qemu_source/roms/edk2-version ]] || die "not a QEMU source tree: $qemu_source"
 check_sha "QEMU's edk2-build.py" "$qemu_source/roms/edk2-build.py" "$helper_sha256"
 check_sha "QEMU's edk2-build.config" "$qemu_source/roms/edk2-build.config" "$config_sha256"
@@ -100,7 +105,7 @@ mkdir -p "$out_dir"
 cache="$native_dir/.build/edk2"
 archives="$cache/archives"
 mkdir -p "$archives"
-inputs=$(cat "$0" "$logo_patch" | shasum -a 256 | cut -c1-16)
+inputs=$(cat "$0" "$logo_patch" "$nvme_patch" | shasum -a 256 | cut -c1-16)
 built="$cache/out-$inputs"
 if [[ -f $built/edk2-aarch64-code.fd && -f $built/edk2-aarch64-code.fd.sha256 &&
       $(sha_of "$built/edk2-aarch64-code.fd") == $(cat "$built/edk2-aarch64-code.fd.sha256") ]]; then
@@ -154,10 +159,11 @@ tar -xJf "$archives/$llvm_archive_name" -C "$work" \
 llvm_bin="$work/$llvm_root/bin"
 "$llvm_bin/clang" --version | grep -q 'clang version 18.1.8' || die "the unpacked clang does not run"
 
-log "Applying the Omarchy logo patch"
+log "Applying the Omarchy logo and NVMe identify patches"
 # git apply checks the original logo's hash; the ceiling keeps git from taking
-# the repository around .build for the target.
+# the repository around .build for the target. edk2's sources have CRLF lines.
 GIT_CEILING_DIRECTORIES=$work git -C "$edk2" apply "$logo_patch"
+GIT_CEILING_DIRECTORIES=$work git -C "$edk2" apply --whitespace=nowarn "$nvme_patch"
 check_sha "patched logo" "$edk2/MdeModulePkg/Logo/Logo.bmp" "$logo_bmp_sha256"
 
 jobs=${OMARCHY_RUNTIME_BUILD_JOBS:-$(sysctl -n hw.ncpu)}

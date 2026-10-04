@@ -13,10 +13,14 @@ commit 82927e9. Changes here:
   flags (`roms/edk2-build.py`, `roms/edk2-build.config`, build
   `armvirt.aa64`, DEBUG as QEMU ships it), clang 18 instead of GCC, and
   `patches/edk2-logo-omarchy.patch`: Omarchy's logo instead of TianoCore's
-  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`).
-  `Tests/firmware/test-boot-logo.py` boots it without a disk and checks the
-  logo on the screen. If the build or that test fails, or with
-  `OMACVM_FIRMWARE=qemu`, QEMU's prebuilt firmware is used (TianoCore logo);
+  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`), and
+  `patches/edk2-bootmanager-nvme-identify-align.patch`: with clang, edk2
+  could not read the NVMe disk's name and renamed its boot entry to "UEFI
+  Misc Device"; now it is "UEFI QEMU NVMe Ctrl omacvm 1" as with QEMU's
+  firmware. `Tests/firmware/test-firmware.py` boots it with an empty disk
+  and checks both: the logo on the screen and the disk's boot entry. If the
+  build or that test fails, or with `OMACVM_FIRMWARE=qemu`, QEMU's prebuilt
+  firmware is used (TianoCore logo);
   `.build/firmware/firmware-source` says which. The flash layout and the
   boot variables are the same either way: a VM's `efi-vars.fd` works with
   both
