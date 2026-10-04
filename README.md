@@ -139,12 +139,13 @@ Free and open source, one display: UTM.
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 67 % | 52 % | **71 %** | 70 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 75 % · 25 % | 67 % · 26 % | **78 % · 38 %** | no result · 22 % |
 | 3D: glmark2 (score) | **7306** | 964 | 1813 | 1017 |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
 | YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
-| GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
+| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
 | Idle desktop | 5.7 W · 18 h | being re-measured | **5.5 W · 18 h** | 6.2 W · 16 h |
 | Reading, scrolling a page | 7.3 W · 14 h | being re-measured | **5.9 W · 17 h** | 6.8 W · 15 h |
@@ -168,7 +169,7 @@ Free and open source, one display: UTM.
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others. Basemark Web 3.0: 75, 67, 78, no result on OmacVM.app. WebGL Aquarium: 25, 26, 38, 22." width="100%">
 </p>
 
 On the Mac itself, for the same loads: idle 6.1 W (16 h), reading 6.6 W
@@ -182,7 +183,10 @@ display, nothing else open, brightness at 50 %, Google Chrome 154 on the Mac
 and in each VM, OmacVM 2.3.0. Speedometer is the median of 3 runs, the rest
 single runs. Power is the whole Mac's draw from its battery telemetry, 3
 minutes per load; hours are 100 Wh over that draw, whole hours from 13 h up,
-one decimal below. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
+one decimal below. The GPU row is from 2026-10-04 (OmacVM 2.6.0, median of 3,
+brightness at its lowest, an external display connected); on the Mac,
+Geekbench 7 GPU gives 204241 with Metal and 117456 with OpenCL. Every step, so
+you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
 
 - **UTM's idle and reading numbers** are being measured again. Our run gave
   15 W at idle, but a later check showed about 5 W, so something was probably

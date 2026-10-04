@@ -13,15 +13,17 @@ end. The tools are in [`src/bench/`](../../src/bench).
 | Speedometer 3.1 | web apps: browser and CPU together | ✓ | ✓ |
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
-| Geekbench 7 GPU | GPU compute | ✓ (Metal) | ✗ see below |
+| Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
+| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | ✗ see below |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
 
 **GPU compute is not possible in any of the VMs.** Geekbench's GPU test
 needs Vulkan or OpenCL, and none of Parallels, UTM, VMware Fusion or
-OmacVM.app offers either to a Linux guest. `bench.sh` records that as "not
-available in this VM".
-The browser tests (MotionMark, WebGL Aquarium) and glmark2 measure graphics
-instead, not raw compute. glmark2 has no Mac version, so it has no Mac
+OmacVM.app offers either to a Linux guest: Geekbench 7's Linux ARM preview
+lists no GPU in any of them. `bench.sh` records that as "not available in this
+VM".
+The browser tests (MotionMark, WebGL Aquarium, Basemark Web 3.0) and glmark2
+measure graphics instead, not raw compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
 
 ## The setup
@@ -33,7 +35,7 @@ Do all of this, or the numbers won't compare:
 | Mac | MacBook Pro M4 Max, macOS 15.7.4 (ours; use yours and say which) |
 | Each VM | 16 CPUs, 48 GB memory. On Parallels that needs Pro or the trial: Standard stops at 4 CPUs and 8 GB |
 | One VM at a time | the VM under test runs alone. Quit the other VM apps, Parallels' background service included: `pgrep -l prl_` should print nothing while you test UTM or Fusion |
-| Full screen | the VM app in full screen. `bench.sh` also starts Chrome full screen |
+| Full screen | the VM app in full screen on the built-in display. `bench.sh` also starts Chrome full screen, on the Mac without the toolbar, so the page is the same size everywhere (1728x1080 at 2x on a 16" MacBook Pro). In a VM that also has an external display (Parallels, Fusion), Chrome must open on the built-in one: move the focus there first (`hyprctl dispatch focusmonitor Virtual-1`) |
 | No screensaver | Omarchy's screensaver and lock off: `omacvm disable idle-lock --vm NAME`. It can start in the middle of a run otherwise |
 | Google Chrome everywhere | Google Chrome on the Mac and in the VM. Arch's Chromium is much slower than Chrome (Parallels: 35.4 with Chromium 153 vs about 45 with Chrome), so it would not compare |
 | Chrome's flags | in a VM, `bench.sh` starts Chrome with the flags in `/etc/chrome-flags.conf` and Omarchy's `~/.config/chrome-flags.conf`. On Fusion one of them must have `--ignore-gpu-blocklist` (OmacVM puts it in `/etc`), or Chrome draws in software ([why](../troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
@@ -69,7 +71,7 @@ OmacVM copies its tools into the VM, so they are in
 
    ```bash
    /usr/local/share/omacvm/bench/bench.sh \
-     --only geekbench,speedometer,motionmark,aquarium,gpu,glmark2 ~/fusion.jsonl
+     --only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2 ~/fusion.jsonl
    ```
 
    glmark2 is not in the default list, hence `--only`. Leave the VM alone until
@@ -86,11 +88,13 @@ OmacVM copies its tools into the VM, so they are in
 ### Options
 
 ```text
-bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,gpu,glmark2] [OUT.jsonl]
+bench.sh [--runs N] [--only geekbench,speedometer,motionmark,aquarium,basemark,gpu,glmark2] [OUT.jsonl]
 ```
 
 Each result is one JSON line: host, OS, test, run, value, and the browser
-version or Geekbench link.
+version or Geekbench link. `browser-bench.py` prints the page size and, for
+Basemark, the link to the result on Basemark's site (Powerboard), where each
+run is also public.
 
 ## Power draw and battery life
 
@@ -150,7 +154,8 @@ cd ~/bench
 - `report.py` prints a Markdown table: the median of each test, and each route
   as a share of the first file (the Mac).
 - `chart.py` draws the bar chart for the README from `results.json`: each route
-  as a percentage of the Mac. glmark2 is left out, since it has no Mac value.
+  as a percentage of the Mac. glmark2 is left out, since it has no Mac value,
+  and so is Geekbench GPU, which no VM can run.
 
 **About Geekbench.** The free version uploads every result to
 browser.geekbench.com and prints only a link. `bench.sh` saves the link;
@@ -203,3 +208,50 @@ Notes:
   ([#32](https://github.com/gillesgoetsch/omacvm/issues/32),
   [finding 15](../troubleshooting.md#15-utm-idle-power-is-being-measured-again)).
 - MotionMark: [finding 16](../troubleshooting.md#16-motionmark-gives-no-stable-result).
+
+### GPU (2026-10-04)
+
+The same Mac, macOS 15.7.4, Google Chrome 154, OmacVM 2.6.0 (release
+candidate). One VM at a time in full screen on the built-in display (3456x2160
+at 120 Hz), the Mac otherwise idle, display brightness at its lowest (it does
+not change these numbers). An external display (3840x2400, 60 Hz, on its own
+power) was connected: in full screen, Parallels and Fusion give the VM a second
+monitor for it. Chrome ran on the built-in display's monitor everywhere, the
+page 1728x1080 at 2x (OmacVM.app: 1728x1085). Median of 3 runs; the share of
+the Mac in brackets.
+
+| | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
+|---|---|---|---|---|---|
+| Basemark Web 3.0 | 3247 | 2446 (75 %) | 2182 (67 %) | 2522 (78 %) | no result |
+| WebGL Aquarium, 30,000 fish (fps) | 107.7 | 26.7 (25 %) | 28.1 (26 %) | 40.6 (38 %) | 23.9 (22 %) |
+| Geekbench 7 GPU, Metal | 204241 | ✗ | ✗ | ✗ | ✗ |
+| Geekbench 7 GPU, OpenCL | 117456 | ✗ | ✗ | ✗ | ✗ |
+
+Each run:
+
+| | Basemark Web 3.0 | WebGL Aquarium (fps) |
+|---|---|---|
+| Mac | 3248, 3118, 3247 | 107.7, 108.5, 106.8 |
+| Parallels | 2586, 2446, 2423 | 21.9, 28.2, 26.7 |
+| UTM | 2182, 2174, 2780 | 25.0, 28.6, 28.1 |
+| VMware Fusion | 2478, 2578, 2522 | 38.9, 40.6, 40.9 |
+| OmacVM.app | no result (3 tries) | 16.8, 24.1, 23.9 |
+
+Notes:
+
+- **Geekbench GPU in a VM: not available.** Geekbench 7's Linux ARM preview
+  has no GPU test: `--gpu-list` lists nothing and `--gpu Vulkan` or
+  `--gpu OpenCL` only prints the help. No VM offers OpenCL, and none offers
+  Vulkan either (Fusion: `vulkaninfo` finds no driver; UTM's Vulkan is off in
+  OmacVM's setup). Tried once in each VM.
+- Basemark mixes GPU tests (WebGL, canvas, SVG) with JavaScript and page tests,
+  so it is not a pure GPU number. Each result is public on Basemark's
+  Powerboard; `browser-bench.py` prints its link.
+- WebGL Aquarium on the Mac: 108 fps on a 120 Hz display, so close to the
+  display's limit. The VMs are far below it.
+- OmacVM.app: Basemark never finished in 3 tries (up to 15 minutes each). It stays
+  in its Geometry Stress Test, Chrome's page at full CPU. OmacVM.app's test VM
+  has 8 CPUs and 16 GB, the others 16 and 48.
+- Chrome must open on the built-in display's monitor: on Fusion it first
+  opened on the external one (page 1920x1200, 60 Hz) and gave 41 to 43 fps and
+  Basemark 2072 to 2596. Those runs are not in the table.
