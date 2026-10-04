@@ -22,6 +22,7 @@ utm_scripting() {
   out=$(cat "$t"); rm -f "$t"
   case $out in
     *-1743*) echo "this terminal may not control UTM: System Settings > Privacy & Security > Automation > your terminal app > UTM: on, then run omacvm again" ;;
+    *-1712*) echo "UTM did not answer in time: click Allow if macOS still asks whether this terminal may control UTM, else quit and reopen UTM; then run omacvm again" ;;
     *) echo "UTM did not answer (${out:-no reply}): quit and reopen UTM, then run omacvm again" ;;
   esac
   return 1
