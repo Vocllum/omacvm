@@ -23,7 +23,8 @@ Toolchain: LLVM 18.1.8 (clang, lld; the official macOS arm64 release),
 acpica's iasl 20240827 and edk2's BaseTools, built with the Command Line
 Tools. Every download is pinned by checksum and kept in .build/edk2/archives;
 a finished build is kept in .build/edk2/out-<inputs> and reused while this
-script and the patches stay the same. About 2 minutes, 800 MB of downloads the
+script and the patches stay the same. It builds in /private/tmp/omacvm-edk2-build
+(the same folder for every checkout, so they all build the same bytes). About 2 minutes, 800 MB of downloads the
 first time.
 EOF
 }
@@ -124,18 +125,42 @@ fetch() {   # fetch LABEL URL SHA256 FILE: download once into the archive cache
   mv "$file.part" "$file"
 }
 
+# Only the archives below are kept in the cache.
+keep=$(sources | cut -f1,2 | tr '\t' '-' | sed 's/$/.tar.gz/'; echo "$llvm_archive_name")
+for file in "$archives"/*; do
+  [[ -f $file ]] || continue
+  grep -qxF "${file##*/}" <<<"$keep" || { log "Removing ${file##*/} (not used)"; rm -f "$file"; }
+done
+
 # The build path ends up in the firmware (the DEBUG build's file names, as
-# QEMU's carries /home/kraxel/...), so it is always the same folder, and the
-# SEC module's __DATE__ and __TIME__ are the edk2 release's (SOURCE_DATE_EPOCH,
-# 2024-08-13 UTC): the same checkout builds the same bytes.
-work="$cache/work"
-rm -rf "$work" "$built"
-mkdir -p "$work"
-cleanup() { local s=$?; trap - EXIT; rm -rf "$work"; exit "$s"; }
+# QEMU's carries /home/kraxel/...), so every checkout builds in the same
+# folder, outside it and the home folder: the firmware carries no user name,
+# and the SEC module's __DATE__ and __TIME__ are the edk2 release's
+# (SOURCE_DATE_EPOCH, 2024-08-13 UTC): every checkout builds the same bytes.
+# A lock keeps two checkouts from building there at once.
+work=/private/tmp/omacvm-edk2-build
+lock="$work.lock"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  owner=$(cat "$lock/pid" 2>/dev/null || true)
+  if [[ -n $owner ]] && ! kill -0 "$owner" 2>/dev/null; then
+    rm -rf "$lock"; continue   # its build is gone
+  fi
+  if [[ -z $owner && -n $(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null) ]]; then
+    rm -rf "$lock"; continue   # died before it wrote its pid
+  fi
+  ((waited % 60)) || log "Waiting for another edk2 build (pid ${owner:-?}, $lock)"
+  ((waited < 1200)) || die "another edk2 build has held $lock for 20 minutes"
+  sleep 5; waited=$((waited + 5))
+done
+echo $$ > "$lock/pid"
+cleanup() { local s=$?; trap - EXIT; rm -rf "$work" "$lock"; exit "$s"; }
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+rm -rf "$work" "$built"
+mkdir -p "$work"
 
 edk2="$work/edk2"
 while IFS=$'\t' read -r name commit repo path sha; do
@@ -206,6 +231,14 @@ install -m 0644 "$qemu_source/roms/edk2-build.py" "$qemu_source/roms/edk2-build.
 code="$work/pc-bios/edk2-aarch64-code.fd"
 [[ -f $code && $(stat -f %z "$code") == 67108864 ]] || fail "the edk2 build (no 64 MiB edk2-aarch64-code.fd)"
 grep -A3 'FV Space Information' "$build_log" | sed 's/^/[edk2-build] /'
+# The firmware volumes before compression: no path of this checkout or home.
+fv_dir="$roms/Build/ArmVirtQemu-AARCH64/DEBUG_CLANGDWARF/FV"
+[[ -f $fv_dir/FVMAIN.Fv && -f $fv_dir/FVMAIN_COMPACT.Fv ]] || die "no firmware volumes in $fv_dir"
+for fv in "$fv_dir"/*.Fv; do
+  for path in "$native_dir" "$HOME"; do
+    ! grep -qaF "$path" "$fv" || die "${fv##*/} carries $path"
+  done
+done
 
 # Only the latest build is kept.
 find "$cache" -maxdepth 1 -name 'out-*' -type d -exec rm -rf {} +

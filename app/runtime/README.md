@@ -21,7 +21,10 @@ commit 82927e9. Changes here:
   and checks both: the logo on the screen and the disk's boot entry. If the
   build or that test fails, or with `OMACVM_FIRMWARE=qemu`, QEMU's prebuilt
   firmware is used (TianoCore logo);
-  `.build/firmware/firmware-source` says which. The flash layout and the
+  `.build/firmware/firmware-source` says which. It builds in
+  `/private/tmp/omacvm-edk2-build` whatever the checkout: the DEBUG build
+  carries its file paths, so every checkout gives the same bytes and the
+  firmware carries no user name (the build checks that). The flash layout and the
   boot variables are the same either way: a VM's `efi-vars.fd` works with
   both
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
