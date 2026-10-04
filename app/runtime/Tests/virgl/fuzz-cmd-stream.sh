@@ -43,13 +43,14 @@ env DYLD_LIBRARY_PATH="$libs" ASAN_OPTIONS=detect_leaks=0 VIRGL_LOG_LEVEL=silent
   -rss_limit_mb=4096 "$here"/fuzz-regressions/*
 cp -n "$here"/fuzz-regressions/* corpus/ 2>/dev/null || true
 # Huge but valid draws (billions of vertices) run for minutes on the software renderer:
-# 20 s per input; a timeout is kept (timeout-*) and fuzzing goes on. A crash (crash-*,
-# oom-*, an oracle abort) stops it. (Fork mode would lose DYLD_LIBRARY_PATH: SIP.)
+# 20 s per input; a timeout (timeout-*) or the process outgrowing 4 GiB (oom-*, slow
+# leaks add up over millions of contexts) is kept and fuzzing goes on in a fresh process.
+# A crash or an oracle abort (crash-*) stops it. (Fork mode would lose DYLD_LIBRARY_PATH: SIP.)
 end=$((SECONDS + secs))
 while ((SECONDS < end)); do
   rc=0
   env DYLD_LIBRARY_PATH="$libs" ASAN_OPTIONS=detect_leaks=0 VIRGL_LOG_LEVEL=silent ./fuzz-cmd-stream \
     -max_total_time=$((end - SECONDS)) -max_len=4096 -rss_limit_mb=4096 -timeout=20 corpus || rc=$?
-  ls crash-* oom-* >/dev/null 2>&1 && exit 1
+  ls crash-* >/dev/null 2>&1 && exit 1
   [ $rc = 0 ] && break
 done
