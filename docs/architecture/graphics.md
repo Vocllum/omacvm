@@ -446,12 +446,15 @@ The tracks share one runtime. Order and overlaps known today:
    keep one.
 5. `gpu-native`'s branch has an earlier version of this document and ADR
    0010; this version replaces both.
-6. `gpu-robust` adds `virgl-shader-failure-skip-draws.patch` and
-   `virgl-context-loss-report.patch` after `virgl-texture-integer-samplers.patch`
-   (and a test-only patch behind `OMACVM_RUNTIME_TEST_HOOKS=1`). They apply
-   unchanged on `gpu-venus`'s tree (branch `gpu-robust-venus` builds and passes
-   the build-time test). The Venus hunk only adds a log line in
-   `vkr_context_on_ring_fatal`.
+6. `gpu-robust` adds, after `virgl-texture-integer-samplers.patch`:
+   `virgl-shader-failure-skip-draws.patch`, `virgl-context-loss-report.patch`,
+   `virgl-shader-variant-null-checks.patch`, `virgl-shader-size-limits.patch`,
+   `virgl-venus-lost-context-fences.patch`, `virgl-core-instance-id.patch`, and
+   the test-only `virgl-test-shader-fault.patch` behind
+   `OMACVM_RUNTIME_TEST_HOOKS=1`. The first two were built on `gpu-venus`'s tree
+   unchanged (branch `gpu-robust-venus`); the Venus fence patch was developed
+   there. `gpu-robust` also carries the `conformance` harness and this document
+   as cherry-picks (same content, merge without conflict).
 
 ## 13. Errors and context loss (built: `gpu-robust`)
 
