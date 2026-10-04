@@ -8,7 +8,9 @@
 # Two Mesa builds: the first makes Mesa's OpenCL-C compiler (mesa_clc, with
 # LLVM) for the driver's built-in kernels; the second builds the driver with
 # that tool and without LLVM, SPIRV-Tools or zstd, so the dylib links only
-# system libraries. Build-time needs (Homebrew): llvm spirv-llvm-translator
+# system libraries. The macos platform defines VK_USE_PLATFORM_METAL_EXT;
+# without it the driver lists VK_EXT_external_memory_metal but returns NULL
+# for vkGetMemoryMetalHandleEXT, which Venus needs. Build-time needs (Homebrew): llvm spirv-llvm-translator
 # spirv-tools bison pkgconf. Needs an SDK with Metal 4 (Xcode 26 or newer).
 # Skips the build when the output already matches this script and commit.
 set -euo pipefail
@@ -120,13 +122,13 @@ python3 -m venv "$work/venv"
 src="$work/$mesa_root"
 meson=("$work/venv/bin/python3" "$work/$meson_root/meson.py")
 export PATH="$work/venv/bin:$ninja_dir:$llvm_bin:$bison_bin:$PATH"
-common=(--wrap-mode=nodownload -Dplatforms= -Dgallium-drivers= -Dopengl=false
+common=(--wrap-mode=nodownload -Dgallium-drivers= -Dopengl=false
   -Dgles1=disabled -Dgles2=disabled -Dglx=disabled -Degl=disabled -Dgbm=disabled
   -Dvideo-codecs= -Dtools= -Dvulkan-layers= -Dbuild-tests=false)
 
 log "Mesa $mesa_commit: mesa_clc (build-time tool)"
 "${meson[@]}" setup "$work/build-clc" "$src" --prefix="$work/clc" --buildtype=release \
-  "${common[@]}" -Dvulkan-drivers= -Dllvm=enabled -Dmesa-clc=enabled \
+  "${common[@]}" -Dplatforms= -Dvulkan-drivers= -Dllvm=enabled -Dmesa-clc=enabled \
   -Dinstall-mesa-clc=true -Dmesa-clc-bundle-headers=enabled
 ninja -C "$work/build-clc"
 "${meson[@]}" install -C "$work/build-clc" --no-rebuild >/dev/null
@@ -136,6 +138,7 @@ log "Mesa $mesa_commit: KosmicKrisp"
 env PATH="$work/clc/bin:$PATH" MACOSX_DEPLOYMENT_TARGET=26.0 \
   "${meson[@]}" setup "$work/build-kk" "$src" --prefix="$work/kk" --libdir=lib \
   --buildtype=release -Db_ndebug=true "${common[@]}" -Dvulkan-drivers=kosmickrisp \
+  -Dplatforms=macos \
   -Dllvm=disabled -Dmesa-clc=system -Dspirv-tools=disabled -Dzstd=disabled
 env PATH="$work/clc/bin:$PATH" MACOSX_DEPLOYMENT_TARGET=26.0 ninja -C "$work/build-kk"
 
