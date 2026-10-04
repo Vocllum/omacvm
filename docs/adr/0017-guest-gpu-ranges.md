@@ -71,6 +71,28 @@ Apple's software renderer and refuse to run on anything else (`soft-gl.h`), and
 a GL oracle (`gl-oracle.c`) checks every GL draw call against the GL's own state
 and aborts on any range a GPU would read or write outside a buffer.
 
+## Coverage
+
+Every way a guest number reaches GPU memory on macOS' OpenGL 4.1, and who checks it:
+
+| Path | Check |
+|---|---|
+| vertex buffers (offset, stride, divisor) and draw first/count/instances | `virgl-draw-range-checks.patch` |
+| index buffer (size, offset, count) and the index values | `virgl-draw-range-checks.patch` (read back) |
+| indirect draws (command, draw count) | read on the CPU, drawn as checked direct draws |
+| uniform buffers (bound range, block size, run-time indexes) | `virgl-buffer-binding-checks`, `virgl-uniform-buffer-checks`, `virgl-shader-index-clamp` |
+| uniform store, sampler and temporary arrays (run-time indexes) | `virgl-shader-index-clamp.patch` |
+| transform feedback ranges | `virgl-buffer-binding-checks.patch` (clamped, aligned) |
+| query results into buffers | `virgl-buffer-binding-checks.patch` |
+| texture uploads and readbacks through buffers (PBO), `glCopyBufferSubData`, `glTexBufferRange` | the GL itself: the spec makes these errors, checked on the CPU; vrend also checks boxes (`resource_contains_box`, transfer bounds) |
+| blits | vrend checks the boxes; the GL clips to the framebuffers |
+| texture fetches, texel fetches from buffer textures | bounded by the texture's size in hardware |
+| storage buffers, atomic counters, images, compute | not on macOS' GL 4.1; bind ranges checked anyway, shader-side storage indexing is not |
+
+Not covered: work that is valid but long (a draw of billions of vertices, a
+shader that loops) can still trip the GPU's watchdog; that is a hang, handled by
+the GPU's own recovery, not a memory fault.
+
 ## Consequences
 
 - Conformance unchanged or better (test VM, M4 Max, 2026-10-04, runtime before
