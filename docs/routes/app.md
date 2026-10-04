@@ -54,9 +54,9 @@ OmacVM's version.
   microphone: the app asks for it when it starts a VM, because QEMU cannot
   ask itself and records nothing without it ([finding 22](../troubleshooting.md#22-parallels-fusion-app-the-microphone-records-nothing-or-silence)).
   Until you allow it, the VM starts without recording (QEMU would wait
-  minutes for an answer, and the whole VM with it): allow it, then restart
-  the VM. Not working yet: in the 2.6.0 test the app was allowed and QEMU's
-  recording still stopped the VM for about four minutes, then failed.
+  minutes for an answer): allow it, then restart the VM. QEMU starts the
+  recording on a thread of its own, so the VM never stops for it; until the
+  microphone runs, the VM records silence.
 - The Mac's camera as *Mac Camera* (`/dev/video42`): QEMU has a virtio port
   `org.omacvm.camera`, the launcher serves it with the Bridge's camera code
   (`src/bridge/mac/camera.swift`) and turns the camera on only while a Linux

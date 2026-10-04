@@ -34,7 +34,9 @@ in more words.
 - Sound and the Mac's microphone on UTM and Fusion: new VMs get a sound card,
   an existing one gets it the next time `omacvm apply` starts it from shut
   down. macOS must allow the VM's app the microphone; `omacvm check` says
-  when it doesn't. OmacVM.app asks for it when it starts a VM.
+  when it doesn't. OmacVM.app asks for it when it starts a VM; its QEMU
+  starts the recording on a thread of its own, so a slow start never stops
+  the VM (the VM records silence until the microphone runs).
 - Omanotch can make its bar exactly as tall as the notch:
   `defaults write ch.gillesgoetsch.omanotch flush -bool true`. Off by default.
 - The Mac's keyboard light goes three steps dimmer than macOS's lowest with
