@@ -172,8 +172,8 @@ cd ~/bench
 
 - `report.py` prints a Markdown table: the median of each test, and each route
   as a share of the first file (the Mac).
-- `chart.py` draws the bar chart for the README: OmacVM.app first, then UTM,
-  VMware Fusion and Parallels, each as a share of the Mac (the dashed line at
+- `chart.py` draws the bar chart for the README and
+  [compare.md](../compare.md): OmacVM.app first, then UTM, VMware Fusion and Parallels, each as a share of the Mac (the dashed line at
   100 %). Five rows: Geekbench 7 multi-core, Speedometer 3.1, WebGL Aquarium,
   Basemark Web 3.0 and Geekbench 7 GPU (OpenCL). Tests without a Mac value
   (glmark2, vkmark) and MotionMark (no stable result) are left out.

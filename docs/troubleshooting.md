@@ -1,12 +1,41 @@
 # Troubleshooting: what we found
 
-Problems we hit while building the VMware Fusion route, the browser GPU on
+Common problems first, with what to do. After them, the findings: problems
+we hit while building the VMware Fusion route, the browser GPU on
 every route and benchmarking all four ways, and what fixed them. Each one is written as symptom, cause, fix
 and where the fix lives, so you can find it again when it comes back.
 
 Most of these are not obvious from the outside: the symptom points somewhere
 else than the cause. Recipes and the general failure table are in
 [AGENTS.md](../AGENTS.md) (sections 6 and 7).
+
+## Common problems
+
+- **First stop**: `omacvm check` names what is wrong and what to do.
+- **The Mac's menu bar stays over the full-screen VM**: macOS is set to always
+  show it. System Settings › Menu Bar (on older macOS: Control Center) ›
+  Automatically hide and show the menu bar: **In Full Screen Only** (or Always).
+  `omacvm check` points this out.
+- **The Mac's pointer shows over the full-screen VM**: menu bar tools that keep
+  their own window across the top of the screen (Bartender, for one) can bring
+  it back. Quit them while you work in the VM.
+- **The Bluetooth panel lists your devices but cannot connect them**: allow
+  Bluetooth for *OmacVM Bridge* (System Settings › Privacy & Security ›
+  Bluetooth); the panel says so too. A device that is off or out of range
+  shows "Not in range?" after about 15 seconds.
+- **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
+  ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
+  Accessibility and Input Monitoring permissions of *OmacVM Gestures*. A VM
+  OmacVM did not set up may need `omacvm update --vm NAME` once: the Mac lets in
+  only VMs whose trackpad daemon says the Bridge's token.
+- **"answers with another SSH host key"**: OmacVM remembers each VM's SSH key.
+  After rebuilding or reinstalling the VM: `omacvm apply --vm NAME --reset-host-key`.
+- **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
+  own factor; tell us the app (window class from `hyprctl clients`) in an
+  issue. The scroll momentum's settings are in `src/gestures/guest/omacvm-gestures`
+  (`OMACVM_GLIDE_*`).
+
+## Findings
 
 | # | Route | Finding |
 |---|---|---|
