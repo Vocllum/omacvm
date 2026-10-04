@@ -249,6 +249,37 @@ def header_block(lines):
         block.pop()
     return "\n".join(block).strip("\n")
 
+# The copyright holder lines of a file header: "Copyright 2020 Intel",
+# "(C) Copyright ...", "SPDX-FileCopyrightText: 2014-2024 The Khronos Group
+# Inc.", with year-led lines that continue one. E-mail addresses (<...>) are
+# cut, the holder stays. Not licence sentences ("COPYRIGHT HOLDERS") or a
+# code generator's COPYRIGHT = """ line.
+marker = re.compile(r"(copyright\b|\(c\)|©)", re.I)
+
+def holder_lines(lines):
+    out, previous = [], False
+    for line in lines:
+        # Any comment or quoting style: "** ", "// ", "# ", a JSON string.
+        raw = re.sub(r"^[^\w(©]+", "", line.strip())
+        raw = re.sub(r"(\s*(\*/|-->|[\"',*]))+$", "", raw)
+        c = re.sub(r"\s*<[^<>]*>", "", raw).strip()
+        spdx = re.match(r"SPDX-FileCopyrightText:\s*(.+)", c, re.I)
+        if spdx:
+            c = spdx.group(1)
+            if not marker.match(c):
+                c = "Copyright " + c
+        holder = re.sub(r"copyright|\(c\)|©|[\d\s,.-]", "", c, flags=re.I)
+        if (marker.match(c) and re.search(r"\d{4}|©|\(c\)", c, re.I) and len(holder) >= 2
+                and not re.match(r"copyright\w*\s*=", c, re.I) and '"""' not in c
+                and "HOLDERS" not in raw.upper()):
+            out.append(c)
+            previous = True
+        elif previous and re.match(r"\d{4}\b", c):
+            out[-1] += ", " + c
+        else:
+            previous = False
+    return out
+
 groups, copyrights, verbatim, unknown, unmarked = {}, {}, {}, [], []
 for path in files:
     rel = os.path.relpath(path, src)
@@ -283,13 +314,8 @@ for path in files:
         lid = "MIT"
         unmarked.append(rel)
     groups.setdefault(lid, []).append(rel)
-    for line in head[:60]:
-        c = clean(line)
-        # A holder line ("Copyright 2020 Intel", "(C) Copyright ..."), not a
-        # licence sentence or a code generator's COPYRIGHT = """ template.
-        if (re.match(r"(copyright\b|\(c\)|©)", c, re.I) and re.search(r"\d{4}|©|\(c\)", c, re.I)
-                and "=" not in c and "<" not in c and "HOLDERS" not in c.upper()):
-            copyrights.setdefault(lid, set()).add(c)
+    for c in holder_lines(head[:60]):
+        copyrights.setdefault(lid, set()).add(c)
 
 if unknown:
     sys.exit("licences not known to build-kosmickrisp.sh:\n  " + "\n  ".join(unknown))
