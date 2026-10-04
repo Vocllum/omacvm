@@ -258,7 +258,13 @@ remove_work_dir() {
 cleanup() {
   local exit_status=$?
   trap - EXIT HUP INT TERM
-  [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  # OMACVM_RUNTIME_KEEP_SCRATCH=1 keeps the patched sources and build trees
+  # (for working on the patches: rebuild with ninja in place).
+  if [[ -n ${OMACVM_RUNTIME_KEEP_SCRATCH:-} && -n $work_dir ]]; then
+    echo "[qemu-source-build] kept scratch tree: $work_dir" >&2
+  else
+    [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  fi
   exit "$exit_status"
 }
 
@@ -496,6 +502,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patc
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdown.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
+# OmacVM Venus: blobs on 16 KiB host pages, so Vulkan memory maps into the guest.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-alignment.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -613,6 +621,11 @@ for virgl_patch in "${virgl_patches[@]}"; do
 done
 verify_file_sha "Native OpenGL browser compatibility patch" "$virgl_native_patch" "$virgl_native_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_native_patch"
+# OmacVM Venus: the render server runs in process (Metal heaps are process-local).
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-in-process.patch"
+# OmacVM Venus: the Vulkan loader and driver come from the app's runtime.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-vulkan-beside.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-stream-sockets.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -626,7 +639,7 @@ env MACOSX_DEPLOYMENT_TARGET="$macos_deployment_target" \
   LDFLAGS="-mmacosx-version-min=$macos_deployment_target -Wl,-headerpad_max_install_names" \
   python3 "$meson" setup "$virgl_build" "$virgl_source" \
     --prefix="$virgl_root" --libdir=lib --buildtype=debugoptimized -Db_ndebug=false --wrap-mode=nodownload \
-    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=false -Dtracing=none
+    -Ddrm-renderers=[] -Dvenus=true -Drender-server-worker=thread -Dtests=false -Dvideo=false -Dtracing=none
 "$ninja" ${ninja_jobs[@]+"${ninja_jobs[@]}"} -C "$virgl_build"
 # These test the actual shader generator and blend-state transitions, without a VM.
 env DYLD_LIBRARY_PATH="$private_libraries" \
