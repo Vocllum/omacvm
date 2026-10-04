@@ -25,7 +25,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
-@@ -2916,6 +2916,19 @@
+@@ -2920,6 +2920,19 @@
  static IOSurfaceRef present_surf[PRESENT_SURFACES];
  static GLuint present_tex[PRESENT_SURFACES];
  static uint32_t present_w, present_h;
@@ -45,7 +45,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
  static unsigned present_next;
  static dispatch_queue_t present_queue;
  static QEMUTimer *present_timer;
-@@ -3037,12 +3050,48 @@
+@@ -3041,12 +3054,48 @@
          }
      }
      present_w = present_h = 0;
@@ -97,7 +97,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
          return true;
      }
      cocoa_gl_present_free();
-@@ -3053,28 +3102,42 @@
+@@ -3057,28 +3106,42 @@
      NSDictionary *props = @{
          (id)kIOSurfaceWidth: @(w),
          (id)kIOSurfaceHeight: @(h),
@@ -152,7 +152,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
      present_next = 0;
      return true;
  }
-@@ -3088,7 +3151,8 @@
+@@ -3092,7 +3155,8 @@
      const char *path = getenv("OMACVM_GL_DUMP");
      FILE *f;
  
@@ -162,7 +162,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
          return;
      }
      IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
-@@ -3141,7 +3205,21 @@
+@@ -3145,7 +3209,21 @@
      }
      CGLSetCurrentContext(present_ctx);
  
@@ -185,7 +185,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
          CGLSetCurrentContext(prev);
          return false;
      }
-@@ -3219,6 +3297,7 @@
+@@ -3228,6 +3306,7 @@
              NSString *f = filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
              [layer setMagnificationFilter:f];
              [layer setMinificationFilter:f];
@@ -193,7 +193,7 @@ Applies after qemu-cocoa-gl-present-vsync.patch.
              [layer setContents:(id)surf];
              [CATransaction commit];
              IOSurfaceDecrementUseCount(surf);
-@@ -3420,6 +3499,7 @@
+@@ -3429,6 +3508,7 @@
          NSString *f = show.filter == GL_LINEAR ? kCAFilterLinear : kCAFilterNearest;
          [layer setMagnificationFilter:f];
          [layer setMinificationFilter:f];
