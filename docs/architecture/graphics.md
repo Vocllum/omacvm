@@ -462,9 +462,11 @@ The tracks share one runtime. Order and overlaps known today:
 2. Done: `gpu-venus` is merged into `gpu-native` (each shared patch applied
    once; gpu-venus's other patches after the fence and present patches).
    Venus fences use `gpu-native`'s FIFO thread-sync.
-3. `gpu-native` and `app-displays` both patch `ui/cocoa.m` heavily: the
-   IOSurface present must cover the head windows too.
-4. `video-decode` and `gpu-native` both add a "hidden window for tests" patch
-   (`qemu-cocoa-hidden-for-tests.patch`, `omacvm-cocoa-background.patch`):
-   keep one.
+3. `gpu-native` and `app-displays` both patch `ui/cocoa.m` heavily. On
+   `gpu-2.9.0` the present patches apply after the display patch and leave
+   the head windows on their `CAOpenGLLayer` (QEMU's 30 ms tick); moving the
+   heads to the IOSurface present is still open (with `pacing-hdr`'s pacing).
+4. Done on `gpu-2.9.0`: one test-window patch (`qemu-cocoa-hidden-for-tests.patch`:
+   `OMACVM_COCOA_HIDDEN`, `OMACVM_BACKGROUND`), applied after the display
+   patch, which has its own test mode at the same two places.
 5. Done: this version replaced `gpu-native`'s earlier draft.
