@@ -42,11 +42,16 @@ done" sets the frame rate of anything light.
   Measured with QEMU's trace events: median 1.56 ms from fence to reply,
   so glmark2 could not get far past 1000 frames a second.
 - Now (`qemu-cocoa-gl-async-fence.patch`, `virgl-darwin-thread-sync.patch`):
-  the sync thread runs on macOS too (a pipe stands in for Linux's eventfd)
-  and reports each fence the moment the GPU is done.
+  the sync thread runs on macOS too (an unlinked FIFO opened read-write
+  stands in for Linux's eventfd, also for Venus's render server) and
+  reports each fence the moment the GPU is done: median 0.2 ms.
+- A faster poll timer is no way around it: without `ppoll`, QEMU's main
+  loop on macOS waits in whole milliseconds (tried: 50 us and 20 us timers
+  give the same ~1100-1200 as 1 ms).
 - Cost: Apple's `glClientWaitSync` spins (`gleTestSync`), so `vrend-sync`
   keeps about half a core busy while the guest renders.
-- Fallback: `OMACVM_VIRGL_POLL_FENCES=1`.
+- Fallback: `OMACVM_VIRGL_POLL_FENCES=1`. QEMU's log says which path a VM
+  took ("virgl fences reported by the sync thread" / "polled every 1 ms").
 
 ## Presenting a frame (gpu-native)
 
@@ -68,10 +73,16 @@ done" sets the frame rate of anything light.
   binds IOSurfaces as rectangle textures, which the guest's shaders do not
   sample (see ADR 0010).
 - Fallback: `OMACVM_GL_PRESENT=layer` (also taken automatically when the
-  IOSurface contexts cannot be made). `OMACVM_GL_FPS=1` logs frames shown
-  per second; `OMACVM_GL_DUMP=FILE` writes the first frame shown.
+  IOSurface contexts cannot be made); the log says which ("GL frames shown
+  as IOSurfaces"). `OMACVM_GL_FPS=1` logs frames shown per second;
+  `OMACVM_GL_DUMP=FILE` writes a frame shown whenever FILE is missing.
 
 ## Blob memory and Venus groundwork (gpu-native, for gpu-venus)
+
+- OpenGL gets nothing from blobs here: Mesa's virgl driver uses them only
+  for persistent, coherent buffer mappings (ARB_buffer_storage), and
+  virglrenderer can offer those only with `glBufferStorage`, which Apple's
+  OpenGL 4.1 does not have. Blobs matter for Venus (Vulkan).
 
 - HVF maps guest memory in 16 KiB pages and macOS 15 has no 4 KiB granule
   (`hv_vm_config_set_ipa_granule` is macOS 26). A 4 KiB guest places blobs on
