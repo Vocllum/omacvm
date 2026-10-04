@@ -11,7 +11,8 @@ OMACVM_TEST_MAIN_DISPLAY test it on virtual displays without full screen
 or focus. A drag keeps the pointer while it crosses the strip between two
 displays (the menu bar above a full-screen window); it lets go after the
 button-up if that lands outside every window. An extra output is sized and
-placed from its window once that is in full screen.
+placed from its window once that is in full screen. The layout names the
+output on the Mac's built-in display ("builtin"), which Omanotch follows.
 
 Upstream: not applicable (OmacVM's own guest port and layout).
 Test: a real external monitor above a notch MacBook: one output per display
@@ -286,7 +287,7 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
      }
  }
  
-@@ -2972,14 +3084,1176 @@
+@@ -2972,14 +3084,1185 @@
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -1176,6 +1177,7 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
 +{
 +    NSMutableArray *outputs = [NSMutableArray array];
 +    NSWindow *mw = [cocoaView window];
++    NSString *builtin = nil;
 +
 +    if (omacvm_chan_fd < 0 || !omacvm_guest_ready) {
 +        return;
@@ -1183,21 +1185,29 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
 +    for (int i = 0; i < omacvm_outputs; i++) {
 +        OmacVMBox b = omacvm_mac_box[i];
 +        NSScreen *s = i ? omacvm_screen_with_id(omacvm_heads[i].display) : [mw screen];
++        NSString *name = [NSString stringWithFormat:@"Virtual-%d", i + 1];
 +        if (b.w <= 0) {
 +            continue;
 +        }
++        /* The output on the Mac's own display (the notch), for Omanotch. */
++        if (s && !builtin && CGDisplayIsBuiltin(omacvm_screen_id(s))) {
++            builtin = name;
++        }
 +        [outputs addObject:@{
-+            @"output": [NSString stringWithFormat:@"Virtual-%d", i + 1],
++            @"output": name,
 +            @"x": @(lround(b.x)), @"y": @(lround(b.y)),
 +            @"width": @(lround(b.w)), @"height": @(lround(b.h)),
 +            @"scale": @(s ? [s backingScaleFactor] : [mw backingScaleFactor]),
 +        }];
 +    }
-+    NSDictionary *msg = @{
++    NSMutableDictionary *msg = [NSMutableDictionary dictionaryWithDictionary:@{
 +        @"layout": outputs,
 +        @"external": @(omacvm_external_enabled),
 +        @"fullscreen": @(omacvm_main_full_screen()),
-+    };
++    }];
++    if (builtin) {
++        msg[@"builtin"] = builtin;
++    }
 +    NSData *json = [NSJSONSerialization dataWithJSONObject:msg
 +                                                   options:NSJSONWritingSortedKeys
 +                                                     error:nil];
@@ -1464,7 +1474,7 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
  static void cocoa_display_early_init(DisplayOptions *o)
  {
      assert(o->type == DISPLAY_TYPE_COCOA);
-@@ -3024,10 +4298,16 @@
+@@ -3024,10 +4307,16 @@
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1482,7 +1492,7 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -3042,6 +4322,7 @@
+@@ -3042,6 +4331,7 @@
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1490,7 +1500,7 @@ mirroring. Applies after qemu-cocoa-modifiers-input-only.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3094,6 +4375,8 @@
+@@ -3094,6 +4384,8 @@
          dcl.ops = &dcl_ops;
      }
  

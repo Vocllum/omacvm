@@ -8,8 +8,10 @@ org.omacvm.display, one JSON object per line:
 
   from the Mac  {"layout": [{"output": "Virtual-2", "x": 1728, "y": 0,
                  "width": 1920, "height": 1080, "scale": 1}, ...],
-                 "external": true, "fullscreen": true}
+                 "external": true, "fullscreen": true, "builtin": "Virtual-2"}
                 where each output sits in the Mac's arrangement (points);
+                "builtin" names the output on the Mac's own display (the
+                notch), when one is;
   to the Mac    {"hello": 1, "external": true}  when it starts,
                 {"external": false}             when the switch changes,
                 {"monitors": [{"name": "Virtual-1", "x": 0, "y": 0,
@@ -18,7 +20,9 @@ org.omacvm.display, one JSON object per line:
                 Mac points the pointer at the right one.
 
 The layout goes to $XDG_RUNTIME_DIR/omacvm/displays.json, where
-omacvm-display-sync takes the positions from.
+omacvm-display-sync takes the positions from, and the built-in display's
+output to $XDG_RUNTIME_DIR/omacvm/builtin (missing: none of them), which
+Omanotch follows.
 
 The switch "Use external displays" is ~/.config/omacvm/displays.conf
 (external=on or off; on when missing):
@@ -39,6 +43,7 @@ import errno
 import json
 import os
 from pathlib import Path
+import re
 import select
 import socket
 import subprocess
@@ -49,6 +54,7 @@ PORT = Path("/dev/virtio-ports/org.omacvm.display")
 CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omacvm/displays.conf"
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
 STATE = RUNTIME / "omacvm/displays.json"
+BUILTIN = RUNTIME / "omacvm/builtin"
 SYNC = "/usr/local/bin/omacvm-display-sync"
 WIDGET = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omarchy/plugins/omacvm.monitor"
 WIDGET_BUILD = Path("/usr/local/share/omacvm/app/guest/monitor-widget/build.py")
@@ -168,6 +174,13 @@ def write_state(message: dict) -> None:
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(message) + "\n")
     tmp.replace(STATE)
+    builtin = message.get("builtin")
+    if isinstance(builtin, str) and re.fullmatch(r"Virtual-[0-9]+", builtin):
+        tmp = BUILTIN.with_suffix(".tmp")
+        tmp.write_text(builtin + "\n")
+        tmp.replace(BUILTIN)
+    else:
+        BUILTIN.unlink(missing_ok=True)
 
 
 class Agent:
