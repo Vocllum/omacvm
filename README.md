@@ -21,7 +21,8 @@
 | 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
 | 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
-| 🔊 **Native volume and brightness**<br>Mac keys with Omarchy's popups, keyboard light with Shift+F1/F2. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
+| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
+| 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | |
 | 📷 **Camera and microphone**<br>Video calls in the VM. | |
 | 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
 
@@ -46,7 +47,8 @@
 | Cmd as Super | ✅ | ✅ | ✅ | ✅ ¹ |
 | Wi-Fi, Bluetooth, audio from the Mac | ✅ | ✅ | ✅ | ✅ |
 | Battery in the bar | ✅ | ✅ | ✅ | ✅ |
-| Volume, brightness, keyboard light | ✅ | ✅ | ✅ | ✅ |
+| Volume and brightness | ✅ | ✅ | ✅ | ✅ |
+| Keyboard backlight (Shift+F1/F2) | ✅ | ✅ | ✅ | ✅ |
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
