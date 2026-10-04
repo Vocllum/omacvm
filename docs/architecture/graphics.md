@@ -108,6 +108,9 @@ on CGL, not on ANGLE.
 | One window per display | built: `app-displays` | `omacvm-cocoa-displays.patch` |
 | Async ctrl queue (guest keeps encoding while the host runs) | planned | finding from `browser-gpu` |
 | Guest scanout textures as IOSurfaces (zero copy present) | planned | ADR 0010 option 3 |
+| Frames on the display's refresh (jitter buffer, display link thread) | built: `pacing-hdr` | `qemu-cocoa-gl-present-vsync.patch`, ADR 0020 |
+| Colour-tagged frames, 10-bit scanout, HDR (PQ, EDR) | built: `pacing-hdr`, HDR off by default | `qemu-cocoa-gl-present-color.patch`, `src/app/guest/virtio-gpu/`, ADR 0021 |
+| Guest paced by the host's vsync | planned | ADR 0020 option 1 |
 
 ## 2. Processes and threads
 
@@ -386,6 +389,11 @@ falls back and logs once.
 | `OMACVM_VIRGL_POLL_FENCES=1` | off | back to the 1 ms fence poll | built (`gpu-native`) |
 | `OMACVM_GL_PRESENT_ON_TICK=1` | off | redraw on QEMU's 30 ms tick again | built |
 | `OMACVM_GL_PRESENT=layer` | iosurface | CAOpenGLLayer path; also taken by itself if the IOSurface contexts fail | built |
+| `OMACVM_GL_VSYNC=0` | on | show frames when drawn instead of on the display's refresh | built (`pacing-hdr`) |
+| `OMACVM_GL_LEAD_MS` | 3 | how long before the vsync a frame goes on the layer | built (`pacing-hdr`) |
+| `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
+| `OMACVM_GL_HDR=1` | off | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
+| `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
 | `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
@@ -451,6 +459,12 @@ What crosses and who checks it:
 - **no host pointers** reach the guest; no guest-controlled allocation
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
   IOSurfaces 3 per window, each at most the largest display).
+- **scanout size and format**: the present surfaces follow the guest's
+  scanout, capped at the largest display. `pacing-hdr` keeps five of them
+  (queue for the display's refresh) and a 10-bit scanout doubles them to 8
+  bytes a pixel: at most 5 x 8 bytes x the largest display (a 6K XDR: about
+  800 MB; three 8-bit ones before: about 240 MB). The colour space comes from
+  QEMU's own setting, never from the guest.
 
 ## 11. Test strategy
 
@@ -482,7 +496,60 @@ bench lock and are indications only):
 | dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
-## 12. Merging the tracks
+## 12. Frame pacing, colour and HDR (built: `pacing-hdr`)
+
+```
+ guest: Hyprland flips on the DRM vblank timer (EDID rate, e.g. 120.006 Hz)
+   |  RESOURCE_FLUSH
+ QEMU thread [BQL]: blit scanout -> IOSurface (BGRA8, or half float when the
+   |                scanout is 10-bit), tagged sRGB or BT.2100 PQ
+ present_queue: wait for the blit's fence -> jitter buffer (<= 3 frames)
+   |
+ display link (own thread, window's screen, ProMotion full rate)
+   |  each refresh: dispatch_after(vsync - 3 ms) on the commit queue
+ commit queue: oldest frame -> layer.contents (+ EDR when PQ)
+   v
+ Core Animation latches at the vsync
+```
+
+- **Why**: the guest's frames come at the display's rate but at their own
+  phase; shown as soon as drawn, jitter around the latch put two frames into
+  one refresh and none into the next. The queue absorbs that: a late frame
+  waits one refresh; once a second, if a frame was left over after every
+  tick and none came late, one is skipped (the guest's EDID rate is a hair
+  faster than the display); a second flush within half a refresh replaces
+  the first. Five present surfaces (was three). ADR 0020.
+- **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
+  counters; nothing on the display link thread or the commit queue takes the
+  BQL. The link pauses after 30 idle refreshes (pause and wake both on the
+  main thread, so a frame never waits behind a paused link).
+- **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
+  the display. HDR needs the guest at 10 bits (guest module) with Hyprland's
+  `cm = "hdr"` and QEMU's `OMACVM_GL_HDR=1`. ADR 0021.
+- **Measuring** (`tests/graphics/pacing`):
+  a pacing page draws its frame number as 16 bit cells; ScreenCaptureKit
+  captures the VM window per WindowServer frame and counts how far the number
+  moved (1 = each frame shown once). F13 presses over QMP and a marker cell
+  give key to screen latency; a dev build decodes the number on the host to
+  time QEMU flush to screen per frame. Colour: six colour bars captured in
+  Display P3; HDR: a capture in extended linear P3 (1.0 = SDR white) plus the
+  screen's EDR headroom.
+
+Numbers (window 1440x810 pt, Chrome page at 120.01 fps (60 on the 60 Hz
+display) in the guest, bench lock held, 12 s per run):
+
+| | gpu-native (frames when drawn) | `pacing-hdr` |
+|---|---|---|
+| MacBook 120 Hz: distinct frames on screen per second | 107.9, 109.0, 108.9, 110.0 | 119.8, 119.8, 119.8 |
+| MacBook 120 Hz: guest frames shown exactly once | 74-82 % | 99.0-99.6 % |
+| MacBook 120 Hz: QEMU flush to screen, median | 5.2-7.2 ms | 12.6-14.2 ms |
+| virtual 120 Hz display: shown once (frames/s) | 55.5 % (107.4) | 98.2 % (117.5) |
+| external 60 Hz display: shown once (frames/s) | 82 % (52.1) | 99.7 % (60.0) |
+| glmark2 quick, 8 runs each, median | 2829 | 2764 (an earlier build) |
+| colour of guest `#ff0000` in Display P3 | (255,0,0) (oversaturated) | (234,51,35) (sRGB red) |
+| EDR headroom of the screen with HDR on | 1.0 | 4.2 |
+
+## 13. Merging the tracks
 
 The tracks share one runtime. Order and overlaps known today:
 
@@ -499,3 +566,7 @@ The tracks share one runtime. Order and overlaps known today:
    `OMACVM_COCOA_HIDDEN`, `OMACVM_BACKGROUND`), applied after the display
    patch, which has its own test mode at the same two places.
 5. Done: this version replaced `gpu-native`'s earlier draft.
+6. `pacing-hdr` sits on `gpu-native` (its two patches apply after
+   `qemu-cocoa-gl-present-iosurface.patch`). With `app-displays` the head
+   windows need the same present (one queue and one display link per head,
+   each on its own screen).

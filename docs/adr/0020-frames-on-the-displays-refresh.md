@@ -1,4 +1,4 @@
-# 0016: Show the guest's frames on the Mac display's refresh
+# 0020: Show the guest's frames on the Mac display's refresh
 
 Status: accepted. Built on `pacing-hdr` (`qemu-cocoa-gl-present-vsync.patch`,
 on top of the IOSurface present of ADR 0010), not merged.

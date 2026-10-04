@@ -1,4 +1,4 @@
-# 0017: Colour-tagged frames, deep colour and HDR through the IOSurface present
+# 0021: Colour-tagged frames, deep colour and HDR through the IOSurface present
 
 Status: accepted. Built on `pacing-hdr` (`qemu-cocoa-gl-present-color.patch`,
 guest `src/app/guest/virtio-gpu/`), not merged. HDR is off by default.
@@ -29,7 +29,7 @@ guest `src/app/guest/virtio-gpu/`), not merged. HDR is off by default.
    c. the EDID QEMU makes carries HDR metadata and the Mac's luminance, and
       the guest tells the host over the display port which mode it chose.
 4. A `CAMetalLayer` with an extended colour space. Same result as tagging a
-   plain layer's IOSurface contents; tried, more latency (ADR 0016).
+   plain layer's IOSurface contents; tried, more latency (ADR 0020).
 
 ## Decision
 
