@@ -5,6 +5,9 @@
 # replay fuzz-regressions/, then fuzz guest command streams (fuzz-cmd-stream.c) for SECONDS
 # (default 600).
 # Needs Homebrew llvm@22. Crashes land in ./fuzz-out/crash-*.
+# Runs on Apple's software renderer only (soft-gl.h; the harness exits otherwise): random
+# streams on the GPU made it fault and macOS panic (2026-10-04). gl-oracle.c aborts on any
+# draw that would read or write outside a buffer, so such inputs are found here too.
 set -euo pipefail
 src=$(cd "$1" && pwd); deps=$(cd "$2" && pwd); secs=${3:-600}
 here=$(cd "$(dirname "$0")" && pwd)
@@ -26,8 +29,13 @@ if [[ ! -f $build/build.ninja ]]; then
       -Dtracing=none >/dev/null
 fi
 env PATH="$ninja_dir:$PATH" PYTHONPATH="$pyyaml" ninja -C "$build" >/dev/null
+# The GL oracle (gl-oracle.c) checks every draw's buffer ranges; linking it is what
+# makes its interposers active.
+"$llvm/bin/clang" -g -dynamiclib "$here/gl-oracle.c" -framework OpenGL \
+  -install_name @rpath/libgl-oracle.dylib -o "$out/libgl-oracle.dylib"
 "$llvm/bin/clang" -g -fsanitize=fuzzer,address -I"$src/src" -I"$build/src" \
   "$here/fuzz-cmd-stream.c" -L"$build/src" -lvirglrenderer -Wl,-rpath,"$build/src" \
+  -L"$out" -lgl-oracle -Wl,-rpath,"$out" \
   -framework OpenGL -Wno-deprecated-declarations -o "$out/fuzz-cmd-stream"
 cd "$out"
 # Known inputs first (each crashed or asked for 4 GiB before its fix), then fuzz.

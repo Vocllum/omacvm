@@ -37,17 +37,28 @@ def run_test(name, implementation):
     subprocess.run([str(binary)], check=True)
 
 
-def run_api_test(name):
-    """Link against the built libvirglrenderer and drive it through its public API."""
+def oracle_link_args(compiler):
+    """gl-oracle.c as a dylib: linked in, it checks every GL draw call's buffer ranges."""
+    lib = output / "libgl-oracle.dylib"
+    subprocess.run([compiler, "-dynamiclib", str(Path(__file__).with_name("gl-oracle.c")),
+                    "-framework", "OpenGL", "-install_name", "@rpath/libgl-oracle.dylib",
+                    "-o", str(lib)], check=True)
+    return ["-L" + str(output), "-lgl-oracle", "-Wl,-rpath," + str(output)]
+
+
+def run_api_test(name, oracle=False):
+    """Link against the built libvirglrenderer and drive it through its public API.
+    The tests run on Apple's software renderer (soft-gl.h), never on the GPU."""
     entry = next(item for item in entries if item["file"].endswith("/virglrenderer.c"))
     command = entry.get("arguments") or shlex.split(entry["command"])
     directory = Path(entry["directory"])
     source = (directory / entry["file"]).resolve().parent
     binary = output / name
+    extra = oracle_link_args(command[0]) if oracle else []
     subprocess.run([command[0], "-I" + str(source), "-I" + str(build / "src"),
                     str(Path(__file__).with_name(name + ".c")),
                     "-L" + str(build / "src"), "-lvirglrenderer",
-                    "-Wl,-rpath," + str(build / "src"),
+                    "-Wl,-rpath," + str(build / "src"), *extra,
                     "-framework", "OpenGL", "-Wno-deprecated-declarations", "-o", str(binary)],
                    cwd=directory, check=True)
     subprocess.run([str(binary)], check=True)
@@ -64,7 +75,7 @@ def run_fuzz_replay():
     subprocess.run([command[0], "-I" + str(source), "-I" + str(build / "src"),
                     str(here / "fuzz-cmd-stream.c"), str(here / "fuzz-replay-main.c"),
                     "-L" + str(build / "src"), "-lvirglrenderer",
-                    "-Wl,-rpath," + str(build / "src"),
+                    "-Wl,-rpath," + str(build / "src"), *oracle_link_args(command[0]),
                     "-framework", "OpenGL", "-Wno-deprecated-declarations", "-o", str(binary)],
                    cwd=directory, check=True)
     inputs = sorted(str(p) for p in (here / "fuzz-regressions").iterdir())
