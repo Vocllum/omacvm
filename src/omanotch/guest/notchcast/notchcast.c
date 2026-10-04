@@ -81,7 +81,17 @@ struct __attribute__((packed)) text_header {
     uint32_t len;
 };
 
-static const char *cfg_output, *cfg_host, *cfg_shell, *cfg_screen;
+static const char *cfg_output, *cfg_host, *cfg_shell;
+// The display whose bar the strip stands in for (the built-in one): see
+// update_screen. Read through screen_name(): the keeper thread changes it.
+static char cfg_screen_buf[64] = "Virtual-1";
+static pthread_mutex_t screen_lock = PTHREAD_MUTEX_INITIALIZER;
+static const char *screen_name(char out[64]) {
+    pthread_mutex_lock(&screen_lock);
+    memcpy(out, cfg_screen_buf, 64);
+    pthread_mutex_unlock(&screen_lock);
+    return out;
+}
 // Height of the Mac's black strip in points (`strip H`); 0 until reported.
 // The hidden output is made this tall so the strip needs no padding.
 static _Atomic int strip_height;
@@ -435,10 +445,11 @@ static void show_guest_cursor_at_exit(const char *dir, double strip_x, double de
         set_guest_cursor_visible(1);
         return;
     }
-    char *j = hypr_request("j/monitors all");
+    char *j = hypr_request("j/monitors all"), scr[64];
     double x, y, w, s;
-    if (!j || monitor_field(j, cfg_screen, "x", &x) || monitor_field(j, cfg_screen, "y", &y) ||
-        monitor_field(j, cfg_screen, "width", &w) || monitor_field(j, cfg_screen, "scale", &s) || s <= 0) {
+    screen_name(scr);
+    if (!j || monitor_field(j, scr, "x", &x) || monitor_field(j, scr, "y", &y) ||
+        monitor_field(j, scr, "width", &w) || monitor_field(j, scr, "scale", &s) || s <= 0) {
         free(j);
         set_guest_cursor_visible(1);
         return;
@@ -781,9 +792,10 @@ static int have_geom;
 static double mac_bar;
 
 static double screen_logical_width(void) {
-    char *j = hypr_request("j/monitors all");
+    char *j = hypr_request("j/monitors all"), scr[64];
     double w = 0, sc = 0;
-    if (j && !monitor_field(j, cfg_screen, "width", &w) && !monitor_field(j, cfg_screen, "scale", &sc) && sc > 0)
+    screen_name(scr);
+    if (j && !monitor_field(j, scr, "width", &w) && !monitor_field(j, scr, "scale", &sc) && sc > 0)
         w /= sc;
     else
         w = 0;
@@ -860,13 +872,18 @@ static void handle_command(char *line) {
                 }
             }
             if (on != bar_parked || fresh) {
-                if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
+                char scr[64];
+                free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
                 free(ipc_call(0, "setParked", on ? "true" : "false", NULL, NULL));
                 if (on && fresh) sync_geometry(1);
             }
             bar_parked = on;
             bar_beat_ms = now;
         }
+    } else if (!strcmp(c, "screen") && argc == 1) {
+        // The built-in display is another output now (update_screen).
+        char scr[64];
+        if (bar_parked == 1) free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
     } else if (!strcmp(c, "geom") && argc == 5 && is_number(argv[1]) && is_number(argv[2]) &&
@@ -1298,7 +1315,8 @@ static int follow_modes(void) {
 
 static int preferred_mode(int *w, int *h) {
     char pattern[128];
-    snprintf(pattern, sizeof pattern, "/sys/class/drm/card*-%s/modes", cfg_screen);
+    char scr[64];
+    snprintf(pattern, sizeof pattern, "/sys/class/drm/card*-%s/modes", screen_name(scr));
     glob_t g;
     int found = 0;
     if (glob(pattern, 0, NULL, &g) == 0) {
@@ -1333,9 +1351,11 @@ static void follow_preferred_mode(const char *monitors_json) {
     }
     if (!following) return;
     double cw, ch, x, y, s, r;
-    if (monitor_field(monitors_json, cfg_screen, "width", &cw) || monitor_field(monitors_json, cfg_screen, "height", &ch) ||
-        monitor_field(monitors_json, cfg_screen, "x", &x) || monitor_field(monitors_json, cfg_screen, "y", &y) ||
-        monitor_field(monitors_json, cfg_screen, "scale", &s) || monitor_field(monitors_json, cfg_screen, "refreshRate", &r) ||
+    char scr[64];
+    screen_name(scr);
+    if (monitor_field(monitors_json, scr, "width", &cw) || monitor_field(monitors_json, scr, "height", &ch) ||
+        monitor_field(monitors_json, scr, "x", &x) || monitor_field(monitors_json, scr, "y", &y) ||
+        monitor_field(monitors_json, scr, "scale", &s) || monitor_field(monitors_json, scr, "refreshRate", &r) ||
         s <= 0)
         return;
     if ((int)cw == w && (int)ch == h) return;
@@ -1354,13 +1374,41 @@ static void follow_preferred_mode(const char *monitors_json) {
     char lua[256];
     snprintf(lua, sizeof lua,
              "hl.monitor({ output = \"%s\", mode = \"%dx%d@%d\", position = \"%dx%d\", scale = %.6f })",
-             cfg_screen, w, h, (int)(r + 0.5), (int)x, (int)y, s);
+             scr, w, h, (int)(r + 0.5), (int)x, (int)y, s);
     // Do not hammer Hyprland with a rule it keeps refusing.
     if (!strcmp(lua, last_applied) && now_ms() - last_ms < 30000) return;
     snprintf(last_applied, sizeof last_applied, "%s", lua);
     last_ms = now_ms();
     LOG("display follows the host's window size: %s", lua);
     hypr_eval(lua);
+}
+
+// Which output is the built-in display: $NOTCHBAR_SCREEN if set; else the one
+// OmacVM.app names in $XDG_RUNTIME_DIR/omacvm/builtin (with external displays
+// it can be any Virtual-N: Virtual-1 is the main window's display); else
+// Virtual-1, the only one under Parallels, UTM and Fusion. Says when it changed.
+static int update_screen(void) {
+    if (getenv("NOTCHBAR_SCREEN")) return 0;
+    char want[64] = "Virtual-1", path[512];
+    const char *rt = getenv("XDG_RUNTIME_DIR");
+    snprintf(path, sizeof path, "%s/omacvm/builtin", rt && *rt ? rt : "/nonexistent");
+    FILE *f = fopen(path, "r");
+    if (f) {
+        char line[64] = "";
+        if (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            int ok = !strncmp(line, "Virtual-", 8) && line[8];
+            for (const char *q = line + 8; ok && *q; q++) ok = *q >= '0' && *q <= '9';
+            if (ok) snprintf(want, sizeof want, "%s", line);
+        }
+        fclose(f);
+    }
+    pthread_mutex_lock(&screen_lock);
+    int changed = strcmp(want, cfg_screen_buf) != 0;
+    if (changed) snprintf(cfg_screen_buf, sizeof cfg_screen_buf, "%s", want);
+    pthread_mutex_unlock(&screen_lock);
+    if (changed) LOG("built-in display: %s", want);
+    return changed;
 }
 
 // Keeps the hidden output present and exactly as wide as the display whose
@@ -1372,11 +1420,13 @@ static void *keeper_thread(void *unused) {
     double last_apply_ms = -1e9;
     int created_attempts = 0;
     for (;;) {
-        char *j = hypr_request("j/monitors all");
+        if (update_screen()) enqueue_command("screen");
+        char *j = hypr_request("j/monitors all"), scr[64];
+        screen_name(scr);
         if (j) {
             double sx, sy, sw, ss, nx, ny, nw, nh, ns;
-            int have_screen = !monitor_field(j, cfg_screen, "x", &sx) && !monitor_field(j, cfg_screen, "y", &sy) &&
-                              !monitor_field(j, cfg_screen, "width", &sw) && !monitor_field(j, cfg_screen, "scale", &ss);
+            int have_screen = !monitor_field(j, scr, "x", &sx) && !monitor_field(j, scr, "y", &sy) &&
+                              !monitor_field(j, scr, "width", &sw) && !monitor_field(j, scr, "scale", &ss);
             int have_notch = !monitor_field(j, cfg_output, "x", &nx) && !monitor_field(j, cfg_output, "y", &ny) &&
                              !monitor_field(j, cfg_output, "width", &nw) && !monitor_field(j, cfg_output, "height", &nh) &&
                              !monitor_field(j, cfg_output, "scale", &ns);
@@ -1768,7 +1818,9 @@ int main(int argc, char **argv) {
     }
     cfg_port = getenv("NOTCHBAR_PORT") ? atoi(getenv("NOTCHBAR_PORT")) : 47811;
     // The display whose bar is parked while the strip shows (the built-in one).
-    cfg_screen = getenv("NOTCHBAR_SCREEN") ? getenv("NOTCHBAR_SCREEN") : "Virtual-1";
+    if (getenv("NOTCHBAR_SCREEN"))
+        snprintf(cfg_screen_buf, sizeof cfg_screen_buf, "%s", getenv("NOTCHBAR_SCREEN"));
+    update_screen();
     const char *op = getenv("OMARCHY_PATH") ? getenv("OMARCHY_PATH") : "/usr/share/omarchy";
     if (asprintf((char **)&cfg_shell, "%s/shell", op) < 0) return 1;
 
@@ -1779,8 +1831,6 @@ int main(int argc, char **argv) {
     pthread_create(&worker, NULL, worker_thread, NULL);
     pthread_create(&th, NULL, net_thread, NULL);
     pthread_create(&keeper, NULL, keeper_thread, NULL);
-    if (getenv("NOTCHBAR_SCREEN")) free(ipc_call(0, "setParkedScreen", cfg_screen, NULL, NULL));
-
     for (;;) {
         dpy = wl_display_connect(NULL);
         if (!dpy) {
