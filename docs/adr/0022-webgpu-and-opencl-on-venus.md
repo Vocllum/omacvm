@@ -114,4 +114,8 @@ the driver ID is asked for whenever `VK_KHR_driver_properties` is there.
 - First install builds Mesa in the VM: about 1-2 minutes on 8 vCPUs (M4
   Max), after pacman fetched LLVM, Clang, Rust and bindgen.
 - On macOS 26 KosmicKrisp compiles NIR to MSL itself: the global-loads and
-  zero-init workarounds are MoltenVK-only by driver ID.
+  zero-init workarounds are MoltenVK-only by driver ID. The same guest Mesa
+  passes the same checks on KosmicKrisp (Mac mini M4, macOS 27): OpenCL,
+  Geekbench 7 with every workload valid, WebGPU in Firefox and Chromium.
+- A 36-minute compute soak (OpenCL, WebGPU in both browsers, ffmpeg's
+  OpenCL filter) ran 63 rounds without a failure on MoltenVK.

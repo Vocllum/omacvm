@@ -260,3 +260,59 @@ Notes:
 - Chrome must open on the built-in display's monitor: on Fusion it first
   opened on the external one (page 1920x1200, 60 Hz) and gave 41 to 43 fps and
   Basemark 2072 to 2596. Those runs are not in the table.
+
+### GPU compute with Venus (2026-10-04)
+
+OmacVM.app with Venus only (the other routes have no Vulkan or OpenCL in the
+VM, see above). The VM runs OmacVM's guest Mesa (ADR 0022). Two Macs:
+
+- **MacBook Pro M4 Max**, macOS 15.7.4, Venus on MoltenVK 1.4.2. Test VM with
+  8 CPUs and 16 GB, in a window. One batch under the bench lock (other test
+  VMs paused; one VM of another track could not be paused and ran beside it).
+- **Mac mini M4** (10 GPU cores), macOS 27.0, Venus on KosmicKrisp. Test VM
+  with 6 CPUs and 8 GB. No bench lock (another agent's builds ran on the mini),
+  so these are indications.
+
+WebGPU matmul is `browser-bench.py webgpu` (f32, 2048x2048, GFLOPS, checked
+against the CPU). In the VM Chromium runs from the "Chromium (WebGPU)" launcher
+(Arch's Chromium 153; Google Chrome 154 works the same with
+`omacvm-chrome-webgpu`); the default Chromium gets no hardware adapter in a VM.
+Median of 3; the Mac's own number in brackets where the same batch has one.
+
+| | M4 Max, MoltenVK | M4 mini, KosmicKrisp |
+|---|---|---|
+| WebGPU matmul, Chromium in the VM | 5071 (Mac Chrome 6038: 84 %) | 1148 (mini Chrome 1614: 71 %) |
+| WebGPU matmul, Firefox 157 in the VM | 665 (Mac Firefox 319: 208 %) | 167 |
+| WebGPU computeBoids, Firefox / Chromium (fps) | 59.9 / 60 (36.4 in the locked batch) | 59.9 / 60.0 |
+| Geekbench 7 GPU OpenCL (single run) | 42486 (Mac OpenCL 95380: 45 %) | 18973 (mini OpenCL 35240: 54 %, earlier that day) |
+| OpenCL saxpy, 16M floats (GB/s) | 387-444 | 101 |
+| ffmpeg 4K `nlmeans_opencl` vs 8 CPUs (fps) | 1.07 vs 0.33 | not measured |
+
+Each run, M4 Max batch:
+
+| | WebGPU matmul 2048 (GFLOPS) |
+|---|---|
+| Mac, Chrome 154 | 6434, 6038, 4600 |
+| VM, Chromium 153 (launcher) | 5144, 5071, 5018 |
+| Mac, Firefox 157 | 285, 333, 319 |
+| VM, Firefox 157 | 667, 650, 665 |
+
+Notes:
+
+- Firefox in the VM beats Firefox on the Mac: on the Mac Firefox's WebGPU
+  (wgpu) writes Metal shaders itself, in the VM it writes SPIR-V and the
+  Vulkan driver translates it, and that translation is faster for this kernel.
+  Chrome (Dawn) is fast on both.
+- The Mac's GPU speed moved a lot between batches (Chrome 2048: 3885 in an
+  earlier locked batch, 6188 in an unlocked one): compare within a row.
+- Geekbench 7 runs every OpenCL workload and all pass validation. The VM loses
+  most where a workload launches many small kernels: each launch crosses the
+  Venus ring (Background Blur 18301 vs 61273, Face Tracking 24606 vs 91731).
+- Results: [VM](https://browser.geekbench.com/v7/gpu/252731),
+  [Mac](https://browser.geekbench.com/v7/gpu/252722),
+  [mini VM](https://browser.geekbench.com/v7/gpu/252849).
+- clpeak sizes its work by the number of compute units, and Zink reports one
+  (Vulkan has no such query): fp32 1.5 TFLOPS as reported, 8.9 with the count
+  forced to 40 (test only), Mac OpenCL 15.6-16.1.
+- Stability: 63 rounds over 36 minutes on the M4 Max (OpenCL, Firefox and
+  Chromium WebGPU, ffmpeg OpenCL), no failure.

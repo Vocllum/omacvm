@@ -331,6 +331,10 @@ with patches: next section, ADR 0022. Frame latency is Venus's ring polling (gue
   mode in the VM (also the default): open.
 - Kernel launches cross the Venus ring like draw calls: launch-heavy
   OpenCL work pays Venus's latency (see vkmark above).
+- On KosmicKrisp (Mac mini M4, macOS 27) the same guest Mesa passes the
+  same checks; the Zink patches and the host zero-init patch act on
+  MoltenVK's driver ID only, so they stay off there. Results tables:
+  [../benchmarks/README.md](../benchmarks/README.md#gpu-compute-with-venus-2026-10-04).
 
 ## 7. Video decode (built: `video-decode`)
 
@@ -480,6 +484,9 @@ bench lock and are indications only):
 | OpenCL clpeak fp32 (VM, 40-CU shim / as reported) vs Mac OpenCL | - | 8.9 / 1.5 vs 15.6-16.1 TFLOPS |
 | Geekbench 7 GPU OpenCL, VM vs Mac, same locked batch | - | 42486 vs 95380 (45 %); before the global-loads fix 10673, Feature Matching failed |
 | ffmpeg 4K nlmeans in the VM, OpenCL vs 8 vCPUs | - | 1.07 vs 0.33 fps |
+| WebGPU matmul f32 2048 on KosmicKrisp (Mac mini M4, unlocked), Chromium launcher / Firefox in the VM vs Chrome on the mini | - | 1148 / 167 vs 1614 GFLOPS |
+| Geekbench 7 GPU OpenCL on KosmicKrisp (Mac mini M4), VM vs the mini's OpenCL | - | 18973 vs 35240 (54 %), all workloads valid |
+| Compute soak (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL), M4 Max | - | 63 rounds in 36 min, 0 failures |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks
