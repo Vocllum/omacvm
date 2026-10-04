@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Guest side of soak.sh: one line "signalled emitted loops webgl_frames video_frame video_drops mem_avail_kb",
+"""Guest side of soak.sh: one line
+"signalled emitted loops webgl_frames video_frame video_drops mem_avail_kb webgl_lit",
 missing values as 0 so the fields never shift. The video frame comes from mpv's IPC socket."""
 import glob, json, socket, sys
 
@@ -34,8 +35,8 @@ def mpv(prop):
 
 sig, emit = first(fence, ("0", "0"))
 loops = first(lambda: str(open(f"{g}/gpu.txt").read().count("LOOP")))
-wf = first(lambda: open(f"{g}/frames.txt").read().split()[-1])
+wf, lit = first(lambda: open(f"{g}/frames.txt").read().splitlines()[-1].split()[:2], ("0", "0"))
 vf = first(lambda: mpv("estimated-frame-number"))  # restarts at 0 on each loop of the file
 vd = first(lambda: mpv("frame-drop-count"))
 mem = first(lambda: next(l.split()[1] for l in open("/proc/meminfo") if l.startswith("MemAvailable")))
-print(sig, emit, loops, wf, vf, vd, mem)
+print(sig, emit, loops, wf, vf, vd, mem, lit)

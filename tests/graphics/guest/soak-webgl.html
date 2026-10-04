@@ -4,8 +4,9 @@
 <body style="margin:0;background:#000">
 <canvas id="c" width="1280" height="720"></canvas>
 <script>
-// Steady WebGL load: 20k instanced quads with a per-pixel shader; posts its frame count every 5 s.
-const gl = document.getElementById("c").getContext("webgl2");
+// Steady WebGL load: 20k instanced quads with a per-pixel shader. Every 5 s it posts its frame
+// count and the share of non-black pixels in a 64x64 sample (0 = the page draws nothing).
+const gl = document.getElementById("c").getContext("webgl2", {preserveDrawingBuffer: true});
 const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; };
 const p = gl.createProgram();
 gl.attachShader(p, sh(gl.VERTEX_SHADER, `#version 300 es
@@ -22,5 +23,11 @@ gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 const ut = gl.getUniformLocation(p, "t"); let frames = 0;
 (function f(ms) { gl.uniform1f(ut, ms / 1000); gl.clear(gl.COLOR_BUFFER_BIT);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, 20000); frames++; requestAnimationFrame(f); })(0);
-setInterval(() => fetch("/frames", {method: "POST", body: String(frames)}), 5000);
+const px = new Uint8Array(64 * 64 * 4);
+setInterval(() => {
+  gl.readPixels(608, 328, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  let lit = 0;
+  for (let i = 0; i < px.length; i += 4) if (px[i] | px[i + 1] | px[i + 2]) lit++;
+  fetch("/frames", {method: "POST", body: `${frames} ${(lit / 4096).toFixed(2)}`});
+}, 5000);
 </script>
