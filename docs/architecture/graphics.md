@@ -401,10 +401,12 @@ What crosses and who checks it:
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
   IOSurfaces 3 per window).
 - **scanout size and format**: the present surfaces follow the guest's
-  scanout (bounded to 16384x16384). A 10-bit scanout doubles them to 8 bytes
-  a pixel (`pacing-hdr`), so a hostile guest can make QEMU hold 6 GB of
-  surfaces instead of 3 GB; bounding the size by the window's backing size is
-  open. The colour space comes from QEMU's own setting, never from the guest.
+  scanout (bounded to 16384x16384). `pacing-hdr` keeps five of them (queue
+  for the display's refresh) and a 10-bit scanout doubles them to 8 bytes a
+  pixel, so a hostile guest can make QEMU hold 10 GB of surfaces (3 GB with
+  three 8-bit ones before); bounding the size by the window's backing size
+  is open. The colour space comes from QEMU's own setting, never from the
+  guest.
 
 ## 11. Test strategy
 
