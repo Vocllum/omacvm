@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..cc4112c
+index 0000000..50ba20a
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2363 @@
+@@ -0,0 +1,2365 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -2043,6 +2043,8 @@ index 0000000..cc4112c
 +    uint32_t h = d->picture_parameter.max_height ? d->picture_parameter.max_height + 1u : codec->height;
 +    OSStatus st;
 +
++    if (!payload_size)                  /* seq_profile is in the first byte */
++        return false;
 +    /* AV1CodecConfigurationRecord + the sequence header as configOBUs. */
 +    cfg = malloc(4 + seq_size);
 +    if (!cfg)
