@@ -59,6 +59,9 @@ panel's full rate.
   116.4-118.7 new frames a second with 3-4 skipped refreshes per 12 s, after
   merging close frames only while the guest outpaces the display; installed
   2.7.0 82-99 with 91-221 skips, gpu-native 76-90 with 203-324.
+- Full screen on the MacBook (the app's default): 119.3-119.9 new frames a
+  second, 1-7 skips per 12 s; 2.7.0 112.8-115.4 with 55-79, gpu-native
+  106-107 with 138-159.
 - The link follows the window's screen (60, 120, 144 Hz), and so does the
   guest's refresh (EDID).
 - Latency: Core Animation shows any commit made at least ~3 ms before the

@@ -548,6 +548,14 @@ and refreshes that skipped a frame:
 | `pacing-hdr` (merge always) | 107.4-119.6 | 5-72 |
 | `pacing-hdr` (merge only when the guest is faster) | 116.4-118.7 | 3-4 |
 
+Full screen on the MacBook (how the app starts by default), bench lock:
+
+| | new frames/s | skipped per 12 s |
+|---|---|---|
+| 2.7.0 as installed | 112.8, 115.0, 115.4 | 55-79 |
+| gpu-native | 106.4, 107.2 | 138-159 |
+| `pacing-hdr` | 119.3, 119.3, 119.9 | 1-7 |
+
 The 2.6/2.7 path is not capped at 33 frames a second as once thought: it
 shows 80-99 of 120 but skips a frame on a fifth of the refreshes (judder).
 
