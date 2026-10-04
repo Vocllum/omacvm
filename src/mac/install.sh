@@ -1,12 +1,15 @@
 #!/bin/bash
 # OmacVM, Mac side: Bridge (Wi-Fi, audio, media keys, display, wallpaper),
-# Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac).
+# Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac),
+# Omanotch (the bar beside the notch, src/omanotch).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
-#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--skip-clip] [--force] [--quiet]
+#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--skip-clip] [--omanotch] [--force] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
 # --skip-clip leaves the clipboard helper out (only Parallels VMs use it;
 # likewise kept when already installed).
+# --omanotch installs Omanotch too (without it, one already installed stays as
+# it is).
 # --no-gestures installs it keys-only for every VM: macOS keeps its trackpad
 # gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
 # VM chooses for itself: gestures and scroll momentum are VM features.)
@@ -16,13 +19,14 @@
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1; CLIP=1; FORCE=0; QUIET=0
+BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0
 for a in "$@"; do
   case $a in
     --no-bridge) BRIDGE=0 ;;
     --no-gestures) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
     --skip-clip) CLIP=0 ;;
+    --omanotch) NOTCH=1 ;;
     --force) FORCE=1 ;;
     --quiet) QUIET=1 ;;
     *) echo "src/mac/install.sh: unknown option $a" >&2; exit 2 ;;
@@ -69,6 +73,8 @@ case $GESTURES in
   0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;
 esac
 (( CLIP )) && install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
+# Omanotch's own installer (it builds the app and starts it at login).
+(( NOTCH )) && install_app "Omanotch" ch.gillesgoetsch.omanotch omanotch/mac
 # The permissions macOS asks for now, once per app (they stay with later updates).
 if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
   printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'

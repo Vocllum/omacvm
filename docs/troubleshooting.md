@@ -30,6 +30,9 @@ else than the cause. Recipes and the general failure table are in
 | 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
 | 19 | All | [Two VMs in one app both get the swipes and Cmd shortcuts](#19-all-routes-two-vms-in-one-app-both-get-the-swipes-and-cmd-shortcuts) |
 | 20 | UTM | [Cmd+W stops the VM](#20-utm-cmdw-stops-the-vm) |
+| 21 | UTM, Fusion | [No sound at all, no microphone](#21-utm-fusion-no-sound-at-all-no-microphone) |
+| 22 | Parallels, Fusion, app | [The microphone records nothing, or silence](#22-parallels-fusion-app-the-microphone-records-nothing-or-silence) |
+| 23 | app | [Chrome hangs in Basemark Web 3.0, the screen flickers](#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers) |
 
 ## 1. Fusion: black screen with stock Omarchy
 
@@ -115,8 +118,8 @@ else than the cause. Recipes and the general failure table are in
   pointer straight back with it.
 - **Fix:** on VMware, `notchcast` only hides and shows the guest cursor; it
   never moves it.
-- **Where:** the [Omanotch](https://github.com/gillesgoetsch/omanotch) repo,
-  `notchcast` (on its main branch). Not in this repo.
+- **Where:** [Omanotch](../src/omanotch/README.md)'s `notchcast`,
+  `src/omanotch/guest/notchcast/notchcast.c`.
 
 ## 5. Fusion: Omanotch cannot find the Mac
 
@@ -125,7 +128,7 @@ else than the cause. Recipes and the general failure table are in
 - **Cause:** `notchcast` looked for the Mac at the default gateway. On Fusion's
   NAT network the gateway is `.2` (Fusion's NAT), and the Mac is `.1`.
 - **Fix:** OmacVM passes the Mac's address to `notchcast` as `NOTCHBAR_HOST`,
-  on every route. `notchcast` also knows Fusion now (on Omanotch's main branch).
+  on every route. `notchcast` also knows Fusion now.
 - **Where:** `src/guest/install.sh` writes
   `~/.config/systemd/user/notchcast.service.d/omacvm-host.conf`.
 
@@ -371,3 +374,94 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   with System Events.
 - **Where:** `src/gestures/mac/omacvm-gestures.c` (event tap at
   `kCGHIDEventTap`).
+
+## 21. UTM, Fusion: no sound at all, no microphone
+
+- **Symptom:** in a UTM or VMware Fusion VM, `aplay -l` says "no soundcards
+  found"; Omarchy plays nothing and PipeWire has no input.
+- **Cause:** neither app gave the VM a sound card. UTM's scripting has no
+  sound property, so the VM it made had `Sound = []`; `vmcli VM Create`
+  writes no `sound.*` lines.
+- **Fix:** UTM: `Sound = [{Hardware = intel-hda}]` in the VM's config.plist
+  (QEMU then gets `intel-hda` + `hda-duplex` on UTM's SPICE audio, input and
+  output). UTM starts a VM with the configuration it read at its own start,
+  so after the edit UTM is quit first (only when no UTM VM runs), else the VM
+  comes up without the card. Fusion: `sound.present`, `sound.virtualDev =
+  "hdaudio"`, `sound.fileName = "-1"`, `sound.autodetect` in the .vmx. New VMs
+  get it during the build; an older VM when `omacvm apply` starts it from shut
+  down. Tested: UTM records the Mac's microphone (RMS about 9, a quiet room),
+  Fusion shows "HD-Audio Generic" for playback and capture.
+- **Where:** `src/lib/mac.sh` (`utm_add_sound`, `fusion_add_sound`),
+  `src/lib/vm.sh` (`vm_boot`), `src/cmd/build.sh`.
+
+## 22. Parallels, Fusion, app: the microphone records nothing, or silence
+
+- **Symptom:** PipeWire lists the input, but a recording is empty: on Fusion
+  and OmacVM.app `pw-record` gets no samples at all
+  (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`); on Parallels the
+  samples come but are all zero (`Capture` at 100 % and on). On Fusion the
+  whole VM also stops for about four minutes when the recording starts (no
+  SSH, `vmware-vmx` at full CPU) until the refusal below is logged; on
+  OmacVM.app before 2.6.0's fix too.
+- **Cause:** macOS's microphone permission for the app that records on the
+  Mac. Fusion's `vmware-vmx` and OmacVM.app's QEMU are helpers that cannot
+  ask for it themselves: their `AudioQueueStart` fails with 268451843.
+  vmware.log says `SoundAQStartStream: Failed to start input audio queue,
+  error: (no mapping) (268451843)`; OmacVM.app's `logs/qemu.log` says
+  `SDL_OpenAudioDevice for recording failed: CoreAudio error
+  (AudioQueueStart): 268451843`. Parallels hands the VM silence instead. UTM
+  recorded the Mac's microphone on the same Mac because UTM had the
+  permission already. 268451843 is 0x10004003, `MACH_RCV_TIMED_OUT`:
+  coreaudiod did not answer `AudioQueueStart` (`_TellServerAboutStreamUsage`)
+  in time. Why the app's VM stopped: QEMU opened the recording on a vCPU
+  thread that holds its global lock (`sample` showed `sdl_open` under
+  `intel_hda_set_st_ctl`), so the whole VM waited with it.
+- **Fix:** Parallels and Fusion: allow Parallels Desktop or VMware Fusion in
+  System Settings › Privacy & Security › Microphone (a person's step), then
+  restart the VM. OmacVM.app: the app now asks for the microphone when it
+  starts a VM, and QEMU records under its grant; the Developer ID build has
+  the `audio-input` entitlement for that. Without the permission the app
+  starts QEMU without recording (`in.voices=0`, and a line in `qemu.log`);
+  allow it, then restart the VM. macOS counts QEMU's recording as the app's
+  (tccd: microphone for `org.omacvm.app`, allowed), and with the grant
+  `AudioQueueStart` answers in well under a second. The app's QEMU now
+  starts and stops the recording on a thread of its own
+  (`qemu-sdl-audio-capture-thread.patch`): the VM keeps running whatever
+  CoreAudio does, records silence until the microphone runs, and logs
+  `SDL recording device did not start within 5 seconds` when it is slow
+  (a sound that starts meanwhile waits for it). `omacvm check` reads the
+  Fusion and app logs for the refusal (and says to restart).
+- **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`,
+  `app/runtime/patches/qemu-sdl-audio-capture-thread.patch`, `src/cmd/check.sh`.
+
+## 23. app: Chrome hangs in Basemark Web 3.0, the screen flickers
+
+- **Symptom:** in OmacVM.app (2.6.0), Basemark Web 3.0 in Google Chrome
+  stops at test 5 of 20, the page flickers and no score comes, even after
+  15 minutes. It finishes on the Mac and in Parallels, UTM and Fusion. WebGL
+  Aquarium and the desktop keep working.
+- **Cause:** the app's virglrenderer turns the guest's shaders (TGSI) into
+  GLSL for the Mac's OpenGL 4.1. One of the patches it is built with
+  (`virglrenderer-a8-shader-swizzle-texture.patch`, for alpha-only textures)
+  reads every `texture()` result into a `vec4`. On an integer texture
+  (`usampler2D`) that gives `uintBitsToFloat(vec4)`, which does not exist, so
+  Apple's compiler refuses the shader. The VM's `logs/qemu.log` says
+  `Shader failed to compile`, `ERROR: 0:273: No matching function for call to
+  uintBitsToFloat(vec4)`, then `context 11 failed to dispatch DRAW_VBO` and
+  `ctrl 0x106, error 0x1200` for every later command: virglrenderer stops
+  that GL context for good, and Chrome's GPU process keeps drawing into a
+  dead context. The patch also put the write mask on that `vec4`
+  (`vec4 val = texture(...).x`), which does not compile either.
+- **Fix:** `app/runtime/patches/virgl-texture-integer-samplers.patch`: the
+  temporary has the sampler's own type (`vec4`, `uvec4`, `ivec4`), the write
+  mask goes on the assignment only. Each runtime build compiles these
+  shaders with the Mac's OpenGL (`app/runtime/Tests/virgl/test-integer-sampler-shader.c`),
+  and `app/scripts/gpu-check.sh` runs Aquarium and Basemark in an app VM and
+  reads `qemu.log` for refused shaders.
+  Tested on a new app VM (8 CPUs, 8 GB, a window, not full screen): with
+  2.6.0's runtime the same shader is refused at Basemark's test 5, later
+  WebGL tests score -1 and the tab stops answering; with the patch Basemark
+  finished 3 times in a row (1054, 772, 1073 in that small window, with other
+  VMs running on the Mac) and Aquarium still runs (19-21 fps).
+- **Where:** `app/runtime/patches/`, `app/runtime/build-qemu-gpu-runtime.sh`,
+  `app/runtime/Tests/virgl/`, `app/scripts/gpu-check.sh`.

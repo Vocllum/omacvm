@@ -48,7 +48,7 @@ BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
 GESTURES=${OMACVM_FEATURE_gestures:-on}; IDLE_LOCK=${OMACVM_FEATURE_idle_lock:-on}
 THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:-}
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
-MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}
+MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -70,7 +70,7 @@ if [[ $BRIDGE == on ]]; then
     else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)" human; fi
     if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
     else skip "Wi-Fi password sharing" "not on a shareable network"; fi
-  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831"; fi
+  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update)"; fi
   audio=$(as_user omacvm-bridge audio 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
     ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"
@@ -81,6 +81,12 @@ if [[ $BRIDGE == on ]]; then
   else bad "Night Shift / True Tone" "no answer from the Bridge"; fi
   if as_user bash -c 'timeout 4 omacvm-bridge events 2>/dev/null | grep -m1 -q "^event:"'; then ok "live updates" "event stream"
   else bad "live updates" "no events from the Bridge"; fi
+  # The widgets and the OSD share one stream (omacvm-bridge-events); a second
+  # connection can be a request in flight.
+  n=$(ss -Htn state established "dst $HOST:47831" | wc -l)
+  if ! user_active omacvm-bridge-events.socket; then bad "shared event stream" "omacvm-bridge-events.socket not active (omacvm apply)"
+  elif (( n <= 2 )); then ok "shared event stream" "$n connection(s) to the Mac"
+  else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
@@ -108,8 +114,63 @@ if [[ $BRIDGE == on ]]; then
   else skip "wallpaper" "off (chosen at setup)"; fi
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
+section "Camera and microphone"
+if [[ $CAMERA == on && $TYPE == parallels ]]; then
+  # Parallels' own camera sharing: a USB camera in the VM.
+  cams=$(cat /sys/class/video4linux/video*/name 2>/dev/null | sort -u | paste -sd, -)
+  if [[ -n $cams ]]; then ok "camera" "Parallels' own: $cams"
+  else bad "camera" "no camera in the VM: turn on camera sharing in the VM's settings in Parallels Desktop (it shares the Mac's camera as a USB camera)"; fi
+elif [[ $CAMERA == on ]]; then
+  if [[ $(cat /sys/class/video4linux/video42/name 2>/dev/null) == "Mac Camera" ]]; then ok "camera device" "/dev/video42, Mac Camera"
+  else bad "camera device" "no /dev/video42 (v4l2loopback not loaded: after a kernel update reboot, then omacvm apply)"; fi
+  if user_active omacvm-camera.service; then ok "camera service" "omacvm-camera, asks the Mac only while an app reads"
+  else bad "camera service" "omacvm-camera.service not running: omacvm apply"; fi
+  cs=$(as_user /usr/local/bin/omacvm-camera --status 2>/dev/null)
+  if [[ $TYPE == app ]]; then
+    if jq -e .port <<<"$cs" >/dev/null 2>&1; then ok "camera from the Mac" "OmacVM.app's camera port"
+    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update)"; fi
+  else
+    case $(jq -r '.permission // empty' <<<"$cs" 2>/dev/null) in
+      granted|test) ok "camera from the Mac" "OmacVM Bridge: $(jq -r '.camera // "no camera"' <<<"$cs"), $(jq -r 'if .on then "on, \(.readers) reading" else "off" end' <<<"$cs")" ;;
+      not-determined) skip "camera from the Mac" "macOS asks for OmacVM Bridge the first time a Linux app uses the camera" human ;;
+      denied|restricted) bad "camera from the Mac" "camera not allowed for OmacVM Bridge (System Settings > Privacy & Security > Camera)" human ;;
+      *) bad "camera from the Mac" "the Bridge does not answer /camera/status: $(jq -r '.error // "no answer"' <<<"$cs" 2>/dev/null) (omacvm update)" ;;
+    esac
+  fi
+else skip "camera" "off (chosen at setup)"; fi
+mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
+if [[ -n $mic ]]; then ok "microphone" "$mic"
+else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
+
+section "The Mac's battery"
+if [[ $TYPE == parallels ]]; then
+  skip "battery" "Parallels gives the VM the Mac's battery itself"
+elif [[ $BATTERY == on ]]; then
+  if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
+  else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
+  # Every kernel that boots must have it (DKMS builds it with each kernel's headers).
+  for k in $(ls /usr/lib/modules 2>/dev/null); do
+    [[ -d /usr/lib/modules/$k/kernel ]] || continue
+    if dkms status -k "$k" omacvm-battery 2>/dev/null | grep -q installed; then ok "battery: kernel $k" "module built (DKMS)"
+    elif [[ ! -f /usr/lib/modules/$k/build/Makefile ]]; then bad "battery: kernel $k" "no headers to build the module with: omarchy update, reboot, omacvm apply"
+    else bad "battery: kernel $k" "module not built (omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
+  done
+  if systemctl is-active -q omacvm-battery; then ok "battery agent" "omacvm-battery feeds it the Mac's"
+  else bad "battery agent" "omacvm-battery.service not running ($(journalctl -u omacvm-battery -n1 -o cat 2>/dev/null | sed 's/^omacvm-battery: //'))"; fi
+  up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
+  pct=$(awk '/percentage:/ { print $2; exit }' <<<"$up"); st=$(awk '/state:/ { print $2; exit }' <<<"$up")
+  if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
+  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update)"
+  else bad "battery in UPower" "no BAT0"; fi
+  if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
+    ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
+  else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
+  if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "the VM never suspends for it"
+  else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
+else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
+
 section "Trackpad and keyboard"
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then   # on UTM and Fusion the daemon also types Cmd as Super
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
@@ -129,7 +190,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
-if [[ $TYPE == utm || $TYPE == fusion ]]; then
+if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
@@ -163,6 +224,25 @@ EOF
   check "QEMU guest agent" "utmctl ip-address/exec" systemctl is-active -q qemu-guest-agent
   check "virtio-gpu settings" "90-omacvm-utm.conf" test -f /etc/environment.d/90-omacvm-utm.conf
   check "GPU for browsers" "virgl-msaa.so preloaded" bash -c 'test -s /usr/local/lib/omacvm/virgl-msaa.so && grep -qx /usr/local/lib/omacvm/virgl-msaa.so /etc/ld.so.preload' ;;
+app)
+  section "OmacVM.app"
+  check "display follows the window" "omacvm-display-sync" pgrep -u "$U" -f omacvm-display-sync
+  check "QEMU guest agent" "clean shutdown fallback" systemctl is-active -q qemu-guest-agent
+  check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
+  if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
+  else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
+  if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
+  else bad "sound" "no PipeWire sink: omacvm apply"; fi
+  if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then
+    ok "display" "$(as_user hyprctl monitors -j | jq -r '.[0] | "\(.width)x\(.height) @\(.refreshRate | floor) Hz, scale \(.scale)"')"
+  fi
+  r=$(as_user glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p')
+  [[ -z $r ]] && r=$(as_user eglinfo -B 2>/dev/null | sed -n 's/^OpenGL core profile renderer: //p;s/^OpenGL renderer: //p' | head -1)
+  case $r in
+    *virgl*) ok "GPU" "$r" ;;
+    "") skip "GPU" "no glxinfo/eglinfo to ask (mesa-utils)" ;;
+    *) bad "GPU" "software rendering: $r" ;;
+  esac ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
@@ -236,6 +316,7 @@ if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
+  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 

@@ -4,9 +4,9 @@
 # repository's src/ (apply.sh puts it in /usr/local/share/omacvm):
 #   guest/install.sh --user NAME --keyboard "LAYOUT [VARIANT]" [--vm-type parallels|utm|fusion]
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
-#                    [--vm-name-b64 NAME]
+#                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, idle-lock, autologin, thp-kernel) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them. Old flags --no-thp-kernel,
 # --thp-kernel and --autologin still work.
@@ -23,7 +23,7 @@ FEATURES=(); declare -A F=() NEEDS=() SET=()
 while IFS=$'\t' read -r name def _ _ needs _; do
   [[ -z $name || $name == \#* ]] && continue
   FEATURES+=("$name"); NEEDS[$name]=$needs
-  [[ $def == on ]] && F[$name]=on || F[$name]=off   # "notch": the Mac decides (build.sh, omacvm)
+  [[ $def == on ]] && F[$name]=on || F[$name]=off   # "notch", "laptop": the Mac decides (build.sh, omacvm)
 done < "$R/features.tsv"
 while (( $# )); do
   case $1 in
@@ -85,13 +85,16 @@ if [[ -z $TYPE ]]; then
 fi
 case $TYPE in
   parallels) HOST=10.211.55.2 ;;
+  app) HOST=10.0.2.2 ;;   # OmacVM.app: QEMU's user network always puts the Mac there
   utm) HOST=$(ip route show default | awk '{ print $3; exit }'); : "${HOST:=192.168.64.1}"
        [[ -n $MODE ]] || { echo "guest/install.sh: UTM needs --display WxH@Hz" >&2; exit 2; } ;;
   fusion) HOST=${HOST_GIVEN:-}   # from the Mac (apply.sh): the gateway's network may not be Fusion's
           [[ $HOST =~ ^[0-9]+\.[0-9]+\.[0-9]+\.1$ ]] || { echo "guest/install.sh: VMware Fusion needs --host (the Mac's address on Fusion's network)" >&2; exit 2; }
           [[ -n $MODE ]] || { echo "guest/install.sh: VMware Fusion needs --display WxH@Hz" >&2; exit 2; } ;;
-  *) echo "guest/install.sh: --vm-type parallels, utm or fusion" >&2; exit 2 ;;
+  *) echo "guest/install.sh: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;;
 esac
+# Parallels gives the VM the Mac's battery itself.
+[[ $TYPE == parallels ]] && F[battery]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
@@ -107,7 +110,19 @@ log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
 # network) may still reach SSH.
 ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
-pacman -S --needed --noconfirm jq >/dev/null 2>&1
+# A VM switched off during pacman keeps pacman's lock, and every pacman below
+# would fail. Wait for one that runs (omarchy update); a lock without pacman goes.
+for ((i = 0; i < 120; i++)); do
+  [[ -e /var/lib/pacman/db.lck ]] && pgrep -x pacman >/dev/null || break
+  (( i )) || log "waiting for pacman (another install runs)"
+  sleep 5
+done
+if [[ -e /var/lib/pacman/db.lck ]]; then
+  pgrep -x pacman >/dev/null && { echo "guest/install.sh: pacman still runs after 10 minutes: try again when it is done" >&2; exit 1; }
+  log "pacman's lock from an install that was cut off: removed"
+  rm -f /var/lib/pacman/db.lck
+fi
+pacman -S --needed --noconfirm jq >/dev/null 2>&1 || { echo "guest/install.sh: pacman could not install jq (no network?)" >&2; exit 1; }
 if command -v grub-mkconfig >/dev/null; then
   # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
   pacman -S --needed --noconfirm grub-btrfs inotify-tools >/dev/null 2>&1
@@ -157,19 +172,39 @@ elif [[ -f $MARK ]]; then
   rm -f "$STAY" "$MARK"
 fi
 
+# Sound, speakers and microphone, on every route: PipeWire's ALSA, PulseAudio
+# and JACK parts (omarchy-mac installs them only on Apple hardware; the VM's
+# card is Parallels', Intel HDA on UTM and OmacVM.app, HD Audio on Fusion).
+# pipewire-jack replaces jack2.
+if ! pacman -Q pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1; then
+  log "sound: PipeWire's ALSA, PulseAudio and JACK parts"
+  pacman -Q jack2 >/dev/null 2>&1 && pacman -Rdd --noconfirm jack2 >/dev/null
+  pacman -S --needed --noconfirm pipewire-alsa pipewire-pulse pipewire-jack rtkit >/dev/null 2>&1 || true
+  user_ctl restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
+fi
 case $TYPE in
   parallels)
     log "display";    "$R/display/guest/install.sh" "$U"
     log "clipboard";  "$R/clipboard/guest/install.sh" "$U" ;;
   utm)
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
+  app)
+    log "OmacVM.app"; "$R/app/guest/install.sh" "$U" ;;
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
+if [[ ${F[battery]} == on ]]; then
+  log "the Mac's battery"
+  "$R/battery/guest/install.sh" on || log "the Mac's battery: not installed (see above)"
+elif [[ -f /etc/systemd/system/omacvm-battery.service ]]; then
+  log "the Mac's battery: off"
+  "$R/battery/guest/install.sh" off || log "the Mac's battery: not removed (see above)"
+fi
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# On UTM and VMware Fusion the gestures daemon also types Cmd shortcuts as Super, so it stays.
-if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion ]]; then
+# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd
+# shortcuts as Super, so it stays.
+if [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
 elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
@@ -185,7 +220,8 @@ if [[ ${F[bridge]} == on ]]; then
 elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   # Disabling the clones brings Omarchy's own Bluetooth, Wi-Fi and audio widgets back.
   log "bridge: off"
-  user_ctl disable --now omacvm-bridge-osd.service >/dev/null 2>&1 || true
+  user_ctl disable --now omacvm-bridge-osd.service omacvm-bridge-events.socket >/dev/null 2>&1 || true
+  user_ctl stop omacvm-bridge-events.service >/dev/null 2>&1 || true
   sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
     'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
      for p in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
@@ -199,28 +235,47 @@ elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
   fi
   rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
 fi
+# The Mac's camera: Parallels passes it itself; elsewhere /dev/video42.
+if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)"; fi
+"$R/camera/guest/install.sh" "$U" "$TYPE" "${F[camera]}" || log "camera: not set up (see above)"
 if [[ ${F[wallpaper]} == on ]]; then
   log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
 elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
   log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
 fi
-# Omanotch's VM side (github.com/gillesgoetsch/omanotch) builds and installs in
-# the desktop session: omacvm-omanotch.service runs it at the next login, or
-# right away when the session is running.
+# Omanotch's VM side (omanotch/guest in this copy) builds and installs in the
+# desktop session: omacvm-omanotch.service runs it at the next login, or right
+# away when the session is running. A changed copy installs again.
 in_session() {
   local run; run=/run/user/$(id -u "$U")
   sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
     HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
     bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
 }
+# Earlier versions cloned Omanotch into the user's home; this copy is used now.
+if [[ -d $H/.local/share/omanotch/.git ]]; then
+  if [[ -z $(git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null) ]]; then
+    rm -rf "$H/.local/share/omanotch"
+  else
+    echo "  ~/.local/share/omanotch has local changes and is no longer used: left in place" >&2
+  fi
+fi
+# OmacVM.app too: its full screen sits below the notch like the other routes'
+# (its own notch-strip mode is an opt-in; Omanotch then leaves the strip alone).
 if [[ ${F[omanotch]} == on ]]; then
   # An empty notchcast is a broken install (seen once): build it again.
   [[ -e $H/.local/bin/notchcast && ! -s $H/.local/bin/notchcast ]] && rm -f "$H/.local/bin/notchcast"
+  sum=$(cd "$R/omanotch/guest" && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16)
+  stamp=$H/.local/state/omacvm/omanotch
+  if [[ -x $H/.local/bin/notchcast && $(cat "$stamp" 2>/dev/null) != "$sum" ]]; then
+    log "Omanotch: changed, installs again"
+    rm -f "$H/.local/bin/notchcast"
+  fi
   if [[ ! -x $H/.local/bin/notchcast ]]; then
     log "Omanotch (the bar beside the notch)"
     pacman -S --needed --noconfirm base-devel lz4 wayland wayland-protocols git >/dev/null 2>&1
-    [[ -d $H/.local/share/omanotch ]] ||
-      sudo -u "$U" git clone -q https://github.com/gillesgoetsch/omanotch.git "$H/.local/share/omanotch"
+    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"
+    echo "$sum" > "$stamp"; chown "$U:$U" "$stamp"
     install -m644 "$R/guest/omacvm-omanotch.service" /etc/systemd/user/
     systemctl --global enable omacvm-omanotch.service >/dev/null 2>&1
     if pgrep -u "$U" -x Hyprland >/dev/null; then
@@ -233,7 +288,9 @@ if [[ ${F[omanotch]} == on ]]; then
   # The Mac's address, so notchcast does not have to guess it (on VMware
   # Fusion the gateway is Fusion's NAT, not the Mac).
   install -d -o "$U" -g "$U" "$H/.config/systemd/user/notchcast.service.d"
-  printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST" > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
+  # OmacVM.app: its display sync already follows the window.
+  { printf '[Service]\nEnvironment=NOTCHBAR_HOST=%s\n' "$HOST"
+    [[ $TYPE == app ]] && printf 'Environment=NOTCHBAR_FOLLOW_MODE=0\n'; } > "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   chown "$U:$U" "$H/.config/systemd/user/notchcast.service.d/omacvm-host.conf"
   user_ctl daemon-reload 2>/dev/null || true
   user_ctl try-restart notchcast.service 2>/dev/null || true
@@ -259,11 +316,9 @@ elif [[ -x $H/.local/bin/notchcast ]]; then
   systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
   rm -f /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
   [[ -n $("$R/guest/omanotch-notifications.sh" off || true) ]] && { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
-  if [[ -f $H/.local/share/omanotch/guest/uninstall.sh ]]; then
-    in_session bash "$H/.local/share/omanotch/guest/uninstall.sh" >/dev/null 2>&1 || true
-  else
+  in_session bash "$R/omanotch/guest/uninstall.sh" >/dev/null 2>&1 ||
     user_ctl disable --now notchcast.service >/dev/null 2>&1 || true
-  fi
+  rm -f "$H/.local/state/omacvm/omanotch"
 fi
 if [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then

@@ -1,0 +1,17 @@
+[Unit]
+Description=Omanotch: stream the Omarchy bar to the macOS notch helper
+Documentation=https://github.com/gillesgoetsch/omacvm/tree/main/src/omanotch
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=%h/.local/bin/notchcast
+Restart=always
+RestartSec=2
+# Belt and braces: never leave the guest cursor hidden.
+ExecStopPost=-/usr/bin/hyprctl eval "hl.config({ cursor = { invisible = false } })"
+# ... and bring the bar back right away instead of after the bar's watchdog.
+ExecStopPost=-/usr/bin/qs ipc -n -p /usr/share/omarchy/shell call notchbar setParked false
+
+[Install]
+WantedBy=graphical-session.target

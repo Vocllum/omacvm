@@ -1,0 +1,14 @@
+[Unit]
+Description=OmacVM.app: the Mac's clipboard in Omarchy (both ways)
+PartOf=graphical-session.target
+After=graphical-session.target
+ConditionPathExists=/dev/virtio-ports/org.omacvm.clipboard
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/bin/omacvm-clipboard
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=graphical-session.target

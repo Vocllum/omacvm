@@ -6,7 +6,8 @@
 #   ensure_xcode_tools       Xcode's command line tools (Swift, clang, git)
 #   ensure_homebrew          Homebrew, on the PATH of this run
 #   ensure_brew_tools        zstd, e2fsprogs, and an OpenSSL with SHA-512 passwords
-#   ensure_vm_app TYPE       Parallels Desktop or UTM 5
+#   ensure_vm_app TYPE       Parallels Desktop, UTM 5, VMware Fusion (waits for
+#                            it) or OmacVM.app (downloaded for this OmacVM's version)
 
 # An OpenSSL that can hash the password (macOS's own LibreSSL has no "passwd -6").
 sha512_openssl() {
@@ -40,6 +41,7 @@ have_fusion() {
   local v; v=$(fusion_version | cut -d. -f1)
   [[ -x $VMRUN && -x $FUSION_LIB/vmcli && $v =~ ^[0-9]+$ ]] && (( v >= 13 ))
 }
+have_omacvm_app() { app_bundle >/dev/null; }
 
 # The installs: ask (or stop with the command under --yes), run, check.
 prereq_install() {   # "what" "command" -> runs the command after asking
@@ -139,7 +141,19 @@ ensure_vm_app() {
       open -a "VMware Fusion" 2>/dev/null || true
       say "    VMware Fusion opens: follow its first steps (it asks for your Mac password once)."
       have_fusion || needs_person "VMware Fusion 13 or newer is needed (found: $(fusion_version))" ;;
+    app)
+      have_omacvm_app && return 0
+      local v a; v=$(cat "$R/src/VERSION")
+      app_published "$v" || app_not_published "$v"
+      prereq_install "OmacVM.app $v" "$(app_install_cmd "$v")"
+      a=$(app_install "$v") || die "OmacVM.app was not installed (see above)"
+      say "    Installed: $a" ;;
   esac
+}
+
+# Releases before OmacVM.app was published have no zip.
+app_not_published() {   # VERSION
+  needs_person "there is no OmacVM.app download for OmacVM $1 ($(app_zip_url "$1") is missing): releases before the app have none. Run omacvm update for a newer OmacVM, or choose another app"
 }
 
 fusion_install_help() {
@@ -159,7 +173,8 @@ prereq_screen() {
   printf '\n  %s%s%s  ·  %s  ·  %s GB  ·  macOS %s%s\n' "$UB" "${model:-Mac}" "$UR" "${chip:-Apple Silicon}" "$mac_mem_gb" \
     "$(sw_vers -productVersion)" "$( [[ $NOTCH == notch ]] && echo "  ·  notch")" > "$TTY"
   for mark in "Xcode's command line tools|have_xcode_tools" "Homebrew|have_homebrew" \
-              "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion"; do
+              "Parallels Desktop|have_parallels" "UTM 5|have_utm5" "VMware Fusion|have_fusion" \
+              "OmacVM.app|have_omacvm_app"; do
     if ${mark#*|}; then printf '  %s✓%s %s\n' "$UOK" "$UR" "${mark%%|*}" > "$TTY"
     else printf '  %s·%s %s %s(not installed)%s\n' "$UD" "$UR" "${mark%%|*}" "$UD" "$UR" > "$TTY"; fi
   done

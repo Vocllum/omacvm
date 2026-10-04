@@ -1,8 +1,9 @@
 #!/bin/bash
 # omacvm update [--vm NAME] [--no-pull]: OmacVM up to date everywhere. This
 # checkout (git pull, when it is a clean clone), the Mac side that is
-# installed, Omanotch on the Mac (when its clone is clean), then OmacVM in
-# every running VM that has it (or only --vm NAME; a stopped one is started).
+# installed (Omanotch with it), OmacVM.app when it is installed and a newer
+# one is published (not while it runs), then OmacVM in every running VM that
+# has it (or only --vm NAME; a stopped one is started).
 # Each VM keeps its feature choices. Stopped VMs are listed, not started. Only
 # VMs OmacVM set up from this Mac (their SSH host key is remembered, or OmacVM
 # built them) get the update, and with it the Bridge's token.
@@ -15,7 +16,7 @@ while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
     --no-pull) PULL=0; shift ;;
-    -h|--help) sed -n '2,9s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -43,17 +44,31 @@ launchctl print "gui/$(id -u)/org.omacvm.bridge" >/dev/null 2>&1 || args+=(--no-
 if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- --keys-only; then args+=(--no-gestures)
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
 launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
+launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
-if [[ -d $HOME/omanotch/.git && -d $HOME/Applications/Omanotch.app ]]; then
-  if [[ -n $(git -C "$HOME/omanotch" status --porcelain --untracked-files=no) ]]; then
-    info "Omanotch: ~/omanotch has local changes, left as it is"
-  else
-    before=$(git -C "$HOME/omanotch" rev-parse HEAD)
-    git -C "$HOME/omanotch" pull -q --ff-only 2>/dev/null || info "Omanotch: git pull failed, left as it is"
-    if [[ $(git -C "$HOME/omanotch" rev-parse HEAD) != "$before" ]]; then
-      log "Omanotch on the Mac"
-      "$HOME/omanotch/mac/install.sh"
+# Omanotch comes with OmacVM now (src/omanotch): the clone earlier versions
+# made is no longer used.
+[[ -d $HOME/omanotch/.git ]] && info "Omanotch: ~/omanotch is no longer used (it comes with OmacVM now), delete it when you like"
+
+# ---------- OmacVM.app ----------
+# The version that goes with this OmacVM, from its release (curl: no
+# quarantine). Not while the app is open: it may run a VM.
+if app=$(app_bundle); then
+  have=$(app_version "$app"); want=$(cat "$R/src/VERSION")
+  if app_version_lt "$have" "$want"; then
+    # awk reads to the end: an early exit would stop app_list with SIGPIPE.
+    running=$(app_list | awk -F'\t' '$3 == "running" && !f { print $1; f = 1 }')
+    if [[ -n $running ]]; then
+      info "OmacVM.app: '$running' runs in it, not updated ($have; $want is out). Shut the VM down, then: omacvm update"
+    # The app's path as it is (pgrep -f took it as a regex: "Omarchy (2).app").
+    elif procs=$(ps -ax -o args= 2>/dev/null) && [[ $procs == *"$app/Contents/"* ]]; then
+      info "OmacVM.app is open, not updated ($have; $want is out). Quit it, then: omacvm update"
+    elif ! app_published "$want"; then
+      info "OmacVM.app $have: no download for $want yet"
+    else
+      log "OmacVM.app $have -> $want"
+      app_install "$want" "$app" >/dev/null || failed_app=1
     fi
   fi
 fi
@@ -89,6 +104,7 @@ if (( ${#stopped[@]} )); then
   info "not running, so not updated: $(printf '%s, ' "${stopped[@]}" | sed 's/, $//')"
   info "start one and run: omacvm update --vm NAME"
 fi
+(( ${failed_app:-0} )) && failed+=("OmacVM.app")
 if (( ${#failed[@]} )); then
   echo "omacvm update: failed in $(printf '%s, ' "${failed[@]}" | sed 's/, $//') (see above)" >&2
   exit 1

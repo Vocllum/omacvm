@@ -1,5 +1,5 @@
 # Finding and reaching VMs from the Mac (sourced after mac.sh; bash 3.2).
-#   vms_list                 one line per VM: NAME<TAB>parallels|utm|fusion<TAB>running|stopped|...
+#   vms_list                 one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
 #                            (Parallels' and UTM's other states as they name them)
 #   vm_find_ip NAME TYPE [s] the VM's address (waits up to s seconds)
 #   vm_probe IP              what the VM says about itself, as KEY=value lines:
@@ -8,6 +8,7 @@
 #   vm_boot NAME TYPE        start a stopped VM and wait for its address
 
 UTM_PREFS=$HOME/Library/Containers/com.utmapp.UTM/Data/Library/Preferences/com.utmapp.UTM.plist
+source "$(dirname "${BASH_SOURCE[0]}")/app.sh"
 
 vms_list() {
   if [[ -x $PRLCTL ]]; then
@@ -35,6 +36,7 @@ PY
   while IFS=$'\t' read -r n x; do
     [[ -n $n ]] && printf '%s\tfusion\t%s\n' "$n" "$(fusion_state "$n")"
   done < <(fusion_list)
+  app_list
 }
 
 # vm_pin NAME TYPE: gssh checks that VM's remembered SSH host key from now on
@@ -93,6 +95,7 @@ vm_find_ip() {   # NAME TYPE [seconds]
     parallels) vm_ip "$(vm_bundle "$1")" "${3:-1}" ;;
     utm) utm_ip "$1" "${3:-1}" ;;
     fusion) fusion_ip "$1" "${3:-1}" ;;
+    app) app_ip "$1" "${3:-1}" ;;
     *) return 1 ;;
   esac
 }
@@ -112,8 +115,9 @@ vm_probe() {
 vm_boot() {   # NAME TYPE
   case $2 in
     parallels) vm_start "$1" "$(vm_bundle "$1")" >&2; vm_ip "$(vm_bundle "$1")" 300 ;;
-    utm) utm_start "$1" >&2; utm_ip "$1" 300 ;;
-    fusion) fusion_start "$1" >&2; fusion_ip "$1" 300 ;;
+    utm) utm_add_sound "$1" >&2; utm_start "$1" >&2; utm_ip "$1" 300 ;;
+    fusion) fusion_add_sound "$1" >&2; fusion_start "$1" >&2; fusion_ip "$1" 300 ;;
+    app) app_start "$1" ;;
     *) return 1 ;;
   esac
 }
@@ -126,6 +130,7 @@ ssh_setup_command() {
     parallels) net=10.211.55.0/24 ;;
     utm) net=192.168.64.0/24 ;;
     fusion) h=$(fusion_host) || return 1; net=${h%.*}.0/24 ;;
+    app) net=10.0.2.0/24 ;;
   esac
   printf "sudo bash -c 'install -d -m700 /root/.ssh && echo \"%s\" >> /root/.ssh/authorized_keys && pacman -S --needed --noconfirm openssh >/dev/null && systemctl enable --now sshd && { ufw allow from %s to any port 22 proto tcp comment \"omacvm: ssh from the Mac\" || true; }'" \
     "$(cat "${OMA_KEY:-$HOME/.ssh/omacvm}.pub")" "$net"
@@ -148,7 +153,7 @@ resolve_vm() {
       fi
     fi
   fi
-  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM or VMware Fusion VM named '$VM'" >&2; exit 2; }
+  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type "$VM") || { echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2; exit 2; }
   vm_pin "$VM" "$TYPE"
   IP=""
   # DHCP leases outlive a stopped VM: only a running one has an address.
@@ -156,6 +161,10 @@ resolve_vm() {
     IP=$(vm_find_ip "$VM" "$TYPE" 30 2>/dev/null) || IP=""
   fi
   if [[ -z $IP && ${1:-} == start ]]; then
+    local other
+    if [[ $TYPE == app ]] && other=$(app_other_running "$VM"); then
+      die "OmacVM.app runs one VM at a time: stop '$other' first"
+    fi
     log "starting '$VM'" >&2
     IP=$(vm_boot "$VM" "$TYPE") || die "'$VM' did not get an address"
     wait_ssh "$IP" 300

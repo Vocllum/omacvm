@@ -5,7 +5,7 @@
 <p align="center">One command builds the VM, in Parallels Desktop, UTM or VMware Fusion. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
-  <b>Pairs with <a href="https://github.com/gillesgoetsch/omanotch">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
+  <b>With <a href="src/omanotch/README.md">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ fast, but out of the box it feels like a guest:
 
 **OmacVM** fixes all of that and builds the VM for you: Arch Linux ARM,
 [omarchy-mac](https://github.com/omacom/omarchy-mac) and the glue on both sides
-of the VM, with [Omanotch](https://github.com/gillesgoetsch/omanotch) putting
+of the VM, with [Omanotch](src/omanotch/README.md) putting
 Omarchy's bar beside the notch.
 
 > [!NOTE]
@@ -85,13 +85,14 @@ More in [With a coding agent](#with-a-coding-agent).
 
 | Feature | What it does |
 |---|---|
-| **The bar beside the notch** | With [Omanotch](https://github.com/gillesgoetsch/omanotch), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. OmacVM.app does it on its own |
+| **The bar beside the notch** | With [Omanotch](src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own |
 | **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
-| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, Option takes small steps, as in Omarchy |
+| **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](#how-it-works)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
+| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with three dimmer steps below macOS's lowest, Option takes small steps, as in Omarchy |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
 | **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](docs/troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](docs/troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
 | **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
@@ -99,6 +100,7 @@ More in [With a coding agent](#with-a-coding-agent).
 | **Night Shift and True Tone** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon, lit while it is on. A click opens a panel like Omarchy's own: Night Shift, its strength and True Tone, all on the Mac (Super+Ctrl+N switches Night Shift directly). It replaces Omarchy's own night light, so the screen is never tinted twice |
 | **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
 | **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
+| **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge and charging, as on a laptop, plus time left and Omarchy's low-battery warning (not tested yet with the Mac on battery; the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
 | **Your keyboard layout** | Taken from the Mac |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
@@ -112,16 +114,22 @@ More in [With a coding agent](#with-a-coding-agent).
 
 ## Four ways: Parallels, UTM, VMware Fusion or OmacVM.app
 
-OmacVM builds the same Omarchy VM in Parallels Desktop, UTM or VMware Fusion.
-OmacVM.app, its own app that needs nothing else, is coming. Everything in
-[What you get](#what-you-get) works in all three apps, except where the table
-says otherwise.
+OmacVM builds the same Omarchy VM in Parallels Desktop, UTM, VMware Fusion or
+OmacVM.app, its own app that needs nothing else. Get the app with
+`omacvm build --vm-type app` (it downloads the app when it is missing), or
+download `OmacVM-<version>.zip` from the
+[releases](https://github.com/gillesgoetsch/omacvm/releases). Downloaded with a
+browser, macOS blocks it the first time: click Open Anyway in System Settings ›
+Privacy & Security. The app builds the VM with its own steps, then OmacVM is
+applied as on the other routes ([docs/routes/app.md](docs/routes/app.md)).
+Everything in [What you get](#what-you-get) works in all four apps, except
+where the table says otherwise.
 
 **Which one?** Fastest and least to set up, and fine with paying: Parallels.
 Free, with external displays and the longest battery life: VMware Fusion.
 Free and open source, one display: UTM.
 
-| | Parallels Desktop | UTM 5 | VMware Fusion 26 | OmacVM.app *(coming)* |
+| | Parallels Desktop | UTM 5 | VMware Fusion 26 | OmacVM.app |
 |---|---|---|---|---|
 | **Best for** | least to set up | free and open source | free, external displays, battery | nothing else to install |
 | Cost | paid | **free**, open source | **free**, also for work | **free**, open source |
@@ -131,12 +139,13 @@ Free and open source, one display: UTM.
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 67 % | 52 % | **71 %** | 70 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 75 % · 25 % | 67 % · 26 % | **78 % · 38 %** | not measured yet · 22 % |
 | 3D: glmark2 (score) | **7306** | 964 | 1813 | 1017 |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
 | YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
-| GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
+| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
 | Idle desktop | 5.7 W · 18 h | being re-measured | **5.5 W · 18 h** | 6.2 W · 16 h |
 | Reading, scrolling a page | 7.3 W · 14 h | being re-measured | **5.9 W · 17 h** | 6.8 W · 15 h |
@@ -151,13 +160,16 @@ Free and open source, one display: UTM.
 | Media keys, trackpad gestures, Cmd shortcuts | ✓ | ✓ | ✓ | coming |
 | The bar beside the notch | ✓ Omanotch | ✓ Omanotch | ✓ Omanotch | ✓ built in |
 | Copy and paste | ✓ | ✓ | ✓ when the pointer crosses the VM's edge | ✓ |
+| The Mac's battery in the bar | ✓ Parallels' own | ✓ through OmacVM Bridge | ✓ through OmacVM Bridge | ✓ built in |
+| The Mac's camera | ✓ Parallels' own | ✓ through OmacVM Bridge (installed for it also with the Bridge off) | ✓ through OmacVM Bridge (likewise) | ✓ built in |
+| Sound and the Mac's microphone | ✓, the microphone once macOS allows Parallels it | ✓ | ✓, the microphone once macOS allows Fusion it | ✓, the microphone once macOS allows OmacVM it |
 | **Setup** | | | | |
-| Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | download the app |
+| Get it | buy it or start the trial | `brew install --cask utm@beta` | download after a Broadcom sign-in | `omacvm build --vm-type app`, or the zip from the releases |
 | Before first use | one Parallels setting | start UTM from the Dock | allow Accessibility for Fusion | allow Accessibility for OmacVM |
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others. Basemark Web 3.0: 75, 67, 78, OmacVM.app not measured yet. WebGL Aquarium: 25, 26, 38, 22." width="100%">
 </p>
 
 On the Mac itself, for the same loads: idle 6.1 W (16 h), reading 6.6 W
@@ -171,7 +183,10 @@ display, nothing else open, brightness at 50 %, Google Chrome 154 on the Mac
 and in each VM, OmacVM 2.3.0. Speedometer is the median of 3 runs, the rest
 single runs. Power is the whole Mac's draw from its battery telemetry, 3
 minutes per load; hours are 100 Wh over that draw, whole hours from 13 h up,
-one decimal below. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
+one decimal below. The GPU row is from 2026-10-04 (OmacVM 2.6.0, median of 3,
+brightness at its lowest, an external display connected); on the Mac,
+Geekbench 7 GPU gives 204241 with Metal and 117456 with OpenCL. Every step, so
+you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
 
 - **UTM's idle and reading numbers** are being measured again. Our run gave
   15 W at idle, but a later check showed about 5 W, so something was probably
@@ -257,6 +272,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it
    in its app: it asks for your user and password on its first boot. `--prebuilt` or `--build` for scripts; details, what is in the
    images and how they are made: [docs/prebuilt.md](docs/prebuilt.md).
+   OmacVM.app has no prebuilt VMs: it always builds its own.
 3. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
    quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs
@@ -276,6 +292,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
+   | The Mac's camera as *Mac Camera*, on only while a Linux app uses it (UTM and Fusion: through OmacVM Bridge, also with the Bridge off) | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
@@ -296,7 +313,15 @@ When it is done, once on the Mac:
 
 1. **Allow the prompts**: Location Services for *OmacVM Bridge* (Wi-Fi
    names), Bluetooth for *OmacVM Bridge*, Accessibility for *OmacVM Bridge*
-   and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures*.
+   and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures*. The camera
+   is asked for the first time a Linux app uses it: for *OmacVM Bridge* (UTM,
+   Fusion), *OmacVM* (the app) or *Parallels Desktop*. The microphone belongs
+   to the VM's app: UTM asks the first time, OmacVM.app when it starts the VM;
+   for Parallels Desktop and VMware Fusion check System Settings › Privacy &
+   Security › Microphone, or the VM records silence or nothing. With the
+   Bridge off but the camera on (UTM, Fusion), *OmacVM Bridge* is still
+   installed for the camera and asks for Location Services, Accessibility and
+   Bluetooth too: say no, the camera does not need them.
 2. **Parallels: let Cmd reach Omarchy.** Parallels' Linux keyboard profile turns
    Cmd+C/V/X into Ctrl before the VM sees them; the build empties it when no VM
    is running (otherwise: quit Parallels Desktop and run
@@ -369,8 +394,8 @@ omacvm check            # --vm NAME for another VM
 ```
 
 Goes through every feature on the Mac and in the running VM (permissions, the
-Bridge, the bar widgets, gestures, scroll momentum, clipboard and pointer, kernel,
-memory, Omanotch) and prints `ok` / `FAIL` with what to do about each failure.
+Bridge, the bar widgets, gestures, scroll momentum, clipboard and pointer, the
+battery, kernel, memory, Omanotch) and prints `ok` / `FAIL` with what to do about each failure.
 It only reads; nothing is changed. `omacvm vms` lists your VMs and their
 OmacVM version.
 
@@ -416,6 +441,20 @@ needs a token.
   Hyprland turns them into real gestures. Each VM tells it what it wants, so a
   VM without gestures keeps macOS's own. Over the full-screen VM it also hides
   the Mac's pointer, so only Omarchy's shows.
+- **The camera** (`src/camera/`): in the VM, `/dev/video42` (*Mac Camera*,
+  v4l2loopback) looks like any webcam. `omacvm-camera` watches who opens it
+  and only then asks the Mac for frames: from the Bridge over the VM network
+  on UTM and Fusion, from OmacVM.app over a virtio port. The Mac sends 1280×720
+  frames while an app reads, and turns the camera off when the last one
+  stops. Parallels passes the camera itself. The code comes from
+  [try-omarchy](https://github.com/omacom/try-omarchy)'s camera bridge.
+- **Omanotch** (`src/omanotch/`, on a MacBook with a notch): `notchcast` in the
+  VM streams Omarchy's bar to Omanotch.app on the Mac, which shows it beside
+  the notch. [How it works](src/omanotch/README.md).
+- **The Mac's battery** (`src/battery/`, UTM, VMware Fusion and OmacVM.app on a
+  MacBook): a small kernel module shows it to the VM as a real battery, which
+  UPower and Omarchy's bar read; the Bridge (or OmacVM.app itself) sends every
+  change. [How it works](src/battery/README.md).
 
 <p align="center">
   <img src="docs/images/gestures.svg" alt="Three fingers swipe on a MacBook trackpad and Omarchy's workspaces slide from 1 to 2 to 3; then a pinch zooms." width="100%">
@@ -478,11 +517,14 @@ a MacBook Pro M4 Max. The raw numbers and how to run the same tests are in
 ## With Omanotch: the bar beside the notch
 
 On a notched MacBook, the full-screen VM sits *below* the camera housing and
-leaves a black strip across the top. **[Omanotch](https://github.com/gillesgoetsch/omanotch)**
+leaves a black strip across the top. **[Omanotch](src/omanotch/README.md)**
 streams Omarchy's real bar into that strip and gives the space back to your
-windows; the graphics on this page show the two together. It is a separate
-project for Parallels, UTM and VMware Fusion; OmacVM sets it up as a feature on a MacBook
-with a notch (`omacvm enable omanotch` on an existing VM).
+windows; the graphics on this page show the two together. It is part of
+OmacVM (`src/omanotch/`, with its own history; it used to be a separate repo)
+and works on Parallels, UTM, VMware Fusion and OmacVM.app. OmacVM sets it up as
+a feature on a MacBook with a notch (`omacvm enable omanotch` on an existing
+VM): Omanotch.app on the Mac next to the Bridge and Gestures, `notchcast` in
+the VM.
 
 ## Troubleshooting
 
@@ -524,16 +566,21 @@ Security, remove the OmacVM apps from Location Services if still listed.
 ## Credits
 
 [Omarchy](https://omarchy.org) (MIT), [omarchy-mac](https://github.com/omacom/omarchy-mac)
-and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team,
+and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team
+(the camera bridge and OmacVM.app's pieces come from try-omarchy, MIT; see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)),
 [Arch Linux ARM](https://archlinuxarm.org),
 [omarchy-parallels](https://github.com/vincenzopalazzo/omarchy-parallels) by
 Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
 [omarchy-arm-utm](https://github.com/ggalancs/omarchy-arm-utm), whose UTM
 findings (virtio-gpu settings, UTM's scripting) shaped the UTM route and
-whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The bar
+whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The Mac's
+battery in the VM (kernel module, agent, the Mac's side) comes from
+try-omarchy; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The bar
 widgets are clones of Omarchy's own. OmacVM is a community project, not
 affiliated with the Omarchy team, Parallels, UTM, VMware (Broadcom) or Apple.
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](LICENSE). The code OmacVM reuses from others is listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

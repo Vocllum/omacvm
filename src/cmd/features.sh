@@ -4,7 +4,7 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes]
 #   omacvm disable FEATURE... [--vm NAME] [--yes]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock idle-lock autologin thp-kernel. A feature that needs another one brings it
+# mac-clock camera battery idle-lock autologin thp-kernel. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM. A stopped VM is started.
@@ -54,11 +54,7 @@ if [[ -z $version ]]; then   # not an OmacVM VM yet: what it would get
 fi
 OLD=("${FV[@]}")
 
-available() {   # INDEX -> status 0 if this Mac can use it; REASON otherwise
-  REASON=""
-  if feature_has_tag "$1" notch && [[ $NOTCH != notch ]]; then REASON="needs a MacBook with a notch"; return 1; fi
-  return 0
-}
+available() { feature_available "$1"; }   # INDEX -> status 0 if this Mac and VM can use it; REASON otherwise
 
 # set_on INDEX on|off, with what it needs or what needs it
 set_on() {

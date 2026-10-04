@@ -2,7 +2,7 @@
 # omacvm check: is every OmacVM feature in place and working, on the Mac and
 # in a running VM (Parallels, UTM or VMware Fusion)? Read-only; run it after a build or an
 # apply, or whenever something seems off:
-#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME] [--key PRIVATE_KEY] [--json]
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY] [--json]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
 # per feature (ok / FAIL / skip); exits 1 if anything failed. The desktop user
 # must be logged in to the VM.
@@ -46,7 +46,7 @@ if [[ -z $IP ]]; then
   IFS=$'\t' read -r VM TYPE IP <<<"$r"
   [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM or VMware Fusion VM named '$VM' (or pass --vm-type and --ip)"
+[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"
 case $TYPE in
   parallels) HOST=10.211.55.2
              [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || stop 1 "no IP for VM '$VM' (is it running?)" ;;
@@ -54,7 +54,9 @@ case $TYPE in
        [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || stop 1 "no IP for UTM VM '$VM' (is it running?)" ;;
   fusion) HOST=$(fusion_host)
           [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || stop 1 "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
-  *) stop 2 "--vm-type parallels, utm or fusion" ;;
+  app) HOST=127.0.0.1   # OmacVM.app: the VM reaches the Mac's 127.0.0.1 as 10.0.2.2
+       [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running" ;;
+  *) stop 2 "--vm-type parallels, utm, fusion or app" ;;
 esac
 export OMA_KEY=$KEY
 
@@ -121,10 +123,15 @@ if [[ $BRIDGE == on ]]; then
   T=~/Library/Application\ Support/omacvm-bridge/token
   if [[ -s $T ]]; then
     [[ $(stat -f %Lp "$T") == 600 ]] && ok "token" "private (600)" || bad "token" "readable by others: chmod 600"
-    st=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/state")
+    # The token only to this user's Bridge (on 127.0.0.1 any Mac program could
+    # listen), and through a header file, never on a command line.
+    bget() { curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831$1"; }
+    lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1 ||
+      { bad "Bridge" "$HOST:47831 is not held by this user's OmacVM Bridge: token not sent"; bget() { :; }; }
+    st=$(bget /state)
     if jq -e .location_authorized <<<"$st" >/dev/null 2>&1; then ok "Location Services" "granted (Wi-Fi names)"
     else bad "Location Services" "not granted to OmacVM Bridge (System Settings > Privacy & Security > Location Services)" human; fi
-    bt=$(curl -s -m 3 -H "Authorization: Bearer $(cat "$T")" "http://$HOST:47831/bluetooth")
+    bt=$(bget /bluetooth)
     case $(jq -r '.permission // empty' <<<"$bt" 2>/dev/null) in
       granted) ok "Bluetooth" "granted (connect devices from the VM)" ;;
       "") bad "Bluetooth" "the Bridge does not answer /bluetooth: src/mac/install.sh" ;;
@@ -133,10 +140,32 @@ if [[ $BRIDGE == on ]]; then
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
+  c=~/Library/Application\ Support/omacvm-bridge/config.json
+  if [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
+    skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
+  else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
 else skip "Bridge" "off (chosen at setup)"; fi
+# The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
+if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
+  running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
+    || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
+fi
+# The microphone: the VM's app records only with macOS's permission, and its
+# recording helper cannot ask (docs/troubleshooting.md, finding 22). Its log says so.
+miclog=""
+case $TYPE in
+  fusion) x=$(fusion_vmx "$VM" 2>/dev/null) && miclog="$(dirname "$x")/vmware.log"; micapp="VMware Fusion" ;;
+  app) d=$(app_dir "$VM" 2>/dev/null) && miclog="$d/logs/qemu.log"; micapp="OmacVM" ;;
+esac
+if [[ -n $miclog && -f $miclog ]]; then
+  if grep -q -e "Failed to start input audio queue" -e "SDL_OpenAudioDevice for recording failed" -e "no microphone permission yet" "$miclog"; then
+    bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
+  else ok "microphone" "no refusal in $micapp's log"; fi
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
+if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
@@ -145,7 +174,7 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
-      g=$(grep "guest connected: $IP " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
@@ -156,6 +185,28 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion ]]; then
       || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+# The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
+# passes it on its own port; Parallels gives the VM its own.
+if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
+  if [[ $TYPE == app ]]; then
+    pid=$(app_pid_dir "$(app_dir "$VM")" 2>/dev/null)
+    if [[ -n $pid ]] && ps -o args= -p "$pid" | grep -q 'name=org.omacvm.battery'; then ok "battery (Mac)" "OmacVM.app passes it (virtio port)"
+    else bad "battery (Mac)" "this OmacVM.app does not pass the battery: omacvm update, then shut the VM down and start it again"; fi
+  elif ! running org.omacvm.bridge; then
+    bad "battery (Mac)" "OmacVM Bridge is not running: it serves the battery to $TYPE VMs (omacvm apply)"
+  else
+    T=~/Library/Application\ Support/omacvm-bridge/token b=""
+    # The token only to this user's Bridge (as above).
+    if [[ -s $T ]] && lsof -nP -a -u "$(id -u)" -c omacvm-bridge -iTCP@"$HOST":47831 -sTCP:LISTEN >/dev/null 2>&1; then
+      b=$(curl -s -m 3 -H @<(printf 'Authorization: Bearer %s\n' "$(cat "$T")") "http://$HOST:47831/battery")
+    fi
+    case $(jq -r '.present | tostring' <<<"$b" 2>/dev/null) in
+      true) ok "battery (Mac)" "the Bridge serves it: $(jq -r '"\(.percentage) %, \(.state)"' <<<"$b")" ;;
+      false) skip "battery (Mac)" "this Mac has no battery" ;;
+      *) bad "battery (Mac)" "the Bridge does not answer /battery (older than the battery: omacvm update)" ;;
+    esac
+  fi
+fi
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
@@ -185,7 +236,21 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
-pgrep -xq omanotch && ok "Omanotch (Mac)" "running" || skip "Omanotch (Mac)" "not running"
+if pgrep -xq omanotch; then
+  # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
+  [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
+  ok "Omanotch (Mac)" "running, bar height: $h"
+else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
+if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
+  rc=0; omanotch_serves_app || rc=$?
+  (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
+fi
+if [[ $TYPE == app ]]; then
+  # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
+  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
+  [[ $n == 1 ]] && skip "notch strip (app)" "the app's full screen covers it (no Space of its own)" \
+    || skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"
+fi
 (( fails )) && mac_failed=1 || mac_failed=0
 
 if (( JSON )); then

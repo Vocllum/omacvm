@@ -1,0 +1,14 @@
+[Unit]
+Description=OmacVM: the Mac's camera as /dev/video42 (Mac Camera)
+StartLimitIntervalSec=0
+# Enabled for every user: not for root's own manager (an SSH login starts it),
+# which would take /dev/video42 before the desktop user's.
+ConditionUser=!@system
+
+[Service]
+ExecStart=/usr/local/bin/omacvm-camera
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

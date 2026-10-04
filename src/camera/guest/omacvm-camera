@@ -1,0 +1,476 @@
+#!/usr/bin/python3
+# OmacVM: from try-omarchy (omarchy-native-camera-bridge), MIT, (c) Try Omarchy contributors.
+"""The Mac's camera as a Linux camera: /dev/video42, "Mac Camera".
+  omacvm-camera            the service (omacvm-camera.service, as the desktop user)
+  omacvm-camera --status   JSON: the Bridge's /camera/status (UTM, Fusion), or
+                           whether OmacVM.app's port is there
+
+v4l2loopback makes /dev/video42 (exclusive_caps: apps see a normal camera).
+This service writes the Mac's frames into it, 1280x720 NV12, and asks the Mac
+for them only while an app reads the camera (v4l2loopback's client-usage
+events), so the Mac's camera and its green light are off otherwise.
+
+Where the frames come from (OMACVM_VM_TYPE in /etc/omacvm/env):
+  app        OmacVM.app, the virtio port org.omacvm.camera
+  utm|fusion OmacVM Bridge on the Mac, GET /camera on port 47831, connected
+             only while an app reads; the token goes only to a Bridge that
+             proved it knows it (as omacvm-bridge)
+Both carry the same messages (src/bridge/mac/camera.swift): {"type": "start"}
+and {"type": "stop"} lines to the Mac, status and frame messages back.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import errno
+import fcntl
+import hashlib
+import hmac
+import http.client
+import json
+import os
+from pathlib import Path
+import select
+import socket
+import struct
+import sys
+import time
+from typing import Any
+
+
+PORT = Path("/dev/virtio-ports/org.omacvm.camera")
+CAMERA = Path("/dev/video42")
+TOKEN = Path.home() / ".config/omacvm-bridge/token"
+BRIDGE_PORT = 47831
+MAGIC = b"TOCM"
+VERSION = 1
+HEADER = struct.Struct("<4sBBHII")
+KIND_STATUS = 1
+KIND_FRAME = 2
+WIDTH = 1280
+HEIGHT = 720
+FRAME_BYTES = WIDTH * HEIGHT * 3 // 2
+MAX_STATUS_BYTES = 4096
+
+V4L2_BUF_TYPE_VIDEO_OUTPUT = 2
+V4L2_FIELD_NONE = 1
+V4L2_COLORSPACE_REC709 = 3
+V4L2_YCBCR_ENC_709 = 2
+V4L2_QUANTIZATION_LIM_RANGE = 2
+V4L2_XFER_FUNC_709 = 1
+V4L2_EVENT_PRIVATE_START = 0x08000000
+V4L2LOOPBACK_EVENT_OFFSET = 0x08E00000
+V4L2_EVENT_PRI_CLIENT_USAGE = V4L2_EVENT_PRIVATE_START + V4L2LOOPBACK_EVENT_OFFSET + 1
+V4L2_EVENT_SUB_FL_SEND_INITIAL = 0x0001
+
+
+def log(message: str) -> None:
+    print(f"omacvm-camera: {message}", file=sys.stderr, flush=True)
+
+
+def fourcc(value: str) -> int:
+    return int.from_bytes(value.encode("ascii"), "little")
+
+
+class V4L2PixFormat(ctypes.Structure):
+    _fields_ = [
+        ("width", ctypes.c_uint32),
+        ("height", ctypes.c_uint32),
+        ("pixelformat", ctypes.c_uint32),
+        ("field", ctypes.c_uint32),
+        ("bytesperline", ctypes.c_uint32),
+        ("sizeimage", ctypes.c_uint32),
+        ("colorspace", ctypes.c_uint32),
+        ("priv", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("ycbcr_enc", ctypes.c_uint32),
+        ("quantization", ctypes.c_uint32),
+        ("xfer_func", ctypes.c_uint32),
+    ]
+
+
+class V4L2FormatValue(ctypes.Union):
+    # The kernel's union has pointer members: 8-byte aligned, 200 bytes.
+    _fields_ = [
+        ("pix", V4L2PixFormat),
+        ("raw_data", ctypes.c_uint8 * 200),
+        ("alignment", ctypes.c_uint64),
+    ]
+
+
+class V4L2Format(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_uint32), ("value", V4L2FormatValue)]
+
+
+class V4L2EventSubscription(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_uint32),
+        ("id", ctypes.c_uint32),
+        ("flags", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 5),
+    ]
+
+
+class TimeSpec(ctypes.Structure):
+    _fields_ = [("seconds", ctypes.c_long), ("nanoseconds", ctypes.c_long)]
+
+
+class V4L2EventData(ctypes.Union):
+    # 8-byte aligned on aarch64 (struct v4l2_event_ctrl has a 64-bit member),
+    # so the client count sits at offset 8, not 4.
+    _fields_ = [
+        ("raw_data", ctypes.c_uint8 * 64),
+        ("alignment", ctypes.c_int64),
+    ]
+
+
+class V4L2Event(ctypes.Structure):
+    _fields_ = [
+        ("type", ctypes.c_uint32),
+        ("data", V4L2EventData),
+        ("pending", ctypes.c_uint32),
+        ("sequence", ctypes.c_uint32),
+        ("timestamp", TimeSpec),
+        ("id", ctypes.c_uint32),
+        ("reserved", ctypes.c_uint32 * 8),
+    ]
+
+
+def ioctl_number(direction: int, kind: str, number: int, size: int) -> int:
+    return (direction << 30) | (size << 16) | (ord(kind) << 8) | number
+
+
+VIDIOC_S_FMT = ioctl_number(3, "V", 5, ctypes.sizeof(V4L2Format))
+VIDIOC_DQEVENT = ioctl_number(2, "V", 89, ctypes.sizeof(V4L2Event))
+VIDIOC_SUBSCRIBE_EVENT = ioctl_number(1, "V", 90, ctypes.sizeof(V4L2EventSubscription))
+
+
+def black_frame() -> bytes:
+    return bytes([16]) * (WIDTH * HEIGHT) + bytes([128]) * (WIDTH * HEIGHT // 2)
+
+
+BLACK = black_frame()
+
+
+def write_frame(descriptor: int, frame: bytes | bytearray | memoryview) -> None:
+    written = os.write(descriptor, frame)
+    if written != FRAME_BYTES:
+        raise RuntimeError(f"the camera took {written} of {FRAME_BYTES} bytes")
+
+
+def configure_camera(descriptor: int) -> None:
+    value = V4L2Format()
+    value.type = V4L2_BUF_TYPE_VIDEO_OUTPUT
+    value.value.pix = V4L2PixFormat(
+        width=WIDTH, height=HEIGHT, pixelformat=fourcc("NV12"), field=V4L2_FIELD_NONE,
+        bytesperline=WIDTH, sizeimage=FRAME_BYTES, colorspace=V4L2_COLORSPACE_REC709,
+        priv=0, flags=0, ycbcr_enc=V4L2_YCBCR_ENC_709,
+        quantization=V4L2_QUANTIZATION_LIM_RANGE, xfer_func=V4L2_XFER_FUNC_709,
+    )
+    fcntl.ioctl(descriptor, VIDIOC_S_FMT, value, True)
+    got = value.value.pix
+    if got.width != WIDTH or got.height != HEIGHT or got.pixelformat != fourcc("NV12") or got.sizeimage < FRAME_BYTES:
+        raise RuntimeError("v4l2loopback did not take 1280x720 NV12")
+    # The first frame makes the exclusive-caps device a capture device, so
+    # browsers list it before anything reads it.
+    write_frame(descriptor, BLACK)
+    sub = V4L2EventSubscription()
+    sub.type = V4L2_EVENT_PRI_CLIENT_USAGE
+    sub.flags = V4L2_EVENT_SUB_FL_SEND_INITIAL
+    fcntl.ioctl(descriptor, VIDIOC_SUBSCRIBE_EVENT, sub, True)
+
+
+def readers(descriptor: int) -> int:
+    event = V4L2Event()
+    fcntl.ioctl(descriptor, VIDIOC_DQEVENT, event, True)
+    if event.type != V4L2_EVENT_PRI_CLIENT_USAGE:
+        return -1
+    return int.from_bytes(bytes(event.data.raw_data[:4]), sys.byteorder)
+
+
+class Parser:
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+
+    def feed(self, chunk: bytes) -> list[tuple[int, bytes]]:
+        self.buffer.extend(chunk)
+        out: list[tuple[int, bytes]] = []
+        while len(self.buffer) >= HEADER.size:
+            magic, version, kind, reserved, size, _ = HEADER.unpack_from(self.buffer)
+            if magic != MAGIC or version != VERSION or reserved != 0:
+                raise ValueError("the Mac sent a message this camera does not know")
+            if (kind == KIND_FRAME and size != FRAME_BYTES) or (kind == KIND_STATUS and size > MAX_STATUS_BYTES) \
+                    or kind not in (KIND_FRAME, KIND_STATUS):
+                raise ValueError("the Mac sent a message of the wrong size")
+            if len(self.buffer) < HEADER.size + size:
+                break
+            out.append((kind, bytes(self.buffer[HEADER.size:HEADER.size + size])))
+            del self.buffer[:HEADER.size + size]
+        return out
+
+
+def request(kind: str) -> bytes:
+    return json.dumps({"type": kind}, separators=(",", ":")).encode() + b"\n"
+
+
+def send_all(descriptor: int, data: bytes) -> None:
+    view = memoryview(data)
+    deadline = time.monotonic() + 5
+    while view:
+        try:
+            view = view[os.write(descriptor, view):]
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                raise OSError(errno.ETIMEDOUT, "the Mac does not take the request")
+            select.select([], [descriptor], [], 1)
+
+
+def env() -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        for line in Path("/etc/omacvm/env").read_text().splitlines():
+            key, _, value = line.partition("=")
+            values[key] = value
+    except OSError:
+        pass
+    return values
+
+
+class Port:
+    """OmacVM.app: the virtio port, open all the time."""
+
+    def __init__(self) -> None:
+        self.fd = -1
+
+    def want(self, on: bool) -> bool:
+        if self.fd < 0:
+            try:
+                self.fd = os.open(PORT, os.O_RDWR | os.O_CLOEXEC | os.O_NOCTTY | os.O_NONBLOCK)
+            except FileNotFoundError:
+                return False
+            send_all(self.fd, request("stop"))   # whatever an earlier run left on
+        send_all(self.fd, request("start" if on else "stop"))
+        return True
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+
+
+class Bridge:
+    """UTM and VMware Fusion: OmacVM Bridge, connected only while an app reads."""
+
+    def __init__(self, host: str) -> None:
+        self.host = host
+        self.fd = -1
+        self.sock: socket.socket | None = None
+        self.rest = b""
+
+    def proven(self, token: bytes) -> bool:
+        nonce = os.urandom(16).hex()
+        try:
+            c = http.client.HTTPConnection(self.host, BRIDGE_PORT, timeout=5)
+            c.request("GET", f"/proof?nonce={nonce}")
+            proof = json.loads(c.getresponse().read()).get("proof", "")
+            c.close()
+        except (OSError, ValueError, AttributeError, http.client.HTTPException):
+            return False
+        want = hmac.new(token, f"omacvm-bridge mac {self.host} {nonce}".encode(), hashlib.sha256).hexdigest()
+        return isinstance(proof, str) and hmac.compare_digest(want, proof)
+
+    def status(self) -> dict[str, Any]:
+        """GET /camera/status: the Mac's camera permission and who reads it."""
+        token = TOKEN.read_bytes().strip()
+        if not self.proven(token):
+            raise RuntimeError(f"{self.host}:{BRIDGE_PORT} did not prove it is OmacVM's Bridge")
+        c = http.client.HTTPConnection(self.host, BRIDGE_PORT, timeout=5)
+        c.request("GET", "/camera/status", headers={"Authorization": "Bearer " + token.decode()})
+        r = c.getresponse()
+        if r.status != 200:
+            raise RuntimeError(f"the Bridge answered {r.status} (too old? omacvm update)")
+        return json.loads(r.read())
+
+    def want(self, on: bool) -> bool:
+        if not on:
+            if self.fd >= 0:
+                try:
+                    send_all(self.fd, request("stop"))
+                except OSError:
+                    pass
+            self.close()
+            return True
+        if self.fd >= 0:
+            return True
+        try:
+            token = TOKEN.read_bytes().strip()
+        except OSError:
+            log(f"no {TOKEN} (omacvm apply copies it)")
+            return False
+        if not self.proven(token):
+            log(f"{self.host}:{BRIDGE_PORT} did not prove it is OmacVM's Bridge (not running, or too old: omacvm update); token not sent")
+            return False
+        try:
+            s = socket.create_connection((self.host, BRIDGE_PORT), timeout=5)
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * FRAME_BYTES)
+            s.sendall(f"GET /camera HTTP/1.1\r\nHost: {self.host}\r\nAuthorization: Bearer ".encode()
+                      + token + b"\r\n\r\n")
+            head = b""
+            while b"\r\n\r\n" not in head and len(head) < 4096:
+                part = s.recv(4096)
+                if not part:
+                    break
+                head += part
+            head, _, self.rest = head.partition(b"\r\n\r\n")
+            first = head.split(b"\r\n")[0].decode(errors="replace")
+            if not first.startswith("HTTP/1.1 200"):
+                log(f"the Bridge said: {first or 'nothing'}")
+                s.close()
+                return False
+            s.setblocking(False)
+        except OSError as error:
+            log(f"cannot reach the Bridge at {self.host}:{BRIDGE_PORT}: {error}")
+            return False
+        self.sock, self.fd = s, s.fileno()
+        send_all(self.fd, request("start"))
+        return True
+
+    def close(self) -> None:
+        if self.sock is not None:
+            self.sock.close()
+        self.sock, self.fd = None, -1
+
+
+def open_camera() -> int:
+    while True:
+        try:
+            return os.open(CAMERA, os.O_RDWR | os.O_CLOEXEC)
+        except FileNotFoundError:
+            time.sleep(2)
+
+
+def main() -> int:
+    values = env()
+    kind = values.get("OMACVM_VM_TYPE", "")
+    link: Port | Bridge
+    if kind == "app":
+        link = Port()
+    elif kind in ("utm", "fusion"):
+        link = Bridge(values.get("OMACVM_HOST", ""))
+    else:
+        log(f"nothing to do on {kind or 'this VM'} (Parallels passes the camera itself)")
+        return 0
+    camera = open_camera()
+    configure_camera(camera)
+    parser = Parser()
+    active = False       # an app reads the camera
+    streaming = False    # the Mac sends frames
+    retry = 0.0          # Bridge: when to connect again
+    quiet_until = 0.0    # Port: the app is not connected, look again then
+    black_at = 0.0
+    unavailable = ""     # the Mac's last reason, logged once (the Mac tries again by itself)
+
+    def handle(chunk: bytes) -> None:
+        nonlocal streaming, unavailable
+        for kind_, payload in parser.feed(chunk):
+            if kind_ == KIND_FRAME:
+                if active:
+                    write_frame(camera, payload)
+                continue
+            status: Any = json.loads(payload)
+            state = status.get("status") if isinstance(status, dict) else None
+            if state == "streaming":
+                streaming = active
+                unavailable = ""
+                log(f"streaming the Mac's {status.get('name', 'camera')}")
+            elif state == "idle" and active and link.fd >= 0:
+                send_all(link.fd, request("start"))   # a new connection on the Mac's side
+            elif state == "unavailable":
+                streaming = False
+                reason = str(status.get("reason", "error"))
+                if reason != unavailable:
+                    log(f"the Mac's camera is unavailable ({reason}); black until it is back")
+                unavailable = reason
+
+    if isinstance(link, Port):
+        link.want(False)   # whatever an earlier run left on
+    try:
+        while True:
+            now = time.monotonic()
+            if active and isinstance(link, Bridge) and link.fd < 0 and now >= retry:
+                if link.want(True):
+                    parser = Parser()
+                    handle(link.rest)
+                else:
+                    retry = now + 5
+            # Waiting for the Mac (its permission prompt, a reconnect): black
+            # frames, so the app shows black instead of stalling.
+            if active and not streaming and now >= black_at:
+                write_frame(camera, BLACK)
+                black_at = now + 0.2
+            poller = select.poll()
+            poller.register(camera, select.POLLPRI)
+            if link.fd >= 0 and now >= quiet_until:
+                poller.register(link.fd, select.POLLIN)
+            for fd, events in poller.poll(200 if active else 1000):
+                if fd == camera:
+                    n = readers(camera)
+                    if n < 0 or (n > 0) == active:
+                        continue
+                    active = n > 0
+                    log("an app reads the camera: asking the Mac" if active else "no app reads the camera any more: Mac camera off")
+                    if active:
+                        retry = 0.0
+                        if isinstance(link, Port) and not link.want(True):
+                            log(f"no {PORT}: start the VM from an OmacVM.app with the camera (omacvm update)")
+                    else:
+                        streaming = False
+                        link.want(False)
+                        write_frame(camera, BLACK)
+                    continue
+                chunk = b""
+                if events & select.POLLIN:
+                    try:
+                        chunk = os.read(fd, 1 << 20)
+                    except BlockingIOError:
+                        continue
+                    except OSError:
+                        chunk = b""
+                if chunk:
+                    handle(chunk)
+                elif isinstance(link, Port):
+                    quiet_until = time.monotonic() + 1   # the app is not connected (yet)
+                else:
+                    log("the Bridge closed the camera")
+                    link.close()
+                    streaming = False
+                    retry = time.monotonic() + 2
+    finally:
+        try:
+            link.want(False)
+        except OSError:
+            pass
+        link.close()
+        os.close(camera)
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["--status"]:   # for omacvm check
+        values = env()
+        try:
+            if values.get("OMACVM_VM_TYPE") in ("utm", "fusion"):
+                print(json.dumps(Bridge(values.get("OMACVM_HOST", "")).status()))
+            else:
+                print(json.dumps({"port": PORT.exists()}))
+        except (OSError, ValueError, RuntimeError, http.client.HTTPException) as error:
+            print(json.dumps({"error": str(error)}))
+            raise SystemExit(1)
+        raise SystemExit(0)
+    try:
+        raise SystemExit(main())
+    except Exception as error:
+        if isinstance(error, OSError) and error.errno == errno.ENODEV:
+            log("the camera device went away")
+        else:
+            log(str(error))
+        raise SystemExit(1)

@@ -5,9 +5,12 @@ pinch/rotate like on a real Apple touchpad; on UTM it also types the Mac's Cmd
 shortcuts as Super.
 
 Connects to the Mac helper (gestures/mac) at the Mac's address on the VM
-network (/etc/omacvm/env), says what this VM wants ("H <gestures> <glide>
-<token> <name>": the feature choices and the VM's name from the same file, the
-name so the Mac can tell two VMs of one app apart) and reads lines:
+network (/etc/omacvm/env). The helper first proves it knows the Bridge's token
+("C <nonce>" from here, "M <nonce> <proof>" back, HMAC-SHA256), then this VM
+does and says what it wants ("R <gestures> <glide> <proof> <name>": the feature
+choices and the VM's name from the same file, the name so the Mac can tell two
+VMs of one app apart). The token itself never goes over the wire, and nothing
+from a listener without the proof is acted on. Then it reads lines:
   F <n> [<id> <x> <y> <size>]...   finger frame, x/y 0..1 (y down)
   S <on|off|esc>                    capture state (esc = released by the escape combo)
   O <natural> <w> <h>               the Mac's scrolling direction, trackpad size (1/100 mm)
@@ -24,9 +27,13 @@ rebuilt here from the real fingers plus macOS's own acceleration and momentum
 notification to the desktop user when the escape combo is used.
 """
 import glob
+import hashlib
+import hmac
 import math
 import os
 import pwd
+import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -58,6 +65,9 @@ def env_floats(name, default):
 
 
 HOST = os.environ.get("OMACVM_GESTURES_HOST") or os.environ.get("OMACVM_HOST") or "10.211.55.2"
+# The Mac address the helper must have accepted on (both proofs name it):
+# OmacVM.app's 10.0.2.2 is the Mac's 127.0.0.1.
+MAC_ADDR = "127.0.0.1" if os.environ.get("OMACVM_VM_TYPE") == "app" else HOST
 PORT = int(env_float("OMACVM_GESTURES_PORT", 47830))
 # The VM's feature choices (/etc/omacvm/env, loaded by the service).
 GESTURES = os.environ.get("OMACVM_FEATURE_gestures", "on") == "on"
@@ -568,18 +578,40 @@ def bridge_token():
         return ""
 
 
+def proof(tok, who, gn, mn):
+    """HMAC-SHA256(token, "omacvm-gestures <who> <Mac address> <guest nonce> <mac nonce>"), hex.
+    With the address, a listener on 127.0.0.1 cannot pass on a proof it got from
+    the helper on 10.211.55.2."""
+    msg = f"omacvm-gestures {who} {MAC_ADDR} {gn} {mn}"
+    return hmac.new(tok.encode(), msg.encode(), hashlib.sha256).hexdigest().encode()
+
+
 def run(pad, keys, glide):
+    # Any VM on the Mac's VM networks can reach the Mac's listener, and on
+    # 127.0.0.1 (OmacVM.app) any program on the Mac could listen in its place:
+    # both sides prove they know the Bridge's token, the Mac first.
+    tok = bridge_token()
+    if not tok:
+        raise ConnectionError("no Bridge token yet (omacvm apply puts it in ~/.config/omacvm-bridge/token)")
     with socket.create_connection((HOST, PORT), timeout=5) as s:
         s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        # The Bridge's token: any VM on the Mac's VM networks can reach the
-        # Mac's listener, so it lets in only VMs that know it.
-        tok = bridge_token()
-        # The name only after a token (the Mac reads the fields in order).
-        s.sendall(f"H {int(GESTURES)} {int(GLIDE_ON)}{' ' + tok if tok else ''}"
-                  f"{' ' + NAME if tok and NAME else ''}\n".encode())
+        gn = secrets.token_hex(16)
+        s.sendall(f"C {gn}\n".encode())
+        buf = b""
+        while b"\n" not in buf and len(buf) < 4096:
+            data = s.recv(4096)
+            if not data:
+                raise ConnectionError(f"{HOST}:{PORT} closed the connection (OmacVM Gestures on the Mac "
+                                      "from before the handshake? omacvm update)")
+            buf += data
+        line, _, buf = buf.partition(b"\n")
+        m = re.fullmatch(rb"M ([0-9a-f]{32}) ([0-9a-f]{64})", line)
+        if not m or not hmac.compare_digest(m[2], proof(tok, "mac", gn, m[1].decode())):
+            raise ConnectionError(f"{HOST}:{PORT} did not prove it knows the Bridge's token: not talking to it")
+        s.sendall(f"R {int(GESTURES)} {int(GLIDE_ON)} {proof(tok, 'vm', gn, m[1].decode()).decode()}"
+                  f"{' ' + NAME if NAME else ''}\n".encode())
         print(f"omacvm-gestures: connected to {HOST}:{PORT} (gestures {'on' if GESTURES else 'off'}, "
               f"scroll momentum {'on' if GLIDE_ON else 'off'})", flush=True)
-        buf = b""
         tick = -1          # forces the first settimeout (create_connection left 5 s)
         while True:
             # A 2 ms tick (the glide's clock) only while a frame or a held

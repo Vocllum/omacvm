@@ -2,7 +2,7 @@
 # omacvm apply: put OmacVM onto a running VM (Parallels, UTM or VMware Fusion), or bring it up
 # to this version: the Mac side the VM's features need, then the VM side. Also
 # for an Omarchy you installed by hand from omarchy-mac.
-#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion] [--user NAME]
+#   omacvm apply [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME]
 #                [--feature NAME=on|off]... [--FEATURE | --no-FEATURE]...
 #                [--keyboard "LAYOUT [VARIANT]"] [--display WxH@Hz] [--key PRIVATE_KEY] [--no-mac]
 #                [--reset-host-key]
@@ -60,13 +60,13 @@ NOTCH=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)
 # Its SSH host key: remembered now when there is none yet, checked after that.
 export OMA_PIN_NEW=1
 if [[ -n $IP ]]; then
-  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm or fusion" >&2; exit 2; }
+  [[ -n $TYPE ]] || TYPE=$(vm_type "${VM:-Omarchy}") || { echo "omacvm apply: with --ip, pass --vm-type parallels, utm, fusion or app" >&2; exit 2; }
   if [[ -n $VM ]]; then vm_pin "$VM" "$TYPE"
   else VM="the VM at $IP"; NAMED=0; OMA_PIN=""; OMA_PIN_ARGS="--ip $IP --vm-type $TYPE"; export OMA_PIN OMA_PIN_ARGS; fi   # an address is no identity (DHCP reuses it): no key kept
 else
   resolve_vm start
 fi
-case $TYPE in parallels|utm|fusion) ;; *) echo "omacvm apply: --vm-type parallels, utm or fusion" >&2; exit 2 ;; esac
+case $TYPE in parallels|utm|fusion|app) ;; *) echo "omacvm apply: --vm-type parallels, utm, fusion or app" >&2; exit 2 ;; esac
 vm_network_ok "$TYPE" "$IP" || exit 3
 ssh_ok=0; (wait_ssh "$IP" 120) >/dev/null 2>&1 || ssh_ok=$?
 (( ssh_ok != 3 )) || { hostkey_error; exit 3; }
@@ -85,6 +85,7 @@ had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
+notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # OmacVM.app: see below
 # New to OmacVM (or a prebuilt VM before its first apply): the defaults,
 # Omanotch with a notch.
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
@@ -95,27 +96,28 @@ before=("${FV[@]}"); features_fix
 for ((i = 0; i < ${#FN[@]}; i++)); do
   [[ ${before[$i]} != "${FV[$i]}" ]] && info "${FTITLE[$i]}: off (it needs ${FNEEDS[$i]})"
 done
+# Parallels shows the Mac's battery itself.
+[[ $TYPE == parallels ]] && FV[$(feature_index battery)]=off
 on() { [[ ${FV[$(feature_index "$1")]} == on ]]; }
+# UTM and Fusion get the Mac's battery and camera from OmacVM Bridge, also with
+# its bar features off (OmacVM.app passes them itself).
+battery_via_bridge() { on battery && [[ $TYPE == utm || $TYPE == fusion ]]; }
+camera_via_bridge() { on camera && [[ $TYPE == utm || $TYPE == fusion ]]; }
+needs_bridge() { on bridge || battery_via_bridge || camera_via_bridge; }
 log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
 
 # ---------- the Mac side ----------
 if (( MAC )); then
   args=(--quiet)
-  on bridge || args+=(--no-bridge)
-  { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
+  needs_bridge || args+=(--no-bridge)
+  { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
+  # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
+  # app's own notch-strip mode is a separate switch in the app, which apply
+  # leaves alone).
+  on omanotch && args+=(--omanotch)
   "$R/src/mac/install.sh" "${args[@]}"
-  if on omanotch; then
-    if [[ ! -d $HOME/omanotch ]]; then
-      log "Omanotch on the Mac"
-      git clone -q https://github.com/gillesgoetsch/omanotch.git "$HOME/omanotch"
-      "$HOME/omanotch/mac/install.sh"
-    elif [[ ! -d $HOME/Applications/Omanotch.app ]]; then
-      log "Omanotch on the Mac"
-      "$HOME/omanotch/mac/install.sh"
-    fi
-  fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
     case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
@@ -126,6 +128,12 @@ if (( MAC )); then
   fi
 fi
 
+# An Omanotch from before OmacVM.app listens only on the other routes' networks.
+if on omanotch && [[ $TYPE == app ]]; then
+  rc=0; omanotch_serves_app || rc=$?
+  (( rc != 1 )) || info "Omanotch on this Mac is too old for OmacVM.app's VMs (it does not serve 127.0.0.1): the strip beside the notch stays empty until it is updated (omacvm update)"
+fi
+
 # ---------- the VM side ----------
 # Parallels Tools: a prebuilt VM comes without them (they are Parallels' own).
 if (( TOOLS )) && [[ $TYPE == parallels ]] && ! gssh "$IP" "systemctl cat prltoolsd >/dev/null 2>&1" < /dev/null; then
@@ -134,9 +142,10 @@ if (( TOOLS )) && [[ $TYPE == parallels ]] && ! gssh "$IP" "systemctl cat prltoo
 fi
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
-if (( MAC )) && on bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
-# The gestures daemon says it too (on UTM and Fusion it always runs).
-if (( TOKEN )) && { on gestures || [[ $TYPE == utm || $TYPE == fusion ]]; }; then bridge_token_ensure; fi
+if (( MAC )) && needs_bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
+# The gestures daemon says it too (on UTM, Fusion and OmacVM.app it always
+# runs; OmacVM.app's VMs show it on 127.0.0.1 even without the Bridge).
+if (( TOKEN )) && { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; }; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then
@@ -144,7 +153,7 @@ elif [[ -f $T ]]; then
   gssh "$IP" "set -e; H=\$(getent passwd '$U' | cut -d: -f6)
     install -d -m700 -o '$U' -g '$U' \"\$H/.config/omacvm-bridge\"
     install -m600 -o '$U' -g '$U' /dev/stdin \"\$H/.config/omacvm-bridge/token\"" < "$T"
-elif on bridge; then
+elif needs_bridge; then
   die "no bridge token yet: the Mac side did not install (run omacvm apply without --no-mac)"
 fi
 log "OmacVM -> $IP:/usr/local/share/omacvm"
@@ -159,6 +168,12 @@ on mac-clock && fargs+=" --clock-format-b64 $(swift "$R/src/clock/mac-clock.swif
 (( NAMED )) && fargs+=" --vm-name-b64 $(printf %s "$VM" | base64 | tr -d '\n')"
 gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs" < /dev/null
 gestures_legacy_forget "$IP"   # its daemon says the token now
+# OmacVM.app: this VM now draws Omarchy's own pointer. The app hides the Mac's
+# over the window only for a VM with this file; VMs set up by older versions
+# hid Omarchy's pointer and need the Mac's until they get this apply.
+if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
+  echo omarchy > "$d/guest-pointer"
+fi
 
 if [[ $TYPE == parallels ]]; then
   PVM=$(vm_bundle "$VM")

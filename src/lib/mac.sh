@@ -11,9 +11,11 @@ LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 # every later connection: OMA_PIN is that VM's file (vm_pin, vm.sh), and
 # OMA_PIN_NEW=1 lets a connection record the key when there is none yet. A VM
 # without a remembered key (and OMA_PIN_NEW unset) is reached as before.
+# IP:PORT for OmacVM.app's VMs (127.0.0.1 and the VM's SSH port).
 OMA_PINS="$HOME/Library/Application Support/omacvm/known_hosts"
 gssh() {
-  local ip=$1; shift
+  local ip=$1 port=22; shift
+  [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }
   local hk=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null)
   if [[ -n ${OMA_PIN:-} ]] && [[ -s $OMA_PIN || ${OMA_PIN_NEW:-} == 1 ]]; then
     [[ -s $OMA_PIN ]] || { mkdir -p "$(dirname "$OMA_PIN")" && chmod 700 "$(dirname "$OMA_PIN")"; }
@@ -21,19 +23,20 @@ gssh() {
         -o "UserKnownHostsFile=\"$OMA_PIN\"" -o HostKeyAlias=omacvm-vm -o CheckHostIP=no)
   fi
   ssh -i "${OMA_KEY:-$HOME/.ssh/omacvm}" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=30 \
-    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR "root@$ip" "$@"
+    "${hk[@]}" -o GlobalKnownHostsFile=/dev/null -o LogLevel=ERROR -p "$port" "root@$ip" "$@"
 }
 
 # hostkey_changed IP: the VM answers, with other host keys than the one
 # remembered for it.
 hostkey_changed() {
   [[ -n ${OMA_PIN:-} && -s ${OMA_PIN:-} ]] || return 1
-  local _h t k seen=0
+  local _h t k seen=0 ip=$1 port=22
+  [[ $ip == *:* ]] && { port=${ip##*:}; ip=${ip%:*}; }   # OmacVM.app: 127.0.0.1:PORT
   while read -r _h t k; do
     [[ -n $k ]] || continue
     seen=1
     grep -qF " $t $k" "$OMA_PIN" && return 1
-  done < <(ssh-keyscan -T 5 "$1" 2>/dev/null)
+  done < <(ssh-keyscan -T 5 -p "$port" "$ip" 2>/dev/null)
   (( seen ))
 }
 
@@ -50,6 +53,14 @@ bridge_token_ensure() {
   [[ -f $BRIDGE_TOKEN && $(tr -d '[:space:]' < "$BRIDGE_TOKEN" | wc -c) -ge 32 ]] && return 0
   mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
   (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
+}
+
+# Omanotch on this Mac serves OmacVM.app's VMs (on 127.0.0.1) only from the
+# version that knows the app's QEMU: 0 it does, 1 too old, 2 not installed.
+omanotch_serves_app() {
+  local b=$HOME/Applications/Omanotch.app/Contents/MacOS
+  [[ -d $b ]] || return 2
+  grep -aqF /Contents/Resources/runtime/bin/OmacVM "$b"/* 2>/dev/null || return 1
 }
 
 # Gestures lets daemons from before the token in only from these VMs (MAC
@@ -114,7 +125,9 @@ vm_state() {   # <vm name> -> running|stopped|...
 
 wait_stopped() {   # <vm name>
   local i
-  for ((i = 0; i < 180; i += 3)); do [[ $(vm_state "$1") == stopped ]] && return 0; sleep 3; done
+  # Parallels can take minutes to close a VM's sound devices when macOS's
+  # audio service is slow to answer it (seen: 7 minutes for the microphone).
+  for ((i = 0; i < 600; i += 3)); do [[ $(vm_state "$1") == stopped ]] && return 0; sleep 3; done
   die "VM '$1' did not stop"
 }
 
@@ -228,6 +241,27 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
   die "UTM VM '$1' did not start (try quitting and reopening UTM, then run build.sh again)"
 }
 
+# utm_add_sound NAME: an Intel HDA sound card (speakers and microphone, through
+# UTM's default SPICE audio), for VMs built without one. The VM must be
+# stopped. UTM keeps the configuration it read at its start (it would start
+# the VM without the card), so it is quit when no UTM VM runs (utm_start opens
+# it again); otherwise the card comes with UTM's next start. VMs outside UTM's
+# own folder: unchanged.
+utm_add_sound() {
+  local c="$HOME/Library/Containers/com.utmapp.UTM/Data/Documents/$1.utm/config.plist" i
+  [[ -f $c ]] || return 0
+  [[ $(plutil -extract Sound json -o - "$c" 2>/dev/null) == "[]" ]] || return 0
+  if pgrep -xq UTM; then
+    if "$UTMCTL" list 2>/dev/null | awk 'NR > 1 && $2 == "started"' | grep -q .; then
+      log "UTM: '$1' gets its sound card (speakers and microphone) when UTM starts next"
+    else
+      osascript -e 'quit app "UTM"' >/dev/null 2>&1 || true
+      for ((i = 0; i < 30; i++)); do pgrep -xq UTM || break; sleep 1; done
+    fi
+  fi
+  plutil -replace Sound -json '[{"Hardware":"intel-hda"}]' "$c" && log "UTM: a sound card for '$1' (speakers and microphone)"
+}
+
 utm_wait_stopped() {   # <vm name>
   local i
   for ((i = 0; i < 180; i += 3)); do [[ $(utm_state "$1") == stopped ]] && return 0; sleep 3; done
@@ -247,10 +281,15 @@ FUSION_DIR=${OMACVM_FUSION_DIR:-$HOME/Virtual Machines.localized}   # where omac
 fusion_bundle() { echo "$FUSION_DIR/$1.vmwarevm"; }   # <vm name> -> the folder omacvm build gives it
 fusion_version() { defaults read "/Applications/VMware Fusion.app/Contents/Info" CFBundleShortVersionString 2>/dev/null; }
 
-fusion_list() {   # one line per VM in Fusion's library: NAME<TAB>VMX
+fusion_list() {   # one line per VM: NAME<TAB>VMX
   local x n
-  [[ -f $FUSION_INVENTORY ]] || return 0
-  sed -n 's/^vmlist[0-9]*\.config = "\(.*\.vmx\)"$/\1/p' "$FUSION_INVENTORY" | while IFS= read -r x; do
+  # Fusion's library, the running VMs and the VMs in $FUSION_DIR: a VM started
+  # without a window (OMACVM_HEADLESS=1) never gets into the library.
+  {
+    [[ -f $FUSION_INVENTORY ]] && sed -n 's/^vmlist[0-9]*\.config = "\(.*\.vmx\)"$/\1/p' "$FUSION_INVENTORY"
+    [[ -x $VMRUN ]] && "$VMRUN" list 2>/dev/null | grep '\.vmx$'
+    for x in "$FUSION_DIR"/*.vmwarevm/*.vmx; do [[ -f $x ]] && echo "$x"; done
+  } | awk '!seen[$0]++' | while IFS= read -r x; do
     [[ -f $x ]] || continue
     n=$(sed -n 's/^displayName = "\(.*\)"$/\1/p' "$x" | head -1)
     printf '%s\t%s\n' "${n:-$(basename "$x" .vmx)}" "$x"
@@ -316,6 +355,20 @@ fusion_start() {   # <vm name>
   [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"
 }
 
+# fusion_add_sound NAME: Fusion's HD Audio card (speakers and the Mac's
+# microphone), for VMs built without one. The VM must be stopped.
+fusion_add_sound() {
+  local x k v kv
+  x=$(fusion_vmx "$1") || return 0
+  grep -q '^sound.present = "TRUE"' "$x" && return 0
+  for kv in sound.present=TRUE sound.virtualDev=hdaudio sound.fileName=-1 sound.autodetect=TRUE; do
+    k=${kv%%=*}; v=${kv#*=}
+    sed -i '' "/^$(sed 's/\./\\./g' <<<"$k") /d" "$x"
+    printf '%s = "%s"\n' "$k" "$v" >> "$x"
+  done
+  log "VMware Fusion: a sound card for '$1' (speakers and microphone)"
+}
+
 fusion_wait_stopped() {   # <vm name>
   local i
   for ((i = 0; i < 180; i += 3)); do [[ $(fusion_state "$1") == stopped ]] && return 0; sleep 3; done
@@ -349,6 +402,7 @@ vm_network_ok() {
         printf 'The VMware Fusion VM is at %s, outside Fusion'"'"'s NAT network (the Mac at %s), which OmacVM needs: give the VM the "Share with my Mac" network.\n' "$2" "$a" >&2
         return 1
       fi ;;
+    app) ;;   # OmacVM.app: QEMU's user network, the Mac is always 127.0.0.1
     *) return 1 ;;
   esac
   return 0

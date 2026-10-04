@@ -50,9 +50,14 @@ Install / remove on the Mac: `mac/install.sh`, `mac/uninstall.sh` (or
 in the VM; `omacvm apply` runs it).
 
 Protocol (TCP, one line each): see the header of `mac/omacvm-gestures.c`
-(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `H <gestures> <glide> <token> <name>`
-from it: the Bridge's token, which every listener checks, and the VM's name in
-base64). With two VMs in one app, only the VM named in the title of the app's
+(`F`, `S`, `O`, `A`, `W`, `P`, `K` to the guest; `R <gestures> <glide> <proof> <name>`
+from it, with the VM's name in base64). First both sides prove they know the
+Bridge's token (HMAC-SHA256 over two nonces and the Mac address the helper
+accepted on, the Mac first), so the token never goes over the wire and the VM
+ignores a listener that cannot prove it (on 127.0.0.1, for OmacVM.app, any Mac
+program could listen; a proof it fetched from the helper on 10.211.55.2 names
+that address and fails). Daemons from before
+that send `H <gestures> <glide> <token> <name>` and are still let in. With two VMs in one app, only the VM named in the title of the app's
 front window gets the trackpad and the keys; without a match every VM of that
 app does.
 

@@ -4,7 +4,10 @@
 // media keys go to the VM's own popup while it is full screen (stage 1c).
 //
 // HTTP/1.1 on port 47831 of the Mac's address on each VM network (10.211.55.2
-// for Parallels, 192.168.64.1 for UTM, .1 of VMware Fusion's NAT network; never 0.0.0.0). Every request needs "Authorization: Bearer <token>":
+// for Parallels, 192.168.64.1 for UTM, .1 of VMware Fusion's NAT network; never 0.0.0.0). Every request needs "Authorization: Bearer <token>",
+// except the one the VM makes first, to check it talks to the Bridge before it sends the token:
+//   GET  /proof?nonce=N    {"proof": HMAC-SHA256(token, "omacvm-bridge mac <addr> N")}, N 32 hex digits,
+//                          <addr> the Mac address the request came in on
 //   GET  /state            Wi-Fi state
 //   GET  /scan[?cached=1]  nearby networks, one entry per SSID; cached=1 = the
 //                          system's scan cache (instant, no radio scan)
@@ -23,7 +26,13 @@
 //   POST /bluetooth/connect    {"address": "AA:BB:CC:DD:EE:FF"}   (also /disconnect, /forget)
 //   POST /bluetooth/settings   opens the Mac's Bluetooth settings (pairing)
 //   POST /wallpaper        image body: the Mac's wallpaper (and lock-screen background)
-//   GET  /events           Server-Sent Events: "wifi", "audio", "display" and "bluetooth" on every change
+//   GET  /battery          the Mac's battery (battery.swift), for UTM and VMware Fusion VMs
+//   GET  /camera           the connection then carries the Mac's camera (camera.swift): the VM
+//                          sends {"type":"start"|"stop"} lines, the Bridge 1280x720 NV12 frames
+//                          while started (macOS asks for the camera permission the first time)
+//   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
+//                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
+//   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
 //                          light changes (keys.swift), ": ping" every 15 s
@@ -38,8 +47,9 @@ setvbuf(stdout, nil, _IOLBF, 0)
 let env = ProcessInfo.processInfo.environment
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet) and VMware Fusion's NAT network (vmnet8, when Fusion
-// is installed). One listener per address; never 0.0.0.0.
-let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? (["10.211.55.2", "192.168.64.1"] + [fusionHost()].compactMap { $0 })
+// is installed), and 127.0.0.1 for OmacVM.app (its VMs reach it as 10.0.2.2).
+// One listener per address; never 0.0.0.0.
+let listenAddrs = (env["OMACVM_BRIDGE_ADDRS"] ?? (["10.211.55.2", "192.168.64.1"] + [fusionHost()].compactMap { $0 } + ["127.0.0.1"])
   .joined(separator: ",")).split(separator: ",").map(String.init)
 
 /// Fusion picks its NAT subnet at install time; the Mac is .1 there (the guests' gateway is .2).
@@ -117,10 +127,12 @@ let hub = Hub([
   Feed(event: "audio", delay: 0.05, read: { audio.state() }, describe: describeAudio),
   Feed(event: "display", delay: 0.1, read: { displayState() }, describe: describeDisplay),
   Feed(event: "bluetooth", delay: 0.3, read: { bluetooth.state() }, describe: describeBluetooth),
+  Feed(event: "battery", delay: 0.3, read: { batteryState() }, describe: describeBattery, coarse: coarseBattery),
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
 let osdEvents = OSDEvents()
+let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
 let menuBar = MenuBar()
 
@@ -130,6 +142,7 @@ wifi.onEvent = { why in why == "scan-cache" ? scanner.cacheUpdated() : hub.chang
 audio.onChange = { why in hub.changed("audio", why: why); osdEvents.audioChanged() }
 NightShift.onChange { hub.changed("display", why: "night-shift") }
 bluetooth.onChange = { why in hub.changed("bluetooth", why: why) }
+watchPowerSources { hub.changed("battery", why: "power") }
 wifi.start()
 audio.start()
 location.start()
@@ -139,7 +152,7 @@ osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
 mediaKeys.start()
 if config.menuBarIcon { menuBar.show() }
-log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon)")
+log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps)")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
 listenerTimer.setEventHandler { servers.forEach { $0.check() } }
@@ -154,6 +167,7 @@ ws.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .ma
   for delay in [2.0, 10.0] {
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
       hub.changed("wifi", why: "wake"); hub.changed("audio", why: "wake"); hub.changed("bluetooth", why: "wake")
+      hub.changed("battery", why: "wake")
     }
   }
 }

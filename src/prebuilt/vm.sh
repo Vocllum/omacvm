@@ -114,11 +114,13 @@ prebuilt_drop_seed() {
       utm_drop_live "$VM"
       rm -f "$PB_SEED"
       utm_set_icon "$VM"   # after the last configuration change: UTM's scripting refuses custom icons
+      utm_add_sound "$VM"  # images from before 2.6.0 have no sound card
       utm_start "$VM" ;;
     fusion)
       ui_spin "The VM shuts down" fusion_wait_stopped "$VM"
       python3 "$R/src/prebuilt/vmconfig.py" vmx-seed "$(fusion_vmx "$VM")" -
       rm -f "$PB_SEED"
+      fusion_add_sound "$VM"   # images from before 2.6.0 have no sound card
       fusion_start "$VM" ;;
   esac
 }

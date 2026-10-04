@@ -1,10 +1,47 @@
 // HTTP server (BSD sockets, one thread per request), auth, routing, and the
 // hub that tracks state and pushes changes to Server-Sent Events clients.
+import CryptoKit
 import Foundation
 
 struct APIError: Error {
   let status: Int, message: String
   init(_ status: Int, _ message: String) { self.status = status; self.message = message }
+}
+
+/// GET /proof: HMAC-SHA256(token, "omacvm-bridge mac <addr> <nonce>") in hex,
+/// <addr> the Mac address the request came in on. The VM checks it, its own
+/// Mac address included, before it sends the token, so a program listening in
+/// the Bridge's place (on 127.0.0.1 any Mac program could) never gets it, not
+/// even by fetching a proof from the Bridge on 10.211.55.2.
+func proof(_ nonce: String, at addr: String) -> String {
+  HMAC<SHA256>.authenticationCode(for: Data("omacvm-bridge mac \(addr) \(nonce)".utf8), using: SymmetricKey(data: token))
+    .map { String(format: "%02x", $0) }.joined()
+}
+
+/// The Mac address a connection came in on.
+func localAddress(_ fd: Int32) -> String? {
+  var sin = sockaddr_in(), len = socklen_t(MemoryLayout<sockaddr_in>.size)
+  let r = withUnsafeMutablePointer(to: &sin) {
+    $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &len) }
+  }
+  return r == 0 && sin.sin_family == sa_family_t(AF_INET) ? ipv4String(sin.sin_addr) : nil
+}
+
+/// A connection from a program on this Mac rather than a VM: from 127.x, or
+/// from one of the Mac's own addresses (a Mac program that connects to
+/// 10.211.55.2 comes from 10.211.55.2, or from any address it binds to first).
+func fromThisMac(_ fd: Int32, peer: String) -> Bool {
+  if peer.hasPrefix("127.") || peer == localAddress(fd) { return true }
+  var list: UnsafeMutablePointer<ifaddrs>?
+  guard getifaddrs(&list) == 0 else { return true }   // cannot tell: refuse
+  defer { freeifaddrs(list) }
+  var p = list
+  while let a = p?.pointee {
+    if let sa = a.ifa_addr, sa.pointee.sa_family == UInt8(AF_INET),
+       ipv4String(UnsafeRawPointer(sa).assumingMemoryBound(to: sockaddr_in.self).pointee.sin_addr) == peer { return true }
+    p = a.ifa_next
+  }
+  return false
 }
 
 func authorized(_ header: String?) -> Bool {
@@ -269,6 +306,15 @@ func handle(_ fd: Int32, peer: String) {
   let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
   let path = url?.path ?? "", query = url?.queryItems ?? []
 
+  if method == "GET", path == "/proof" {   // no token: it is how the VM checks this is the Bridge
+    guard let n = query.first(where: { $0.name == "nonce" })?.value, n.count == 32,
+          n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
+      respond(fd, 400, ["error": "nonce: 32 hex digits"]); return
+    }
+    guard let at = localAddress(fd) else { respond(fd, 500, ["error": "no local address"]); return }
+    respond(fd, 200, ["proof": proof(n, at: at)])
+    return
+  }
   guard authorized(headers["authorization"]) else {
     log("401 \(method) \(path) from \(peer)")
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")
@@ -296,6 +342,8 @@ func handle(_ fd: Int32, peer: String) {
     respond(fd, 200, hub.current("display"))
   case ("GET", "/bluetooth"):
     respond(fd, 200, hub.current("bluetooth"))
+  case ("GET", "/battery"):
+    respond(fd, 200, hub.current("battery"))
   case ("POST", let p) where p.hasPrefix("/bluetooth/"):
     guard let obj = (body.isEmpty ? [:] : try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else {
       respond(fd, 400, ["error": "body must be a JSON object"]); return
@@ -341,9 +389,27 @@ func handle(_ fd: Int32, peer: String) {
     } catch {
       respond(fd, 500, ["error": "\(error)"])
     }
+  // The camera is only for VMs. A Mac program could read the token file and
+  // would get frames under the Bridge's camera permission, without asking
+  // macOS itself. OmacVM.app's VMs use their virtio port, not 127.0.0.1.
+  case ("GET", let p) where (p == "/camera" || p == "/camera/status") && fromThisMac(fd, peer: peer):
+    log("403 \(path) from \(peer): the camera is only for VMs")
+    respond(fd, 403, ["error": "the camera is only for VMs, not for programs on this Mac"])
+  case ("GET", "/camera/status"):
+    respond(fd, 200, camera.status())
+  case ("GET", "/camera"):
+    // From here on the connection carries the camera (camera.swift): the VM
+    // says start and stop, the Bridge sends frames while it is started.
+    guard camera.canAttach else { respond(fd, 503, ["error": "too many camera connections"]); return }
+    let head = "HTTP/1.1 200 OK\r\nContent-Type: application/x-omacvm-camera\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n"
+    guard writeAll(fd, Data(head.utf8)) else { close(fd); return }
+    var forever = timeval()
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &forever, socklen_t(MemoryLayout<timeval>.size))
+    camera.attach(fd: fd, label: peer, leftover: Data(buf[headEnd.upperBound...]))
   case ("POST", "/power"), ("POST", "/join"), ("POST", "/disconnect"):
     respond(fd, 501, ["error": "Wi-Fi control is not implemented yet (stage 2)"])
-  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/wifi/password"), (_, "/events"):
+  case (_, "/state"), (_, "/scan"), (_, "/audio"), (_, "/display"), (_, "/bluetooth"), (_, "/battery"), (_, "/wifi/password"), (_, "/events"),
+       (_, "/camera"), (_, "/camera/status"):
     respond(fd, 405, ["error": "method not allowed"])
   default:
     respond(fd, 404, ["error": "not found"])

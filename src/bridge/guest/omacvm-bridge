@@ -1,7 +1,9 @@
 #!/bin/bash
 # omacvm-bridge (guest side): small client for the OmacVM Bridge on the Mac.
-#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | events [--external]
-#     (--external: osd events also for brightness changed on the Mac itself)
+#   omacvm-bridge state | scan [--cached] | audio | display | bluetooth | battery | events [--external] [--direct]
+#     (--external: osd events also for brightness changed on the Mac itself;
+#      events come from the session's omacvm-bridge-events when it runs,
+#      --direct: straight from the Mac)
 #   omacvm-bridge volume +5 | -5 | 40        percent; +/- = relative, unmutes when raising
 #   omacvm-bridge mute [on|off|toggle]       default: toggle
 #   omacvm-bridge mic-volume 60 | mic-mute [on|off|toggle]
@@ -14,14 +16,34 @@
 #   omacvm-bridge bluetooth settings         the Mac's Bluetooth settings (to pair a device)
 #   omacvm-bridge wallpaper <image> [theme]  make it the Mac's wallpaper
 # Env: OMACVM_BRIDGE_URL (default: the Mac's address from /etc/omacvm/env, port 47831),
-#      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token)
+#      OMACVM_BRIDGE_TOKEN_FILE (default ~/.config/omacvm-bridge/token),
+#      OMACVM_BRIDGE_EVENTS_SOCKET (default $XDG_RUNTIME_DIR/omacvm-bridge-events.sock)
 set -euo pipefail
 [[ -r /etc/omacvm/env ]] && source /etc/omacvm/env   # OMACVM_VM_TYPE, OMACVM_HOST (guest/install.sh)
 URL=${OMACVM_BRIDGE_URL:-http://${OMACVM_HOST:-10.211.55.2}:47831}
 TOKEN_FILE=${OMACVM_BRIDGE_TOKEN_FILE:-$HOME/.config/omacvm-bridge/token}
 
+# The token only to a Bridge that first proved it knows it (HMAC-SHA256 of a
+# fresh nonce and the Mac address it answered on): on 127.0.0.1 (OmacVM.app)
+# any Mac program could listen in its place, and pass on a proof from the
+# Bridge on 10.211.55.2 but for the address. Bridges from before /proof get no
+# token: omacvm update.
+MAC_ADDR=${URL#*://}; MAC_ADDR=${MAC_ADDR%%[:/]*}
+[[ ${OMACVM_VM_TYPE:-} == app ]] && MAC_ADDR=127.0.0.1   # OmacVM.app's 10.0.2.2 is the Mac's 127.0.0.1
+proven() {
+  local n p
+  n=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  p=$(curl -sS -m 5 "${URL%/}/proof?nonce=$n" 2>/dev/null | jq -r '.proof // empty' 2>/dev/null) || p=""
+  python3 -c 'import hashlib, hmac, sys
+t = open(sys.argv[1], "rb").read().strip()
+w = hmac.new(t, f"omacvm-bridge mac {sys.argv[2]} {sys.argv[3]}".encode(), hashlib.sha256).hexdigest()
+sys.exit(not hmac.compare_digest(w.encode(), sys.argv[4].encode()))' "$TOKEN_FILE" "$MAC_ADDR" "$n" "$p" 2>/dev/null
+}
 # The token goes in via a header file, so it never shows up in `ps`.
-req() { curl -sS --fail-with-body -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") "$@"; echo; }
+req() {
+  proven || { echo "omacvm-bridge: $URL did not prove it is OmacVM's Bridge (an older Bridge? omacvm update); token not sent" >&2; return 1; }
+  curl -sS --fail-with-body -H @<(printf 'Authorization: Bearer %s\n' "$(<"$TOKEN_FILE")") "$@"; echo
+}
 post() { req -X POST -H 'Content-Type: application/json' -d "$2" "$URL$1"; }
 frac() { awk -v p="$1" 'BEGIN { printf "%.4f", p / 100 }'; }
 check_switch() { [[ ${2:-toggle} =~ ^(on|off|toggle)$ ]] || { echo "$1: on, off or toggle" >&2; exit 2; }; }
@@ -42,6 +64,7 @@ case ${1:-} in
   scan) [[ ${2:-} == --cached ]] && req "$URL/scan?cached=1" || req "$URL/scan" ;;
   audio) req "$URL/audio" ;;
   display) req "$URL/display" ;;
+  battery) req "$URL/battery" ;;
   bluetooth)
     case ${2:-} in
       "") req "$URL/bluetooth" ;;
@@ -52,7 +75,19 @@ case ${1:-} in
       settings) post /bluetooth/settings '{}' ;;
       *) echo "bluetooth: power, connect, disconnect, forget or settings" >&2; exit 2 ;;
     esac ;;
-  events) if [[ ${2:-} == --external ]]; then req -N "$URL/events?osd=external"; else req -N "$URL/events"; fi ;;
+  events)
+    q=""; direct=0
+    for a in "${@:2}"; do
+      case $a in --external) q="?osd=external" ;; --direct) direct=1 ;; *) echo "events: --external, --direct" >&2; exit 2 ;; esac
+    done
+    # One stream per session (omacvm-bridge-events.socket); nobody listening
+    # there (curl's 7): straight to the Mac, as before.
+    SOCK=${OMACVM_BRIDGE_EVENTS_SOCKET:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omacvm-bridge-events.sock}
+    if (( ! direct )) && [[ -S $SOCK ]]; then
+      rc=0; curl -sN --fail --unix-socket "$SOCK" "http://omacvm-bridge/events$q" || rc=$?
+      (( rc == 7 )) || exit "$rc"
+    fi
+    req -N "$URL/events$q" ;;
   volume) check_percent volume "${2:-}"; post /audio/volume "$(level_json volume "$2")" ;;
   mute) check_switch mute "${2:-}"; post /audio/mute "{\"muted\": $(switch_json "${2:-}")}" ;;
   mic-volume) check_percent mic-volume "${2:-}"; post /audio/volume "$(level_json volume "$2" ', "scope": "input"')" ;;
@@ -74,5 +109,5 @@ case ${1:-} in
     req -X POST -H 'Content-Type: application/octet-stream' -H "X-Omarchy-Theme: ${3:-}" \
       --data-binary "@$2" "$URL/wallpaper" ;;
   password) req --max-time 75 "$URL/wifi/password${2:+?ssid=$(urlencode "$2")}" ;;
-  *) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 2 ;;
+  *) sed -n '2,20s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

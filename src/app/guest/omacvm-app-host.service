@@ -1,0 +1,10 @@
+[Unit]
+Description=OmacVM.app: settings from the Mac
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/omacvm-app-host
+
+[Install]
+WantedBy=multi-user.target

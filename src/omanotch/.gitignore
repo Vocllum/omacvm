@@ -1,0 +1,11 @@
+# build output
+/build/
+mac/build/
+*.o
+.DS_Store
+# local, machine-specific settings
+/config.local.*
+guest/notchcast/build/
+guest/bar/Bar.qml
+guest/bar/Bar.qml.orig
+guest/bar/bar.patch
