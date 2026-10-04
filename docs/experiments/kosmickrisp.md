@@ -186,7 +186,12 @@ Metal entry point), `guest-mesa.sh`,
   `OMACVM_RUNTIME_KOSMICKRISP=1` (build time, opt-in). KosmicKrisp's own `MESA_KK_*` variables
   reach it through QEMU's environment.
 - Security: the Metal entry points are checked before use (a missing one was a
-  guest-triggered host crash).
+  guest-triggered host crash). A guest can still drive KosmicKrisp into
+  `VK_ERROR_DEVICE_LOST` (Aquarium with list restart on, round 1); whether Venus recovers
+  and what it does to the Mac was not tried on purpose, since a host GPU fault can take the
+  whole Mac down (the MacBook's 2026-10-04 panic). It belongs with gpu-robust's guest-to-host
+  GPU fault work. KosmicKrisp's shader compiler runs inside QEMU, so it adds code the guest
+  can reach.
 - Build: KosmicKrisp needs Homebrew LLVM, SPIRV-LLVM-Translator, SPIRV-Tools and bison at
   build time only, and the macOS 26 SDK. The runtime build fails in a path with a space
   (meson splits `CFLAGS`), true before this branch too.
