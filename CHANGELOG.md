@@ -42,3 +42,7 @@ in more words.
   Bridge's `config.json` turns them off).
 - One event stream from the Mac per VM, shared by the bar widgets and the
   on-screen display, instead of up to nine.
+- Benchmarks: the GPU as a share of the Mac in the README (Basemark Web 3.0
+  and WebGL Aquarium in Chrome). `bench.sh` runs Basemark too, and Geekbench's
+  GPU test with Metal and OpenCL on the Mac. No VM can run Geekbench's GPU
+  test: its Linux ARM preview has none, and no VM offers Vulkan or OpenCL.
