@@ -43,8 +43,8 @@ in the guest (`omacvm-virtio-gpu-build`, needs the kernel headers).
 
 - Colours are right on every Mac display (P3 or sRGB); `OMACVM_GL_COLOR=native`
   restores the old look.
-- A 10-bit scanout costs half-float surfaces (8 bytes a pixel, 3 surfaces:
-  112 MB at 2880x1620 instead of 56 MB).
+- A 10-bit scanout costs half-float surfaces (8 bytes a pixel, 5 surfaces:
+  187 MB at 2880x1620 instead of 93 MB).
 - HDR works end to end with a guest monitor rule (`bitdepth = 10,
   cm = "hdr", supports_hdr = 1, max_luminance = 1600, sdr_max_luminance =
   203`): the MacBook's EDR headroom goes to 4.2, PQ 203 nits is SDR white on
