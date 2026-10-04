@@ -16,13 +16,13 @@
 |---|---|
 | 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
 | 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
-| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 2.9.0)* | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
-| 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. *(coming with 2.8.0)* | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
-| 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
-| ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
-| 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
-| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
-| 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | |
+| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 2.9.0)* | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
+| 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. *(coming with 2.8.0)* | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
+| 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
+| ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
+| 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
+| 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
+| 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
 | 📷 **Camera and microphone**<br>Video calls in the VM. | |
 | 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
 
