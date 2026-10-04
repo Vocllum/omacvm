@@ -75,6 +75,9 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
   I420 ones FFmpeg would pick) and lists AV1 only to Chromium-based browsers.
+  Its folder `/usr/local/lib/dri` goes into `/etc/ld.so.conf.d`: Firefox
+  decodes in a sandboxed process that may load libraries only from the paths
+  ld.so knows, so without it YouTube in Firefox falls back to the CPU.
 
 Switches on the Mac (QEMU's environment): `OMACVM_VIDEO_DECODE=0` turns it
 off, `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per frame,
