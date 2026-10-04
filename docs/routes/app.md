@@ -199,3 +199,4 @@ virtual Mac display (killing it is unplugging it). With
 `OMACVM_TEST_MAIN_DISPLAY=<id>` for the main window), QEMU uses only the
 other displays, "full screen" is a plain window over each display (no
 Space, no menu bar change) and QEMU never takes the focus.
+`OMACVM_DISPLAYS_DEBUG=1` logs what goes over the port (QEMU's log).
