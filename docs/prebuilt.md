@@ -62,8 +62,8 @@ Each release has, per app, `omacvm-prebuilt-VERSION-ROUTE.tar.zst.part-aa`,
 `-ab`, …, a manifest (`.json`), SHA-256 sums (`.sha256`) and the package list.
 
 ```bash
-shasum -a 256 -c omacvm-prebuilt-2.3.1-utm.sha256
-cat omacvm-prebuilt-2.3.1-utm.tar.zst.part-* | zstd -dc --long=27 | tar -xSf -
+shasum -a 256 -c omacvm-prebuilt-2.6.0-utm.sha256
+cat omacvm-prebuilt-2.6.0-utm.tar.zst.part-* | zstd -dc --long=27 | tar -xSf -
 ```
 
 That gives `Omarchy.pvm`, `Omarchy.utm` or `Omarchy.vmwarevm`. Open it with
