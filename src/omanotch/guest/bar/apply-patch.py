@@ -19,12 +19,15 @@ What the patch adds:
     parked copy, so panels open on the visible display under the strip.
   * IPC target "notchbar" for the helper, and a watchdog that unparks the bar
     when the helper stops sending heartbeats.
+  * notchcast's last word on parking (~/.local/state/omanotch/park), read at
+    startup and every few seconds: a shell that (re)starts while the strip
+    shows parks at once, and a lost IPC call cannot leave two bars.
 """
 import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 13
+VERSION = 14
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -287,18 +290,44 @@ def main():
     onTriggered: root.notchWriteState()
   }
 
-  // Unpark when the helper goes quiet, so the built-in display never ends up
-  // without a bar. notchcast beats every 4 s and unparks by itself when the
-  // helper or the service stops; this only catches a notchcast that died.
+  // notchcast's last word on parking: "1 <output>" or "0" (notchcast writes
+  // it before its IPC calls). Followed only while notchcast beats, so a file
+  // left behind by a notchcast that died changes nothing.
+  FileView {
+    id: notchParkFile
+    path: root.notchStateDir + "/park"
+    blockLoading: true
+    printErrors: false
+  }
+  function notchFollowParkFile() {
+    notchBeatFile.reload()
+    var beat = parseFloat(String(notchBeatFile.text()).trim())
+    if (!(beat > 0) || Date.now() - beat > 15000) return
+    if (beat > notchLastBeat) notchLastBeat = beat
+    notchParkFile.reload()
+    var p = String(notchParkFile.text()).trim().split(/\\s+/)
+    if (p[0] === "1" && p.length === 2 && /^[A-Za-z0-9_.-]+$/.test(p[1])) {
+      if (notchParkedScreen !== p[1]) notchParkedScreen = p[1]
+      if (!notchParked) notchParked = true
+    } else if (p[0] === "0" && p.length === 1 && notchParked) {
+      notchParked = false
+    }
+  }
+
+  // Follows the park file (at once when the shell starts: a restarted shell
+  // must not wait for the next IPC call), and unparks when the helper goes
+  // quiet, so the built-in display never ends up without a bar. notchcast
+  // beats every 4 s and unparks by itself when the helper or the service
+  // stops; the watchdog only catches a notchcast that died. Two tiny file
+  // reads every 3 s, no process.
   Timer {
     interval: 3000
     repeat: true
-    running: root.notchParked
+    running: true
+    triggeredOnStart: true
     onTriggered: {
-      notchBeatFile.reload()
-      var beat = parseFloat(String(notchBeatFile.text()).trim())
-      if (beat > root.notchLastBeat) root.notchLastBeat = beat
-      if (Date.now() - root.notchLastBeat > 15000) root.notchParked = false
+      root.notchFollowParkFile()
+      if (root.notchParked && Date.now() - root.notchLastBeat > 15000) root.notchParked = false
     }
   }
 

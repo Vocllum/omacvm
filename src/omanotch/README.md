@@ -195,7 +195,7 @@ up by itself.
 | Strip stays black | `~/Library/Logs/omanotch.log` ("listening on …", "guest connected"?) · in the VM: `systemctl --user status notchcast` |
 | UTM: the pointer never reaches the strip | UTM's automatic input capture is on (see Requirements), or press ⌃⌥ to release the mouse |
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
-| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
+| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` and `screen` the built-in display · `~/.local/state/omanotch/park` is what notchcast asked for (`1 <output>`); the bar follows it within 3 s, also after a shell restart |
 | OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …") · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
 | Strip shows another VM's bar | two VMs of one app are connected: Omanotch tells apps apart, not VMs of one app (`~/Library/Logs/omanotch.log`: "strip serves guest …"); stop the other VM or restart its `notchcast` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
