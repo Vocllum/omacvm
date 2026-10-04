@@ -7,13 +7,14 @@
  *  SKIPPED - the draw is dropped, the context keeps drawing,
  *  LOST    - the guest's command is refused and its context is lost.
  * Covers virgl-buffer-binding-checks.patch, virgl-draw-range-checks.patch and
- * virgl-uniform-buffer-checks.patch.
+ * virgl-uniform-buffer-checks.patch; case 29 virgl-shader-index-clamp.patch.
  * Usage: test-gpu-ranges [case] */
 #include <OpenGL/OpenGL.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/uio.h>
 #include "soft-gl.h"
 #include "virglrenderer.h"
 #include "virgl_hw.h"
@@ -368,6 +369,86 @@ static void teardown(int ctx)
 
 static const struct draw plain3 = { .count = 3, .mode = TEST_PRIM_TRIANGLES };
 
+static const char *vs_ubo_indirect =
+   "VERT\n"
+   "DCL IN[0]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL OUT[1], GENERIC[0]\n"
+   "DCL CONST[1][0..3]\n"
+   "DCL ADDR[0]\n"
+   "IMM[0] FLT32 { 1000.0, 0.0, 0.0, 0.0 }\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: ARL ADDR[0].x, IMM[0].xxxx\n"
+   "  2: MOV OUT[1], CONST[1][ADDR[0].x]\n"
+   "  3: END\n";
+
+static const char *fs_varying =
+   "FRAG\n"
+   "DCL IN[0], GENERIC[0], PERSPECTIVE\n"
+   "DCL OUT[0], COLOR\n"
+   "  0: MOV OUT[0], IN[0]\n"
+   "  1: END\n";
+
+/* A shader indexes its 4-element uniform block at 1000: the translator clamps the index
+ * to the last element, so the colour drawn is element 3, not memory past the buffer. */
+static void run_clamp_case(void)
+{
+   struct cmds *c = calloc(1, sizeof(*c));
+   const int ctx = 29;
+
+   setup(c, ctx);
+   const float tri[12] = { -1, -1, 0, 1, 3, -1, 0, 1, -1, 3, 0, 1 };
+   emit_write(c, res_id(ctx, R_VB), 0, tri, sizeof(tri));
+   const float ubo[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25f, 0.5f, 0.75f, 1 };
+   emit_write(c, res_id(ctx, R_UBO64), 0, ubo, sizeof(ubo));
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_VIEWPORT_STATE, 0, VIRGL_SET_VIEWPORT_STATE_SIZE(1)));
+   emit(c, 0);
+   const float vp[6] = { 32, 32, 0.5f, 32, 32, 0.5f };
+   for (int i = 0; i < 6; i++) {
+      uint32_t u;
+      memcpy(&u, &vp[i], 4);
+      emit(c, u);
+   }
+   /* blend state writing all channels, rasterizer state with depth clip */
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_BLEND, VIRGL_OBJ_BLEND_SIZE));
+   emit(c, 40);
+   emit(c, 0);
+   emit(c, 0);
+   for (int i = 0; i < VIRGL_MAX_COLOR_BUFS; i++)
+      emit(c, VIRGL_OBJ_BLEND_S2_RT_COLORMASK(0xf));
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_BLEND, 1));
+   emit(c, 40);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_RASTERIZER, VIRGL_OBJ_RS_SIZE));
+   emit(c, 41);
+   emit(c, VIRGL_OBJ_RS_S0_DEPTH_CLIP(1));
+   for (int i = 0; i < VIRGL_OBJ_RS_SIZE - 2; i++)
+      emit(c, 0);
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_RASTERIZER, 1));
+   emit(c, 41);
+   emit_shader(c, 6, TEST_SHADER_VERTEX, vs_ubo_indirect);
+   emit_shader(c, 7, TEST_SHADER_FRAGMENT, fs_varying);
+   emit_bind_shader(c, 6, TEST_SHADER_VERTEX);
+   emit_bind_shader(c, 7, TEST_SHADER_FRAGMENT);
+   emit_uniform_buffer(c, 1, 0, 64, res_id(ctx, R_UBO64));
+   unsigned long before = gl_oracle_draws();
+   emit_draw(c, &plain3);
+   int r = submit(ctx, c);
+   check(r == 0 && gl_oracle_draws() - before == 1,
+         "case 29: a uniform block indexed at 1000 by an address register: drawn");
+
+   uint8_t px[4] = { 0 };
+   struct iovec iov = { px, sizeof(px) };
+   struct virgl_box box = { 0, 0, 0, 1, 1, 1 };
+   virgl_renderer_transfer_read_iov(res_id(ctx, R_RT), ctx, 0, 0, 0, &box, 0, &iov, 1);
+   char line[128];
+   snprintf(line, sizeof(line), "case 29: it read the block's last element (BGRA %u %u %u %u)",
+            px[0], px[1], px[2], px[3]);
+   check(px[0] > 180 && px[1] > 120 && px[1] < 136 && px[2] > 56 && px[2] < 72, line);
+
+   teardown(ctx);
+   free(c);
+}
+
 static void run_case(int n)
 {
    struct cmds *c = calloc(1, sizeof(*c));
@@ -659,6 +740,8 @@ int main(int argc, char **argv)
    for (int n = 1; n <= 28; n++)
       if (!only || only == n)
          run_case(n);
+   if (!only || only == 29)
+      run_clamp_case();
 
    /* A buffer asking for persistent mapping gets no GL storage on a GL without
     * ARB_buffer_storage (macOS): creating it must fail, not leave an empty GL buffer. */

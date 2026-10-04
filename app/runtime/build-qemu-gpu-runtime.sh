@@ -91,6 +91,7 @@ virgl_gl_error_patch="$native_dir/patches/virgl-gl-error-skip-command.patch"
 virgl_buffer_checks_patch="$native_dir/patches/virgl-buffer-binding-checks.patch"
 virgl_draw_checks_patch="$native_dir/patches/virgl-draw-range-checks.patch"
 virgl_ubo_checks_patch="$native_dir/patches/virgl-uniform-buffer-checks.patch"
+virgl_index_clamp_patch="$native_dir/patches/virgl-shader-index-clamp.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -132,6 +133,7 @@ virgl_gl_error_patch_sha256=ac9835d10c49ebdf461b633ad4c70e77a9f227db9c623b839a6d
 virgl_buffer_checks_patch_sha256=e4c88d550f781b6d42834bcd1b33f94b252f382f70fc206190419070bda0b7f1
 virgl_draw_checks_patch_sha256=aa0ddfdff93462c75e74fc2e6f419557537f7b1bcd5ee833e21b76b3cd7b3fa0
 virgl_ubo_checks_patch_sha256=022a7079e5c995ecd05df3229aa4ad59538f971e9a920c3ef5e2ca1baeddca25
+virgl_index_clamp_patch_sha256=cab18c535c5ed46d2d6c8785c7096c280288d9aff9f30b499c48487ad2c3d933
 virgl_venus_lost_patch_sha256=7c68192a607670b12cf46147e40a2603485b7f5d1941709b2df891e4f7e4f9ed
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -685,6 +687,9 @@ verify_file_sha "Draw range checks" "$virgl_draw_checks_patch" "$virgl_draw_chec
 patch -d "$virgl_source" -p1 -f -i "$virgl_draw_checks_patch"
 verify_file_sha "Uniform buffer checks" "$virgl_ubo_checks_patch" "$virgl_ubo_checks_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_ubo_checks_patch"
+# OmacVM: array indexes a guest shader computes stay inside their arrays.
+verify_file_sha "Shader index clamp" "$virgl_index_clamp_patch" "$virgl_index_clamp_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_index_clamp_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
