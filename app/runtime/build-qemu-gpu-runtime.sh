@@ -78,6 +78,9 @@ udp_patch="$native_dir/patches/libslirp-ipv4-udp-translation.patch"
 fence_poll_patch="$native_dir/patches/qemu-darwin-gpu-fence-poll.patch"
 virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
+virgl_shader_core_glsl_version_patch="$native_dir/patches/virgl-shader-core-glsl-version.patch"
+virgl_shader_shadow_grad_patch="$native_dir/patches/virgl-shader-shadow-grad.patch"
+virgl_shader_float_ops_patch="$native_dir/patches/virgl-shader-float-ops-integer-outputs.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -107,6 +110,9 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
+virgl_shader_core_glsl_version_patch_sha256=0db80eb195b2c83374216f95410d3fcc076b6fa3e2f6cdb725a5b9d185c5f6fc
+virgl_shader_shadow_grad_patch_sha256=a9a4f7f0f646137425d8ad5b7b61c5a46d3e5ef5284571103064d45c8ee9c328
+virgl_shader_float_ops_patch_sha256=7c7746729e613b62b79bb016d32a0dd3a2ade80c9fb6f05498a2f1f30e1dae6b
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -637,6 +643,14 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_int_tex_patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-thread-sync.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-in-process.patch"
+# OmacVM: where virglrenderer and Apple's core profile disagree (ADR 0018). Each gap made
+# one shader or draw stop the guest's whole GL context: the app drew black from then on.
+verify_file_sha "Core profile GLSL version patch" "$virgl_shader_core_glsl_version_patch" "$virgl_shader_core_glsl_version_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_core_glsl_version_patch"
+verify_file_sha "Shadow textureGrad patch" "$virgl_shader_shadow_grad_patch" "$virgl_shader_shadow_grad_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_shadow_grad_patch"
+verify_file_sha "Float ops into integer outputs patch" "$virgl_shader_float_ops_patch" "$virgl_shader_float_ops_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_float_ops_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
