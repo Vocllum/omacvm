@@ -22,6 +22,8 @@ in more words.
   MacBook whichever display holds the main window (OmacVM.app tells the VM
   which output is the built-in display). Before, with the main window on an
   external display, the MacBook showed two bars.
+- Omanotch: after a shell restart the bar is parked under the strip again
+  within seconds; before, the MacBook could show two bars.
 - Per-display workspaces handle more than two displays (Virtual-3 gets
   21..30, and so on), and several workspaces of an unplugged display all
   come back when it returns. Tested on OmacVM.app; Parallels and Fusion use

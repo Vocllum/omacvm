@@ -504,6 +504,21 @@ static void write_beat(void) {
     }
 }
 
+// The parking the helper asked for, for a shell that starts (or restarts)
+// after it was said: "1 <output>" or "0", rewritten in place. The bar (patch
+// v14+) reads it with the beat at startup and every few seconds, so a new
+// shell parks at once instead of waiting for an IPC call that may have gone
+// to the old shell, or to none while the new one was still loading.
+static void write_park(int on) {
+    char path[600], scr[64];
+    state_path(path, sizeof path, "park");
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    if (on) fprintf(f, "1 %s\n", screen_name(scr));
+    else fputs("0\n", f);
+    fclose(f);
+}
+
 // The bar's own report (bar patch v9+): {"parked":…,"barSize":…,"started":…}.
 struct bar_state {
     int parked;
@@ -865,7 +880,9 @@ static void handle_command(char *line) {
                 static double started;
                 if (read_bar_state(&st)) {
                     // Unparked although we keep it parked, or a new shell.
-                    fresh = !st.parked || (started && st.started != started);
+                    // The first read cannot tell an old shell's report from
+                    // the current one's: count it as new (one extra call).
+                    fresh = !st.parked || st.started != started;
                     started = st.started;
                 } else {
                     // A bar patched before v9 only knows the IPC heartbeat.
@@ -876,6 +893,7 @@ static void handle_command(char *line) {
             }
             if (on != bar_parked || fresh) {
                 char scr[64];
+                write_park(on);  // first: a shell starting right now reads it
                 free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
                 free(ipc_call(0, "setParked", on ? "true" : "false", NULL, NULL));
                 if (on && fresh) sync_geometry(1);
@@ -886,7 +904,10 @@ static void handle_command(char *line) {
     } else if (!strcmp(c, "screen") && argc == 1) {
         // The built-in display is another output now (update_screen).
         char scr[64];
-        if (bar_parked == 1) free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
+        if (bar_parked == 1) {
+            write_park(1);
+            free(ipc_call(0, "setParkedScreen", screen_name(scr), NULL, NULL));
+        }
     } else if (!strcmp(c, "beat") && argc == 1) {
         free(ipc_call(0, "heartbeat", NULL, NULL, NULL));
     } else if (!strcmp(c, "geom") && argc == 5 && is_number(argv[1]) && is_number(argv[2]) &&
@@ -1813,6 +1834,7 @@ static void *signal_thread(void *arg) {
     sigwait(set, &sig);
     LOG("signal %d, restoring the guest cursor and exiting", sig);
     set_guest_cursor_visible(1);
+    write_park(0);
     _exit(0);
     return NULL;
 }
@@ -1846,6 +1868,7 @@ int main(int argc, char **argv) {
     if (getenv("NOTCHBAR_SCREEN"))
         snprintf(cfg_screen_buf, sizeof cfg_screen_buf, "%s", getenv("NOTCHBAR_SCREEN"));
     update_screen();
+    write_park(0);  // nothing is parked until the helper says so
     const char *op = getenv("OMARCHY_PATH") ? getenv("OMARCHY_PATH") : "/usr/share/omarchy";
     if (asprintf((char **)&cfg_shell, "%s/shell", op) < 0) return 1;
 
