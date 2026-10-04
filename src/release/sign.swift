@@ -8,8 +8,14 @@ import CryptoKit
 import Foundation
 
 func fail(_ s: String) -> Never { FileHandle.standardError.write(Data((s + "\n").utf8)); exit(2) }
-func read(_ p: String) -> Data { (try? Data(contentsOf: URL(fileURLWithPath: p))) ?? fail("cannot read \(p)") }
-func b64(_ d: Data) -> Data { Data(base64Encoded: String(decoding: d, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) ?? fail("not base64") }
+func read(_ p: String) -> Data {
+  guard let d = try? Data(contentsOf: URL(fileURLWithPath: p)) else { fail("cannot read \(p)") }
+  return d
+}
+func b64(_ d: Data) -> Data {
+  guard let v = Data(base64Encoded: String(decoding: d, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) else { fail("not base64") }
+  return v
+}
 let a = CommandLine.arguments
 switch (a.count, a.count > 1 ? a[1] : "") {
 case (3, "keygen"):
@@ -19,7 +25,8 @@ case (3, "keygen"):
   print(k.publicKey.rawRepresentation.base64EncodedString())
 case (4, "sign"):
   guard let k = try? Curve25519.Signing.PrivateKey(rawRepresentation: b64(read(a[2]))) else { fail("not a private key") }
-  print((try? k.signature(for: read(a[3])))?.base64EncodedString() ?? fail("signing failed"))
+  guard let sig = try? k.signature(for: read(a[3])) else { fail("signing failed") }
+  print(sig.base64EncodedString())
 case (5, "verify"):
   guard let k = try? Curve25519.Signing.PublicKey(rawRepresentation: b64(Data(a[2].utf8))) else { fail("not a public key") }
   if k.isValidSignature(b64(read(a[4])), for: read(a[3])) { print("good signature") } else { print("BAD signature"); exit(1) }
