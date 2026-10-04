@@ -31,6 +31,6 @@ Mac's own Chrome gives 120.2 shown frames/s, steps {1: 1192, 2: 4, 0: 6}.
 Colour: open `colors.html` full screen in the guest, then `./snapcolor <id>`.
 With tagged surfaces guest red is Display P3 (234,51,35); untagged (255,0,0).
 
-HDR: guest at 10 bits with `cm = "hdr"` (see ADR 0017), QEMU with
+HDR: guest at 10 bits with `cm = "hdr"` (see ADR 0021), QEMU with
 `OMACVM_GL_HDR=1`, then `./snaphdr <id>`: values above 1.0 are HDR, and the
 built-in screen's "edr now" rises above 1.0.
