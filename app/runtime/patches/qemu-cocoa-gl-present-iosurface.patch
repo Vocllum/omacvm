@@ -19,8 +19,8 @@ IOSurface contexts cannot be made, the window falls back to it as well.
 OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 (checks orientation and colours). Applies after qemu-cocoa-gl-present-on-flush.
 
---- a/ui/cocoa.m	2026-10-04 08:25:31
-+++ b/ui/cocoa.m	2026-10-04 08:52:47
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
 @@ -56,6 +56,10 @@
  #include "qemu/error-report.h"
  #include <Carbon/Carbon.h>
@@ -283,12 +283,12 @@ OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 +            const uint8_t *px = base + y * stride + x * 4;
 +            uint8_t rgb[3] = { px[2], px[1], px[0] };
 +            fwrite(rgb, 1, 3, f);
-         }
-     }
++        }
++    }
 +    IOSurfaceUnlock(surf, kIOSurfaceLockReadOnly, NULL);
 +    fclose(f);
- }
- 
++}
++
 +/* QEMU thread, BQL held. Returns false when nothing could be shown. */
 +static bool cocoa_gl_present(void)
 +{
@@ -381,7 +381,7 @@ OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 +            glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT,
 +                             1000 * 1000 * 1000);
 +            glDeleteSync(sync);
-+        }
+         }
 +        CGLSetCurrentContext(NULL);
 +        cocoa_gl_present_dump(surf);
 +        dispatch_async(dispatch_get_main_queue(), ^{
@@ -417,9 +417,9 @@ OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 +        cocoa_gl_present();
 +    } else if (!timer_pending(present_timer)) {
 +        timer_mod(present_timer, present_last_ns + present_period_ns);
-+    }
-+}
-+
+     }
+ }
+ 
 +static void cocoa_gl_present_timer(void *opaque)
 +{
 +    if (gl_dirty) {
@@ -459,7 +459,7 @@ OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
          dispatch_async(dispatch_get_main_queue(), ^{
              qatomic_set(&gl_present_pending, false);
              [[cocoaView layer] setNeedsDisplay];
-@@ -3060,6 +3393,15 @@
+@@ -3060,6 +3393,17 @@
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;
@@ -472,11 +472,13 @@ OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
 +            present_mode = 0;
 +            [cocoaView useCGLLayer];
 +        }
++        info_report("cocoa: GL frames shown %s",
++                    present_ctx ? "as IOSurfaces" : "with a CAOpenGLLayer");
  
          for (unsigned int index = 0; ; index++) {
              QemuConsole *con = qemu_console_lookup_by_index(index);
---- a/meson.build	2026-10-04 07:29:56
-+++ b/meson.build	2026-10-04 08:52:47
+--- a/meson.build
++++ b/meson.build
 @@ -1221,7 +1221,7 @@
  endif
  
