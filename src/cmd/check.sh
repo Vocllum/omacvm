@@ -252,7 +252,7 @@ if pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
   [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
   ok "Omanotch (Mac)" "running, bar height: $h"
-elif [[ $(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none) != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
+elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
 else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
@@ -261,8 +261,9 @@ fi
 if [[ $TYPE == app ]]; then
   # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
   n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  [[ $n == 1 ]] && skip "notch strip (app)" "the app's full screen covers it (no Space of its own)" \
-    || skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"
+  if [[ $n == 1 ]]; then skip "notch strip (app)" "the app's full screen covers it (no Space of its own)"
+  elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
 
