@@ -448,6 +448,8 @@ bench lock and are indications only):
 |---|---|---|
 | glmark2, window 1440x810 pt, 60 Hz | 1259 | 4006 (async fences + present on flush) |
 | glmark2 short set, bench lock | 1096-1139 | 3310-3590 (final: + fence wait) |
+| 2.9.0 candidate, same build, safe mode vs new (bench lock, quiet Mac) | glmark2 short 932/1073, Aquarium 23.0/23.1/24.0 | glmark2 short 3748/3696, Aquarium 22.9/22.6/22.8 |
+| same, other VMs loading the Mac | Aquarium 23.4/24.0/23.1 | Aquarium 19.9/20.6/21.5 (the extra threads compete for CPU) |
 | Fence to reply, median | 1.56 ms | 0.20 ms |
 | Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
 | WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same) |

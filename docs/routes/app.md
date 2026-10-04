@@ -46,9 +46,10 @@ OmacVM's version.
 - A new frame goes to the window as soon as Omarchy finishes it, drawn off
   the main thread as an IOSurface (before, QEMU redrew the window on a 30 ms
   timer). GPU fences come back in about 0.2 ms instead of 1.5 ms, so light 3D
-  work runs about three times as fast (glmark2's short set about 3,300
-  instead of 1,070). WebGL-heavy pages stay the same: there Apple's OpenGL is
-  the limit ([how](../architecture/graphics.md)). If the picture or the GPU
+  work runs about three times as fast (glmark2's short set about 3,700
+  instead of 1,000). WebGL-heavy pages stay the same (Aquarium 22.8 vs 23.1
+  fps; a few percent lower while other VMs load the Mac): there Apple's
+  OpenGL is the limit ([how](../architecture/graphics.md)). If the picture or the GPU
   misbehaves on a Mac: `defaults write org.omacvm.app gpuSafeMode -bool true`
   and restart the VM goes back to the 2.8.0 path.
 - Vulkan in the VM (Venus on MoltenVK), hidden and experimental:

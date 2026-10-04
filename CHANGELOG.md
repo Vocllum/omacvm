@@ -7,10 +7,10 @@ in more words.
 
 - OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
   of 1.5 ms, so light 3D work runs about three times as fast (glmark2's short
-  set about 3,300 instead of 1,070, same build, benchmark lock held). A new
+  set about 3,700 instead of 1,000, same build, benchmark lock held). A new
   frame goes to the window as soon as Omarchy finishes it, drawn off the main
   thread as an IOSurface, not on QEMU's 30 ms timer. WebGL-heavy pages stay
-  where they were (Aquarium about 21 fps): there Apple's OpenGL is the limit.
+  where they were (Aquarium about 23 fps): there Apple's OpenGL is the limit.
 - The thread that waits for the GPU no longer keeps a core busy.
 - If the picture or the GPU misbehaves on a Mac:
   `defaults write org.omacvm.app gpuSafeMode -bool true` and a VM restart go
