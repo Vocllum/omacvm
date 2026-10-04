@@ -1,0 +1,152 @@
+#!/bin/bash
+# Tests for omacvm resources (src/cmd/resources.sh, src/lib/resources.sh).
+#   src/tests/resources.sh          the settings writers on fixture files only
+#   src/tests/resources.sh --live   also the command on throwaway VMs named
+#                                   "OmacVM T-resources": a Parallels VM without
+#                                   a disk (prlctl create), a UTM VM without
+#                                   drives (UTM's scripting; UTM opens if it is
+#                                   not running), a Fusion .vmx and an OmacVM.app
+#                                   folder (fixtures). None of them is started;
+#                                   all are deleted at the end.
+# Exit 0 when every test passes.
+set -uo pipefail
+R=$(cd "$(dirname "$0")/../.." && pwd)
+source "$R/src/lib/mac.sh"
+source "$R/src/lib/vm.sh"
+source "$R/src/lib/setup.sh"
+source "$R/src/vm/utm.sh"
+source "$R/src/vm/fusion.sh"
+source "$R/src/lib/resources.sh"
+LIVE=0; [[ ${1:-} == --live ]] && LIVE=1
+T=$(mktemp -d); FAIL=0; N=0
+ok() { N=$((N + 1)); printf '  ok    %s\n' "$1"; }
+bad() { N=$((N + 1)); FAIL=$((FAIL + 1)); printf '  FAIL  %s\n' "$1"; }
+check() { local what=$1; shift; if "$@"; then ok "$what"; else bad "$what"; fi; }
+eq() { [[ $1 == "$2" ]] || { echo "        got '$1', want '$2'" >&2; return 1; }; }
+
+echo "fixtures"
+# OmacVM.app: vm.env as the app and omacvm build write it (quotes kept elsewhere).
+cat > "$T/vm.env" <<'EOF'
+NAME='It'\''s mine'
+CPUS='8'
+MEM_MB=16384
+DISK_GB=64
+FEATURES='bridge=on wallpaper=on'
+EOF
+res_env_set "$T/vm.env" 4 6144
+check "vm.env: CPUS and MEM_MB changed" eq "$(grep -E '^(CPUS|MEM_MB)=' "$T/vm.env" | paste -sd' ' -)" "CPUS=4 MEM_MB=6144"
+check "vm.env: the other lines as they were" eq "$(grep -vE '^(CPUS|MEM_MB)=' "$T/vm.env" | paste -sd'|' -)" "NAME='It'\\''s mine'|DISK_GB=64|FEATURES='bridge=on wallpaper=on'"
+printf "NAME='x'\n" > "$T/old.env"; res_env_set "$T/old.env" 2 4096
+check "vm.env without the keys: added" eq "$(paste -sd' ' - < "$T/old.env")" "NAME='x' CPUS=2 MEM_MB=4096"
+check "vm.env: no temporary file left" eq "$(ls "$T" | grep -c 'env\.')" 0
+
+# UTM: config.plist's System dictionary.
+cat > "$T/config.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>System</key><dict><key>Architecture</key><string>aarch64</string><key>CPUCount</key><integer>6</integer><key>MemorySize</key><integer>8192</integer></dict>
+</dict></plist>
+EOF
+res_plist_set "$T/config.plist" 3 5120
+check "config.plist: CPUCount and MemorySize" eq "$(plutil -extract System.CPUCount raw "$T/config.plist") $(plutil -extract System.MemorySize raw "$T/config.plist")" "3 5120"
+check "config.plist: integers, the rest kept" eq "$(plutil -extract System.CPUCount xml1 -o - "$T/config.plist" | grep -c '<integer>') $(plutil -extract System.Architecture raw "$T/config.plist")" "1 aarch64"
+
+# VMware Fusion: the .vmx, and its graphics memory that comes out of the VM's.
+cat > "$T/x.vmx" <<'EOF'
+.encoding = "UTF-8"
+displayName = "Fixture"
+numvcpus = "16"
+memsize = "49152"
+svga.graphicsMemoryKB = "8388608"
+vmotion.svga.graphicsMemoryKB = "8388608"
+EOF
+RES_NOTE=""; res_vmx_set "$T/x.vmx" 4 16384
+check "vmx: numvcpus and memsize" eq "$(vmx_get "$T/x.vmx" numvcpus) $(vmx_get "$T/x.vmx" memsize)" "4 16384"
+check "vmx: graphics memory kept while it fits" eq "$(vmx_get "$T/x.vmx" svga.graphicsMemoryKB) ${RES_NOTE:-none}" "8388608 none"
+RES_NOTE=""; res_vmx_set "$T/x.vmx" 2 4096
+check "vmx: graphics memory lowered when it no longer fits" eq "$(vmx_get "$T/x.vmx" svga.graphicsMemoryKB) $(vmx_get "$T/x.vmx" vmotion.svga.graphicsMemoryKB)" "1048576 1048576"
+check "vmx: and says so" eq "$RES_NOTE" "graphics memory down to 1 GB (part of the VM's memory)"
+check "vmx: one line per key" eq "$(grep -c '^memsize' "$T/x.vmx")" 1
+
+# Parallels: config.pvs (the path Parallels Desktop Standard takes).
+cat > "$T/config.pvs" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<ParallelsVirtualMachine><Hardware><Cpu><Number>4</Number><AutoCountEnabled>1</AutoCountEnabled></Cpu><Memory><RAM>8192</RAM><RamAutoSizeEnabled>1</RamAutoSizeEnabled></Memory></Hardware></ParallelsVirtualMachine>
+EOF
+res_pvs_set "$T/config.pvs" 6 12288
+check "config.pvs: CPUs, memory, automatic sizing off" eq "$(for p in Cpu/Number Cpu/AutoCountEnabled Memory/RAM Memory/RamAutoSizeEnabled; do python3 "$PVS" "$T/config.pvs" get "Hardware/$p"; done | paste -sd' ' -)" "6 0 12288 0"
+
+# Tiers as omacvm build gives them, for a few Macs (OmacVM.app's Mac.tier is the same rule).
+tiers() {   # CORES PERF EFF MEM_GB -> the four tiers, "cpus/gb" each
+  local t out=""
+  mac_cores=$1 mac_perf=$2 mac_eff=$3 mac_mem_gb=$4 CAP_CPUS=$1 CAP_MEM_GB=$4
+  for t in 0 1 2 3; do tier_values "$t"; out+="$T_CPUS/$T_MEM "; done
+  echo "${out% }"
+}
+check "tiers: M4 Max 16 cores 64 GB" eq "$(tiers 16 12 4 64)" "6/16 12/32 14/40 16/48"
+check "tiers: M1 8 cores 8 GB" eq "$(tiers 8 4 4 8)" "2/4 4/4 6/4 8/4"
+check "tiers: M2 8 cores 16 GB" eq "$(tiers 8 4 4 16)" "2/4 4/8 6/8 8/8"
+
+if (( LIVE )); then
+  echo "throwaway VMs (OmacVM T-resources)"
+  NAME="OmacVM T-resources"
+  O="$R/omacvm"
+  APPDIR="$(app_vms_root)/$NAME"
+  export OMACVM_FUSION_DIR=$T/fusion
+  FUSION_DIR=$OMACVM_FUSION_DIR
+  UTM_ID=""
+  cleanup() {
+    "$PRLCTL" delete "$NAME" >/dev/null 2>&1
+    [[ -n $UTM_ID ]] && osascript -e "tell application \"UTM\" to delete virtual machine id \"$UTM_ID\"" >/dev/null 2>&1
+    [[ -f $APPDIR/vm.env && $(app_env "$APPDIR" NAME) == "$NAME" ]] && rm -rf "$APPDIR"
+    [[ -n ${FAKE_PID:-} ]] && kill "$FAKE_PID" 2>/dev/null
+    rm -rf "$T"
+  }
+  trap cleanup EXIT
+  [[ -e $APPDIR ]] && { echo "  $APPDIR exists already: not touching it" >&2; exit 1; }
+
+  "$PRLCTL" create "$NAME" --ostype linux --distribution ubuntu --no-hdd >/dev/null || bad "Parallels: throwaway VM"
+  mkdir -p "$OMACVM_FUSION_DIR/$NAME.vmwarevm"
+  printf '.encoding = "UTF-8"\ndisplayName = "%s"\nnumvcpus = "4"\nmemsize = "8192"\nsvga.graphicsMemoryKB = "2097152"\n' "$NAME" > "$OMACVM_FUSION_DIR/$NAME.vmwarevm/$NAME.vmx"
+  mkdir -p "$APPDIR"; : > "$APPDIR/disk.img"
+  printf "NAME='%s'\nCPUS=4\nMEM_MB=8192\nDISK_GB=64\nSSH_PORT=52399\nVM_USER='t'\n" "$NAME" > "$APPDIR/vm.env"
+  UTM_ID=$(utm_osa -e 'tell application "UTM" to return id of (make new virtual machine with properties {backend:qemu, configuration:{name:"'"$NAME"'", architecture:"aarch64", memory:4096, cpu cores:2, hypervisor:true, uefi:true, notes:"omacvm resources test, deleted after it"}})')
+  [[ $UTM_ID =~ ^[0-9A-F-]{36}$ ]] || { bad "UTM: throwaway VM ($UTM_ID)"; UTM_ID=""; }
+
+  out=$("$O" resources --vm "$NAME" --cpus 2 2>&1); rc=$?
+  check "a name in four apps is refused (exit 2)" eq "$rc" 2
+  check "and the message names --vm-type" eq "$(grep -c -- '--vm-type' <<<"$out")" 1
+
+  for t in parallels utm fusion app; do
+    [[ $t == utm && -z $UTM_ID ]] && continue
+    "$O" resources --vm "$NAME" --vm-type $t --cpus 3 --memory-gb 5 >/dev/null; rc=$?
+    check "$t: --cpus 3 --memory-gb 5" eq "$rc $(res_get "$NAME" $t)" "0 3 5120"
+    "$O" resources --vm "$NAME" --vm-type $t --resources low >/dev/null
+    mac_specs; CAP_CPUS=$mac_cores; CAP_MEM_GB=$mac_mem_gb; tier_values 0
+    check "$t: --resources low" eq "$(res_get "$NAME" $t)" "$T_CPUS $((T_MEM * 1024))"
+    "$O" resources --vm "$NAME" --vm-type $t --cpus 999 >/dev/null 2>&1; rc=$?
+    check "$t: more CPUs than the Mac has is refused" eq "$rc $(res_get "$NAME" $t)" "2 $T_CPUS $((T_MEM * 1024))"
+    j=$("$O" resources --vm "$NAME" --vm-type $t --memory-gb 4 --json)
+    check "$t: --json after a change" eq "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(d["type"], d["memory_gb"], d["changed"])' "$j")" "$t 4 True"
+  done
+
+  # Parallels Desktop Standard: no prlctl set, the settings file instead.
+  printf '#!/bin/bash\n[[ $1 == set ]] && { echo "only in Pro" >&2; exit 1; }\nexec /usr/local/bin/prlctl "$@"\n' > "$T/prlctl"; chmod +x "$T/prlctl"
+  REAL=$PRLCTL; PRLCTL=$T/prlctl
+  res_set "$NAME" parallels 2 6144; rc=$?
+  PRLCTL=$REAL
+  check "parallels without prlctl set: config.pvs while unregistered" eq "$rc $(res_get "$NAME" parallels)" "0 2 6144"
+  check "parallels: registered again" eq "$(vm_state "$NAME")" stopped
+  check "parallels: Parallels reads the new values" eq "$("$PRLCTL" list -i "$NAME" | awk '$1 == "cpu" { print $2 } $1 == "memory" { print $2 }' | paste -sd' ' -)" "cpus=2 size=6144Mb"
+
+  # OmacVM.app while its VM runs: written, for the next start (a stand-in
+  # process with the VM's disk on its command line, as QEMU has).
+  (exec -a "qemu-stand-in -drive file=$APPDIR/disk.img,format=raw" sleep 60) & FAKE_PID=$!
+  sleep 1
+  out=$("$O" resources --vm "$NAME" --vm-type app --cpus 2 2>&1); rc=$?
+  check "app, running: changed for the next start" eq "$rc $(grep -c 'applies on the next start' <<<"$out")" "0 1"
+  kill "$FAKE_PID" 2>/dev/null; wait "$FAKE_PID" 2>/dev/null; FAKE_PID=""
+fi
+echo "$((N - FAIL)) of $N passed"
+(( FAIL == 0 ))
