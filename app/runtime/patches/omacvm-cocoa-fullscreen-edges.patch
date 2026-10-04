@@ -4,16 +4,19 @@ Subject: [PATCH] cocoa: no Dock, menu bar or hot corner from inside full screen
 What: the other displays' full-screen windows ask macOS for the same
 presentation as the main window (Dock and menu bar hidden, not auto-hidden),
 and while the VM has the pointer in full screen the Mac's cursor never
-reaches a corner of its display: within 200 points of a corner it is
-detached from the mouse and QEMU moves it from the mouse's motion, at least
-3 points from the corner's edges. Both follow the immersive option (on by
+reaches a corner of its display or the Dock's edge: within 200 points of
+them it is detached from the mouse and QEMU moves it from the mouse's
+motion, at least 3 points from such an outer edge (edges shared with
+another display stay open). Both follow the immersive option (on by
 default; immersive=off keeps macOS's behaviour).
 
 Why: in the user's 2.8.0/2.9.0 RC test the Dock came up at the edge of the
 external display (its full-screen Space used macOS's default auto-hide), and
 a hot corner set to "put display to sleep" fired from inside the full-screen
-VM. Moving the cursor back after it reached the corner does not help (tried:
-the display still went to sleep), so the cursor must never get there. The
+VM. The presentation option alone did not keep the Dock away on the other
+display (tried), and moving the cursor back after it reached a corner did
+not stop the hot corner (tried: the display went to sleep), so the cursor
+must never get there. The
 guest's pointer is absolute, so it only stops 3 points short of a corner.
 
 Upstream: not applicable (OmacVM's display windows; QEMU has one window).
@@ -22,7 +25,7 @@ into each corner and along each edge shows no Dock, no menu bar, no hot
 corner (notes: display-bugs track).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 646ffb6..26bf285 100644
+index 646ffb6..fab3207 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -466,6 +466,8 @@ static bool omacvm_map_pointer(int output, double u, double v,
@@ -78,19 +81,21 @@ index 646ffb6..26bf285 100644
      with_bql(^{
          if (button >= 0) {
              qemu_input_queue_btn(dcl.con, button, down);
-@@ -3277,6 +3288,81 @@ static bool omacvm_main_full_screen(void)
+@@ -3277,6 +3288,141 @@ static bool omacvm_main_full_screen(void)
             ([[cocoaView window] styleMask] & NSWindowStyleMaskFullScreen);
  }
  
 +/*
 + * While the VM has the pointer in full screen, the Mac's cursor never reaches
-+ * the very corners of its display: a corner is a macOS hot corner (one put
-+ * the Mac's display to sleep from inside the VM). Moving the cursor back after
-+ * it got there is too late (the Dock already saw it), so near a corner the
-+ * cursor is detached from the mouse and moved by QEMU from the mouse's
-+ * motion, never closer than 3 points to the corner's edges. The guest's
-+ * pointer is absolute, so it simply stops short of the corner. Off with
-+ * immersive=off; leaving full screen or the VM gives the cursor back.
++ * a corner of its display (a macOS hot corner: one put the Mac's display to
++ * sleep from inside the VM) nor the Dock's edge (on another display than the
++ * main window's the Dock came up there). Moving the cursor back after it got
++ * there is too late, so near a corner or the Dock's edge the cursor is
++ * detached from the mouse and QEMU moves it from the mouse's motion, never
++ * closer than 3 points to such an outer edge. Edges shared with another
++ * display stay open, so the pointer still crosses to it. The guest's pointer
++ * is absolute: it simply stops short of the edge. Off with immersive=off;
++ * leaving full screen or the VM gives the cursor back.
 + */
 +static bool omacvm_corner_held;
 +static CGPoint omacvm_corner_pos;
@@ -103,6 +108,37 @@ index 646ffb6..26bf285 100644
 +    }
 +}
 +
++static bool omacvm_display_at(CGFloat x, CGFloat y)
++{
++    CGDirectDisplayID id;
++    uint32_t n = 0;
++
++    return CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &id, &n) == kCGErrorSuccess && n > 0;
++}
++
++/* The edge the Dock sits on: 0 bottom, 1 left, 2 right. */
++static int omacvm_dock_edge(void)
++{
++    static int edge = -1;
++
++    if (edge < 0) {
++        CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("orientation"),
++                                                        CFSTR("com.apple.dock"));
++        edge = 0;
++        if (v && CFGetTypeID(v) == CFStringGetTypeID()) {
++            if (CFStringCompare((CFStringRef)v, CFSTR("left"), 0) == kCFCompareEqualTo) {
++                edge = 1;
++            } else if (CFStringCompare((CFStringRef)v, CFSTR("right"), 0) == kCFCompareEqualTo) {
++                edge = 2;
++            }
++        }
++        if (v) {
++            CFRelease(v);
++        }
++    }
++    return edge;
++}
++
 +static void omacvm_guard_corners(NSEvent *event)
 +{
 +    const CGFloat zone = 200, g = 3;
@@ -110,7 +146,9 @@ index 646ffb6..26bf285 100644
 +    uint32_t n = 0;
 +    CGPoint p;
 +    CGRect r;
-+    CGFloat dx, dy;
++    CGFloat minx, maxx, miny, maxy;
++    bool outl, outr, outt, outb, corner, dock;
++    int edge;
 +
 +    if (!immersive_mode_enabled || !omacvm_main_full_screen()) {
 +        omacvm_corner_release();
@@ -131,36 +169,61 @@ index 646ffb6..26bf285 100644
 +    }
 +    if (CGGetDisplaysWithPoint(p, 1, &id, &n) != kCGErrorSuccess || n == 0) {
 +        /* Past the outer edge of the displays: stay on the one it was on. */
-+        if (CGGetDisplaysWithPoint(omacvm_corner_pos, 1, &id, &n) != kCGErrorSuccess ||
++        if (!omacvm_corner_held ||
++            CGGetDisplaysWithPoint(omacvm_corner_pos, 1, &id, &n) != kCGErrorSuccess ||
 +            n == 0) {
 +            omacvm_corner_release();
 +            return;
 +        }
 +    }
 +    r = CGDisplayBounds(id);
-+    p.x = MIN(MAX(p.x, CGRectGetMinX(r)), CGRectGetMaxX(r) - 1);
-+    p.y = MIN(MAX(p.y, CGRectGetMinY(r)), CGRectGetMaxY(r) - 1);
-+    dx = MIN(p.x - CGRectGetMinX(r), CGRectGetMaxX(r) - 1 - p.x);
-+    dy = MIN(p.y - CGRectGetMinY(r), CGRectGetMaxY(r) - 1 - p.y);
-+    if (dx < zone && dy < zone) {
-+        p.x = MIN(MAX(p.x, CGRectGetMinX(r) + g), CGRectGetMaxX(r) - 1 - g);
-+        p.y = MIN(MAX(p.y, CGRectGetMinY(r) + g), CGRectGetMaxY(r) - 1 - g);
-+        if (!omacvm_corner_held) {
-+            omacvm_corner_held = true;
-+            CGAssociateMouseAndMouseCursorPosition(false);
++    minx = CGRectGetMinX(r);
++    maxx = CGRectGetMaxX(r) - 1;
++    miny = CGRectGetMinY(r);
++    maxy = CGRectGetMaxY(r) - 1;
++    p.x = MIN(MAX(p.x, minx), maxx);
++    p.y = MIN(MAX(p.y, miny), maxy);
++    /* Outer edges: no display beyond them. */
++    outl = !omacvm_display_at(minx - 1, p.y);
++    outr = !omacvm_display_at(maxx + 1, p.y);
++    outt = !omacvm_display_at(p.x, miny - 1);
++    outb = !omacvm_display_at(p.x, maxy + 1);
++    corner = MIN(p.x - minx, maxx - p.x) < zone && MIN(p.y - miny, maxy - p.y) < zone;
++    edge = omacvm_dock_edge();
++    dock = (edge == 0 && outb && maxy - p.y < zone) ||
++           (edge == 1 && outl && p.x - minx < zone) ||
++           (edge == 2 && outr && maxx - p.x < zone);
++    if (!corner && !dock) {
++        if (omacvm_corner_held) {
++            CGWarpMouseCursorPosition(p);
++            omacvm_corner_release();
 +        }
-+        omacvm_corner_pos = p;
-+        CGWarpMouseCursorPosition(p);
-+    } else if (omacvm_corner_held) {
-+        CGWarpMouseCursorPosition(p);
-+        omacvm_corner_release();
++        return;
 +    }
++    if (outl && (corner || edge == 1)) {
++        p.x = MAX(p.x, minx + g);
++    }
++    if (outr && (corner || edge == 2)) {
++        p.x = MIN(p.x, maxx - g);
++    }
++    if (outt && corner) {
++        p.y = MAX(p.y, miny + g);
++    }
++    if (outb && (corner || edge == 0)) {
++        p.y = MIN(p.y, maxy - g);
++    }
++    if (!omacvm_corner_held) {
++        omacvm_corner_held = true;
++        CGAssociateMouseAndMouseCursorPosition(false);
++    }
++    omacvm_corner_pos = p;
++    CGWarpMouseCursorPosition(p);
 +}
 +
  /* A display's rectangle in points, top-left origin (CoreGraphics' global space). */
  static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
  {
-@@ -3692,6 +3778,22 @@ - (BOOL)windowShouldClose:(id)sender
+@@ -3692,6 +3838,22 @@ - (BOOL)windowShouldClose:(id)sender
      return NO;
  }
  

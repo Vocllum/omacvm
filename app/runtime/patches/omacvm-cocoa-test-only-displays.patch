@@ -13,7 +13,7 @@ Upstream: not applicable (test hook of OmacVM's display windows).
 Test: used by the display tests (notes: display-bugs track).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 26bf285..c1a9973 100644
+index fab3207..2a6c486 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -3224,6 +3224,18 @@ static bool omacvm_test_mode(void)
