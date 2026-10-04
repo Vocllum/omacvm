@@ -28,6 +28,14 @@ systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@"
 install -m644 omacvm-displays.service /etc/systemd/user/
 systemctl --global enable omacvm-displays.service >/dev/null 2>&1 || true
 systemctl --user -M "$U@" daemon-reload 2>/dev/null && systemctl --user -M "$U@" restart omacvm-displays.service 2>/dev/null || true
+# The switch "Use external displays" in Omarchy's display panel: Omarchy's own
+# widget with one more section (omacvm.monitor; the stock one stays if it no
+# longer fits).
+W=$(mktemp -d)
+if python3 monitor-widget/build.py "$W/omacvm.monitor"; then
+  ../../lib/install-plugin.sh "$U" "$W/omacvm.monitor" || echo "WARN: the display widget did not install"
+fi
+rm -rf "$W"
 install -m644 omacvm-app-host.service /etc/systemd/system/
 systemctl enable --now omacvm-app-host.service >/dev/null 2>&1 || true
 install -Dm644 90-omacvm-app.conf /etc/environment.d/90-omacvm-app.conf
