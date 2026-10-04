@@ -80,7 +80,7 @@ virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
 virgl_shader_core_glsl_version_patch="$native_dir/patches/virgl-shader-core-glsl-version.patch"
 virgl_shader_shadow_lod_patch="$native_dir/patches/virgl-shader-shadow-lod-extension.patch"
-virgl_shader_float_ops_patch="$native_dir/patches/virgl-shader-float-ops-integer-outputs.patch"
+virgl_shader_int_outputs_patch="$native_dir/patches/virgl-shader-integer-outputs.patch"
 virgl_blitter_core_glsl_version_patch="$native_dir/patches/virgl-blitter-core-glsl-version.patch"
 virgl_blitter_integer_msaa_patch="$native_dir/patches/virgl-blitter-integer-msaa.patch"
 virgl_framebuffer_no_attachments_patch="$native_dir/patches/virgl-framebuffer-no-attachments.patch"
@@ -114,9 +114,9 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
-virgl_shader_core_glsl_version_patch_sha256=0db80eb195b2c83374216f95410d3fcc076b6fa3e2f6cdb725a5b9d185c5f6fc
+virgl_shader_core_glsl_version_patch_sha256=a770a393ffe1c674938ff9cd7383e9fcef69e9dee4b1a82edca3d8e8eb2aa22a
 virgl_shader_shadow_lod_patch_sha256=93fddfb526c5ff7bae62d3d0ed5fdec6d386207c5883041f80e45245d3609293
-virgl_shader_float_ops_patch_sha256=7c7746729e613b62b79bb016d32a0dd3a2ade80c9fb6f05498a2f1f30e1dae6b
+virgl_shader_int_outputs_patch_sha256=3532681c93fcf014a99e88cf302179860a6a89677efed9d1d5f0a22647cb12cd
 virgl_blitter_core_glsl_version_patch_sha256=f11ace2d9b32a4c70e9a1072bca4e69a61023d193b2a087cf75fcb5c39e6fb91
 virgl_blitter_integer_msaa_patch_sha256=7c38f7998e5190deeec6d8012bcc42ad0ed26f0cc22ca1287b176348795b4334
 virgl_framebuffer_no_attachments_patch_sha256=33d3d12d1eac356957fd474c16412d5fe21d866c9d68c2661fa970b17266582d
@@ -657,8 +657,8 @@ verify_file_sha "Core profile GLSL version patch" "$virgl_shader_core_glsl_versi
 patch -d "$virgl_source" -p1 -f -i "$virgl_shader_core_glsl_version_patch"
 verify_file_sha "Shadow lod extension patch" "$virgl_shader_shadow_lod_patch" "$virgl_shader_shadow_lod_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_shader_shadow_lod_patch"
-verify_file_sha "Float ops into integer outputs patch" "$virgl_shader_float_ops_patch" "$virgl_shader_float_ops_patch_sha256"
-patch -d "$virgl_source" -p1 -f -i "$virgl_shader_float_ops_patch"
+verify_file_sha "Integer outputs patch" "$virgl_shader_int_outputs_patch" "$virgl_shader_int_outputs_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_int_outputs_patch"
 verify_file_sha "Blitter GLSL version patch" "$virgl_blitter_core_glsl_version_patch" "$virgl_blitter_core_glsl_version_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_blitter_core_glsl_version_patch"
 verify_file_sha "Blitter integer multisample patch" "$virgl_blitter_integer_msaa_patch" "$virgl_blitter_integer_msaa_patch_sha256"

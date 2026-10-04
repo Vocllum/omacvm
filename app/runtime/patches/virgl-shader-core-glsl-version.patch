@@ -4,7 +4,8 @@ What: on a desktop core profile that supports GLSL 3.30 (macOS: 4.10), every
 translated shader is "#version 330" or newer instead of 140/150. "#extension"
 lines are left out when the emitted version has the feature in core:
 ARB_texture_rectangle and ARB_draw_instanced (1.40), ARB_texture_multisample
-(1.50), ARB_shader_bit_encoding and ARB_explicit_attrib_location (3.30).
+(1.50), ARB_shader_bit_encoding and ARB_explicit_attrib_location (3.30; both
+places that ask for the latter, also separable programs and images).
 Why: Apple's core profile refuses floatBitsToInt()/intBitsToFloat() and friends
 below 3.30, and many translations use them without setting SHADER_REQ_INTS (e.g.
 integer vertex attributes passed on: dEQP-GLES3.functional.shaders.precision.int.*).
@@ -12,13 +13,17 @@ It also refuses "#extension GL_ARB_draw_instanced" (Chrome's instanced WebGL
 shaders). One refused shader stopped the guest's whole GL context, so every
 later draw of that app was black (dEQP-GLES3 in one process: 455/896 pass).
 Upstreamable (desktop core profiles only; GLES and compatibility hosts are
-unchanged); not sent. Replaces virgl-core-instance-id.patch of gpu-robust (same
-loop, ARB_draw_instanced is one of the entries here).
+unchanged); not sent.
+Overlap: gpu-robust's virgl-core-instance-id.patch does the ARB_draw_instanced
+part only. This patch leaves the upstream ARB_texture_rectangle line in place
+and adds its check above it, so both patches apply in either order (checked);
+drop virgl-core-instance-id.patch when both land.
 Tests: Tests/virgl/test-core-glsl-shaders.c (generated GLSL compiled by the
-Mac's OpenGL; fails without this patch).
+Mac's OpenGL; every case checks the version and extension lines; fails without
+this patch).
 --- a/src/vrend/vrend_shader.c
 +++ b/src/vrend/vrend_shader.c
-@@ -363,6 +363,24 @@ static const struct vrend_shader_table shader_req_table[] = {
+@@ -363,6 +363,24 @@
      { SHADER_REQ_EXPLICIT_UNIFORM_LOCATION, "ARB_explicit_uniform_location"},
  };
  
@@ -43,7 +48,17 @@ Mac's OpenGL; fails without this patch).
  enum vrend_type_qualifier {
     TYPE_CONVERSION_NONE = 0,
     FLOAT = 1,
-@@ -6331,7 +6349,8 @@ static void emit_header(const struct dump_ctx *ctx, struct vrend_glsl_strbufs *g
+@@ -6321,7 +6339,8 @@
+       if (ctx->shader_req_bits & SHADER_REQ_SEPERATE_SHADER_OBJECTS)
+          emit_ext(glsl_strbufs, "ARB_separate_shader_objects", "require");
+ 
+-      if (ctx->shader_req_bits & SHADER_REQ_EXPLICIT_ATTRIB_LOCATION)
++      if ((ctx->shader_req_bits & SHADER_REQ_EXPLICIT_ATTRIB_LOCATION) &&
++          ctx->glsl_ver_required < 330)
+          emit_ext(glsl_strbufs, "ARB_explicit_attrib_location", "require");
+ 
+       if (ctx->shader_req_bits & SHADER_REQ_ARRAYS_OF_ARRAYS)
+@@ -6331,7 +6350,8 @@
            ctx->prog_type == TGSI_PROCESSOR_TESS_EVAL)
           emit_ext(glsl_strbufs, "ARB_tessellation_shader", "require");
  
@@ -53,17 +68,17 @@ Mac's OpenGL; fails without this patch).
           emit_ext(glsl_strbufs, "ARB_explicit_attrib_location", "require");
        /* Core GLSL 150 already includes fragment coord layouts; avoid extension require on hosts that omit the ARB string (e.g., macOS core GL). */
        if (ctx->prog_type == TGSI_PROCESSOR_FRAGMENT && fs_emit_layout(ctx) && ctx->glsl_ver_required < 150)
-@@ -6352,7 +6371,8 @@ static void emit_header(const struct dump_ctx *ctx, struct vrend_glsl_strbufs *g
+@@ -6352,6 +6372,9 @@
        }
  
        for (uint32_t i = 0; i < ARRAY_SIZE(shader_req_table); i++) {
--         if (shader_req_table[i].key == SHADER_REQ_SAMPLER_RECT && ctx->glsl_ver_required >= 140)
 +         int core_ver = shader_req_core_glsl_ver(shader_req_table[i].key);
 +         if (core_ver && ctx->glsl_ver_required >= core_ver)
++            continue;
+          if (shader_req_table[i].key == SHADER_REQ_SAMPLER_RECT && ctx->glsl_ver_required >= 140)
              continue;
  
-          if (ctx->shader_req_bits & shader_req_table[i].key) {
-@@ -8178,6 +8198,12 @@ bool vrend_convert_shader(const struct vrend_context *rctx,
+@@ -8178,6 +8201,12 @@
     if (cfg->glsl_version >= 140)
        ctx.glsl_ver_required = require_glsl_ver(&ctx, 140);
  

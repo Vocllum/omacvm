@@ -1,0 +1,237 @@
+virglrenderer: results written to integer outputs keep their bits
+
+What: the guest's TGSI writes results straight to an integer render target
+(it folds floatBitsToUint(f(x)) or uint(i) into "OP OUT[n], ..."). For such a
+destination the translation now stores integer results as they are and float
+results as their bits (floatBitsToUint/floatBitsToInt):
+- integer ops (UADD, AND, NOT, USEQ, FSLT, F2U, TXQ, ...) went through
+  uintBitsToFloat()/intBitsToFloat() and were then converted to the output's
+  type, i.e. the value of a reinterpreted float;
+- SQRT, LRP, DP2/3/4, DPH, DST, LIT, EXP, LOG, SCS, RCP, RSQ, MAD, POW, XPD,
+  CMP, UCMP, I2F and U2F wrote without the bit cast: uint(1.0 / x) instead of
+  floatBitsToUint(1.0 / x), or a vec4 assigned to a uvec4, which no compiler
+  accepts;
+- SEQ/SNE/SLT/SGE... applied the bit cast to a bvec4 (does not compile); they
+  go through vec4() first.
+Float destinations and temporaries get the same GLSL as before.
+Why: dEQP-GLES3 builtin_functions.precision.sqrt/length read 315 for
+sqrt(99463) instead of its bits; the shaders that did not compile stopped the
+guest's whole context. Same on Linux hosts.
+Upstream bug (same code upstream); upstreamable; not sent.
+Applies after virgl-shader-core-glsl-version.patch.
+Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
+(18 ops; 11 fail without this patch, the others without its first part).
+--- a/src/vrend/vrend_shader.c
++++ b/src/vrend/vrend_shader.c
+@@ -408,6 +408,9 @@
+   enum vrend_type_qualifier dstconv;
+   enum vrend_type_qualifier udstconv;
+   enum vrend_type_qualifier idstconv;
++  /* An integer output: integer results are stored as they are (dstconv keeps
++   * the bits), float results as their bits (dtypeprefix floatBitsTo*). */
++  bool dst_is_int;
+   bool dst_override_no_wm[TGSI_FULL_MAX_DST_REGISTERS];
+   int32_t dest_index;
+ };
+@@ -2550,9 +2553,12 @@
+ 
+ #define emit_arit_op2(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s((%s %s %s))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], op, srcs[1], writemask)
+ #define emit_op1(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s(%s))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), op, srcs[0], writemask)
+-#define emit_compare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s((%s(%s(%s), %s(%s))))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask)
++#define emit_compare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(%s(%s(%s), %s(%s))))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask)
++/* uintBitsToFloat()/intBitsToFloat() of an integer result, unless the destination is
++ * an integer output that takes the integer as it is */
++#define int_result_to_dst(cast) (dinfo.dst_is_int ? "" : (cast))
+ 
+-#define emit_ucompare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(uintBitsToFloat(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.udstconv), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask, get_string(dinfo.udstconv))
++#define emit_ucompare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], get_string(dinfo.dstconv), int_result_to_dst("uintBitsToFloat"), get_string(dinfo.udstconv), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask, get_string(dinfo.udstconv))
+ 
+ static void handle_vertex_proc_exit(const struct dump_ctx *ctx,
+                                     struct vrend_glsl_strbufs *glsl_strbufs,
+@@ -4510,20 +4516,21 @@
+                }
+                dinfo->dst_override_no_wm[i] = output->override_no_wm;
+             }
++            bool int_result = dtype == TGSI_TYPE_SIGNED || dtype == TGSI_TYPE_UNSIGNED;
+             if (output->is_int) {
+-               if (dinfo->dtypeprefix == TYPE_CONVERSION_NONE)
+-                  dinfo->dtypeprefix = FLOAT_BITS_TO_INT;
++               dinfo->dtypeprefix = int_result ? TYPE_CONVERSION_NONE : FLOAT_BITS_TO_INT;
+                dinfo->dstconv = INT;
++               dinfo->dst_is_int = true;
+             }
+             else if (output->type == VEC_UINT) {
+-               if (dinfo->dtypeprefix == TYPE_CONVERSION_NONE)
+-                  dinfo->dtypeprefix = FLOAT_BITS_TO_UINT;
++               dinfo->dtypeprefix = int_result ? TYPE_CONVERSION_NONE : FLOAT_BITS_TO_UINT;
+                dinfo->dstconv = dinfo->udstconv;
++               dinfo->dst_is_int = true;
+             }
+             else if (output->type == VEC_INT) {
+-               if (dinfo->dtypeprefix == TYPE_CONVERSION_NONE)
+-                  dinfo->dtypeprefix = FLOAT_BITS_TO_INT;
++               dinfo->dtypeprefix = int_result ? TYPE_CONVERSION_NONE : FLOAT_BITS_TO_INT;
+                dinfo->dstconv = dinfo->idstconv;
++               dinfo->dst_is_int = true;
+             }
+             if (output->name == TGSI_SEMANTIC_PSIZE) {
+                dinfo->dstconv = FLOAT;
+@@ -5633,22 +5640,22 @@
+    switch (inst->Instruction.Opcode) {
+    case TGSI_OPCODE_SQRT:
+    case TGSI_OPCODE_DSQRT:
+-      emit_buff(&ctx->glsl_strbufs, "%s = sqrt(vec4(%s))%s;\n", dsts[0], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(sqrt(vec4(%s)))%s;\n", dsts[0], get_string(dinfo.dtypeprefix), srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_LRP:
+-      emit_buff(&ctx->glsl_strbufs, "%s = mix(vec4(%s), vec4(%s), vec4(%s))%s;\n", dsts[0], srcs[2], srcs[1], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(mix(vec4(%s), vec4(%s), vec4(%s)))%s;\n", dsts[0], get_string(dinfo.dtypeprefix), srcs[2], srcs[1], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_DP2:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(dot(vec2(%s), vec2(%s)));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(dot(vec2(%s), vec2(%s))));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_DP3:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(dot(vec3(%s), vec3(%s)));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(dot(vec3(%s), vec3(%s))));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_DP4:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(dot(vec4(%s), vec4(%s)));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(dot(vec4(%s), vec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_DPH:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(dot(vec4(vec3(%s), 1.0), vec4(%s)));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(dot(vec4(vec3(%s), 1.0), vec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_MAX:
+    case TGSI_OPCODE_DMAX:
+@@ -5688,11 +5695,11 @@
+       emit_buff(&ctx->glsl_strbufs, "discard;\n");
+       break;
+    case TGSI_OPCODE_DST:
+-      emit_buff(&ctx->glsl_strbufs, "%s = vec4(1.0, %s.y * %s.y, %s.z, %s.w);\n", dsts[0],
+-               srcs[0], srcs[1], srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(vec4(1.0, %s.y * %s.y, %s.z, %s.w));\n", dsts[0],
++               get_string(dinfo.dtypeprefix), srcs[0], srcs[1], srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_LIT:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(vec4(1.0, max(%s.x, 0.0), step(0.0, %s.x) * pow(max(0.0, %s.y), clamp(%s.w, -128.0, 128.0)), 1.0)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(1.0, max(%s.x, 0.0), step(0.0, %s.x) * pow(max(0.0, %s.y), clamp(%s.w, -128.0, 128.0)), 1.0))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_EX2:
+       emit_op1("exp2");
+@@ -5701,10 +5708,10 @@
+       emit_op1("log2");
+       break;
+    case TGSI_OPCODE_EXP:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(vec4(pow(2.0, floor(%s.x)), %s.x - floor(%s.x), exp2(%s.x), 1.0)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(pow(2.0, floor(%s.x)), %s.x - floor(%s.x), exp2(%s.x), 1.0))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_LOG:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(vec4(floor(log2(%s.x)), %s.x / pow(2.0, floor(log2(%s.x))), log2(%s.x), 1.0)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(floor(log2(%s.x)), %s.x / pow(2.0, floor(log2(%s.x))), log2(%s.x), 1.0))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[0], srcs[0], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_COS:
+       emit_op1("cos");
+@@ -5713,7 +5720,7 @@
+       emit_op1("sin");
+       break;
+    case TGSI_OPCODE_SCS:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(vec4(cos(%s.x), sin(%s.x), 0, 1)%s);\n", dsts[0], get_string(dinfo.dstconv),
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(cos(%s.x), sin(%s.x), 0, 1))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix),
+                srcs[0], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_DDX:
+@@ -5731,7 +5738,7 @@
+       emit_op1("dFdyFine");
+       break;
+    case TGSI_OPCODE_RCP:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(1.0/(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(1.0/(%s)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0]);
+       break;
+    case TGSI_OPCODE_DRCP:
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(1.0LF/(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
+@@ -5786,7 +5793,7 @@
+       break;
+    case TGSI_OPCODE_RSQ:
+    case TGSI_OPCODE_DRSQ:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(inversesqrt(%s.x));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(inversesqrt(%s.x)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0]);
+       break;
+    case TGSI_OPCODE_FBFETCH:
+    case TGSI_OPCODE_MOV:
+@@ -5831,7 +5838,7 @@
+       emit_arit_op2("<<");
+       break;
+    case TGSI_OPCODE_MAD:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s((%s * %s + %s)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1], srcs[2], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s * %s + %s)%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1], srcs[2], writemask);
+       break;
+    case TGSI_OPCODE_UMAD:
+    case TGSI_OPCODE_DMAD:
+@@ -5871,7 +5878,7 @@
+       emit_txqs(ctx, inst, sinfo.sreg_index, srcs, dsts[0]);
+       break;
+    case TGSI_OPCODE_I2F:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(ivec4(%s)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(ivec4(%s)))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_I2D:
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(ivec4(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
+@@ -5880,7 +5887,7 @@
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
+       break;
+    case TGSI_OPCODE_U2F:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(uvec4(%s)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(vec4(uvec4(%s)))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_U2D:
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(uvec4(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
+@@ -5901,10 +5908,10 @@
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0]);
+       break;
+    case TGSI_OPCODE_NOT:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(uintBitsToFloat(~(uvec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(~(uvec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), int_result_to_dst("uintBitsToFloat"), srcs[0]);
+       break;
+    case TGSI_OPCODE_INEG:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(intBitsToFloat(-(ivec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(-(ivec4(%s))));\n", dsts[0], get_string(dinfo.dstconv), int_result_to_dst("intBitsToFloat"), srcs[0]);
+       break;
+    case TGSI_OPCODE_DNEG:
+       emit_buff(&ctx->glsl_strbufs, "%s = %s(-%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
+@@ -5958,13 +5965,13 @@
+       emit_ucompare("greaterThanEqual");
+       break;
+    case TGSI_OPCODE_POW:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(pow(%s, %s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(pow(%s, %s)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_CMP:
+-      emit_buff(&ctx->glsl_strbufs, "%s = mix(%s, %s, greaterThanEqual(%s, vec4(0.0)))%s;\n", dsts[0], srcs[1], srcs[2], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(mix(%s, %s, greaterThanEqual(%s, vec4(0.0))))%s;\n", dsts[0], get_string(dinfo.dtypeprefix), srcs[1], srcs[2], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_UCMP:
+-      emit_buff(&ctx->glsl_strbufs, "%s = mix(%s, %s, notEqual(floatBitsToUint(%s), uvec4(0.0)))%s;\n", dsts[0], srcs[2], srcs[1], srcs[0], writemask);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(mix(%s, %s, notEqual(floatBitsToUint(%s), uvec4(0.0))))%s;\n", dsts[0], get_string(dinfo.dtypeprefix), srcs[2], srcs[1], srcs[0], writemask);
+       break;
+    case TGSI_OPCODE_END:
+       if (iter->processor.Processor == TGSI_PROCESSOR_VERTEX) {
+@@ -5998,7 +6005,7 @@
+       emit_buff(&ctx->glsl_strbufs, "%s = int(%s);\n", dsts[0], srcs[0]);
+       break;
+    case TGSI_OPCODE_XPD:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(cross(vec3(%s), vec3(%s)));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(cross(vec3(%s), vec3(%s))));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], srcs[1]);
+       break;
+    case TGSI_OPCODE_BGNLOOP:
+       emit_buf(&ctx->glsl_strbufs, "do {\n");
+@@ -6086,7 +6093,7 @@
+       ctx->shader_req_bits |= SHADER_REQ_GPU_SHADER5;
+       break;
+    case TGSI_OPCODE_BFI:
+-      emit_buff(&ctx->glsl_strbufs, "%s = %s(uintBitsToFloat(bitfieldInsert(%s, %s, int(%s), int(%s))));\n", dsts[0], get_string(dinfo.dstconv), srcs[0], srcs[1], srcs[2], srcs[3]);
++      emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(bitfieldInsert(%s, %s, int(%s), int(%s))));\n", dsts[0], get_string(dinfo.dstconv), int_result_to_dst("uintBitsToFloat"), srcs[0], srcs[1], srcs[2], srcs[3]);
+       ctx->shader_req_bits |= SHADER_REQ_GPU_SHADER5;
+       break;
+    case TGSI_OPCODE_BREV:

@@ -5,7 +5,6 @@
  * every later draw of that app was black. Translates TGSI offline, checks the
  * text, then compiles it with the Mac's own OpenGL (a CGL core profile context,
  * no window) when one is available. */
-#include <dlfcn.h>
 #include <epoxy/gl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,27 +12,7 @@
 #include "tgsi/tgsi_text.h"
 #include "vrend/vrend_shader.h"
 #include "vrend/vrend_strbuf.h"
-
-typedef int (*choose_fn)(const int *, void **, int *);
-typedef int (*create_fn)(void *, void *, void **);
-typedef int (*current_fn)(void *);
-
-/* A core profile context like the renderer's (OpenGL 4.1 on the Mac). */
-static bool gl_init(void)
-{
-   void *cgl = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY);
-   if (!cgl)
-      return false;
-   choose_fn choose = (choose_fn)dlsym(cgl, "CGLChoosePixelFormat");
-   create_fn create = (create_fn)dlsym(cgl, "CGLCreateContext");
-   current_fn current = (current_fn)dlsym(cgl, "CGLSetCurrentContext");
-   if (!choose || !create || !current)
-      return false;
-   const int attrs[] = {99 /* kCGLPFAOpenGLProfile */, 0x3200 /* 3.2 core and later */, 0};
-   void *pix = NULL, *ctx = NULL;
-   int n = 0;
-   return !choose(attrs, &pix, &n) && pix && !create(pix, NULL, &ctx) && ctx && !current(ctx);
-}
+#include "cgl-context.h"
 
 static bool gl_compiles(const char *name, GLenum type, const char *glsl)
 {
@@ -95,7 +74,7 @@ static int convert(const char *name, const char *text, const struct vrend_shader
 
 int main(void)
 {
-   bool have_gl = gl_init();
+   bool have_gl = cgl_init_current();
    if (!have_gl)
       puts("SKIP: no OpenGL context here; checking the GLSL text only");
    int failed = 0;
@@ -118,6 +97,14 @@ int main(void)
                      "MOV OUT[0], IN[0]\nMOV OUT[1], IN[1]\nEND\n",
                      &key, "uintBitsToFloat", NULL, have_gl);
 
+   /* A separable program (program pipelines) asks for explicit locations too;
+    * they are core in GLSL 3.30. */
+   memset(&key, 0, sizeof(key));
+   failed |= convert("separable vertex shader",
+                     "VERT\nPROPERTY SEPARABLE_PROGRAM 1\nDCL IN[0]\nDCL OUT[0], POSITION\n"
+                     "DCL OUT[1], GENERIC[0]\nMOV OUT[0], IN[0]\nMOV OUT[1], IN[0]\nEND\n",
+                     &key, "layout", NULL, have_gl);
+
    /* Integer render target written from a flat input. */
    memset(&key, 0, sizeof(key));
    key.fs.cbufs_unsigned_int_bitmask = 0x1;
@@ -126,29 +113,43 @@ int main(void)
                      "MOV OUT[0], IN[0]\nEND\n",
                      &key, NULL, NULL, have_gl);
 
-   /* dEQP-GLES3.functional.shaders.builtin_functions.precision.*: the guest
-    * writes floatBitsToUint(sqrt(x)) to an integer render target; its TGSI
-    * puts the float math straight into the output. The bits must be kept
-    * (floatBitsToUint), not the value converted (uint(1.0 / x) gave 315 for
-    * sqrt(99463) instead of the float's bits). */
+   /* Results written straight to an integer render target (the guest's TGSI
+    * folds floatBitsToUint(f(x)) or uint(i) into "OP OUT[n], ..."). Float results
+    * must keep their bits: dEQP-GLES3 builtin_functions.precision.sqrt read 315
+    * for sqrt(99463) (uint(1.0 / x)), and CMP, UCMP or SEQ into such an output
+    * did not compile at all. Integer results are stored as they are, without a
+    * detour through uintBitsToFloat() (uvec4(uintBitsToFloat(a + b)) converts). */
    static const struct {
-      const char *name, *op;
-   } float_ops[] = {
-      {"RCP into an integer color output", "RCP OUT[0].x, IN[0].xxxx\n"},
-      {"RSQ into an integer color output", "RSQ OUT[0].x, IN[0].xxxx\n"},
-      {"SQRT into an integer color output", "SQRT OUT[0], IN[0]\n"},
-      {"DP3 into an integer color output", "DP3 OUT[0].x, IN[0], IN[0]\n"},
-      {"MAD into an integer color output", "MAD OUT[0], IN[0], IN[0], IN[0]\n"},
-      {"POW into an integer color output", "POW OUT[0].x, IN[0].xxxx, IN[0].yyyy\n"},
-      {"LRP into an integer color output", "LRP OUT[0], IN[0], IN[0], IN[0]\n"},
+      const char *op, *must, *must_not;
+   } int_out[] = {
+      {"RCP OUT[0].x, IN[0].xxxx", "floatBitsToUint(1.0/", NULL},
+      {"RSQ OUT[0].x, IN[0].xxxx", "floatBitsToUint(inversesqrt", NULL},
+      {"SQRT OUT[0], IN[0]", "floatBitsToUint(sqrt", NULL},
+      {"DP3 OUT[0].x, IN[0], IN[0]", "floatBitsToUint(dot", NULL},
+      {"MAD OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(", NULL},
+      {"POW OUT[0].x, IN[0].xxxx, IN[0].yyyy", "floatBitsToUint(pow", NULL},
+      {"LRP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
+      {"CMP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
+      {"UCMP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
+      {"SEQ OUT[0], IN[0], IN[0]", "floatBitsToUint(vec4(equal", NULL},
+      {"I2F OUT[0], IN[0]", "floatBitsToUint(vec4(ivec4", NULL},
+      {"U2F OUT[0], IN[0]", "floatBitsToUint(vec4(uvec4", NULL},
+      {"UADD OUT[0], IN[0], IN[0]", "fsout_c0 = uvec4((uvec4(", "BitsToFloat"},
+      {"AND OUT[0], IN[0], IN[0]", "fsout_c0 = uvec4((", "BitsToFloat"},
+      {"NOT OUT[0], IN[0]", "fsout_c0 = uvec4((~", "BitsToFloat"},
+      {"USEQ OUT[0], IN[0], IN[0]", "* uvec4(0xffffffff)", "BitsToFloat"},
+      {"FSLT OUT[0], IN[0], IN[0]", "* uvec4(0xffffffff)", "BitsToFloat"},
+      {"F2U OUT[0], IN[0]", "fsout_c0 = uvec4((uvec4(", "BitsToFloat"},
    };
-   for (unsigned i = 0; i < sizeof(float_ops) / sizeof(float_ops[0]); i++) {
-      char text[256];
-      snprintf(text, sizeof(text), "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n%sEND\n",
-               float_ops[i].op);
+   for (unsigned i = 0; i < sizeof(int_out) / sizeof(int_out[0]); i++) {
+      char name[96], text[256];
+      snprintf(name, sizeof(name), "%.*s into an integer color output",
+               (int)strcspn(int_out[i].op, " "), int_out[i].op);
+      snprintf(text, sizeof(text), "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n%s\nEND\n",
+               int_out[i].op);
       memset(&key, 0, sizeof(key));
       key.fs.cbufs_unsigned_int_bitmask = 0x1;
-      failed |= convert(float_ops[i].name, text, &key, "floatBitsToUint(", NULL, have_gl);
+      failed |= convert(name, text, &key, int_out[i].must, int_out[i].must_not, have_gl);
    }
 
    /* Instanced drawing (WebGL through ANGLE): gl_InstanceID is core GLSL;
