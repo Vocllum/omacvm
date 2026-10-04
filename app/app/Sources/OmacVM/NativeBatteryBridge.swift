@@ -30,35 +30,28 @@ final class NativeBatteryBridge: @unchecked Sendable {
 
     deinit { stop() }
 
+    /// In its own autorelease pool: run() never returns to one, and every
+    /// line that is not JSON leaves an autoreleased NSError behind.
     static func isRefreshRequest(_ line: Data) -> Bool {
-        (try? JSONSerialization.jsonObject(with: line) as? [String: Any])?["type"] as? String == "refresh"
+        autoreleasepool {
+            (try? JSONSerialization.jsonObject(with: line) as? [String: Any])?["type"] as? String == "refresh"
+        }
     }
 
     func run() throws {
         startPowerNotifications()
         startHeartbeat()
-        var line = Data(), skipping = false
+        var lines = BatteryLines()
         var chunk = [UInt8](repeating: 0, count: 4096)
         while true {
             let count = chunk.withUnsafeMutableBytes { Darwin.read(descriptor, $0.baseAddress, $0.count) }
             if count > 0 {
-                var start = 0
-                for index in 0..<count where chunk[index] == 0x0A {
-                    if !skipping {
-                        line.append(contentsOf: chunk[start..<index])
-                        // In step with the write, so a VM that floods requests
-                        // waits for its answers instead of queueing work here.
-                        if Self.isRefreshRequest(line) {
-                            stateQueue.sync { guestListening = true; sendOnQueue(forced: true) }
-                        }
+                lines.feed(chunk[0..<count]) { line in
+                    // In step with the write, so a VM that floods requests
+                    // waits for its answers instead of queueing work here.
+                    if Self.isRefreshRequest(line) {
+                        stateQueue.sync { guestListening = true; sendOnQueue(forced: true) }
                     }
-                    line.removeAll(keepingCapacity: true)
-                    skipping = false
-                    start = index + 1
-                }
-                if !skipping {
-                    line.append(contentsOf: chunk[start..<count])
-                    if line.count > Self.maximumLineBytes { line.removeAll(); skipping = true }   // dropped, not fatal
                 }
             } else if count == 0 {
                 return
@@ -137,6 +130,29 @@ final class NativeBatteryBridge: @unchecked Sendable {
         } catch {
             fputs("[battery-bridge] \(error.localizedDescription)\n", stderr)
             stop()
+        }
+    }
+}
+
+/// Splits what the VM sends into lines; a line over maximumLineBytes is
+/// dropped (not fatal), up to its newline.
+struct BatteryLines {
+    private var line = Data(), skipping = false
+
+    mutating func feed(_ chunk: ArraySlice<UInt8>, _ each: (Data) -> Void) {
+        var start = chunk.startIndex
+        for index in chunk.indices where chunk[index] == 0x0A {
+            if !skipping {
+                line.append(contentsOf: chunk[start..<index])
+                each(line)
+            }
+            line.removeAll(keepingCapacity: true)
+            skipping = false
+            start = index + 1
+        }
+        if !skipping {
+            line.append(contentsOf: chunk[start..<chunk.endIndex])
+            if line.count > NativeBatteryBridge.maximumLineBytes { line.removeAll(); skipping = true }
         }
     }
 }

@@ -40,6 +40,32 @@ enum CameraWire {
   }
 }
 
+/// The VM's side of a camera connection: one JSON object per line,
+/// {"type": "start"} or {"type": "stop"}.
+struct CameraRequests {
+  static let maximumLineBytes = 4096
+  private var line = Data()
+
+  /// Calls want(true) for start, want(false) for stop. False: something else
+  /// or a line over 4 KB came, and the connection should close.
+  mutating func feed(_ bytes: UnsafeBufferPointer<UInt8>, want: (Bool) -> Void) -> Bool {
+    for byte in bytes {
+      if byte == 0x0A {
+        // Own autorelease pool: the connection's thread never drains one, and
+        // a line that is not JSON leaves an autoreleased NSError behind.
+        let type = autoreleasepool { (try? JSONSerialization.jsonObject(with: line) as? [String: Any])?["type"] as? String }
+        guard type == "start" || type == "stop" else { return false }
+        want(type == "start")
+        line.removeAll(keepingCapacity: true)
+      } else if byte != 0x0D {
+        guard line.count < Self.maximumLineBytes else { return false }
+        line.append(byte)
+      }
+    }
+    return true
+  }
+}
+
 /// macOS's camera permission for this app: granted, not-determined, denied or restricted.
 func cameraPermission() -> String {
   switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -308,21 +334,9 @@ final class CameraHub: @unchecked Sendable {
     let c = CameraChannel(fd: fd, label: label), id = ObjectIdentifier(c)
     lock.lock(); channels[id] = c; lock.unlock()
     c.send(CameraWire.status(["status": "idle"]))
-    var line = Data(), buf = [UInt8](repeating: 0, count: 1024)
+    var requests = CameraRequests(), buf = [UInt8](repeating: 0, count: 1024)
     func feed(_ bytes: UnsafeBufferPointer<UInt8>) -> Bool {
-      for byte in bytes {
-        if byte == 0x0A {
-          guard let o = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                let type = o["type"] as? String, type == "start" || type == "stop" else {
-            log("\(label): not a camera request, closing"); return false
-          }
-          want(c, type == "start")
-          line.removeAll(keepingCapacity: true)
-        } else if byte != 0x0D {
-          guard line.count < 4096 else { return false }
-          line.append(byte)
-        }
-      }
+      guard requests.feed(bytes, want: { want(c, $0) }) else { log("\(label): not a camera request, closing"); return false }
       return true
     }
     var going = leftover.withUnsafeBytes { feed($0.bindMemory(to: UInt8.self)) }
