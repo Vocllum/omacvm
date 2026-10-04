@@ -19,7 +19,7 @@ command -v vainfo >/dev/null && vainfo --display drm --device "$dev" 2>/dev/null
 files=("$@")
 if ((${#files[@]} == 0)); then
   src=(-f lavfi -i "testsrc2=size=1920x1080:rate=30,noise=alls=8:allf=t" -t 3 -pix_fmt yuv420p)
-  ffmpeg -nostdin -hide_banner -loglevel error "${src[@]}" -c:v libx264 -preset medium "$tmp/h264.mp4"
+  ffmpeg -nostdin -hide_banner -loglevel error -y "${src[@]}" -c:v libx264 -preset medium "$tmp/h264.mp4"
   files+=("$tmp/h264.mp4")
   for pass in 1 2; do   # two passes: libvpx makes hidden alt-ref frames
     out=/dev/null; [[ $pass == 2 ]] && out=$tmp/vp9.webm
@@ -27,8 +27,8 @@ if ((${#files[@]} == 0)); then
       -pass $pass -passlogfile "$tmp/vp9" -auto-alt-ref 1 -lag-in-frames 25 -cpu-used 4 -f webm "$out"
   done
   files+=("$tmp/vp9.webm")
-  if ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx265; then
-    ffmpeg -nostdin -hide_banner -loglevel error "${src[@]}" -c:v libx265 -preset fast \
+  if [[ $(ffmpeg -hide_banner -encoders 2>/dev/null) == *libx265* ]]; then
+    ffmpeg -nostdin -hide_banner -loglevel error -y "${src[@]}" -c:v libx265 -preset fast \
       -x265-params log-level=error "$tmp/hevc.mp4"
     files+=("$tmp/hevc.mp4")
   fi
@@ -36,9 +36,11 @@ fi
 
 fail=0
 for f in "${files[@]}"; do
-  ffmpeg -nostdin -hide_banner -loglevel error -i "$f" -frames 600 -pix_fmt nv12 -f framemd5 "$tmp/sw.md5"
-  if ! ffmpeg -nostdin -hide_banner -loglevel error -hwaccel vaapi -hwaccel_device "$dev" \
-      -hwaccel_output_format vaapi -i "$f" -frames 600 -vf hwdownload,format=nv12 -f framemd5 "$tmp/hw.md5"; then
+  fmt=nv12   # 10-bit video comes out as P010
+  [[ $(ffprobe -v error -select_streams v:0 -show_entries stream=pix_fmt -of csv=p=0 "$f") == *10* ]] && fmt=p010le
+  ffmpeg -nostdin -hide_banner -loglevel error -y -i "$f" -frames 600 -pix_fmt $fmt -f framemd5 "$tmp/sw.md5"
+  if ! ffmpeg -nostdin -hide_banner -loglevel error -y -hwaccel vaapi -hwaccel_device "$dev" \
+      -hwaccel_output_format vaapi -i "$f" -frames 600 -vf hwdownload,format=$fmt -f framemd5 "$tmp/hw.md5"; then
     echo "$(basename "$f"): VA-API decoding failed"; fail=1; continue
   fi
   sw=$(grep -v '^#' "$tmp/sw.md5" | awk -F, '{ print $NF }')
