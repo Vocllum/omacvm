@@ -6,10 +6,11 @@ the runner page and restarts it when needed, until the runner posts "done".
   context in error, so every later page of that Chrome would fail too). Then the next page.
 - a page that posts nothing for STALL s (renderer blocked in a GL call) is recorded as "hang"
   and Chrome restarted at the next page.
-Usage: webgl-driver.py OUT.jsonl WEBGL_MAJOR ISOLATE STALL_S"""
+Usage: webgl-driver.py OUT.jsonl WEBGL_MAJOR ISOLATE STALL_S [FIRST_PAGE]"""
 import json, os, subprocess, sys, time, urllib.request
 
 out, wv, isolate, stall = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+first_page = int(sys.argv[5]) if len(sys.argv) > 5 else 0
 PROF = "/tmp/webgl-prof"
 chrome = None
 
@@ -31,8 +32,10 @@ def post(path, rec):
                                                   method="POST"), timeout=10)
 
 
-start(0, 1)
-pos, cur, seen_at, restarts = 0, None, time.time(), 0
+# records already in OUT (a run resumed after a VM restart) are not ours to act on
+pos = os.path.getsize(out) if os.path.exists(out) else 0
+start(first_page, 1)
+cur, seen_at, restarts = None, time.time(), 0
 while True:
     time.sleep(0.5)
     with open(out) if os.path.exists(out) else open(os.devnull) as f:
