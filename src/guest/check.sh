@@ -231,6 +231,12 @@ app)
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
+  if [[ ! -e /dev/virtio-ports/org.omacvm.display ]]; then
+    skip "every Mac display" "no display port: an OmacVM.app from before external displays (omacvm update)"
+  elif user_active omacvm-displays.service; then
+    n=$(as_user hyprctl monitors -j 2>/dev/null | jq '[.[] | select(.name | test("^Virtual-"))] | length' 2>/dev/null || echo "?")
+    ok "every Mac display" "external displays $(as_user omacvm-displays state 2>/dev/null || echo "?"), $n output(s) now"
+  else bad "every Mac display" "omacvm-displays.service not running: omacvm apply"; fi
   if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
   else bad "sound" "no PipeWire sink: omacvm apply"; fi
   if as_user hyprctl monitors -j 2>/dev/null | jq -e '.[0].refreshRate' >/dev/null 2>&1; then
