@@ -51,7 +51,7 @@ index ba6af7c..aba99f1 100644
          qemu_log_mask(LOG_GUEST_ERROR,
 -                      "%s: nr_entries is too big (%d > 16384)\n",
 -                      __func__, nr_entries);
-+                      "%s: nr_entries is too big (%d > %d)\n",
++                      "%s: nr_entries is too big (%u > %d)\n",
 +                      __func__, nr_entries, VIRTIO_GPU_MAX_MAPPING_ENTRIES);
          return -1;
      }
