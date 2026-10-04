@@ -3,6 +3,19 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- OmacVM.app: a Linux app switching the screen between large modes in a loop
+  grew the VM's GPU memory on the Mac by up to 1.1 GB per switch and never gave
+  it back, until the Mac ran out of memory (2.6.0 and 2.7.0 too). Two GL
+  contexts were never flushed; both are now, and the memory stays flat.
+- OmacVM.app: the textures and buffers a VM's apps make have a memory budget
+  on the Mac, a quarter of its memory (`OMACVM_GPU_MEMORY_MB` changes it, 0
+  turns it off). Past it, the app's GPU context stops; the VM and the Mac go on.
+- OmacVM.app: a WebGL 2 or OpenGL ES app using transform feedback could stop
+  the VM (QEMU crashed in Apple's OpenGL when it ended the recording). Fixed in
+  the app's virglrenderer, with a build-time test.
+
 ## 2.7.0
 
 - OmacVM.app: videos are decoded by the Mac's media engine instead of the
