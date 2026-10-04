@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for omacvm-displays' wallpaper check (no VM needed).
+"""Tests for omacvm-displays' desktop check (no VM needed).
 
     python3 src/app/guest/tests/test_omacvm_displays.py
 """
@@ -90,17 +90,83 @@ class MisplacedWallpapers(unittest.TestCase):
             self.assertEqual(od.misplaced_wallpapers(m, l), [])
 
 
-class Agent(unittest.TestCase):
-    """check_wallpapers: settle, confirm, then repair once, rate-limited."""
+def ppm(w, h, pixel):
+    return b"P6\n%d %d\n255\n" % (w, h) + bytes(pixel) * (w * h)
 
-    def make(self, problems):
+
+def ws(**per_id):
+    return [{"id": int(k[1:]), "windows": v} for k, v in per_id.items()]
+
+
+def active(m, wid, special=0):
+    m = dict(m)
+    m["activeWorkspace"] = {"id": wid}
+    m["specialWorkspace"] = {"id": special}
+    return m
+
+
+class DesktopOutputs(unittest.TestCase):
+    L = layers(Virtual_1=[("omarchy-background", 1728, 0, 1920, 1200)],
+               Virtual_2=[("omarchy-background", 0, 0, 1728, 1080)],
+               NOTCH=[("omarchy-background", 0, 0, 1728, 37)])
+
+    def test_empty_workspaces_with_wallpaper(self):
+        mons = [active(MONS[0], 1), active(MONS[1], 11), active(MONS[2], -1337)]
+        self.assertEqual(od.desktop_outputs(mons, ws(w1=0, w11=0), self.L), ["Virtual-1", "Virtual-2"])
+
+    def test_windows_special_mirror_and_no_wallpaper_skipped(self):
+        mons = [active(MONS[0], 1), active(MONS[1], 11, special=-98),
+                active(mon("Virtual-3", 0, 0, 3456, 2160, mirrorOf="Virtual-2"), 12),
+                active(mon("Virtual-4", 0, 0, 10, 10), 13)]
+        l = dict(self.L, **layers(Virtual_3=[("omarchy-background", 0, 0, 1, 1)]))
+        self.assertEqual(od.desktop_outputs(mons, ws(w1=2, w11=0, w12=0, w13=0), l), [])
+
+    def test_garbage(self):
+        for m, w, l in [(None, None, None), ([], [], {}), ([1, "x"], "y", {"a": 1}),
+                        ([{"name": "Virtual-1", "activeWorkspace": 3}], [], self.L)]:
+            self.assertEqual(od.desktop_outputs(m, w, l), [])
+
+
+class Shown(unittest.TestCase):
+    def test_grey_is_undrawn(self):
+        self.assertTrue(od.undrawn(od.ppm_shown(ppm(40, 30, (17, 17, 17)), od.HYPR_GREY)))
+
+    def test_wallpaper_is_drawn(self):
+        img = ppm(20, 10, (17, 17, 17))
+        mixed = b"P6\n4 2\n255\n" + bytes((17, 17, 17)) * 4 + bytes((90, 140, 200)) * 4
+        self.assertFalse(od.undrawn(od.ppm_shown(mixed, od.HYPR_GREY)))
+        self.assertTrue(od.undrawn(od.ppm_shown(img, od.HYPR_GREY)))
+
+    def test_flat_other_colour_is_undrawn_only_if_flat(self):
+        # A flat image of any colour has no spread: nothing drawn on it.
+        self.assertTrue(od.undrawn(od.ppm_shown(ppm(8, 8, (0, 0, 0)), od.HYPR_GREY)))
+
+    def test_not_ppm(self):
+        for data in (b"", b"P5\n1 1\n255\n\0", b"P6\n2 2\n255\n\0", b"garbage"):
+            self.assertIsNone(od.ppm_shown(data, od.HYPR_GREY))
+            self.assertFalse(od.undrawn(od.ppm_shown(data, od.HYPR_GREY)))
+
+    def test_background_colour(self):
+        self.assertEqual(od.background_colour({"int": 0xff202122}), (0x20, 0x21, 0x22))
+        self.assertEqual(od.background_colour(None), od.HYPR_GREY)
+        self.assertEqual(od.background_colour({"int": "x"}), od.HYPR_GREY)
+
+
+class Agent(unittest.TestCase):
+    """check_desktop: look when due, confirm, restart once, rate-limited, counted on success."""
+
+    def make(self, problems, locked=False, exit_code=0):
         self.problems = problems
+        self.locked = locked
+        self.exit_code = exit_code
         a = od.Agent.__new__(od.Agent)
-        a.layout_at = -100.0
+        a.looks = []
+        a.shell = None
         a.suspect = None
         a.repairs = 0
         a.repaired_at = -od.REPAIR_EVERY
         a.repair = None
+        a.repairing = []
         a.repaired_for = []
         a.said = []
         self.started = []
@@ -110,11 +176,15 @@ class Agent(unittest.TestCase):
         class P:
             def __init__(self, argv, **kw):
                 test.started.append(argv)
+                self.returncode = None
 
             def poll(self):
-                return 0
-        for target, value in [("misplaced_wallpapers", lambda m, l: list(self.problems)),
+                self.returncode = test.exit_code
+                return self.returncode
+        for target, value in [("undrawn_outputs", lambda: list(self.problems)),
+                              ("misplaced_wallpapers", lambda m, l: []),
                               ("hypr_json", lambda c: None),
+                              ("screen_locked", lambda: self.locked),
                               ("config_flag", lambda n: True),
                               ("REPAIRS", pathlib.Path("/nonexistent/omacvm-test/shell-repairs"))]:
             patcher = mock.patch.object(od, target, value)
@@ -126,55 +196,93 @@ class Agent(unittest.TestCase):
             self.addCleanup(patcher.stop)
         return a
 
-    def test_confirm_then_repair_then_rate_limit(self):
-        a = self.make(["Virtual-2: x"])
-        a.check_wallpapers()                      # first sight
+    def run_for(self, a, seconds, step=1.0):
+        end = self.clock[0] + seconds
+        while self.clock[0] < end:
+            self.clock[0] += step
+            a.check_desktop()
+            a.repair_done()
+
+    def test_nothing_due_nothing_done(self):
+        a = self.make(["Virtual-2"])
+        self.run_for(a, 300)
         self.assertEqual(self.started, [])
-        self.clock[0] += 2
-        a.check_wallpapers()                      # too soon to confirm
+
+    def test_confirm_then_restart_once(self):
+        a = self.make(["Virtual-2"])
+        a.look_in(10)
+        self.run_for(a, 12)                       # first sight only
         self.assertEqual(self.started, [])
-        self.clock[0] += 5
-        a.check_wallpapers()                      # confirmed: restart
+        self.run_for(a, 6)                        # confirmed 4 s later
         self.assertEqual(self.started, [["omarchy-restart-shell"]])
-        for _ in range(4):                        # within REPAIR_EVERY: no more
-            self.clock[0] += 10
-            a.check_wallpapers()
-        self.assertEqual(len(self.started), 1)
+        self.assertEqual(a.repairs, 1)
 
-    def test_layout_change_resets(self):
-        a = self.make(["Virtual-2: x"])
-        a.check_wallpapers()
-        self.clock[0] += 5
-        a.layout_changed()
-        self.clock[0] += 1
-        a.check_wallpapers()                      # still settling
-        self.clock[0] += 5
-        a.check_wallpapers()                      # first sight again
+    def test_drawn_again_resets(self):
+        a = self.make(["Virtual-2"])
+        a.look_in(1)
+        self.run_for(a, 2)
+        self.problems = []
+        self.run_for(a, 10)
+        self.problems = ["Virtual-2"]
+        a.look_in(1)
+        self.run_for(a, 2)                        # a new first sight
         self.assertEqual(self.started, [])
 
-    def test_at_most_three(self):
-        a = self.make(["Virtual-2: x"])
-        for i in range(40):
-            self.problems = [f"Virtual-2: at {i // 2}"]  # a new place each time
-            self.clock[0] += od.REPAIR_EVERY / 2
-            a.check_wallpapers()
-        self.assertEqual(len(self.started), od.REPAIR_MAX)
+    def test_new_shell_is_looked_at(self):
+        a = self.make([])
+        with mock.patch.object(od, "shell_pid", lambda: 4242):
+            a.watch_shell()
+        self.assertEqual(len(a.looks), len(od.SHELL_LOOKS))
+        with mock.patch.object(od, "shell_pid", lambda: 4242):
+            a.watch_shell()                       # same shell: no new looks
+        self.assertEqual(len(a.looks), len(od.SHELL_LOOKS))
+
+    def test_layout_burst_one_look(self):
+        a = self.make([])
+        for _ in range(10):
+            self.clock[0] += 0.2
+            a.layout_changed()
+        self.assertEqual(len(a.looks), 1)
+
+    def test_locked_waits_and_does_not_count(self):
+        a = self.make(["Virtual-2"], locked=True)
+        a.look_in(1)
+        self.run_for(a, 60)
+        self.assertEqual(self.started, [])
+        self.assertEqual(a.repairs, 0)
+        self.locked = False                       # unlocked: the pending look restarts it
+        self.run_for(a, 40)
+        self.assertEqual(self.started, [["omarchy-restart-shell"]])
+
+    def test_failed_restart_not_counted(self):
+        a = self.make(["Virtual-2"], exit_code=1)
+        a.look_in(1)
+        self.run_for(a, 10)
+        self.assertEqual(len(self.started), 1)
+        self.assertEqual(a.repairs, 0)
+        self.assertEqual(a.repaired_for, [])
 
     def test_same_after_restart_stops(self):
-        # A fresh shell with exactly the same report: not a surface left
-        # behind; one restart only.
-        a = self.make(["Virtual-2: x"])
-        for _ in range(40):
-            self.clock[0] += od.REPAIR_EVERY / 2
-            a.check_wallpapers()
+        a = self.make(["Virtual-2"])
+        for _ in range(10):
+            a.look_in(1)
+            self.run_for(a, od.REPAIR_EVERY)
         self.assertEqual(len(self.started), 1)
 
+    def test_at_most_three(self):
+        a = self.make(["Virtual-2"])
+        for i in range(20):
+            self.problems = [f"Virtual-{2 + i % 2}"]  # a different display each time
+            a.look_in(1)
+            self.run_for(a, od.REPAIR_EVERY)
+        self.assertEqual(len(self.started), od.REPAIR_MAX)
+
     def test_switched_off(self):
-        a = self.make(["Virtual-2: x"])
+        a = self.make(["Virtual-2"])
         with mock.patch.object(od, "config_flag", lambda n: n != "repair-shell"):
-            for _ in range(10):
-                self.clock[0] += od.REPAIR_EVERY
-                a.check_wallpapers()
+            for _ in range(5):
+                a.look_in(1)
+                self.run_for(a, od.REPAIR_EVERY)
         self.assertEqual(self.started, [])
 
 

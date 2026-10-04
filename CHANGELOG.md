@@ -22,9 +22,14 @@ in more words.
   MacBook whichever display holds the main window (OmacVM.app tells the VM
   which output is the built-in display). Before, with the main window on an
   external display, the MacBook showed two bars.
-- A display that moves in the layout (plugging displays in and out, or
-  starting the VM in full screen) keeps its wallpaper and bar. Before, it
-  could stay dark grey without a bar until the shell was restarted.
+- OmacVM.app: displays no longer come up black (dark grey, no wallpaper, no
+  bar) after a start or reboot, about one boot in six with two displays.
+  QEMU refused the memory of a large texture (Omarchy's wallpaper, 81 MB)
+  when the VM's memory was fragmented, and the shell lost its GPU context.
+  It also happened with one display, less often, in earlier versions.
+  The VM now also checks what each display really shows and restarts the
+  shell once if one stays grey; omacvm check says "desktop" and, on the Mac,
+  "GPU contexts".
 - Omanotch: after a shell restart the bar is parked under the strip again
   within seconds; before, the MacBook could show two bars.
 - Per-display workspaces handle more than two displays (Virtual-3 gets

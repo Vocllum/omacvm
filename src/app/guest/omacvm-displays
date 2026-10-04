@@ -31,18 +31,19 @@ The switch "Use external displays" is ~/.config/omacvm/displays.conf
   omacvm-displays external on|off|toggle
   omacvm-displays state             "on" or "off" (nothing without the port)
   omacvm-displays status            the switch and the outputs, as JSON
-  omacvm-displays layers            displays whose wallpaper is not on them
+  omacvm-displays desktop           displays that show no desktop, as JSON
 
-Outputs move when Mac displays come and go. Hyprland leaves a mapped layer
-surface at its old place when its output moves, and Omarchy's remap for that
-never fires on Quickshell, so a display can end up without wallpaper or bar
-(only Hyprland's dark grey; a shell restart fixed it). The agent checks where
-the wallpaper layers are once the layout has settled, and when one is still
-off its display a few seconds later, it restarts the shell (at most every
-2 minutes, 3 times per session, and not again when a restart changed
-nothing; repair-shell=off in displays.conf turns that off, the check and its
-log line stay). Omanotch's patched bar and wallpaper
-remap themselves; this also covers Omarchy's own.
+A display can come up without wallpaper or bar, only Hyprland's dark grey:
+when the shell lost its GPU context (QEMU refused a large texture's memory,
+fixed in OmacVM.app 2.8.0; any other GPU fault does the same) or when its
+wallpaper stayed at an output's old place. The agent looks at what each
+display really shows (a small screenshot) after the shell starts and after
+the layout changes. A display that shows only Hyprland's background with no
+window on it, twice 4 s apart, gets the shell restarted (what fixed it by
+hand; Omanotch's bar parks again from its park file): not while the screen
+is locked, at most every 2 minutes and 3 times per session, and not again
+when a restart changed nothing. repair-shell=off in displays.conf turns the
+restart off; the check and its log line stay.
 
 The switch also sits in Omarchy's display panel (the bar widget
 omacvm.monitor, built from Omarchy's own by monitor-widget/build.py; rebuilt
@@ -174,6 +175,7 @@ def monitors() -> list[dict] | None:
 
 
 WALLPAPER = "omarchy-background"
+HYPR_GREY = (0x11, 0x11, 0x11)   # Hyprland's default misc:background_color
 
 
 def misplaced_wallpapers(monitors_data, layers_data) -> list[str]:
@@ -215,6 +217,126 @@ def misplaced_wallpapers(monitors_data, layers_data) -> list[str]:
         problems.append(f"{name}: wallpaper at {where}, display at "
                         f"{want[0]},{want[1]} {round(want[2])}x{round(want[3])}")
     return problems
+
+
+def background_colour(option) -> tuple[int, int, int]:
+    """Hyprland's misc:background_color (j/getoption) as RGB."""
+    try:
+        value = int(option.get("int")) if isinstance(option, dict) else None
+    except (TypeError, ValueError):
+        value = None
+    if value is None:
+        return HYPR_GREY
+    return ((value >> 16) & 255, (value >> 8) & 255, value & 255)
+
+
+def desktop_outputs(monitors_data, workspaces_data, layers_data) -> list[str]:
+    """Mac displays (Virtual-N) that should show the bare desktop now.
+
+    Enabled, not mirroring another, with a wallpaper layer of the shell, and
+    no window on the active workspace (nor a special workspace shown). Any
+    other display may rightly show something dark.
+    """
+    if not isinstance(monitors_data, list) or not isinstance(layers_data, dict):
+        return []
+    windows = {w.get("id"): w.get("windows", 0) for w in workspaces_data
+               if isinstance(w, dict)} if isinstance(workspaces_data, list) else {}
+    out = []
+    for m in monitors_data:
+        if not isinstance(m, dict) or m.get("disabled"):
+            continue
+        name = m.get("name", "")
+        if not re.fullmatch(r"Virtual-[0-9]+", name):
+            continue
+        if m.get("mirrorOf") not in (None, "", "none"):
+            continue
+        special = m.get("specialWorkspace")
+        if isinstance(special, dict) and special.get("id"):
+            continue
+        active = m.get("activeWorkspace")
+        wid = active.get("id") if isinstance(active, dict) else None
+        if wid is None or windows.get(wid, 1) != 0:
+            continue
+        levels = layers_data.get(name, {}).get("levels") if isinstance(layers_data.get(name), dict) else None
+        if not any(isinstance(layer, dict) and layer.get("namespace") == WALLPAPER
+                   for level in (levels.values() if isinstance(levels, dict) else [])
+                   for layer in (level if isinstance(level, list) else [])):
+            continue
+        out.append(name)
+    return sorted(out)
+
+
+def ppm_shown(data: bytes, grey: tuple[int, int, int]) -> tuple[float, float] | None:
+    """(share of pixels in Hyprland's background colour, spread of brightness)
+    of a binary PPM (grim -t ppm), or None when it is not one."""
+    try:
+        magic, size, maxval, pixels = data.split(b"\n", 3)
+        w, h = (int(v) for v in size.split())
+        if magic != b"P6" or int(maxval) != 255 or len(pixels) < w * h * 3 or not w * h:
+            return None
+    except ValueError:
+        return None
+    n = w * h
+    hits = 0
+    total = 0
+    total2 = 0
+    for i in range(0, n * 3, 3):
+        r, g, b = pixels[i], pixels[i + 1], pixels[i + 2]
+        if abs(r - grey[0]) <= 3 and abs(g - grey[1]) <= 3 and abs(b - grey[2]) <= 3:
+            hits += 1
+        y = (r * 299 + g * 587 + b * 114) // 1000
+        total += y
+        total2 += y * y
+    mean = total / n
+    return hits / n, max(0.0, total2 / n - mean * mean) ** 0.5
+
+
+def undrawn(shown: tuple[float, float] | None) -> bool:
+    """Only Hyprland's background: no wallpaper (and no bar) drawn."""
+    return shown is not None and (shown[0] > 0.97 or shown[1] < 1.0)
+
+
+def grab(output: str) -> bytes | None:
+    """A small screenshot of one output (grim, a tenth of its size)."""
+    try:
+        r = subprocess.run(["grim", "-s", "0.1", "-o", output, "-t", "ppm", "-"],
+                           capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def undrawn_outputs() -> list[str]:
+    """Mac displays that should show the desktop but show only Hyprland's grey."""
+    names = desktop_outputs(hypr_json("j/monitors"), hypr_json("j/workspaces"),
+                            hypr_json("j/layers"))
+    if not names:
+        return []
+    grey = background_colour(hypr_json("j/getoption misc:background_color"))
+    return [n for n in names if undrawn(ppm_shown(grab(n) or b"", grey))]
+
+
+def screen_locked() -> bool:
+    try:
+        return subprocess.run(["omarchy-hyprland-session-locked"], timeout=5,
+                              check=False).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def shell_pid() -> int | None:
+    """The running Omarchy shell (Quickshell) of this user, if any."""
+    uid = os.getuid()
+    for d in Path("/proc").iterdir():
+        if not d.name.isdigit():
+            continue
+        try:
+            if d.stat().st_uid != uid or (d / "comm").read_text().strip() != "quickshell":
+                continue
+        except OSError:
+            continue
+        return int(d.name)
+    return None
 
 
 def run_sync() -> None:
@@ -261,6 +383,7 @@ REPAIR_EVERY = 120.0   # seconds between two shell restarts
 REPAIR_MAX = 3         # per run of the agent (a session)
 SETTLE = 3.0           # seconds without a layout change before checking
 CONFIRM = 4.0          # the same problem again after this long: repair
+SHELL_LOOKS = (10.0, 25.0)  # seconds after a shell (re)start to look
 
 
 class Agent:
@@ -274,11 +397,13 @@ class Agent:
         self.events: socket.socket | None = None
         self.check_at = 0.0
         self.last_check = 0.0
-        self.layout_at = time.monotonic()
+        self.looks: list[float] = []   # when to look at the displays
+        self.shell: int | None = None
         self.suspect: tuple[list[str], float] | None = None
         self.repairs = 0
         self.repaired_at = -REPAIR_EVERY
         self.repair: subprocess.Popen | None = None
+        self.repairing: list[str] = []
         self.repaired_for: list[str] = []
         self.said: list[str] = []
 
@@ -319,56 +444,85 @@ class Agent:
             self.reported = current
             self.send({"monitors": current})
 
+    def look_in(self, delay: float) -> None:
+        self.looks.append(time.monotonic() + delay)
+
     def layout_changed(self) -> None:
-        self.layout_at = time.monotonic()
+        # Look once the layout has been quiet for a moment (one look per burst).
+        now = time.monotonic()
+        self.looks = [t for t in self.looks if not now < t <= now + SETTLE]
+        self.look_in(SETTLE)
         self.suspect = None
 
-    def check_wallpapers(self) -> None:
-        """Restarts the shell when a wallpaper stays off its display."""
-        now = time.monotonic()
-        if self.repair and self.repair.poll() is None:
-            return  # a restart is under way
-        if now - self.layout_at < SETTLE:
+    def watch_shell(self) -> None:
+        pid = shell_pid()
+        if pid and pid != self.shell:
+            for delay in SHELL_LOOKS:
+                self.look_in(delay)
+        self.shell = pid
+
+    def repair_done(self) -> None:
+        """Counts a shell restart once it is known to have happened."""
+        if not self.repair or self.repair.poll() is None:
             return
-        problems = misplaced_wallpapers(hypr_json("j/monitors"), hypr_json("j/layers"))
+        code, self.repair = self.repair.returncode, None
+        if code != 0:
+            log(f"shell restart failed (exit {code}); not counted")
+            return
+        self.repairs += 1
+        self.repaired_for = self.repairing
+        self.repaired_at = time.monotonic()
+        try:  # for omacvm check
+            REPAIRS.parent.mkdir(parents=True, exist_ok=True)
+            REPAIRS.write_text(json.dumps({"count": self.repairs, "at": time.time(),
+                                           "why": self.repairing}) + "\n")
+        except OSError:
+            pass
+
+    def check_desktop(self) -> None:
+        """Restarts the shell when a display shows only Hyprland's grey."""
+        now = time.monotonic()
+        if not self.looks or min(self.looks) > now:
+            return
+        self.looks = [t for t in self.looks if t > now]
+        if self.repair:
+            return  # a restart is under way; the new shell gets its looks
+        problems = undrawn_outputs()
         if not problems:
             self.suspect = None
             return
         if not self.suspect or self.suspect[0] != problems:
             self.suspect = (problems, now)
+            self.look_in(CONFIRM)
             return
         if now - self.suspect[1] < CONFIRM:
+            self.look_in(CONFIRM - (now - self.suspect[1]))
             return
         self.suspect = None
-        detail = "; ".join(problems)
+        moved = misplaced_wallpapers(hypr_json("j/monitors"), hypr_json("j/layers"))
+        detail = ", ".join(problems) + (f"; {'; '.join(moved)}" if moved else "")
         say = problems != self.said  # one log line per distinct problem
         self.said = problems
         if not config_flag("repair-shell"):
             if say:
-                log(f"wallpaper off its display ({detail}); repair-shell=off")
+                log(f"no desktop drawn on {detail}; repair-shell=off")
             return
         if problems == self.repaired_for:
-            # Exactly the same after a fresh shell: not a surface left
-            # behind (or Hyprland reports layers differently). Stop here.
+            # The same after a fresh shell: a restart does not help. Stop here.
             if self.repairs < REPAIR_MAX:
-                log(f"wallpaper still off its display after a shell restart ({detail}); "
-                    "not restarting it again")
+                log(f"still no desktop on {detail} after a shell restart; not restarting it again")
             self.repairs = REPAIR_MAX
             return
         if self.repairs >= REPAIR_MAX or now - self.repaired_at < REPAIR_EVERY:
             if say:
-                log(f"wallpaper off its display ({detail}); not restarting the shell again yet")
+                log(f"no desktop drawn on {detail}; not restarting the shell again yet")
             return
-        self.repairs += 1
-        self.repaired_for = problems
-        self.repaired_at = now
-        log(f"wallpaper off its display ({detail}): restarting the shell")
-        try:  # for omacvm check
-            REPAIRS.parent.mkdir(parents=True, exist_ok=True)
-            REPAIRS.write_text(json.dumps({"count": self.repairs, "at": time.time(),
-                                           "why": problems}) + "\n")
-        except OSError:
-            pass
+        if screen_locked():
+            # omarchy-restart-shell does not restart a locked session's shell.
+            self.look_in(30.0)
+            return
+        log(f"no desktop drawn on {detail}: restarting the shell")
+        self.repairing = problems
         try:
             self.repair = subprocess.Popen(["omarchy-restart-shell"], stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL)
@@ -442,7 +596,9 @@ class Agent:
                 self.check_at = 0.0
                 self.last_check = now
                 self.report()
-                self.check_wallpapers()
+                self.watch_shell()
+                self.repair_done()
+            self.check_desktop()
 
 
 def notify(text: str) -> None:
@@ -476,13 +632,14 @@ def main(argv: list[str]) -> int:
         print(json.dumps({"external": external_on(), "port": PORT.exists(),
                           "layout": layout, "monitors": monitors()}, indent=2))
         return 0
-    if len(argv) >= 2 and argv[1] == "layers":
+    if len(argv) >= 2 and argv[1] == "desktop":
         repairs = None
         try:
             repairs = json.loads(REPAIRS.read_text())
         except (OSError, ValueError):
             pass
-        print(json.dumps({"misplaced": misplaced_wallpapers(hypr_json("j/monitors"),
+        print(json.dumps({"undrawn": undrawn_outputs(),
+                          "misplaced": misplaced_wallpapers(hypr_json("j/monitors"),
                                                             hypr_json("j/layers")),
                           "repairs": repairs}, indent=2))
         return 0

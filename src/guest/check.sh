@@ -248,13 +248,16 @@ app)
   elif user_active omacvm-displays.service; then
     n=$(as_user hyprctl monitors -j 2>/dev/null | jq '[.[] | select(.name | test("^Virtual-"))] | length' 2>/dev/null || echo "?")
     ok "every Mac display" "external displays $(as_user omacvm-displays state 2>/dev/null || echo "?"), $n output(s) now"
-    # A wallpaper left at its output's old place: that display shows only dark grey.
-    lay=$(as_user omacvm-displays layers 2>/dev/null)
-    off=$(jq -r '.misplaced // [] | join("; ")' <<<"$lay" 2>/dev/null)
-    fixes=$(jq -r '.repairs.count // 0' <<<"$lay" 2>/dev/null)
-    if [[ -n $off ]]; then bad "wallpaper" "not on its display: $off (omarchy-restart-shell; journalctl --user -u omacvm-displays)"
-    elif [[ -z $lay ]]; then skip "wallpaper" "omacvm-displays layers gave nothing"
-    else ok "wallpaper" "on every display$([[ ${fixes:-0} != 0 ]] && echo " (shell restarted $fixes time(s) to put it back)")"; fi
+    # What each display really shows (a small screenshot): only Hyprland's grey
+    # where the desktop should be means no wallpaper and no bar were drawn.
+    desk=$(as_user omacvm-displays desktop 2>/dev/null)
+    dark=$(jq -r '.undrawn // [] | join(", ")' <<<"$desk" 2>/dev/null)
+    off=$(jq -r '.misplaced // [] | join("; ")' <<<"$desk" 2>/dev/null)
+    fixes=$(jq -r '.repairs.count // 0' <<<"$desk" 2>/dev/null)
+    if [[ -n $dark ]]; then bad "desktop" "nothing drawn on $dark, only Hyprland's grey${off:+ ($off)}: omarchy-restart-shell; journalctl --user -u omacvm-displays"
+    elif [[ -n $off ]]; then bad "desktop" "wallpaper not on its display: $off (omarchy-restart-shell)"
+    elif [[ -z $desk ]]; then skip "desktop" "omacvm-displays desktop gave nothing"
+    else ok "desktop" "wallpaper drawn on every display without windows$([[ ${fixes:-0} != 0 ]] && echo " (shell restarted $fixes time(s) to draw it)")"; fi
   else bad "every Mac display" "omacvm-displays.service not running: omacvm apply"; fi
   if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
   else bad "sound" "no PipeWire sink: omacvm apply"; fi
@@ -369,6 +372,12 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
        [[ $parked != true && -n $beat && $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
        (( $(date +%s%3N) - beat < 15000 )); then
     bad "notch display" "the strip shows the bar but $b's own bar is not parked: two bars on the MacBook (omarchy-restart-shell)"
+  elif [[ $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
+       [[ $(as_user hyprctl layers -j 2>/dev/null | jq --arg n "$b" --argjson m "$(jq -c --arg n "$b" '.[] | select(.name == $n)' <<<"$mons" 2>/dev/null || echo null)" \
+            '[(.[$n].levels // {})[][] | select(.namespace == "omarchy-bar" and .h >= 8 and $m != null
+              and .y < $m.y + $m.height / $m.scale and .y + .h > $m.y)] | length' 2>/dev/null) -gt 0 ]]; then
+    # What Hyprland composites, whatever the bar says about itself.
+    bad "notch display" "the strip shows the bar and a bar is also on $b: two bars on the MacBook (omarchy-restart-shell)"
   else ok "notch display" "$b$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 
