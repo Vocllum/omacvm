@@ -49,8 +49,8 @@ while [ "$(date +%s)" -lt $end ]; do
     continue
   fi
   misses=0
-  read -r sig emit loops wf mf md mem <<< "$g"
-  echo "{\"t\":$now,\"heartbeat\":true,\"fence_signalled\":$sig,\"fence_emitted\":$emit,\"gpu_loops\":$loops,\"webgl_frames\":$wf,\"video_frame\":$mf,\"video_drops\":$md,\"guest_mem_avail_kb\":$mem,\"qemu_cpu\":$cpu,\"qemu_rss_kb\":$rss}" >> "$ART/samples.jsonl"
+  read -r sig emit loops wf mf md mem lit <<< "$g"
+  echo "{\"t\":$now,\"heartbeat\":true,\"fence_signalled\":$sig,\"fence_emitted\":$emit,\"gpu_loops\":$loops,\"webgl_frames\":$wf,\"video_frame\":$mf,\"video_drops\":$md,\"guest_mem_avail_kb\":$mem,\"webgl_lit\":${lit:-0},\"qemu_cpu\":$cpu,\"qemu_rss_kb\":$rss}" >> "$ART/samples.jsonl"
   if [ "$sig" != "$last_sig" ] || [ "$sig" = "$emit" ]; then last_sig=$sig; sig_since=$now; fi
   [ $((now - sig_since)) -ge 45 ] && { verdict=fail; why="fence $sig stuck 45 s (emitted $emit)"; sample_qemu fence; break; }
   prog="$loops/$wf/$mf"
@@ -74,6 +74,8 @@ res = {"suite": "soak", "verdict": verdict, "reason": why, "minutes_planned": in
        "seconds_paused_by_bench": int(paused), "samples": len(s), "heartbeat_misses": len(s) - len(ok),
        "gpu_loops": ok[-1]["gpu_loops"] if ok else 0, "gpu_scores": scores,
        "webgl_frames": ok[-1]["webgl_frames"] if ok else 0,
+       # share of non-black pixels the WebGL page read back (0 = it renders nothing)
+       "webgl_lit_min_max": [min(x.get("webgl_lit", 0) for x in ok), max(x.get("webgl_lit", 0) for x in ok)] if ok else None,
        "video_frame": ok[-1]["video_frame"] if ok else 0, "video_drops": ok[-1]["video_drops"] if ok else 0,
        "fences_signalled": (ok[-1]["fence_signalled"] - ok[0]["fence_signalled"]) if ok else 0,
        "qemu_rss_mb_first_last_max": [rss[0] // 1024, rss[-1] // 1024, max(rss) // 1024] if rss else None,
