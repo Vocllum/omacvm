@@ -4,7 +4,8 @@ What: a shader that indexes its uniform blocks at run time (CONST[ADDR + n]) get
 them as one GLSL array. That array now starts at the lowest block the shader
 declares and runs to the highest, holes included; the renderer names, binds and
 checks every element from the same mask, and the run-time index is
-"addr + n - first" (it ignored n). Before, the array had one element per declared
+"addr + n - first" (it ignored n). Every element keeps the first block's size, as
+before (the array has one element type). Before, the array had one element per declared
 block, but the renderer named element k after block k + 1: with holes some names
 did not exist (the block then counted as inactive) and some elements were never
 bound. A second line of defence: before vrend binds a program's blocks, each
@@ -30,7 +31,7 @@ the index picked).
     uint32_t ubo_used_mask;
     int ubo_sizes[32];
     uint32_t num_address;
-@@ -943,8 +942,31 @@
+@@ -943,6 +942,19 @@
  {
     snprintf(buf, 64, "clamp(addr%d + %d, 0, %d)", addr, offset, size > 1 ? size - 1 : 0);
     return buf;
@@ -49,20 +50,8 @@ the index picked).
 +   return u_bit_consecutive(first, util_last_bit(ctx->ubo_used_mask) - first);
  }
  
-+/* vec4s in each "uboarr" element: the largest block declared */
-+static int ubo_array_vec4s(const struct dump_ctx *ctx)
-+{
-+   uint32_t mask = ctx->ubo_used_mask;
-+   int size = 0;
-+   while (mask)
-+      size = MAX2(size, ctx->ubo_sizes[u_bit_scan(&mask)]);
-+   return size;
-+}
-+
  static int sampler_array_size(const struct dump_ctx *ctx, int first)
- {
-    for (uint32_t i = 0; i < ctx->num_sampler_arrays; i++)
-@@ -1974,8 +1996,6 @@
+@@ -1974,8 +1986,6 @@
           ctx->ubo_used_mask |= (1 << decl->Dim.Index2D);
           ctx->ubo_sizes[decl->Dim.Index2D] = decl->Range.Last + 1;
        } else {
@@ -71,7 +60,7 @@ the index picked).
           if (decl->Range.Last) {
              if (decl->Range.Last + 1 > ctx->num_consts)
                 ctx->num_consts = decl->Range.Last + 1;
-@@ -4944,23 +4964,24 @@
+@@ -4944,7 +4954,8 @@
                 ctx->shader_req_bits |= SHADER_REQ_GPU_SHADER5;
                 char block[64], index[64];
                 const int first = ffs(ctx->ubo_used_mask) - 1;
@@ -81,10 +70,7 @@ the index picked).
                 if (src->Register.Indirect) {
                    if (src->Indirect.File != TGSI_FILE_ADDRESS)
                       return false;
-                   strbuf_fmt(src_buf, "%s(%s%suboarr[%s].ubocontents[%s]%s)", get_string(stypeprefix), prefix, cname, block,
--                             clamped_index(index, src->Indirect.Index, src->Register.Index, ctx->ubo_sizes[first]), swizzle);
-+                             clamped_index(index, src->Indirect.Index, src->Register.Index, ubo_array_vec4s(ctx)), swizzle);
-                } else
+@@ -4954,13 +4965,13 @@
                    strbuf_fmt(src_buf, "%s(%s%suboarr[%s].ubocontents[%d]%s)", get_string(stypeprefix), prefix, cname, block, src->Register.Index, swizzle);
              } else {
                 if (ctx->info.dimension_indirect_files & (1 << TGSI_FILE_CONSTANT)) {
@@ -93,28 +79,26 @@ the index picked).
                       char index[64];
 -                     const int first = ffs(ctx->ubo_used_mask) - 1;
 -                     strbuf_fmt(src_buf, "%s(%s%suboarr[%d].ubocontents[%s]%s)", get_string(stypeprefix), prefix, cname, dim - ctx->ubo_base,
--                                clamped_index(index, src->Indirect.Index, src->Register.Index, ctx->ubo_sizes[first]), swizzle);
 +                     strbuf_fmt(src_buf, "%s(%s%suboarr[%d].ubocontents[%s]%s)", get_string(stypeprefix), prefix, cname, dim - first,
-+                                clamped_index(index, src->Indirect.Index, src->Register.Index, ubo_array_vec4s(ctx)), swizzle);
+                                 clamped_index(index, src->Indirect.Index, src->Register.Index, ctx->ubo_sizes[first]), swizzle);
                    } else
 -                     strbuf_fmt(src_buf, "%s(%s%suboarr[%d].ubocontents[%d]%s)", get_string(stypeprefix), prefix, cname, dim - ctx->ubo_base, src->Register.Index, swizzle);
 +                     strbuf_fmt(src_buf, "%s(%s%suboarr[%d].ubocontents[%d]%s)", get_string(stypeprefix), prefix, cname, dim - first, src->Register.Index, swizzle);
                 } else {
                    if (src->Register.Indirect) {
                       char index[64];
-@@ -6771,9 +6792,8 @@
- 
+@@ -6772,8 +6783,8 @@
        if (ctx->info.dimension_indirect_files & (1 << TGSI_FILE_CONSTANT)) {
           glsl_ver_required = require_glsl_ver(ctx, 150);
--         int first = ffs(ctx->ubo_used_mask) - 1;
+          int first = ffs(ctx->ubo_used_mask) - 1;
 -         unsigned num_ubo = util_bitcount(ctx->ubo_used_mask);
 -         emit_hdrf(glsl_strbufs, "uniform %subo { vec4 ubocontents[%d]; } %suboarr[%d];\n", cname, ctx->ubo_sizes[first], cname, num_ubo);
 +         emit_hdrf(glsl_strbufs, "uniform %subo { vec4 ubocontents[%d]; } %suboarr[%d];\n", cname,
-+                   ubo_array_vec4s(ctx), cname, util_bitcount(ubo_array_mask(ctx)));
++                   ctx->ubo_sizes[first], cname, util_bitcount(ubo_array_mask(ctx)));
        } else {
           unsigned mask = ctx->ubo_used_mask;
           while (mask) {
-@@ -7936,7 +7956,8 @@
+@@ -7936,7 +7947,8 @@
     sinfo->image_binding_offset = ctx->key->image_binding_offset;
     sinfo->image_last_binding = ctx->key->image_binding_offset + ctx->image_last_binding;
     sinfo->num_consts = ctx->num_consts;
