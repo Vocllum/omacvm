@@ -9,6 +9,10 @@ sizes every blob to it (Mesa's Venus driver asks for the value), so every
 blob lands on a host page. A blob's host mapping is rounded up to whole
 pages to match.
 
+Upstream: not sent (QEMU 11.1 has the feature bit but never offers it).
+Test: Venus in an app VM (vulkaninfo, vkmark), Vulkan CTS smoke in
+tests/graphics; OpenGL unaffected (virgl GL does not use blobs here).
+
 diff --git a/hw/display/virtio-gpu-base.c b/hw/display/virtio-gpu-base.c
 index 270fbaa..ee53ffe 100644
 --- a/hw/display/virtio-gpu-base.c

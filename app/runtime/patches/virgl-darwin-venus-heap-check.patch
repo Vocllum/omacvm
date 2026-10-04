@@ -4,6 +4,9 @@ Subject: [PATCH] venus: fail a Metal export without a heap
 MoltenVK returns VK_SUCCESS and a NULL MTLHeap for memory it did not put
 in a heap; the render server then crashed QEMU in CFRetain(NULL).
 
+Upstream: not applicable (tap's Metal export).
+Test: none automatic; the crash was seen with MoltenVK before the fix.
+
 diff --git a/src/venus/vkr_device_memory.c b/src/venus/vkr_device_memory.c
 index 504b655..382eaf1 100644
 --- a/src/venus/vkr_device_memory.c

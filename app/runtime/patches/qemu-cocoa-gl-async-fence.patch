@@ -16,6 +16,12 @@ OMACVM_VIRGL_POLL_FENCES=1 goes back to polling; the log says which.
 A faster poll timer is no alternative: without ppoll, QEMU's main loop on
 macOS waits in whole milliseconds.
 
+Upstream: not sent (QEMU turns the sync thread on for EGL only; a CGL
+variant could go with virglrenderer's macOS eventfd).
+Test: fence trace and glmark2 in an app VM (bench lock); tests/graphics
+(conformance-runs) dEQP GLES2/3 and WebGL 1/2 give the same cases with
+OMACVM_VIRGL_POLL_FENCES=1 and without; 30-minute soaks.
+
 --- a/hw/display/virtio-gpu-virgl.c	2026-10-04 10:26:39
 +++ b/hw/display/virtio-gpu-virgl.c	2026-10-04 10:26:39
 @@ -14,6 +14,7 @@

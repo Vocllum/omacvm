@@ -8,6 +8,9 @@ neighbour's flag, and vkGetMemoryMetalHandleEXT stayed NULL (QEMU
 crashed calling it). Drop the field and look the two functions up
 directly; vkr enables the extension itself.
 
+Upstream: not applicable (fixes a startergo tap patch).
+Test: vkmark runs (before: QEMU crashed in a NULL call).
+
 diff --git a/src/venus/venus-protocol/vn_protocol_renderer_info.h b/src/venus/venus-protocol/vn_protocol_renderer_info.h
 index 2222028..f55dc34 100644
 --- a/src/venus/venus-protocol/vn_protocol_renderer_info.h

@@ -7,6 +7,9 @@ messages when they are not seqpacket, but treated every short read as an
 error; a stream may return part of a message (0 bytes = the peer closed),
 fds arrive with the first bytes only, and a message must fit the buffer.
 
+Upstream: not sent (macOS only).
+Test: Venus starts in an app VM (vulkaninfo, vkmark); Vulkan CTS smoke.
+
 diff --git a/server/render_socket.c b/server/render_socket.c
 index 3201da6..0563a5a 100644
 --- a/server/render_socket.c

@@ -14,6 +14,9 @@ Aquarium 19.2-20.1 -> 19.6-20.4 fps.
 
 Upstream: macOS-specific; could go upstream with the thread-sync support.
 
+Test: glmark2 and Aquarium A/B with the bench lock (numbers above);
+tests/graphics dEQP and WebGL runs on the runtime with this patch.
+
 diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
 index 394fb9b..677c6c6 100644
 --- a/src/vrend/vrend_renderer.c
