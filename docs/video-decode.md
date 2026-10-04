@@ -115,7 +115,10 @@ What an upstream change in UTM would need:
   for VideoToolbox, as this patch does;
 - Chrome's GPU in UTM (the MSAA sample count) before Chrome benefits;
 - a frame-order issue seen only there: in a readback test 107 of 120 frames
-  matched (all 120 in OmacVM.app).
+  matched (all 120 in OmacVM.app);
+- a bounds check virglrenderer's video code lacks on every host: it copies as
+  many bitstream bytes as the guest says into the bitstream buffer
+  (`vrend_video_decode_bitstream`); the patch clamps it to the buffer's size.
 
 ## Parallels and VMware Fusion
 
