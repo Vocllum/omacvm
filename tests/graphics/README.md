@@ -60,6 +60,8 @@ result records the unmasked renderer so a software fallback shows.
 `guest/webgl-driver.py` runs Chrome in the session. After a failing page Chrome is restarted and
 the page tried once more in a fresh GPU process (same reason as dEQP; `ISOLATE=0` turns it off);
 a page that posts nothing for 300 s (`STALL`) is recorded as `hang` and the run goes on.
+Results stream to the host as the page posts them; when QEMU dies, the running page is recorded
+as `hostcrash`, the VM restarted and the run goes on at the next page.
 
 ## Soak hang detection
 
@@ -79,10 +81,11 @@ glmark2 scores and every sample (`samples.jsonl`) next to the JSON.
 
 - dEQP: `status` counts (Pass, Fail, NotSupported, Crash, ...), `pass_rate` = passed / (ran and
   not NotSupported), `failures` (first 500 cases), CTS commit, renderer.
-- WebGL: pages pass/fail/timeout/hang (each page's last attempt), subtests pass/fail,
+- WebGL: pages pass/fail/timeout/hang/hostcrash (each page's last attempt), `qemu_crashes`, subtests pass/fail,
   `subtest_pass_rate`, `cascade_victims` (pages that failed only after another page in the same
   Chrome), failed pages with the first messages, renderer, Chrome version.
-- Soak: `verdict`, `reason`, loads' progress, fences signalled, QEMU RSS first/last/max,
+- Soak: `verdict`, `reason`, loads' progress, `webgl_lit_min_max` (share of lit pixels the WebGL
+  page reads back; 0 = it draws nothing), fences signalled, QEMU RSS first/last/max,
   guest MemAvailable first/last.
 
 These are correctness and stability results; performance numbers go through the benchmark
