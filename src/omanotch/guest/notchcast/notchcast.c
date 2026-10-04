@@ -273,16 +273,29 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
     int status = 0;
     if (pid > 0 && waitpid(pid, &status, 0) == pid &&
         !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
-        static time_t last_said;
+        // At most every 30 s per function; the net thread and the worker both call here.
+        static pthread_mutex_t said_lock = PTHREAD_MUTEX_INITIALIZER;
+        static struct { char fn[24]; time_t at; } said[8];
         time_t now = time(NULL);
-        if (now - last_said >= 30) {
+        int say = 0;
+        pthread_mutex_lock(&said_lock);
+        int k = 0, oldest = 0;
+        for (; k < 8 && said[k].fn[0] && strcmp(said[k].fn, fn); k++)
+            if (said[k].at < said[oldest].at) oldest = k;
+        if (k == 8) k = oldest;
+        if (strcmp(said[k].fn, fn) || now - said[k].at >= 30) {
+            snprintf(said[k].fn, sizeof said[k].fn, "%s", fn);
+            said[k].at = now;
+            say = 1;
+        }
+        pthread_mutex_unlock(&said_lock);
+        if (say) {
             char why[240] = "";
             ssize_t n = efd >= 0 ? pread(efd, why, sizeof why - 1, 0) : 0;
             why[n > 0 ? n : 0] = 0;
             why[strcspn(why, "\n")] = 0;
             LOG("ipc %s failed (%s %d)%s%s", fn, WIFEXITED(status) ? "exit" : "signal",
                   WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status), *why ? ": " : "", why);
-            last_said = now;
         }
     } else if (pid < 0) {
         LOG("ipc %s: fork failed: %s", fn, strerror(errno));

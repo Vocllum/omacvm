@@ -248,7 +248,7 @@ def desktop_outputs(monitors_data, workspaces_data, layers_data) -> list[str]:
         name = m.get("name", "")
         if not re.fullmatch(r"Virtual-[0-9]+", name):
             continue
-        if m.get("mirrorOf") not in (None, "", "none"):
+        if m.get("mirrorOf") not in (None, "", "none") or m.get("dpmsStatus") is False:
             continue
         special = m.get("specialWorkspace")
         if isinstance(special, dict) and special.get("id"):
@@ -268,7 +268,8 @@ def desktop_outputs(monitors_data, workspaces_data, layers_data) -> list[str]:
 
 def ppm_shown(data: bytes, grey: tuple[int, int, int]) -> tuple[float, float] | None:
     """(share of pixels in Hyprland's background colour, spread of brightness)
-    of a binary PPM (grim -t ppm), or None when it is not one."""
+    of a binary PPM (grim -t ppm) below its top tenth (where a bar may be),
+    or None when it is not one."""
     try:
         magic, size, maxval, pixels = data.split(b"\n", 3)
         w, h = (int(v) for v in size.split())
@@ -276,7 +277,12 @@ def ppm_shown(data: bytes, grey: tuple[int, int, int]) -> tuple[float, float] | 
             return None
     except ValueError:
         return None
+    top = h // 10
+    pixels = pixels[top * w * 3:]
+    h -= top
     n = w * h
+    if not n:
+        return None
     hits = 0
     total = 0
     total2 = 0
@@ -292,15 +298,16 @@ def ppm_shown(data: bytes, grey: tuple[int, int, int]) -> tuple[float, float] | 
 
 
 def undrawn(shown: tuple[float, float] | None) -> bool:
-    """Only Hyprland's background: no wallpaper (and no bar) drawn."""
-    return shown is not None and (shown[0] > 0.97 or shown[1] < 1.0)
+    """Only Hyprland's background where the wallpaper should be. A flat image
+    of another colour (a plain wallpaper, a dark output) is not counted."""
+    return shown is not None and shown[0] > 0.97
 
 
 def grab(output: str) -> bytes | None:
     """A small screenshot of one output (grim, a tenth of its size)."""
     try:
         r = subprocess.run(["grim", "-s", "0.1", "-o", output, "-t", "ppm", "-"],
-                           capture_output=True, timeout=10, check=False)
+                           capture_output=True, timeout=3, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return None
     return r.stdout if r.returncode == 0 else None
@@ -401,6 +408,7 @@ class Agent:
         self.shell: int | None = None
         self.suspect: tuple[list[str], float] | None = None
         self.repairs = 0
+        self.attempts = 0
         self.repaired_at = -REPAIR_EVERY
         self.repair: subprocess.Popen | None = None
         self.repairing: list[str] = []
@@ -471,7 +479,6 @@ class Agent:
             return
         self.repairs += 1
         self.repaired_for = self.repairing
-        self.repaired_at = time.monotonic()
         try:  # for omacvm check
             REPAIRS.parent.mkdir(parents=True, exist_ok=True)
             REPAIRS.write_text(json.dumps({"count": self.repairs, "at": time.time(),
@@ -487,6 +494,11 @@ class Agent:
         self.looks = [t for t in self.looks if t > now]
         if self.repair:
             return  # a restart is under way; the new shell gets its looks
+        if screen_locked():
+            # The lock screen covers the displays, and omarchy-restart-shell
+            # keeps a live locker: look again once unlocked.
+            self.look_in(30.0)
+            return
         problems = undrawn_outputs()
         if not problems:
             self.suspect = None
@@ -513,16 +525,16 @@ class Agent:
                 log(f"still no desktop on {detail} after a shell restart; not restarting it again")
             self.repairs = REPAIR_MAX
             return
-        if self.repairs >= REPAIR_MAX or now - self.repaired_at < REPAIR_EVERY:
+        if (self.repairs >= REPAIR_MAX or self.attempts >= 2 * REPAIR_MAX
+                or now - self.repaired_at < REPAIR_EVERY):
             if say:
                 log(f"no desktop drawn on {detail}; not restarting the shell again yet")
             return
-        if screen_locked():
-            # omarchy-restart-shell does not restart a locked session's shell.
-            self.look_in(30.0)
-            return
         log(f"no desktop drawn on {detail}: restarting the shell")
         self.repairing = problems
+        # Rate-limited from the attempt: a restart that fails counts here too.
+        self.attempts += 1
+        self.repaired_at = now
         try:
             self.repair = subprocess.Popen(["omarchy-restart-shell"], stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL)

@@ -170,8 +170,10 @@ fi
 # (this run of the VM) names it.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+  # Not a failure by itself: the app may have been restarted since (the VM's
+  # "desktop" line says whether the shell draws now).
   if [[ -n $lost ]]; then
-    bad "GPU contexts" "lost by: $lost (it draws nothing until restarted; the shell: omarchy-restart-shell)"
+    skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
 fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it

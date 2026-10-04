@@ -375,7 +375,8 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
        [[ $parked != true && -n $beat && $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
        (( $(date +%s%3N) - beat < 15000 )); then
     bad "notch display" "the strip shows the bar but $b's own bar is not parked: two bars on the MacBook (omarchy-restart-shell)"
-  elif [[ $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
+  elif [[ $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 && -n $beat ]] &&
+       (( $(date +%s%3N) - beat < 15000 )) &&
        [[ $(as_user hyprctl layers -j 2>/dev/null | jq --arg n "$b" --argjson m "$(jq -c --arg n "$b" '.[] | select(.name == $n)' <<<"$mons" 2>/dev/null || echo null)" \
             '[(.[$n].levels // {})[][] | select(.namespace == "omarchy-bar" and .h >= 8 and $m != null
               and .y < $m.y + $m.height / $m.scale and .y + .h > $m.y)] | length' 2>/dev/null) -gt 0 ]]; then
