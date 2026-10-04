@@ -139,7 +139,7 @@ Free and open source, one display: UTM.
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 67 % | 52 % | **71 %** | 70 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
-| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 75 % · 25 % | 67 % · 26 % | **78 % · 38 %** | no result · 22 % |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 75 % · 25 % | 67 % · 26 % | **78 % · 38 %** | not measured yet · 22 % |
 | 3D: glmark2 (score) | **7306** | 964 | 1813 | 1017 |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
@@ -169,7 +169,7 @@ Free and open source, one display: UTM.
 | Where the VM goes | **any folder, external drives too** | UTM's own library | **any folder, external drives too** | **any folder, external drives too** |
 
 <p align="center">
-  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others. Basemark Web 3.0: 75, 67, 78, no result on OmacVM.app. WebGL Aquarium: 25, 26, 38, 22." width="100%">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac. Geekbench 7 one core: Parallels 97, UTM 90, VMware Fusion 93, OmacVM.app 97 percent. All cores: 96, 89, 99, 99. Speedometer 3.1: 67, 52, 71, 70. MotionMark 1.3.1: VMware Fusion 40 percent, no stable result on the others. Basemark Web 3.0: 75, 67, 78, OmacVM.app not measured yet. WebGL Aquarium: 25, 26, 38, 22." width="100%">
 </p>
 
 On the Mac itself, for the same loads: idle 6.1 W (16 h), reading 6.6 W

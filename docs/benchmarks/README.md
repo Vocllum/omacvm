@@ -241,7 +241,7 @@ the Mac in brackets.
 
 | | Mac | Parallels | UTM | VMware Fusion | OmacVM.app |
 |---|---|---|---|---|---|
-| Basemark Web 3.0 | 3247 | 2446 (75 %) | 2182 (67 %) | 2522 (78 %) | no result |
+| Basemark Web 3.0 | 3247 | 2446 (75 %) | 2182 (67 %) | 2522 (78 %) | not measured yet |
 | WebGL Aquarium, 30,000 fish (fps) | 107.7 | 26.7 (25 %) | 28.1 (26 %) | 40.6 (38 %) | 23.9 (22 %) |
 | Geekbench 7 GPU, Metal | 204241 | ✗ | ✗ | ✗ | ✗ |
 | Geekbench 7 GPU, OpenCL | 117456 | ✗ | ✗ | ✗ | ✗ |
@@ -254,7 +254,7 @@ Each run:
 | Parallels | 2586, 2446, 2423 | 21.9, 28.2, 26.7 |
 | UTM | 2182, 2174, 2780 | 25.0, 28.6, 28.1 |
 | VMware Fusion | 2478, 2578, 2522 | 38.9, 40.6, 40.9 |
-| OmacVM.app | no result (3 tries) | 16.8, 24.1, 23.9 |
+| OmacVM.app | no result (3 tries, before the fix) | 16.8, 24.1, 23.9 |
 
 Notes:
 
@@ -270,7 +270,11 @@ Notes:
   display's limit. The VMs are far below it.
 - OmacVM.app: Basemark never finished in 3 tries (up to 15 minutes each). It stays
   in its Geometry Stress Test, Chrome's page at full CPU. OmacVM.app's test VM
-  has 8 CPUs and 16 GB, the others 16 and 48.
+  has 8 CPUs and 16 GB, the others 16 and 48. Cause and fix:
+  [finding 23](../troubleshooting.md#23-app-chrome-hangs-in-basemark-web-30-the-screen-flickers).
+  With the fix it finishes: 2157 in one run in the app's window (page
+  1920x1200 at 2x, the other test VMs paused), not comparable with the table.
+  The full-screen run for the table is still to do.
 - Chrome must open on the built-in display's monitor: on Fusion it first
   opened on the external one (page 1920x1200, 60 Hz) and gave 41 to 43 fps and
   Basemark 2072 to 2596. Those runs are not in the table.
