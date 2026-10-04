@@ -170,8 +170,7 @@ Then delete the VM in its app, and remove the OmacVM apps from System Settings
 
 ## Credits
 
-First of all, thanks to [DHH](https://github.com/dhh) for making [Omarchy](https://omarchy.org) (MIT).
-OmacVM only exists because Omarchy does.
+[Omarchy](https://omarchy.org) (MIT) and [DHH](https://github.com/dhh) for making this!
 
 [omarchy-mac](https://github.com/omacom/omarchy-mac) and
 [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team.
