@@ -249,7 +249,11 @@ app)
       vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' | tr '\n' ' ')
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
-  else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi ;;
+  else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
+  if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
+    check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
+      grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
+  fi ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
