@@ -540,6 +540,24 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdow
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+# OmacVM: QEMU's view context is flushed after surface texture work; guest mode
+# changes left whole screen textures in GPU memory. Tested on Apple's software
+# renderer with the patched with_gl_view_ctx(), no VM needed.
+cocoa_view_flush_patch="$native_dir/patches/qemu-cocoa-gl-view-flush.patch"
+cocoa_view_flush_patch_sha256=dcaadc2b20cc52a140ba837114429a9c849ca52bf6c7d940f98f3aeb6c3ced0f
+verify_file_sha "QEMU Cocoa view-context flush" \
+  "$cocoa_view_flush_patch" "$cocoa_view_flush_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$cocoa_view_flush_patch"
+display_tests="$work_dir/display-tests"
+mkdir -p "$display_tests"
+awk '/^static void with_gl_view_ctx\(CodeBlock block\)$/,/^}$/' "$source_dir/ui/cocoa.m" \
+  > "$display_tests/with-gl-view-ctx.inc"
+grep -q 'glFlush();' "$display_tests/with-gl-view-ctx.inc" || \
+  die "with_gl_view_ctx() in ui/cocoa.m has no glFlush (view-context flush patch)"
+cc -fblocks -Wall -Werror -Wno-deprecated-declarations -I"$display_tests" \
+  "$native_dir/Tests/display/test-gl-view-flush.c" -framework OpenGL \
+  -o "$display_tests/test-gl-view-flush"
+"$display_tests/test-gl-view-flush"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
