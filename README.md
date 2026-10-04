@@ -170,8 +170,11 @@ Then delete the VM in its app, and remove the OmacVM apps from System Settings
 
 ## Credits
 
-[Omarchy](https://omarchy.org) (MIT), [omarchy-mac](https://github.com/omacom/omarchy-mac)
-and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team.
+First of all, thanks to [DHH](https://github.com/dhh) for making [Omarchy](https://omarchy.org) (MIT).
+OmacVM only exists because Omarchy does.
+
+[omarchy-mac](https://github.com/omacom/omarchy-mac) and
+[try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team.
 try-omarchy (MIT) gives the camera bridge, the Mac's battery in the VM and
 OmacVM.app's pieces. Also [Arch Linux ARM](https://archlinuxarm.org);
 [omarchy-parallels](https://github.com/vincenzopalazzo/omarchy-parallels) by
