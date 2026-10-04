@@ -1,4 +1,5 @@
-/* libFuzzer harness: guest command streams into a virgl context on the Mac's OpenGL.
+/* libFuzzer harness: guest command streams into a virgl context on Apple's software
+ * OpenGL renderer (soft-gl.h: never on the GPU).
  * Each input is one SUBMIT_3D buffer for a fresh context that has already named a
  * reset status buffer (VIRGL_CCMD_SET_RESET_STATUS_BUFFER), so the decoder, the
  * refused-shader path and the context-loss report all see guest-controlled data.
@@ -12,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include "soft-gl.h"
 #include "virglrenderer.h"
 #include "virgl_hw.h"
 #include "virgl_protocol.h"
@@ -28,17 +30,7 @@ static uint32_t ctx_id;
 
 static CGLContextObj new_context(CGLContextObj share)
 {
-   CGLPixelFormatAttribute attrs[] = {
-      kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core, 0
-   };
-   CGLPixelFormatObj pix = NULL;
-   CGLContextObj ctx = NULL;
-   GLint n = 0;
-   if (CGLChoosePixelFormat(attrs, &pix, &n) || !pix)
-      return NULL;
-   CGLCreateContext(pix, share, &ctx);
-   CGLReleasePixelFormat(pix);
-   return ctx;
+   return soft_gl_context(share);
 }
 
 static void write_fence(void *c, uint32_t f)
@@ -81,8 +73,10 @@ int LLVMFuzzerInitialize(int *argc, char ***argv)
    (void)argc;
    (void)argv;
    main_ctx = new_context(NULL);
-   if (!main_ctx || CGLSetCurrentContext(main_ctx) ||
-       virgl_renderer_init(&cookie, 0, &callbacks))
+   if (!main_ctx || CGLSetCurrentContext(main_ctx))
+      abort();
+   soft_gl_require();
+   if (virgl_renderer_init(&cookie, 0, &callbacks))
       abort();
    return 0;
 }

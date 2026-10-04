@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/uio.h>
+#include "soft-gl.h"
 #include "virglrenderer.h"
 #include "virgl_hw.h"
 #include "virgl_protocol.h"
@@ -51,17 +52,7 @@ static void write_fence(void *cookie, uint32_t fence)
 
 static CGLContextObj new_context(CGLContextObj share)
 {
-   CGLPixelFormatAttribute attrs[] = {
-      kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_GL4_Core, 0
-   };
-   CGLPixelFormatObj pix = NULL;
-   CGLContextObj ctx = NULL;
-   GLint n = 0;
-   if (CGLChoosePixelFormat(attrs, &pix, &n) || !pix)
-      return NULL;
-   CGLCreateContext(pix, share, &ctx);
-   CGLReleasePixelFormat(pix);
-   return ctx;
+   return soft_gl_context(share);
 }
 
 static virgl_renderer_gl_context create_gl_context(void *cookie, int scanout,
@@ -194,6 +185,7 @@ int main(void)
       printf("skip: no OpenGL context on this Mac\n");
       return 0;
    }
+   soft_gl_require();
    virgl_set_log_callback(count_log, NULL, NULL);
    static int cookie;
    if (virgl_renderer_init(&cookie, 0, &callbacks)) {
