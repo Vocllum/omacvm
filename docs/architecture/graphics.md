@@ -303,8 +303,10 @@ guest needs Mesa with blob rounding.
 Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
 no float64. So Zink (GL on Vulkan) and ANGLE-on-Vulkan in Chrome do not
 work; they wait for KosmicKrisp, which needs Metal 4 (macOS 26). See
-ADR 0013. Frame latency is Venus's ring polling (guest `vn_relax`, host
-`vkr_ring_relax`), about 1.3 ms per frame: vkmark ~800 is latency, not GPU.
+ADR 0013. With fences polled every 1 ms each vkmark frame waited about
+1.3 ms: vkmark ~730-800 was latency, not GPU. With the sync thread's fences
+(`gpu-native`) the same runtime gives about 5,200 (bench lock, 800x600
+headless, median of 3: 5195 vs 732 polled).
 
 ## 7. Video decode (built: `video-decode`)
 
@@ -450,7 +452,8 @@ bench lock and are indications only):
 | Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
 | WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same) |
 | QEMU CPU, glmark2 / Aquarium, bench lock | - | 165% / 176% (fence wait; spinning: 195% / 194%) |
-| vkmark headless 800x600 (Venus) | - | ~800 |
+| vkmark headless 800x600 (Venus), bench lock | - | 5195 (fences polled: 732) |
+| dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks
