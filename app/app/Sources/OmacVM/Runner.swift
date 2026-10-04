@@ -42,7 +42,8 @@ final class Runner {
             // QEMU's user network: the Mac is 10.0.2.2 for the VM; SSH from the Mac on 127.0.0.1.
             "-netdev", "user,id=net0,hostfwd=tcp:127.0.0.1:\(c.sshPort)-:22",
             "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56,romfile=",
-            "-device", "virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile=",
+            // Venus (Vulkan) needs blobs and a host memory window for them.
+            "-device", "virtio-gpu-gl-pci,max_outputs=1,xres=1920,yres=1080,romfile=\(Settings.venus ? ",blob=true,venus=true,hostmem=4G" : "")",
             "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",

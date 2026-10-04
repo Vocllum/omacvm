@@ -1,0 +1,41 @@
+From: OmacVM
+Subject: [PATCH] cocoa: OMACVM_BACKGROUND starts without taking the focus
+
+For test runs while someone works at the Mac: no Dock icon, the app is
+never activated and its window opens behind the others.
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -1801,7 +1801,11 @@
+             ? [NSString stringWithUTF8String:qemu_name]
+             : @"QEMU"];
+         [window setContentView:cocoaView];
+-        [window makeKeyAndOrderFront:self];
++        if (getenv("OMACVM_BACKGROUND")) {
++            [window orderBack:self];
++        } else {
++            [window makeKeyAndOrderFront:self];
++        }
+         [window center];
+         [window setDelegate: self];
+ 
+@@ -2967,10 +2971,18 @@
+     // Pull this console process up to being a fully-fledged graphical
+     // app with a menubar and Dock icon
+     ProcessSerialNumber psn = { 0, kCurrentProcess };
+-    TransformProcessType(&psn, kProcessTransformToForegroundApplication);
++    /* OmacVM: OMACVM_BACKGROUND=1 (tests) starts without taking the focus:
++     * no Dock icon, never activated, the window opens behind the others. */
++    bool background = getenv("OMACVM_BACKGROUND") != NULL;
++    if (!background) {
++        TransformProcessType(&psn, kProcessTransformToForegroundApplication);
++    }
+ 
+     [[NSProcessInfo processInfo] setProcessName:omacvm_product_name()];
+     [QemuApplication sharedApplication];
++    if (background) {
++        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
++    }
+     cocoa_set_product_icon();
+ 
+     dcl.con = qemu_console_lookup_default();

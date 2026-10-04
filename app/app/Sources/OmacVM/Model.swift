@@ -310,6 +310,9 @@ enum Settings {
     /// misbehaves on a Mac.
     /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
     static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
+    /// Vulkan in the VM (Venus on MoltenVK), experimental: the guest needs
+    /// Mesa 26.3 or newer. Hidden: defaults write org.omacvm.app venus -bool true
+    static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
