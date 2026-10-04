@@ -203,6 +203,7 @@ def main() -> int:
     (out / "Panel.qml").write_text(panel)
     shutil.copy2(HERE / "manifest.json", out / "manifest.json")
     shutil.copy2(HERE / "placement.sh", out / "placement.sh")
+    shutil.copy2(HERE / "LICENSE", out / "LICENSE")
     (out / "placement.sh").chmod(0o755)
     digest = hashlib.sha256((source / "Panel.qml").read_bytes()).hexdigest()
     (out / ".source-sha256").write_text(digest + "\n")
