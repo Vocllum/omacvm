@@ -1,0 +1,94 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>OmacVM context loss test</title>
+<style>body{margin:0;background:#222;color:#ddd;font:14px monospace}canvas{display:block}</style>
+<canvas id="c" width="512" height="512"></canvas>
+<pre id="log"></pre>
+<script>
+// Draws every frame and proves it with readPixels (the clear colour encodes the frame).
+// After a few seconds it also draws with a "poison" shader whose constant 4242.25 a test
+// build of the host refuses (OMACVM_VIRGL_TEST_FAIL_GLSL). Reports to the guest server.
+const q = new URLSearchParams(location.search);
+const POISON_AT = +(q.get('poison_at') || 5000);
+const canvas = document.getElementById('c');
+let gl, prog, poison, buf, frame = 0, good = 0, bad = 0, lost = 0, restored = 0;
+let poisonDraws = 0, poisoned = false, lastLostAt = null, restoredAt = null;
+const t0 = performance.now();
+const post = (path, o) => fetch(path, {method: 'POST', body: JSON.stringify(o)}).catch(() => {});
+
+function compile(vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    gl.attachShader(p, s);
+  }
+  gl.bindAttribLocation(p, 0, 'pos');
+  gl.linkProgram(p);
+  return p;
+}
+
+const VS = 'attribute vec2 pos; varying vec2 v; void main(){ v = pos * 0.5 + 0.5; gl_Position = vec4(pos * 0.5, 0.0, 1.0); }';
+const FS = 'precision mediump float; varying vec2 v; void main(){ gl_FragColor = vec4(0.2, v.x, v.y, 1.0); }';
+const POISON_FS = 'precision highp float; varying vec2 v; void main(){ gl_FragColor = vec4(min(v.x * 4242.25, 1.0), 0.0, v.y, 1.0); }';
+
+function init() {
+  prog = compile(VS, FS);
+  poison = null;
+  buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  if (!gl || gl.isContextLost()) return;
+  frame++;
+  const g = 40 + frame % 200;                 // expected green in the corner
+  gl.clearColor(0, g / 255, 0, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.useProgram(prog);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // Only before the first loss: after a restore the page must simply work again.
+  if (!lost && performance.now() - t0 > POISON_AT) {
+    if (!poison) poison = compile(VS, POISON_FS);
+    gl.useProgram(poison);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    poisonDraws++;
+    poisoned = true;
+  }
+  const px = new Uint8Array(4);
+  gl.readPixels(4, 4, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  if (Math.abs(px[1] - g) <= 1 && px[0] === 0) good++; else bad++;
+}
+
+canvas.addEventListener('webglcontextlost', e => {
+  e.preventDefault();
+  lost++; lastLostAt = performance.now() - t0;
+  post('/event', {event: 'lost', t: lastLostAt, frame});
+});
+canvas.addEventListener('webglcontextrestored', () => {
+  restored++; restoredAt = performance.now() - t0;
+  init();
+  const d = gl.getExtension('WEBGL_debug_renderer_info');
+  post('/event', {event: 'restored', t: restoredAt, frame,
+                  renderer: d ? gl.getParameter(d.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)});
+});
+
+gl = canvas.getContext('webgl', {preserveDrawingBuffer: true});
+const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+post('/start', {renderer: dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER),
+                userAgent: navigator.userAgent, poison_at: POISON_AT});
+init();
+requestAnimationFrame(tick);
+// One beat per second: frames drawn and how many readbacks matched since the last beat.
+setInterval(() => {
+  post('/beat', {t: performance.now() - t0, frame, good, bad, lost, restored, poisoned,
+                 poisonDraws, contextLost: gl.isContextLost()});
+  good = bad = 0;
+  document.getElementById('log').textContent = `frame ${frame} lost ${lost} restored ${restored}`;
+}, 1000);
+</script>

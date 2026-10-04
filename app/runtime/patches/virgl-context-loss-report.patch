@@ -8,8 +8,8 @@ line ("context N (name) is lost ..., the guest driver was told"). A guest Mesa
 with src/app/guest/mesa/mesa-virgl-reset-status.patch reports that through
 glGetGraphicsResetStatus (GL_GUILTY_CONTEXT_RESET) and EXT/KHR_robustness, so
 ANGLE/Chrome and other robust apps recreate their context. Venus: the ring
-thread's fatal path logs once per context (the guest's Mesa aborts the app on the
-fatal ring status, nothing else to add on the host).
+thread's fatal path logs once per context; the guest's Mesa ends the app on the
+fatal ring status (its fences: virgl-venus-lost-context-fences.patch).
 Why: a lost virgl context left the guest app drawing into nothing forever; the
 host printed one error per failed command instead of saying what happened.
 Validation: the buffer must be a PIPE_BUFFER with VIRGL_BIND_CUSTOM (no GL object,
