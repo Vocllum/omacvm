@@ -236,6 +236,37 @@ int main(void)
                      "MOV OUT[0], TEMP[0]\nEND\n",
                      &key, "textureGather", "GL_EXT_texture_shadow_lod", have_gl);
 
+   /* gl_SampleMask written with every component: only gl_SampleMask[0]
+    * exists on the Mac ("Index 1 beyond bounds"). The stencil value is .y. */
+   memset(&key, 0, sizeof(key));
+   failed |= convert("MOV of all components into gl_SampleMask",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
+                     "DCL OUT[1], SAMPLEMASK\nMOV OUT[0], IN[0]\nMOV OUT[1], IN[0]\nEND\n",
+                     &key, "gl_SampleMask[0] = floatBitsToInt(int_out_tmp1.x);", "gl_SampleMask[1]",
+                     have_gl);
+   memset(&key, 0, sizeof(key));
+   failed |= convert("stencil value from .y",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL OUT[1], STENCIL\n"
+                     "MOV OUT[0], IN[0]\nMOV OUT[1].x, IN[0].yyyy\nMOV OUT[1].y, IN[0].xxxx\nEND\n",
+                     &key, "gl_FragStencilRefARB = floatBitsToInt(int_out_tmp1.y);", NULL,
+                     false /* the Mac has no ARB_shader_stencil_export */);
+   /* An output also written with an indirect index keeps upstream's direct
+    * writes: a temporary would hide the indirect write. */
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("integer colour output also written indirectly",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL ADDR[0]\n"
+                     "IMM[0] INT32 {0, 0, 0, 0}\nUARL ADDR[0].x, IMM[0].xxxx\n"
+                     "MOV OUT[ADDR[0].x], IN[0]\nMOV OUT[0], IN[0]\nEND\n",
+                     &key, "fsout_c0", "int_out_tmp", false);
+   /* A precise result keeps precise in its temporary. */
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("precise MAD into an integer color output",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
+                     "MAD_PRECISE OUT[0], IN[0], IN[0], IN[0]\nEND\n",
+                     &key, "precise vec4 int_out_tmp0;", NULL, have_gl);
+
    /* A vertex emitted in a loop before the text that writes gl_Layer still
     * stores it: which components are written comes from a pass before the
     * translation, not from the text order. */
@@ -252,7 +283,7 @@ int main(void)
                      "ENDLOOP\nEMIT IMM[0].yyyy\nEND\n",
                      &key, "{\n\t\tgl_Layer = floatBitsToInt(int_out_tmp1.x);", NULL, have_gl);
 
-   /* Compute shaders are always "#version 330\" (hosts with compute; the Mac
+   /* Compute shaders are always "#version 330" (hosts with compute; the Mac
     * has none): a shader that needs GLSL 4.30 for a vote still needs the
     * texture gather extension line. Text only. */
    memset(&key, 0, sizeof(key));

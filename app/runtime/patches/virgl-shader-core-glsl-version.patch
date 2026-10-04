@@ -103,22 +103,22 @@ shader that needs 4.30 keeps its extension lines; fails without this patch).
  enum vrend_type_qualifier {
     TYPE_CONVERSION_NONE = 0,
     FLOAT = 1,
-@@ -6205,6 +6274,14 @@
-                      const char *verb)
- {
+@@ -6207,6 +6276,14 @@
     emit_ver_extf(glsl_strbufs, "#extension GL_%s : %s\n", name, verb);
-+}
-+
+ }
+ 
 +static void emit_ext_unless_core(const struct dump_ctx *ctx,
 +                                 struct vrend_glsl_strbufs *glsl_strbufs,
 +                                 const char *name, const char *verb)
 +{
 +   if (!ext_is_core(ctx, name))
 +      emit_ext(glsl_strbufs, name, verb);
- }
- 
++}
++
  static void emit_header(const struct dump_ctx *ctx, struct vrend_glsl_strbufs *glsl_strbufs)
-@@ -6298,61 +6375,48 @@
+ {
+    if (ctx->cfg->use_gles) {
+@@ -6298,61 +6375,49 @@
        emit_hdr(glsl_strbufs, "precision highp float;\n");
        emit_hdr(glsl_strbufs, "precision highp int;\n");
     } else {
@@ -196,11 +196,12 @@ shader that needs 4.30 keeps its extension lines; fails without this patch).
  
        for (uint32_t i = 0; i < ARRAY_SIZE(shader_req_table); i++) {
 -         if (shader_req_table[i].key == SHADER_REQ_SAMPLER_RECT && ctx->glsl_ver_required >= 140)
-+         if (ext_is_core(ctx, shader_req_table[i].string))
++         if ((ctx->shader_req_bits & shader_req_table[i].key) &&
++             ext_is_core(ctx, shader_req_table[i].string))
              continue;
  
           if (ctx->shader_req_bits & shader_req_table[i].key) {
-@@ -8177,6 +8241,12 @@
+@@ -8177,6 +8242,12 @@
     /* if we are in core profile mode we should use GLSL 1.40 */
     if (cfg->glsl_version >= 140)
        ctx.glsl_ver_required = require_glsl_ver(&ctx, 140);
