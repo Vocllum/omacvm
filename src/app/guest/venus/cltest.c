@@ -1,5 +1,5 @@
-// cltest.c: OpenCL smoke test - saxpy on 16M floats, a reduction and atomics (global and local),
-// checked against the CPU, timed. Build: gcc -O2 -o cltest cltest.c -lOpenCL -lm
+// cltest.c: OpenCL smoke test - saxpy on 16M floats, a reduction, atomics (global and local) and an
+// in-place sort in global memory, checked against the CPU, timed. Build: gcc -O2 -o cltest cltest.c -lOpenCL -lm
 #define CL_TARGET_OPENCL_VERSION 300
 #include <CL/cl.h>
 #include <stdio.h>
@@ -19,7 +19,15 @@ static const char *src =
 "__kernel void count(__global const float *x, __global int *hits, float t) {\n"
 "  __local int lh; if (get_local_id(0) == 0) lh = 0; barrier(CLK_LOCAL_MEM_FENCE);\n"
 "  if (x[get_global_id(0)] > t) atomic_inc(&lh); barrier(CLK_LOCAL_MEM_FENCE);\n"
-"  if (get_local_id(0) == 0) atomic_add(hits, lh); }\n";
+"  if (get_local_id(0) == 0) atomic_add(hits, lh); }\n"
+/* one work-group bitonic-sorts global memory: swaps a[i] and a[p] (MoltenVK 1.4.2's SPIRV-Cross lost
+ * elements here, see patches/mesa-zink-moltenvk-global-loads.patch) */
+"__kernel void bsort(__global float *a, int n) {\n"
+"  int lid = get_local_id(0), ls = get_local_size(0);\n"
+"  for (int k = 2; k <= n; k <<= 1) for (int j = k >> 1; j > 0; j >>= 1) {\n"
+"    for (int i = lid; i < n; i += ls) { int p = i ^ j; if (p > i) { float x = a[i], y = a[p];\n"
+"      if (((i & k) == 0 && x < y) || ((i & k) != 0 && x > y)) { a[i] = y; a[p] = x; } } }\n"
+"    barrier(CLK_GLOBAL_MEM_FENCE); } }\n";
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 int main(void) {
   cl_platform_id p; cl_device_id d; cl_int e; char name[256];
@@ -56,6 +64,15 @@ int main(void) {
   CK(clEnqueueReadBuffer(q, bh, CL_TRUE, 0, 4, &ghits, 0, NULL, NULL));
   long chits = 0; for (size_t i = 0; i < n; i++) chits += x[i] > thr;
   printf("atomics: gpu %d cpu %ld\n", ghits, chits);
-  printf("%s\n", bad == 0 && fabs(gsum - csum) / csum < 1e-4 && ghits == chits ? "PASS" : "FAIL");
+  int sn = 2048; size_t sls = 64; float sv[2048]; double s0 = 0, s1 = 0;
+  for (int i = 0; i < sn; i++) { sv[i] = (float)((i * 7919) % 10007); s0 += sv[i]; }
+  cl_mem bs = clCreateBuffer(c, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof sv, sv, &e); CK(e);
+  cl_kernel kb = clCreateKernel(pr, "bsort", &e); CK(e);
+  CK(clSetKernelArg(kb, 0, sizeof bs, &bs)); CK(clSetKernelArg(kb, 1, sizeof sn, &sn));
+  CK(clEnqueueNDRangeKernel(q, kb, 1, NULL, &sls, &sls, 0, NULL, NULL));
+  CK(clEnqueueReadBuffer(q, bs, CL_TRUE, 0, sizeof sv, sv, 0, NULL, NULL));
+  int order = 0; for (int i = 0; i < sn; i++) { s1 += sv[i]; if (i && sv[i] > sv[i - 1]) order++; }
+  printf("sort: %d out of order, %s\n", order, s0 == s1 ? "no element lost" : "ELEMENTS LOST");
+  printf("%s\n", bad == 0 && fabs(gsum - csum) / csum < 1e-4 && ghits == chits && !order && s0 == s1 ? "PASS" : "FAIL");
   return 0;
 }
