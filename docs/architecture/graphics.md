@@ -48,8 +48,11 @@ done" sets the frame rate of anything light.
 - A faster poll timer is no way around it: without `ppoll`, QEMU's main
   loop on macOS waits in whole milliseconds (tried: 50 us and 20 us timers
   give the same ~1100-1200 as 1 ms).
-- Cost: Apple's `glClientWaitSync` spins (`gleTestSync`), so `vrend-sync`
-  keeps about half a core busy while the guest renders.
+- Apple's `glClientWaitSync` spins (`gleTestSync`) until the fence signals.
+  `virgl-darwin-fence-wait.patch` tests instead: busy for 100 us, then 50 us
+  waits with `mach_wait_until` on a time-constraint thread (plain `nanosleep`
+  is stretched by timer coalescing). QEMU's CPU during glmark2 195% -> 165%,
+  Aquarium 194% -> 176%, same frame rates.
 - Fallback: `OMACVM_VIRGL_POLL_FENCES=1`. QEMU's log says which path a VM
   took ("virgl fences reported by the sync thread" / "polled every 1 ms").
 
@@ -122,4 +125,4 @@ track notes.
 | fence to reply (median, QEMU trace) | 1.56 ms | 0.20 ms |
 | frames shown in the window, desktop animation | 33/s at most | mean 58, max 90 (120 Hz display) |
 | WebGL Aquarium 30k (Chrome) | 21.2-21.6 fps | 21.4-22.9 fps |
-| QEMU CPU during Aquarium | ~160% | ~175-190% |
+| QEMU CPU during Aquarium | ~160% | ~176% |

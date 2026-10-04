@@ -628,6 +628,7 @@ verify_file_sha "Native OpenGL browser compatibility patch" "$virgl_native_patch
 patch -d "$virgl_source" -p1 -f -i "$virgl_native_patch"
 # OmacVM GPU: eventfd for the sync thread on macOS; Venus render server in process.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-thread-sync.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-in-process.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
