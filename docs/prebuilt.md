@@ -50,7 +50,11 @@ OmacVM takes the newest image with its own major version and a version up to
 its own (OmacVM 2.5.0 uses a 2.4.0 image when there is no newer one): the
 first `omacvm apply` brings the VM side to the current version anyway. With no
 such image (or no connection), `--prebuilt` builds the VM here instead and
-says so.
+says so. OmacVM.app (`--vm-type app`) has no prebuilt VMs and always builds
+in the app.
+
+Images from before 2.6.0 have no sound card on UTM and Fusion: the build
+adds one while the VM is off, after the seed is gone.
 
 ## Downloading one by hand
 

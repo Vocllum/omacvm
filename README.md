@@ -268,6 +268,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it
    in its app: it asks for your user and password on its first boot. `--prebuilt` or `--build` for scripts; details, what is in the
    images and how they are made: [docs/prebuilt.md](docs/prebuilt.md).
+   OmacVM.app has no prebuilt VMs: it always builds its own.
 3. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
    quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs

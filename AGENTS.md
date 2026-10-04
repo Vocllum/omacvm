@@ -44,7 +44,7 @@ UTM, or choose their password: hand those over, never work around them.
      is experimental and off by default: offer
      it, do not decide it.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
-     (same major version, up to this one); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
+     (same major version, up to this one; never for OmacVM.app); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
      minutes) or a build here (`--build`, the default with `--yes`).
   3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, Fusion 45-85:
      `minutes` in the plan; run it in the background and follow its output). Exit 3 = something to install first.
