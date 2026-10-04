@@ -15,6 +15,16 @@ in more words.
 - The 1.x commands `./build.sh`, `./apply.sh` and `./check.sh` in the
   repository's root are gone: use `omacvm build`, `omacvm apply` and
   `omacvm check`.
+- Change the CPUs and memory of an existing VM: `omacvm resources --vm NAME`
+  with `--resources low|balanced|high|best`, `--cpus N` or `--memory-gb N`
+  (also in the `omacvm` menu). The same tiers and limits as the build, on
+  every route: Parallels (`prlctl set`, or its settings file on Standard),
+  UTM, VMware Fusion (graphics memory goes down with the memory when it would
+  no longer fit) and OmacVM.app. The VM must be stopped, except on
+  OmacVM.app, which takes the change at its next start. A name used in two
+  apps needs `--vm-type`.
+- OmacVM.app: a Resources picker in the VM's window, with the create
+  screen's tiers; it applies on the next start.
 
 ## 2.7.0
 

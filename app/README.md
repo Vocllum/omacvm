@@ -75,6 +75,10 @@ Accessibility of its own.
    Omarchy (omarchy-mac) on the disk, then OmacVM's VM side.
 3. Starts it: QEMU shows Omarchy in a window that follows its size. Quit
    shuts the VM down cleanly; the Mac's sleep pauses it.
+4. Before a start, the window has a Resources picker (the same tiers as the
+   create screen): it writes `CPUS` and `MEM_MB` into the VM's `vm.env`,
+   which applies on the next start. `omacvm resources --vm NAME` does the same
+   from the terminal.
 
 The VM is a normal install: `omarchy update` and snapshots work.
 
