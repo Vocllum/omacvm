@@ -55,7 +55,9 @@ OmacVM's version.
   in macOS's arrangement. Plugging a display in or out works live: its
   workspaces move to the main display and come back with it, as on a
   laptop. Leaving full screen closes the other windows; in a window Omarchy
-  has one screen. Omarchy's display panel (the monitor icon in the bar) has
+  has one screen. Omanotch's strip stays on the MacBook whichever display
+  holds the main window: the app tells the VM which output is the built-in
+  display. Omarchy's display panel (the monitor icon in the bar) has
   **Use external displays**: off, full screen stays on one display. The VM
   keeps the setting (`~/.config/omacvm/displays.conf`; also
   `omacvm-displays external on|off`).
