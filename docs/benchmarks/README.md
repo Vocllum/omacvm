@@ -23,6 +23,8 @@ available in this VM".
 The browser tests (MotionMark, WebGL Aquarium) and glmark2 measure graphics
 instead, not raw compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
+Why WebGL in the VMs stays far below the Mac (draw calls, not pixels), route
+by route: [experiments/browser-gpu.md](../experiments/browser-gpu.md).
 
 ## The setup
 

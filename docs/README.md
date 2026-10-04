@@ -11,6 +11,7 @@ we found along the way. To set OmacVM up, start with the
 | [benchmarks/README.md](benchmarks/README.md) | How we benchmark the routes against the Mac, step by step, and the results so far |
 | [troubleshooting.md](troubleshooting.md) | Non-obvious problems we hit, each as symptom, cause, fix and where in the code |
 | [experiments/vmware-fusion.md](experiments/vmware-fusion.md) | The plan and test log from building the Fusion route |
+| [experiments/browser-gpu.md](experiments/browser-gpu.md) | Why WebGL in the VMs' browsers reaches only a quarter to two fifths of the Mac, measured on every route, and what we tried |
 | [experiments/trackpad-scrolling.md](experiments/trackpad-scrolling.md) | How the macOS-native scroll momentum was tuned, over 29 rounds, with every measurement |
 | [experiments/scroll-analysis/](experiments/scroll-analysis/) | The analysis scripts for the scroll momentum |
 | [images/](images/) | The README's graphics (hand-written SVG with SMIL animation) and the demo video |
