@@ -184,7 +184,9 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
       esac
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
-      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
+      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
+      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
