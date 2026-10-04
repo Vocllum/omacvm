@@ -93,13 +93,33 @@ done" sets the frame rate of anything light.
 - `virgl-darwin-venus-in-process.patch`: Venus's render server runs as a
   thread of QEMU (Metal heaps cannot cross processes).
 
+## Where the time goes (gpu-native)
+
+- Light frames (glmark2, the desktop): the fence round trip. Fixed above.
+- Heavy browser frames (WebGL Aquarium, 30,000 fish): QEMU's render thread
+  is busy all the time, and most of it is Apple's OpenGL itself (about 60%:
+  pipeline-state lookups and texture validation for every draw); the kernel
+  (main-loop polls, the user network, the BQL) about 14%; virglrenderer only
+  about 9%. Faster fences do not change Aquarium (about 21 fps before and
+  after). Tuning virglrenderer can win little; a render thread of its own,
+  away from QEMU's main loop, maybe 10%. The large step is not to go through
+  Apple's OpenGL at all: Vulkan (Venus) with Zink for OpenGL, see gpu-venus.
+- Not levers: ANGLE on Metal as the host GL (`gl=es`): the guest gets only
+  OpenGL 2.1 and glmark2 drops to about 700. Sleeping between fence tests:
+  macOS sleeps far longer than asked, Aquarium fell to 7-15 fps.
+
 ## Measuring
 
-Test VM: 8 CPUs, 16 GB, window 1440x810 points on a 60 Hz display,
-`glmark2-es2-wayland --fullscreen` (2880x1620) in the Hyprland session.
-Scripts and raw results are in the gpu-native track notes.
+Test VM: 8 CPUs, 16 GB, Omarchy in a window on the Mac's built-in display,
+in the Hyprland session. Every number with the tracks' benchmark lock held
+(the other test VMs paused). Scripts and raw results are in the gpu-native
+track notes.
 
-| Runtime | glmark2 (median of 3) |
-|---|---|
-| rc-2.6.0 (polled fences, refresh on the 30 ms tick) | 1259 |
-| async fences + present on flush | 4006 |
+| | rc-2.6.0 | this branch |
+|---|---|---|
+| glmark2 full run (`--fullscreen`) | 1125-1388 | 3576-4117 |
+| glmark2 short set, same session | 1096-1139 | 3859-4111 |
+| fence to reply (median, QEMU trace) | 1.56 ms | 0.20 ms |
+| frames shown in the window, desktop animation | 33/s at most | mean 58, max 90 (120 Hz display) |
+| WebGL Aquarium 30k (Chrome) | 21.2-21.6 fps | 21.4-22.9 fps |
+| QEMU CPU during Aquarium | ~160% | ~175-190% |
