@@ -59,7 +59,8 @@ done
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
 build_dir="$native_dir/.build"
-runtime_dir="$build_dir/qemu-gpu-runtime"
+# OMACVM_RUNTIME_OUT: stage elsewhere (to compare builds side by side).
+runtime_dir="${OMACVM_RUNTIME_OUT:-$build_dir/qemu-gpu-runtime}"
 entitlements="$native_dir/qemu-hvf.entitlements"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 dependency_bundler="$native_dir/bundle-macho-dependencies.sh"

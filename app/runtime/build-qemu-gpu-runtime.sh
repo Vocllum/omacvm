@@ -502,11 +502,13 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patc
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdown.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
-# OmacVM GPU: fences reported by virglrenderer's sync thread (no 1 ms polling);
-# blobs on 16 KiB host pages, so Venus memory maps into the guest.
+# OmacVM GPU (docs/architecture/graphics.md): fences reported by virglrenderer's
+# sync thread (no 1 ms polling); blobs on 16 KiB host pages, so Venus memory
+# maps into the guest; frames shown when the guest flushes, as IOSurfaces.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-async-fence.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-alignment.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-on-flush.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-iosurface.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
