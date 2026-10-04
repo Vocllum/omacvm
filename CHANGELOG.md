@@ -30,6 +30,10 @@ in more words.
   The VM now also checks what each display really shows and restarts the
   shell once if one stays grey; omacvm check says "desktop" and, on the Mac,
   "GPU contexts".
+- Omanotch's wallpaper is decoded at the display's size (about a third of
+  the memory per display, and no oversized upload that UTM's QEMU can
+  refuse), and its bar and wallpaper follow their output when it moves in
+  the layout.
 - Omanotch: after a shell restart the bar is parked under the strip again
   within seconds; before, the MacBook could show two bars.
 - Per-display workspaces handle more than two displays (Virtual-3 gets

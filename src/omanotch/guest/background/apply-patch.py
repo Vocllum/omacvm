@@ -21,6 +21,12 @@ Hyprland's own dark grey), and Omarchy's ScreenMoveRemap, meant for that,
 waits for xChanged/yChanged, which Quickshell's screens do not have (only
 geometryChanged), so it never fires.
 
+The wallpaper is also decoded at the size it is shown at (the display's pixels),
+not at the image's own: Omarchy's 6016x3384 images made an 81 MB texture per
+display, and on a QEMU that limits a buffer's memory entries (UTM's; OmacVM.app
+before 2.8.0) such an upload in fragmented memory failed and the shell lost its
+GPU context: black displays without bar.
+
 The patch is versioned like the bar patch; an older version is restored from
 <Background.qml>.before-notchbar (kept by install.sh) and patched again.
 """
@@ -28,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 3
+VERSION = 4
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
@@ -152,6 +158,23 @@ def main():
 ''', '''        id: revealMask
         anchors.fill: notchCanvas
 ''')
+
+    # 5. Decode the image at the size it is shown at (see the docstring); at
+    #    least 1x1, since 0x0 would mean the image's own size.
+    text = replace_once(text, "      property bool maskReady: false\n", """      property bool maskReady: false
+      // omarchy-notch-bar: the wallpaper at the size it is shown at.
+      readonly property real notchDpr: panel.modelData && panel.modelData.devicePixelRatio > 0
+                                       ? panel.modelData.devicePixelRatio : 1
+      readonly property size notchImageSize: Qt.size(Math.max(1, Math.ceil(notchCanvas.width * notchDpr)),
+                                                     Math.max(1, Math.ceil(notchCanvas.height * notchDpr)))
+""")
+    for image in ("base", "oldFrame"):
+        text = replace_once(text, f"        id: {image}\n        anchors.fill: notchCanvas\n",
+                            f"        id: {image}\n        anchors.fill: notchCanvas\n"
+                            "        sourceSize: panel.notchImageSize\n")
+    text = replace_once(text, "          id: incomingFrame\n          anchors.fill: parent\n",
+                        "          id: incomingFrame\n          anchors.fill: parent\n"
+                        "          sourceSize: panel.notchImageSize\n")
 
     open(path, "w").write(text)
     print(f"patched (v{VERSION})")
