@@ -144,7 +144,8 @@ else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fus
 
 section "The Mac's battery"
 if [[ $TYPE == parallels ]]; then
-  skip "battery" "Parallels gives the VM the Mac's battery itself"
+  if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
+  else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
 elif [[ $BATTERY == on ]]; then
   if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
   else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
