@@ -263,27 +263,45 @@ static void read_indirect(const void *offset, uint64_t bytes, uint32_t *cmd)
    read_buffer(buf, (uint64_t)(uintptr_t)offset, bytes, cmd);
 }
 
+/* The checks above judge a draw by its ranges; the software renderer would then spend
+ * minutes on a draw of billions of vertices. Such draws are checked, counted and not
+ * rasterized (the fuzzer looks for bad ranges, not pixels). */
+static int too_big(long long count, long long instances)
+{
+   if (instances < 1)
+      instances = 1;
+   return count > 0 && count * instances > (1 << 18);
+}
+
 static void o_DrawArrays(GLenum mode, GLint first, GLsizei count)
 {
    check_arrays(first, count, 0, 1);
+   if (too_big(count, 1))
+      return;
    glDrawArrays(mode, first, count);
 }
 
 static void o_DrawArraysInstanced(GLenum mode, GLint first, GLsizei count, GLsizei instances)
 {
    check_arrays(first, count, 0, instances > 0 ? instances : 0);
+   if (too_big(count, instances))
+      return;
    glDrawArraysInstanced(mode, first, count, instances);
 }
 
 static void o_DrawArraysInstancedARB(GLenum mode, GLint first, GLsizei count, GLsizei instances)
 {
    check_arrays(first, count, 0, instances > 0 ? instances : 0);
+   if (too_big(count, instances))
+      return;
    glDrawArraysInstancedARB(mode, first, count, instances);
 }
 
 static void o_DrawElements(GLenum mode, GLsizei count, GLenum type, const void *indices)
 {
    check_elements(count, type, indices, 0, 1);
+   if (too_big(count, 1))
+      return;
    glDrawElements(mode, count, type, indices);
 }
 
@@ -291,6 +309,8 @@ static void o_DrawRangeElements(GLenum mode, GLuint start, GLuint end, GLsizei c
                                 const void *indices)
 {
    check_elements(count, type, indices, 0, 1);
+   if (too_big(count, 1))
+      return;
    glDrawRangeElements(mode, start, end, count, type, indices);
 }
 
@@ -298,6 +318,8 @@ static void o_DrawRangeElementsEXT(GLenum mode, GLuint start, GLuint end, GLsize
                                    GLenum type, const void *indices)
 {
    check_elements(count, type, indices, 0, 1);
+   if (too_big(count, 1))
+      return;
    glDrawRangeElementsEXT(mode, start, end, count, type, indices);
 }
 
@@ -305,6 +327,8 @@ static void o_DrawElementsInstanced(GLenum mode, GLsizei count, GLenum type, con
                                     GLsizei instances)
 {
    check_elements(count, type, indices, 0, instances > 0 ? instances : 0);
+   if (too_big(count, instances))
+      return;
    glDrawElementsInstanced(mode, count, type, indices, instances);
 }
 
@@ -312,6 +336,8 @@ static void o_DrawElementsInstancedARB(GLenum mode, GLsizei count, GLenum type,
                                        const void *indices, GLsizei instances)
 {
    check_elements(count, type, indices, 0, instances > 0 ? instances : 0);
+   if (too_big(count, instances))
+      return;
    glDrawElementsInstancedARB(mode, count, type, indices, instances);
 }
 
@@ -319,6 +345,8 @@ static void o_DrawElementsBaseVertex(GLenum mode, GLsizei count, GLenum type, co
                                      GLint base)
 {
    check_elements(count, type, indices, base, 1);
+   if (too_big(count, 1))
+      return;
    glDrawElementsBaseVertex(mode, count, type, (void *)indices, base);
 }
 
@@ -326,6 +354,8 @@ static void o_DrawRangeElementsBaseVertex(GLenum mode, GLuint start, GLuint end,
                                           GLenum type, const void *indices, GLint base)
 {
    check_elements(count, type, indices, base, 1);
+   if (too_big(count, 1))
+      return;
    glDrawRangeElementsBaseVertex(mode, start, end, count, type, (void *)indices, base);
 }
 
@@ -333,6 +363,8 @@ static void o_DrawElementsInstancedBaseVertex(GLenum mode, GLsizei count, GLenum
                                               const void *indices, GLsizei instances, GLint base)
 {
    check_elements(count, type, indices, base, instances > 0 ? instances : 0);
+   if (too_big(count, instances))
+      return;
    glDrawElementsInstancedBaseVertex(mode, count, type, indices, instances, base);
 }
 
@@ -341,6 +373,8 @@ static void o_DrawArraysIndirect(GLenum mode, const void *indirect)
    uint32_t cmd[4]; /* count, instances, first, base instance */
    read_indirect(indirect, sizeof(cmd), cmd);
    check_arrays((GLint)cmd[2], (GLsizei)cmd[0], cmd[3], cmd[1]);
+   if (too_big(cmd[0], cmd[1]))
+      return;
    glDrawArraysIndirect(mode, indirect);
 }
 
@@ -350,6 +384,8 @@ static void o_DrawElementsIndirect(GLenum mode, GLenum type, const void *indirec
    read_indirect(indirect, sizeof(cmd), cmd);
    check_elements((GLsizei)cmd[0], type, (const void *)(uintptr_t)((uint64_t)cmd[2] * index_size(type)),
                   (GLint)cmd[3], cmd[1]);
+   if (too_big(cmd[0], cmd[1]))
+      return;
    glDrawElementsIndirect(mode, type, indirect);
 }
 
