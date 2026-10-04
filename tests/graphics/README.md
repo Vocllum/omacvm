@@ -40,7 +40,7 @@ Never edit a script while a run uses it: bash reads scripts as it goes.
 | `./deqp.sh vk [--env "VK_ICD_FILENAMES=..."]` | Vulkan CTS `vk-default` list, for Venus | use a filter (e.g. `^dEQP-VK\.(api\|memory)\.`) |
 | `./webgl.sh --version 1.0.4 [--filter RE]` | Khronos WebGL conformance 2.0.0 suite, WebGL 1 pages, Chrome in the guest session | full: ~15-30 min |
 | `./webgl.sh --version 2.0.0 --filter '^conformance2/'` | same, WebGL 2 pages | longer |
-| `./soak.sh [--minutes 30] [--vk]` | glmark2 (or vkmark) loop + Chrome WebGL page + mpv 1080p60 loop, with hang detection | 30 min |
+| `./soak.sh [--minutes 30] [--vk [--vk-icd FILE]]` | glmark2 (or vkmark) loop + Chrome WebGL page + mpv 1080p60 loop, with hang detection | 30 min |
 
 dEQP has no Arch Linux ARM package: build it once in the guest with `guest/build-cts.sh`
 (copied to `/opt/vk-gl-cts`, ~15 min for GLES, much longer for `deqp-vk`). It records the CTS

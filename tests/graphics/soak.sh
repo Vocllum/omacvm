@@ -1,5 +1,5 @@
 #!/bin/bash
-# soak.sh [--minutes 30] [--interval 15] [--vk] [--out FILE.json]
+# soak.sh [--minutes 30] [--interval 15] [--vk [--vk-icd FILE]] [--out FILE.json]
 # Load: glmark2 loop (vkmark with --vk), Chrome on a WebGL page, mpv looping a 1080p video.
 # Every interval: guest heartbeat over SSH, progress of each load, virtio-gpu fences
 # (debugfs: signalled vs emitted), QEMU CPU% and RSS, new QEMU log lines.
@@ -7,9 +7,10 @@
 # collects: QEMU stack samples, QEMU log, guest dmesg if reachable. Results as JSON.
 set -uo pipefail
 H=$(cd "$(dirname "$0")" && pwd); V="$H/vm.sh"
-MIN=30; IV=15; VK=0; OUT=""
+MIN=30; IV=15; VK=0; ICD=""; OUT=""
 while [ $# -gt 0 ]; do case $1 in
   --minutes) MIN=$2; shift 2;; --interval) IV=$2; shift 2;; --vk) VK=1; shift;;
+  --vk-icd) ICD=$2; shift 2;;
   --out) OUT=$2; shift 2;; *) echo "unknown: $1"; exit 2;; esac; done
 OUT=${OUT:-$H/results/soak-$(date +%Y%m%d-%H%M%S).json}; ART=${OUT%.json}; mkdir -p "$ART"
 QPID=$("$V" pid); [ -z "$QPID" ] && { echo "VM not running"; exit 1; }
@@ -24,7 +25,8 @@ G=/tmp/omacvm-soak
 "$V" ssh "ffmpeg -loglevel error -f lavfi -i testsrc2=size=1920x1080:rate=60 -t 20 -c:v libx264 -pix_fmt yuv420p $G/v.mp4"
 "$V" ssh "chown -R \$(id -un 1000) $G"
 T=$(( MIN*60 + 60 ))
-if [ $VK = 1 ]; then GPUJOB="vkmark --winsys wayland"; else GPUJOB="glmark2-es2-wayland"; fi
+# --vk-icd: a guest venus other than the system one (Arch's 26.2.3 lacks blob alignment)
+if [ $VK = 1 ]; then GPUJOB="env ${ICD:+VK_DRIVER_FILES=$ICD} vkmark --winsys wayland"; else GPUJOB="glmark2-es2-wayland"; fi
 "$V" session bash -c "cd $G; nohup timeout $T python3 server.py >/dev/null 2>&1 &
   nohup timeout $T bash -c 'while :; do $GPUJOB >> $G/gpu.txt 2>&1; echo LOOP >> $G/gpu.txt; done' >/dev/null 2>&1 &
   nohup timeout $T google-chrome-stable --user-data-dir=$G/prof --no-first-run --ozone-platform=wayland --disable-background-timer-throttling --disable-renderer-backgrounding http://127.0.0.1:8766/webgl.html >/dev/null 2>&1 &
