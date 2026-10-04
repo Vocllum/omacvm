@@ -8,6 +8,11 @@ VIRGL_RESET_STATUS_GUILTY there when it loses the context. virgl then:
   - implements get_device_reset_status (PIPE_GUILTY_CONTEXT_RESET) and
     set_device_reset_callback (called after the next flush, so Mesa switches the
     GL context to its lost dispatch at once);
+  - a context that asked for no reset notification (most apps, and ANGLE's own
+    context in Chrome) cannot learn about it, so the next flush ends the app with
+    abort(), as Mesa's venus does on a fatal ring status. Chrome then restarts its
+    GPU process and the page gets webglcontextlost/restored.
+    VIRGL_KEEP_LOST_CONTEXT=1 keeps such an app running (drawing nothing);
   - sets device_reset_status_query, so EGL/GLX offer create_context_robustness;
   - st/mesa: KHR_robustness (and EXT_robustness on GLES) also when the driver
     reports resets but has no robust buffer access (Apple's GL 4.1 has no
@@ -15,18 +20,27 @@ VIRGL_RESET_STATUS_GUILTY there when it loses the context. virgl then:
     out-of-bounds reads; robust buffer access itself stays off, so ANGLE keeps its
     own bounds checks. On virgl/Apple this changes no GL or GLES version.
 Why: without it a lost host context leaves the app drawing into nothing: Chrome's
-WebGL page freezes. With it, robust apps (ANGLE/Chrome, gl-lost) see
-GL_GUILTY_CONTEXT_RESET and recreate their context.
+WebGL page freezes. With it, robust apps (gl-lost) see GL_GUILTY_CONTEXT_RESET
+and recreate their context; Chrome recovers through the GPU process restart.
 Applies to: Mesa 26.2.3 (Arch Linux ARM's version on 2026-10-04).
 Upstream: upstreamable together with the virglrenderer side; not sent.
 Tests: tests/graphics/guest/gl-lost.c (GL_GUILTY_CONTEXT_RESET on the frame the
 host lost the context), tests/graphics/context-loss.sh --expect recover --mesa
 /opt/omacvm-mesa (Chrome).
 diff --git a/src/gallium/drivers/virgl/virgl_context.c b/src/gallium/drivers/virgl/virgl_context.c
-index bfc9835..c94dcf6 100644
+index bfc9835..ba8b35b 100644
 --- a/src/gallium/drivers/virgl/virgl_context.c
 +++ b/src/gallium/drivers/virgl/virgl_context.c
-@@ -1083,6 +1083,54 @@ static void virgl_submit_cmd(struct virgl_winsys *vws,
+@@ -46,6 +46,8 @@
+ #include "util/slab.h"
+ #include "util/u_upload_mgr.h"
+ #include "util/u_blitter.h"
++#include "util/log.h"
++#include "util/u_debug.h"
+ 
+ #include "virgl_encode.h"
+ #include "virgl_context.h"
+@@ -1083,6 +1085,54 @@ static void virgl_submit_cmd(struct virgl_winsys *vws,
     }
  }
  
@@ -81,20 +95,29 @@ index bfc9835..c94dcf6 100644
  void virgl_flush_eq(struct virgl_context *ctx, void *closure,
                      struct pipe_fence_handle **fence)
  {
-@@ -1104,6 +1152,12 @@ void virgl_flush_eq(struct virgl_context *ctx, void *closure,
+@@ -1104,6 +1154,21 @@ void virgl_flush_eq(struct virgl_context *ctx, void *closure,
  
     virgl_submit_cmd(rs->vws, ctx->cbuf, fence);
  
-+   if (!ctx->reset_reported && ctx->reset_callback.reset &&
++   if (!ctx->reset_reported &&
 +       virgl_get_device_reset_status(&ctx->base) != PIPE_NO_RESET) {
 +      ctx->reset_reported = true;
-+      ctx->reset_callback.reset(ctx->reset_callback.data, PIPE_GUILTY_CONTEXT_RESET);
++      if (ctx->reset_callback.reset) {
++         ctx->reset_callback.reset(ctx->reset_callback.data, PIPE_GUILTY_CONTEXT_RESET);
++      } else if (!debug_get_bool_option("VIRGL_KEEP_LOST_CONTEXT", false)) {
++         /* The app did not ask for reset notification, so it would draw into a dead
++          * context for good. End it like venus does on a fatal ring status: a
++          * browser then restarts its GPU process and the page gets its context back. */
++         mesa_loge("virgl: the host lost this GL context and the app asked for no reset "
++                   "notification; aborting (VIRGL_KEEP_LOST_CONTEXT=1 keeps it)");
++         abort();
++      }
 +   }
 +
     /* Reserve some space for transfers. */
     if (ctx->encoded_transfers)
        ctx->cbuf->cdw = VIRGL_MAX_TBUF_DWORDS;
-@@ -1859,6 +1913,14 @@ struct pipe_context *virgl_context_create(struct pipe_screen *pscreen,
+@@ -1859,6 +1924,14 @@ struct pipe_context *virgl_context_create(struct pipe_screen *pscreen,
     if (rs->caps.caps.v2.capability_bits & VIRGL_CAP_APP_TWEAK_SUPPORT)
        virgl_send_tweaks(vctx, rs);
  
