@@ -1,0 +1,41 @@
+#!/bin/bash
+# OmacVM.app, HDR (optional, off by default): build the guest's virtio-gpu
+# module with 10-bit scanout formats (linux-virtio-gpu-deep-color.patch) for
+# the running kernel and install it into /lib/modules/<kernel>/updates.
+# Needs linux-aarch64-headers. The driver sources are the upstream stable
+# release of the running kernel's version, from kernel.org.
+# Usage (root): omacvm-virtio-gpu-build [--remove]
+set -euo pipefail
+kernel=$(uname -r)
+updates=/lib/modules/$kernel/updates/virtio-gpu.ko
+if [[ ${1:-} == --remove ]]; then
+  rm -f "$updates"
+  depmod -a "$kernel"
+  echo "omacvm-virtio-gpu: removed; the stock driver loads after a reboot"
+  exit 0
+fi
+version=${kernel%%-*}
+[[ $version =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || { echo "omacvm-virtio-gpu: unexpected kernel version $kernel" >&2; exit 1; }
+[[ -d /lib/modules/$kernel/build ]] || { echo "omacvm-virtio-gpu: install linux-aarch64-headers first" >&2; exit 1; }
+here=$(cd "$(dirname "$0")" && pwd)
+patch_file=${OMACVM_VIRTIO_GPU_PATCH:-$here/linux-virtio-gpu-deep-color.patch}
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+src=$work/drivers/gpu/drm/virtio
+mkdir -p "$src"
+base="https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/gpu/drm/virtio"
+for f in Makefile virtgpu_debugfs.c virtgpu_display.c virtgpu_drv.c virtgpu_drv.h \
+         virtgpu_fence.c virtgpu_gem.c virtgpu_ioctl.c virtgpu_kms.c virtgpu_object.c \
+         virtgpu_plane.c virtgpu_prime.c virtgpu_submit.c virtgpu_trace.h \
+         virtgpu_trace_points.c virtgpu_vq.c virtgpu_vram.c; do
+  curl --fail --silent --show-error --location --proto '=https' --retry 3 \
+    -o "$src/$f" "$base/$f?h=v$version"
+done
+patch -d "$work" -p1 -f -i "$patch_file"
+# Out of tree: the trace header sits next to the sources.
+sed -i 's|^#define TRACE_INCLUDE_PATH .*|#define TRACE_INCLUDE_PATH .|' "$src/virtgpu_trace.h"
+echo 'CFLAGS_virtgpu_trace_points.o := -I$(src)' >> "$src/Makefile"
+make -s -C "/lib/modules/$kernel/build" M="$src" CONFIG_DRM_VIRTIO_GPU=m modules
+install -Dm644 "$src/virtio-gpu.ko" "$updates"
+depmod -a "$kernel"
+echo "omacvm-virtio-gpu: installed $updates (10-bit scanout); takes effect after a reboot"
