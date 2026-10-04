@@ -2,6 +2,8 @@
  * Each input is one SUBMIT_3D buffer for a fresh context that has already named a
  * reset status buffer (VIRGL_CCMD_SET_RESET_STATUS_BUFFER), so the decoder, the
  * refused-shader path and the context-loss report all see guest-controlled data.
+ * Resources: 1 = that guest-memory buffer, 2 = a GL buffer (stream output), 3 = a
+ * 64x64 colour buffer.
  * Beyond ASan: the 16 bytes on each side of the guest's buffer are never written
  * (the host may write inside it: transfers and query results name it too).
  * Build and run: fuzz-cmd-stream.sh (needs Homebrew llvm@22 for libFuzzer). */
@@ -103,6 +105,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
    virgl_renderer_resource_create(&args, NULL, 0);
    virgl_renderer_resource_attach_iov(1, &iov, 1);
    virgl_renderer_ctx_attach_resource(ctx_id, 1);
+   /* A GL buffer (created for stream output; vrend binds it as any buffer) and a
+    * 64x64 colour buffer, so streams can draw and record transform feedback. */
+   struct virgl_renderer_resource_create_args buf_args = {
+      .handle = 2, .target = 0 /* PIPE_BUFFER */, .format = VIRGL_FORMAT_R8_UNORM,
+      .bind = VIRGL_BIND_STREAM_OUTPUT,
+      .width = 4096, .height = 1, .depth = 1, .array_size = 1,
+   };
+   struct virgl_renderer_resource_create_args rt_args = {
+      .handle = 3, .target = 2 /* PIPE_TEXTURE_2D */, .format = VIRGL_FORMAT_B8G8R8A8_UNORM,
+      .bind = VIRGL_BIND_RENDER_TARGET | VIRGL_BIND_SAMPLER_VIEW, .width = 64, .height = 64,
+      .depth = 1, .array_size = 1,
+   };
+   virgl_renderer_resource_create(&buf_args, NULL, 0);
+   virgl_renderer_resource_create(&rt_args, NULL, 0);
+   virgl_renderer_ctx_attach_resource(ctx_id, 2);
+   virgl_renderer_ctx_attach_resource(ctx_id, 3);
    uint32_t setup[2] = {
       VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0, VIRGL_SET_RESET_STATUS_BUFFER_SIZE), 1
    };
@@ -121,8 +139,12 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
          abort();
 
    virgl_renderer_ctx_detach_resource(ctx_id, 1);
+   virgl_renderer_ctx_detach_resource(ctx_id, 2);
+   virgl_renderer_ctx_detach_resource(ctx_id, 3);
    virgl_renderer_resource_detach_iov(1, NULL, NULL);
    virgl_renderer_resource_unref(1);
    virgl_renderer_context_destroy(ctx_id);
+   virgl_renderer_resource_unref(2);
+   virgl_renderer_resource_unref(3);
    return 0;
 }
