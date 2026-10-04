@@ -84,7 +84,9 @@ A build is done when all of this holds:
    (`omacvm-fusion-displays` user unit; `omacvm check` counts the outputs).
    OmacVM.app: the same in full screen (Virtual-2, ... at each display's size
    and scale) while "Use external displays" is on; `omacvm-displays status`
-   in the VM shows the switch, the Mac's arrangement and Hyprland's outputs.
+   in the VM shows the switch, the Mac's arrangement and Hyprland's outputs;
+   `$XDG_RUNTIME_DIR/omacvm/builtin` names the MacBook's output, which
+   Omanotch (NOTCH, the parked bar) follows.
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN` shows 47830 (Gestures) and 47831
    (Bridge) on 10.211.55.2, 192.168.64.1 and/or the `.1` of Fusion's vmnet8
    (see "VMware Fusion settings" below); `launchctl list | grep omacvm`
