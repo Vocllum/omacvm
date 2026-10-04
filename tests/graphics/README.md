@@ -41,7 +41,7 @@ Never edit a script while a run uses it: bash reads scripts as it goes.
 | `./webgl.sh --version 1.0.4 [--filter RE]` | Khronos WebGL conformance 2.0.0 suite, WebGL 1 pages, Chrome in the guest session | full: ~15-30 min |
 | `./webgl.sh --version 2.0.0 --filter '^conformance2/'` | same, WebGL 2 pages | longer |
 | `./soak.sh [--minutes 30] [--vk [--vk-icd FILE]]` | glmark2 (or vkmark) loop + Chrome WebGL page + mpv 1080p60 loop, with hang detection | 30 min |
-| `./scanout-churn.sh [--sizes "W1 H1 W2 H2"] [--seconds N]` | guest switches its scanout between two sizes on VT2 (`guest/alt-scanout.c`); pass = QEMU's GPU memory ("IOAccelerator (graphics)") grows < 64 MB. Stops the churn if QEMU grows by 2 GB. Default 3840x2160 <-> 2560x1440 | 15 s |
+| `./scanout-churn.sh [--sizes "W1 H1 W2 H2"] [--switches N] [--step K]` | guest switches its scanout between two sizes on VT2 (`guest/alt-scanout.c`, K switches per step), the Mac measures QEMU's GPU memory ("IOAccelerator (graphics)", `footprint`) between steps; pass = every switch worked and it grew < 64 MB after the first step. Stops when QEMU's footprint grew by `--budget-mb` (2048), so an old runtime overshoots by one step at most. Default 3840x2160 <-> 2560x1440, 60 switches | ~1 min |
 
 dEQP has no Arch Linux ARM package: build it once in the guest with `guest/build-cts.sh`
 (copied to `/opt/vk-gl-cts`, ~15 min for GLES, much longer for `deqp-vk`). It records the CTS

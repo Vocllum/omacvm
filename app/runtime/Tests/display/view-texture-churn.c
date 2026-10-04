@@ -12,19 +12,25 @@
  *
  * PARTS, any of:
  *   s  surface switch on the view context, as cocoa_gl_switch does:
- *      glDeleteTextures + glTexImage2D(GL_RGB) from fresh surface memory
+ *      glDeleteTextures + glTexImage2D(GL_RGB, GL_BGRA) from fresh surface memory
  *   u  surface update on the view context, as cocoa_gl_update: glTexSubImage2D
- *   f  glFlush on the view context after s and u (what the patch adds)
- *   x  guest transfer of the whole dumb buffer into its texture on a second
- *      context, as vrend does, with a fence wait
+ *   f  glFlush on the view context after s and u (qemu-cocoa-gl-view-flush.patch)
+ *   x  guest transfer of the whole dumb buffer into its texture on vrend's
+ *      context, followed by a guest fence (glFenceSync + wait, which flushes)
+ *   y  the same transfer without a fence: QEMU's 2D path uploads the new screen
+ *      on vrend's own context (ctx0) on every mode change, and nothing flushes it
+ *   z  glFlush on that context after y (virgl-control-queue-flush.patch)
  *   r  layer render: draw the scanout texture into a 2880x1800 FBO + glFlush
+ * The view context is double-buffered like QEMU's NSOpenGLContext.
  *
  *   cc -O1 view-texture-churn.c -framework OpenGL -o churn
  *   ./churn s  3840 2160 2560 1440 30    # grows ~16 MB per switch (M4)
  *   ./churn sf 3840 2160 2560 1440 30    # flat
  *   ./churn s  2560 1600 1920 1200 30    # flat: small textures are not kept
- * Measured on the Mac mini M4, macOS 27: s 8000x6000<->7000x5000 +166 MB per
- * switch; sf flat; su 3840x2160 +63 MB per switch, suf flat; x and r flat.
+ * Measured on the Mac mini M4, macOS 27 (first version: GL_RGBA uploads, single-
+ * buffered view): s 8000x6000<->7000x5000 +166 MB per switch; sf flat; su 3840x2160
+ * +63 MB per switch, suf flat; x and r flat. Raw output of later runs:
+ * ~/omacvm-work/gpu-robust/results/view-texture-churn/.
  */
 #include <OpenGL/OpenGL.h>
 #include <OpenGL/gl3.h>
@@ -35,11 +41,12 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-static CGLContextObj make_context(CGLContextObj share)
+static CGLContextObj make_context(CGLContextObj share, int double_buffer)
 {
     CGLPixelFormatAttribute attrs[] = {
         kCGLPFAOpenGLProfile, (CGLPixelFormatAttribute)kCGLOGLPVersion_3_2_Core,
-        kCGLPFAColorSize, 24, kCGLPFAAccelerated, 0
+        kCGLPFAColorSize, 24, kCGLPFAAccelerated,
+        double_buffer ? kCGLPFADoubleBuffer : (CGLPixelFormatAttribute)0, 0
     };
     CGLPixelFormatObj pix = NULL;
     CGLContextObj ctx = NULL;
@@ -145,6 +152,7 @@ int main(int argc, char **argv)
     const double cap = argc > 7 ? atof(argv[7]) : 2000;
     const int S = !!strchr(parts, 's'), U = !!strchr(parts, 'u'),
               F = !!strchr(parts, 'f'), X = !!strchr(parts, 'x'),
+              Y = !!strchr(parts, 'y'), Z = !!strchr(parts, 'z'),
               R = !!strchr(parts, 'r');
 
     for (int i = 0; i < 2; i++) {
@@ -154,9 +162,9 @@ int main(int argc, char **argv)
         }
     }
 
-    CGLContextObj view = make_context(NULL);
-    CGLContextObj ctx0 = make_context(view);
-    CGLContextObj layer = make_context(view);
+    CGLContextObj view = make_context(NULL, 1);
+    CGLContextObj ctx0 = make_context(view, 0);
+    CGLContextObj layer = make_context(view, 0);
 
     /* The guest's two dumb buffers as renderer textures, made once. */
     GLuint scanout[2];
@@ -206,7 +214,7 @@ int main(int argc, char **argv)
             glGenTextures(1, &surface_texture);
             glBindTexture(GL_TEXTURE_2D, surface_texture);
             glPixelStorei(GL_UNPACK_ROW_LENGTH, w[k]);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w[k], h[k], 0, GL_RGBA, GL_UNSIGNED_BYTE, next);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, w[k], h[k], 0, GL_BGRA, GL_UNSIGNED_BYTE, next);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             if (F) {
@@ -223,7 +231,7 @@ int main(int argc, char **argv)
             CGLSetCurrentContext(view);
             glBindTexture(GL_TEXTURE_2D, surface_texture);
             glPixelStorei(GL_UNPACK_ROW_LENGTH, w[k]);
-            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w[k], h[k], GL_RGBA, GL_UNSIGNED_BYTE, surface);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w[k], h[k], GL_BGRA, GL_UNSIGNED_BYTE, surface);
             if (F) {
                 glFlush();
             }
@@ -237,6 +245,16 @@ int main(int argc, char **argv)
             GLsync sync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
             glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT, 2000000000ull);
             glDeleteSync(sync);
+            CGLSetCurrentContext(NULL);
+        }
+        if (Y) {
+            CGLSetCurrentContext(ctx0);
+            glBindTexture(GL_TEXTURE_2D, scanout[k]);
+            glPixelStorei(GL_UNPACK_ROW_LENGTH, w[k]);
+            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, w[k], h[k], GL_BGRA, GL_UNSIGNED_BYTE, guest[k]);
+            if (Z) {
+                glFlush();
+            }
             CGLSetCurrentContext(NULL);
         }
         if (R) {
