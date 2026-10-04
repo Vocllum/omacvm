@@ -33,5 +33,6 @@ A=$H/.config/hypr/autostart.lua
 grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
 echo "OmacVM.app: display sync, guest agent"
 # Venus VMs only (the app's hidden venus switch): Vulkan, OpenCL, WebGPU in
-# Firefox. Builds Mesa once (10-15 minutes); a failure leaves GL as it is.
+# Firefox. Builds Mesa once (about a minute, plus LLVM, Clang and Rust to
+# download the first time); a failure leaves GL as it is.
 ./venus/install.sh || echo "OmacVM.app: Venus extras not installed (see above)"

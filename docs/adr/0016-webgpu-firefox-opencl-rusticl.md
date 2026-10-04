@@ -84,7 +84,7 @@ context).
 - Unbound descriptors are undefined on MoltenVK instead of zero; rusticl
   binds what kernels use. One Geekbench 7 workload (Feature Matching)
   fails its own validation: open.
-- First install builds Mesa in the VM (needs LLVM, Rust; about 10-15
-  minutes). Leaves the GL stack alone.
+- First install builds Mesa in the VM: 61 s on 8 vCPUs (M4 Max), after
+  pacman fetched LLVM, Clang, Rust and bindgen. Leaves the GL stack alone.
 - On macOS 26 KosmicKrisp may make the null-descriptor patch unnecessary;
   the push-descriptor one is MoltenVK-only by its driver ID.

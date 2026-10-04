@@ -1,4 +1,5 @@
-// cltest.c: OpenCL smoke test - saxpy on 16M floats + reduction, checked against the CPU, timed.
+// cltest.c: OpenCL smoke test - saxpy on 16M floats, a reduction and atomics (global and local),
+// checked against the CPU, timed. Build: gcc -O2 -o cltest cltest.c -lOpenCL -lm
 #define CL_TARGET_OPENCL_VERSION 300
 #include <CL/cl.h>
 #include <stdio.h>
@@ -14,7 +15,11 @@ static const char *src =
 "  for (size_t i = g; i < n; i += get_global_size(0)) s += x[i];\n"
 "  tmp[l] = s; barrier(CLK_LOCAL_MEM_FENCE);\n"
 "  for (size_t k = get_local_size(0) / 2; k > 0; k >>= 1) { if (l < k) tmp[l] += tmp[l + k]; barrier(CLK_LOCAL_MEM_FENCE); }\n"
-"  if (l == 0) out[get_group_id(0)] = tmp[0]; }\n";
+"  if (l == 0) out[get_group_id(0)] = tmp[0]; }\n"
+"__kernel void count(__global const float *x, __global int *hits, float t) {\n"
+"  __local int lh; if (get_local_id(0) == 0) lh = 0; barrier(CLK_LOCAL_MEM_FENCE);\n"
+"  if (x[get_global_id(0)] > t) atomic_inc(&lh); barrier(CLK_LOCAL_MEM_FENCE);\n"
+"  if (get_local_id(0) == 0) atomic_add(hits, lh); }\n";
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec * 1e-9; }
 int main(void) {
   cl_platform_id p; cl_device_id d; cl_int e; char name[256];
@@ -44,6 +49,13 @@ int main(void) {
   CK(clEnqueueReadBuffer(q, bo, CL_TRUE, 0, sizeof part, part, 0, NULL, NULL));
   double gsum = 0, csum = 0; for (int i = 0; i < 256; i++) gsum += part[i]; for (size_t i = 0; i < n; i++) csum += x[i];
   printf("sum: gpu %.1f cpu %.1f rel err %.2e\n", gsum, csum, fabs(gsum - csum) / csum);
-  printf("%s\n", bad == 0 && fabs(gsum - csum) / csum < 1e-4 ? "PASS" : "FAIL");
+  cl_int zero = 0; cl_mem bh = clCreateBuffer(c, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, 4, &zero, &e); CK(e);
+  cl_kernel kc = clCreateKernel(pr, "count", &e); CK(e); float thr = 0.5f; size_t ls2 = 256;
+  CK(clSetKernelArg(kc, 0, sizeof bx, &bx)); CK(clSetKernelArg(kc, 1, sizeof bh, &bh)); CK(clSetKernelArg(kc, 2, 4, &thr));
+  CK(clEnqueueNDRangeKernel(q, kc, 1, NULL, &n, &ls2, 0, NULL, NULL)); cl_int ghits;
+  CK(clEnqueueReadBuffer(q, bh, CL_TRUE, 0, 4, &ghits, 0, NULL, NULL));
+  long chits = 0; for (size_t i = 0; i < n; i++) chits += x[i] > thr;
+  printf("atomics: gpu %d cpu %ld\n", ghits, chits);
+  printf("%s\n", bad == 0 && fabs(gsum - csum) / csum < 1e-4 && ghits == chits ? "PASS" : "FAIL");
   return 0;
 }
