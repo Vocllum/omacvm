@@ -154,13 +154,3 @@ omarchy_channel() {
     https://api.github.com/repos/omarchy-mac/omarchy-pkgs-aarch64/releases/tags/stable) || code=0
   [[ $code == 200 ]] && echo stable || echo rc
 }
-
-# OmacVM's VM side: copy src/ and run guest/install.sh for this VM's features.
-omacvm_guest_install() {
-  local fargs="" f
-  for f in ${FEATURES:-}; do fargs+=" --feature $f"; done
-  COPYFILE_DISABLE=1 tar --no-xattrs -C "$OMACVM_SRC" --exclude build --exclude __pycache__ -czf - . |
-    vssh "rm -rf /usr/local/share/omacvm && mkdir -p /usr/local/share/omacvm &&
-          tar --no-same-owner -C /usr/local/share/omacvm -xzf - 2>/dev/null"
-  vssh "/usr/local/share/omacvm/guest/install.sh --user '$VM_USER' --keyboard '$KEYBOARD' --vm-type app$fargs" < /dev/null
-}
