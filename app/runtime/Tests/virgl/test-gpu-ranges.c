@@ -46,7 +46,9 @@ static virgl_renderer_gl_context create_gl_context(void *cookie, int scanout,
 {
    (void)cookie;
    (void)scanout;
-   return soft_gl_context(param->shared ? main_ctx : NULL);
+   (void)param;
+   /* QEMU (ui/cocoa) shares every context with its view's context, the first one too. */
+   return soft_gl_context(main_ctx);
 }
 
 static void destroy_gl_context(void *cookie, virgl_renderer_gl_context ctx)

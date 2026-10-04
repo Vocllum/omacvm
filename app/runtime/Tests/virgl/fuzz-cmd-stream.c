@@ -44,7 +44,9 @@ static virgl_renderer_gl_context create_gl_context(void *c, int scanout,
 {
    (void)c;
    (void)scanout;
-   return new_context(param->shared ? main_ctx : NULL);
+   (void)param;
+   /* QEMU (ui/cocoa) shares every context with its view's context, the first one too. */
+   return new_context(main_ctx);
 }
 
 static void destroy_gl_context(void *c, virgl_renderer_gl_context ctx)
