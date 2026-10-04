@@ -431,7 +431,7 @@ human_steps() {
   elif (( CAMERA || BATTERY )) && [[ $TYPE == utm || $TYPE == fusion ]]; then
     local what="The camera and the Mac's battery come"
     (( CAMERA && BATTERY )) || { (( CAMERA )) && what="The camera comes" || what="The Mac's battery comes"; }
-    echo "$what through OmacVM Bridge, so it is installed although its bar features are off. On its first start macOS asks for Location Services, Accessibility and Bluetooth for it: say no, these do not need them."
+    echo "$what through OmacVM Bridge, so it is installed although its bar features are off. On its first start macOS asks for Location Services, Accessibility and Bluetooth for it: say no, they are not needed for this."
   fi
   if (( GESTURES )) || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
     local what="the trackpad"
