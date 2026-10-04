@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | 📶 **Wi-Fi, audio and battery from the Mac**<br>The bar shows your real networks, sound devices and battery. | 🔀 **Features on or off anytime**<br>`omacvm features` switches them on an existing VM. |
 | 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
-| 📷 **Camera and microphone**<br>Video calls in the VM. | |
+| 📷 **Camera and microphone**<br>Video calls in the VM. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
 | 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
 
 **[See the full compatibility list per app below.](#which-app)**
