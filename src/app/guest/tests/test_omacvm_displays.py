@@ -127,6 +127,16 @@ class DesktopOutputs(unittest.TestCase):
             self.assertEqual(od.desktop_outputs(m, w, l), [])
 
 
+class LayoutEvent(unittest.TestCase):
+    def test_events(self):
+        self.assertTrue(od.layout_event(b"monitoraddedv2>>2,Virtual-2,QEMU\n"))
+        self.assertTrue(od.layout_event(b"workspace>>1\nmonitorremoved>>Virtual-2\n"))
+        self.assertTrue(od.layout_event(b"configreloaded>>\n"))
+        # grim (the desktop check's own screenshots) must not count as a layout change
+        self.assertFalse(od.layout_event(b"screencast>>1,monitor\nscreencastv2>>1,monitor,Virtual-1\n"))
+        self.assertFalse(od.layout_event(b"focusedmon>>Virtual-1,1\nfocusedmonv2>>Virtual-1,1\n"))
+
+
 class Shown(unittest.TestCase):
     def test_grey_is_undrawn(self):
         self.assertTrue(od.undrawn(od.ppm_shown(ppm(40, 30, (17, 17, 17)), od.HYPR_GREY)))
