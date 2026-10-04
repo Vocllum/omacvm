@@ -16,6 +16,7 @@ a new record replaces it and says so.
 | [0017](0017-fence-wait-short-sleeps.md) | Wait for GPU fences in short sleeps, not a spin | accepted, built (`gpu-native`) |
 | [0018](0018-gpu-safe-mode.md) | A hidden GPU safe mode that is exactly the old path | accepted, built (`gpu-native`) |
 | [0020](0020-frames-on-the-displays-refresh.md) | Show the guest's frames on the Mac display's refresh | accepted, built (`pacing-hdr`) |
-| [0021](0021-colour-deep-colour-hdr.md) | Colour-tagged frames, deep colour and HDR | accepted, built (`pacing-hdr`), HDR off by default |
+| [0021](0021-colour-deep-colour-hdr.md) | Colour-tagged frames, deep colour and HDR | accepted, built (`pacing-hdr`), HDR off by default, only on EDR displays |
+| [0023](0023-refresh-rate-follows-the-guest.md) | The refresh rate follows the guest (ProMotion) | accepted, built (`pacing-hdr`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

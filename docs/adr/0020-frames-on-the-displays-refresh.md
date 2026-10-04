@@ -44,8 +44,8 @@ Option 4 now, option 1 later. The display link runs on its own
 user-interactive thread (on the main thread, event handling delayed ticks by
 milliseconds and put two frames into one refresh), commits happen on a
 high-priority queue 3 ms before the vsync (`OMACVM_GL_LEAD_MS`): 2 ms still
-lost a frame now and then, 4.2 ms brought repeats. ProMotion is asked for the
-panel's full rate.
+lost a frame now and then, 4.2 ms brought repeats. ProMotion was asked for
+the panel's full rate; ADR 0023 lets the rate follow the guest instead.
 
 ## Consequences
 

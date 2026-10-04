@@ -391,8 +391,9 @@ falls back and logs once.
 | `OMACVM_GL_PRESENT=layer` | iosurface | CAOpenGLLayer path; also taken by itself if the IOSurface contexts fail | built |
 | `OMACVM_GL_VSYNC=0` | on | show frames when drawn instead of on the display's refresh | built (`pacing-hdr`) |
 | `OMACVM_GL_LEAD_MS` | 3 | how long before the vsync a frame goes on the layer | built (`pacing-hdr`) |
+| `OMACVM_GL_REFRESH=fixed` | follows the guest | display link at the screen's full rate while frames come | built (`pacing-hdr`) |
 | `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
-| `OMACVM_GL_HDR=1` | off | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
+| `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
 | `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
 | `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
@@ -503,10 +504,12 @@ bench lock and are indications only):
    |  RESOURCE_FLUSH
  QEMU thread [BQL]: blit scanout -> IOSurface (BGRA8, or half float when the
    |                scanout is 10-bit), tagged sRGB or BT.2100 PQ
- present_queue: wait for the blit's fence -> jitter buffer (<= 3 frames)
+ present_queue: wait for the blit's fence
+   |-- frames one at a time (> 52 ms apart): layer.contents now, no link
+   |-- close frames: jitter buffer (<= 3 frames)
    |
- display link (own thread, window's screen, ProMotion full rate)
-   |  each refresh: dispatch_after(vsync - 3 ms) on the commit queue
+ display link (own thread, window's screen; rate: the guest's, see below)
+   |  each tick: dispatch_after(vsync - 3 ms) on the commit queue
  commit queue: oldest frame -> layer.contents (+ EDR when PQ)
    v
  Core Animation latches at the vsync
@@ -523,6 +526,17 @@ bench lock and are indications only):
   follows the window's screen and asks for that screen's full rate (60, 120,
   144 Hz) on every move; QEMU's EDID follows too, so the guest's vblank
   timer switches with it. Five present surfaces (was three). ADR 0020.
+- **Refresh rate** (ProMotion): the link runs only while frames come close
+  together; single frames (typing, a cursor) go on the layer when ready and
+  nothing ticks (an idle desktop sends no frames at all). On a
+  variable-refresh screen the link asks for the slowest whole fraction of
+  the full rate that is a whole multiple of the guest's frame rate (24 fps:
+  24 Hz, 30: 30, 60: 60, 20: 40, else the full rate), so macOS can lower
+  the panel's rate like for a native app. Lower after two seconds, higher
+  at once. Fixed-rate screens (60 Hz externals) keep their rate. The guest
+  itself stays at the EDID rate: virtio-gpu has no adaptive-sync property,
+  so Hyprland's VRR stays off. `OMACVM_GL_REFRESH=fixed` keeps the full
+  rate. ADR 0023.
 - **Latency**: Core Animation shows a commit at the next vsync if it lands
   about 3 ms before it; committing earlier does not show it sooner. So the
   delay from a finished guest frame to the glass is set by the guest's vblank
@@ -531,14 +545,17 @@ bench lock and are indications only):
   can take the average half refresh off.
 - **Locks**: `present_lock` (an `os_unfair_lock`) guards the queue and the
   counters; nothing on the display link thread or the commit queue takes the
-  BQL. The link pauses after 30 idle refreshes (pause and wake both on the
-  main thread, so a frame never waits behind a paused link).
+  BQL. The link pauses 0.25 s after the last frame, or after a second of
+  single frames (pause and wake both on the main thread, so a frame never
+  waits behind a paused link).
 - **Colour**: surfaces are tagged; Core Animation converts sRGB (or PQ) to
   the display. HDR needs the guest at 10 bits (guest module) with Hyprland's
   `cm = "hdr"` and QEMU's `OMACVM_GL_HDR=1`. The app's hidden switch
   (`defaults write org.omacvm.app hdr -bool true`) sets QEMU's side and tells
-  the guest (SMBIOS `omacvm.hdr=1`); `omacvm-display-sync` then adds the HDR
-  fields to the output's rule once the 10-bit module runs. ADR 0021.
+  the guest (SMBIOS `omacvm.hdr=1`), but only while a display has EDR
+  headroom (`NSScreen` potential EDR > 1); Macs with SDR displays only keep
+  the 8-bit path and `qemu.log` says so. `omacvm-display-sync` then adds the
+  HDR fields to the output's rule once the 10-bit module runs. ADR 0021.
 - **HDR clients**: an app must hand Hyprland a PQ image description
   (`wp_color_manager_v1`). GStreamer's `waylandsink` does; mpv 0.41 with
   `--gpu-api=opengl` does not (it only reads the preferred description, its
@@ -549,7 +566,10 @@ bench lock and are indications only):
   captures the VM window per WindowServer frame and counts how far the number
   moved (1 = each frame shown once). F13 presses over QMP and a marker cell
   give key to screen latency; a dev build decodes the number on the host to
-  time QEMU flush to screen per frame. Colour: six colour bars captured in
+  time QEMU flush to screen per frame. `pacing.html?fps=N` draws N new
+  frames a second (video-like) and `cadence.py` reads how long each stayed
+  on screen. QEMU's trace events `cocoa_present_*` (`-trace`) give the
+  link's rate, ticks and counters. Colour: six colour bars captured in
   Display P3; HDR: a capture in extended linear P3 (1.0 = SDR white) plus the
   screen's EDR headroom.
 
@@ -596,6 +616,32 @@ second); the guest's refresh and the display link followed each move.
 HDR (PQ bars at 100/203/400/600/1000 nits in GStreamer's `waylandsink`):
 0.37 / 0.60 / 0.89 / 1.10 / 1.50 times SDR white on the MacBook's XDR panel
 (Hyprland 0.56 compresses the top; the host passes at least 2.95x).
+
+After the rebase onto gpu-native's capped IOSurface present (`3bf87cc`),
+testufo on a virtual 120 Hz display, bench lock, 3 x 12 s:
+
+| | new frames/s | skipped |
+|---|---|---|
+| `pacing-hdr`, rate follows the guest (default) | 119.6, 119.9, 119.9 | 35, 8, 3 |
+| `pacing-hdr`, `OMACVM_GL_REFRESH=fixed` | 119.6, 119.8, 109.5 | 25, 8, 11 |
+| gpu-native (frames when drawn) | 92.0, 98.2, 100.5 | 220-251 |
+
+Refresh rate following the guest, virtual 120 Hz display with the screen's
+slowest rate faked at 24 Hz (dev build; the MacBook panel's floor), bench
+lock, 30 s per row (`ab-matrix`): ticks of the display link per second,
+frames held on screen exactly as long as they should (10 s capture), QEMU
+CPU:
+
+| guest content | follows the guest | fixed full rate |
+|---|---|---|
+| page at 24 fps | 23.8 ticks/s, 84 % even, 17.2 % | 120.6, 72 %, 17.5 % |
+| page at 60 fps | 60.5, 98.5 %, 29.4 % | 120.7, 77 %, 32.0 % |
+| page at 5 fps | 0 (shown when ready), 9.5 % | 114, 11.3 % |
+| page at 120 fps | 120.5, 97 %, 46.4 % | 120.8, 91 %, 58.8 % |
+| mpv, 24 fps video | 23.7, -, 19.5 % | 120.7, -, 23.7 % |
+
+The panel's real rate and the Mac's power need the window on the MacBook
+panel with nobody at the Mac; not measured yet.
 ## 13. Merging the tracks
 
 The tracks share one runtime. Order and overlaps known today:
