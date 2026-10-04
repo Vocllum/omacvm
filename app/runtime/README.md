@@ -58,6 +58,11 @@ commit 82927e9. Changes here:
   named and bound as the shader declares them, and a GL error while a draw is
   set up skips the draw (ADR 0017). Checked by `Tests/virgl/test-gpu-ranges.c`
   cases 30-34 and `gl-oracle.c`
+- `patches/virgl-vertex-unused-first-input.patch`: a vertex shader that does
+  not read its first input no longer stops vrend from setting the other
+  attributes; before, the draw kept the previous draw's attribute pointers
+  without any GL error (ADR 0017). Checked by `Tests/virgl/test-gpu-ranges.c`
+  case 35
 - `patches/virgl-venus-robust-buffer-access.patch`: Venus devices always get
   robust buffer access where the host's Vulkan device offers it (MoltenVK
   does), whatever the guest asked for

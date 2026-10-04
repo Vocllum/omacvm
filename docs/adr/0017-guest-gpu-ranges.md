@@ -4,7 +4,8 @@ Status: accepted. Built on `gpu-robust` (`virgl-buffer-binding-checks.patch`,
 `virgl-draw-range-checks.patch`, `virgl-uniform-buffer-checks.patch`,
 `virgl-shader-index-clamp.patch`, and after the first review
 `virgl-vertex-format-checks.patch`, `virgl-uniform-buffer-alignment.patch`,
-`virgl-uniform-block-array.patch`, `virgl-draw-gl-error-check.patch`). On
+`virgl-uniform-block-array.patch`, `virgl-draw-gl-error-check.patch`, and
+after the second review `virgl-vertex-unused-first-input.patch`). On
 always; there is deliberately no setting to turn it off.
 
 ## Context
@@ -32,6 +33,13 @@ left the binding on the previous buffer; and a uniform block array with a hole
 (blocks 1 and 3) was named wrongly, so one element was never bound and read
 binding 0, another stage's buffer. The checks judged what the guest asked for,
 the GPU used what the GL still had.
+
+The second review found the same result without any refused call: when the
+vertex shader does not read its first input (no attribute location for it),
+upstream vrend returned from the vertex setup ("Shader probably didn't
+compile - skipping rendering") but the draw went out anyway, with the
+previous draw's attribute pointers. No GL error, so the error check below
+saw nothing.
 
 vrend checked little of this: resource handles were checked for a non-zero GL
 name only (a texture's name was then used as a buffer name), the index range
@@ -84,6 +92,11 @@ in "Consequences"; mapping instead of reading back would wait for the GPU
   before each GL draw call vrend asks for GL errors; one means some setup
   call was refused and older state is in place, so the draw is skipped. The
   two checks above close the known cases; this one is for the unknown ones.
+  It only sees refused calls: state vrend itself forgets to set raises no
+  error.
+- Vertex setup (`virgl-vertex-unused-first-input.patch`): an input the
+  shader does not read is passed over, not a reason to stop; every attribute
+  the program reads gets the guest's new buffer and the rest are disabled.
 
 A draw that fails a check is skipped and logged (three lines per context); the
 context lives, like a refused shader (ADR 0016). A malformed binding (wrong
@@ -96,7 +109,8 @@ a GL oracle (`gl-oracle.c`) checks every GL draw call against the GL's own state
 and aborts on any range a GPU would read or write outside a buffer, and on a GL
 error pending at the draw (a refused call). Fuzzing is not proof of coverage:
 about 900,000 inputs with no oracle abort never produced the three refused-call
-cases above, which the review built by hand.
+cases above, which the review built by hand, nor the unused first input,
+which the second review built by hand.
 
 ## Coverage
 
@@ -108,6 +122,7 @@ Every way a guest number reaches GPU memory on macOS' OpenGL 4.1, and who checks
 | index buffer (size, offset, count) and the index values | `virgl-draw-range-checks.patch` (read back) |
 | indirect draws (command, draw count) | read on the CPU, drawn as checked direct draws |
 | vertex attribute formats the GL refuses | `virgl-vertex-format-checks.patch`; any other refusal: `virgl-draw-gl-error-check.patch` |
+| vertex attributes vrend does not set (unused first input) | `virgl-vertex-unused-first-input.patch` (no GL error, so the error check cannot see it) |
 | uniform buffers (bound range, block size, run-time indexes) | `virgl-buffer-binding-checks`, `virgl-uniform-buffer-checks`, `virgl-shader-index-clamp` |
 | uniform and storage buffer offset alignment | `virgl-uniform-buffer-alignment.patch` |
 | uniform block arrays (element names, bindings) | `virgl-uniform-block-array.patch` |

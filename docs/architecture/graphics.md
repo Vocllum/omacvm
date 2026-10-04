@@ -406,8 +406,11 @@ What crosses and who checks it:
   (`virgl-vertex-format-checks.patch`, `virgl-uniform-buffer-alignment.patch`),
   uniform block arrays are bound as declared
   (`virgl-uniform-block-array.patch`), and a GL error while a draw is set up
-  skips the draw (`virgl-draw-gl-error-check.patch`). A draw that fails is
-  skipped and logged. The fuzzer runs on Apple's software renderer only, with
+  skips the draw (`virgl-draw-gl-error-check.patch`). vrend's own early
+  return when the vertex shader does not read its first input left the old
+  attribute pointers in place with no GL error at all; it now sets the other
+  attributes and disables the rest (`virgl-vertex-unused-first-input.patch`).
+  A draw that fails is skipped and logged. The fuzzer runs on Apple's software renderer only, with
   a GL oracle that aborts on any draw leaving a buffer (STANDARDS 14).
   Venus has the same exposure: its devices always get robust buffer access
   where the host driver has it (`virgl-venus-robust-buffer-access.patch`);
@@ -483,8 +486,8 @@ The tracks share one runtime. Order and overlaps known today:
    `virgl-draw-range-checks.patch`, `virgl-uniform-buffer-checks.patch`,
    `virgl-shader-index-clamp.patch`, `virgl-vertex-format-checks.patch`,
    `virgl-uniform-buffer-alignment.patch`, `virgl-uniform-block-array.patch`,
-   `virgl-draw-gl-error-check.patch`, `virgl-venus-robust-buffer-access.patch`,
-   and the test-only
+   `virgl-draw-gl-error-check.patch`, `virgl-vertex-unused-first-input.patch`,
+   `virgl-venus-robust-buffer-access.patch`, and the test-only
    `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. The
    patches up to the Venus fence one passed the build-time tests on
    `gpu-venus`'s tree (branch `gpu-robust-venus`, c0988e2); the Venus fence
