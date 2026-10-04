@@ -85,7 +85,10 @@ if [[ -x $pkg_config ]]; then
 else
   missing+=("pkg-config (brew install pkgconf)")
 fi
-sdk_major=$(xcrun --sdk macosx --show-sdk-version 2>/dev/null | cut -d. -f1)
+# No xcrun or no SDK: an empty version (pipefail would otherwise end the
+# script here, before the list below).
+sdk_major=$(xcrun --sdk macosx --show-sdk-version 2>/dev/null | cut -d. -f1) || sdk_major=
+[[ $sdk_major =~ ^[0-9]+$ ]] || sdk_major=
 ((${sdk_major:-0} >= 26)) || missing+=("the macOS 26 SDK or newer for Metal 4 (Xcode 26), have ${sdk_major:-none}")
 if ((${#missing[@]})); then
   echo "kosmickrisp-build: this Mac cannot build KosmicKrisp; missing:" >&2
