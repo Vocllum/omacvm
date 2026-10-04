@@ -17,7 +17,8 @@ failed with GL_INVALID_OPERATION and the context was lost.
 Upstream: upstreamable (the NULL program is a GL spec grey zone, but ending with
 the begin program is correct everywhere); not sent.
 Tests: Tests/virgl/test-transform-feedback.c (build time, 15 teardown orders on
-Apple's GL; without this patch case 14 crashes, cases 3 and 7 lose the context);
+Apple's GL; without this patch, on the whole gpu-robust series, cases 3, 5, 7,
+11, 14 and 15 crash with SIGSEGV; with it all 29 checks pass);
 tests/graphics: ./deqp.sh gles3 --filter 'transform_feedback' and ./webgl.sh
 --version 2.0.0 --filter '^conformance2/(transform_feedback|vertex_arrays)/'.
 --- a/src/vrend/vrend_renderer.c
