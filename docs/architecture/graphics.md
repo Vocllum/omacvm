@@ -348,7 +348,7 @@ falls back and logs once.
 | `OMACVM_MAX_OUTPUTS`, `OMACVM_DISPLAY_SOCKET` | set by the launcher | heads and agent socket | built |
 | `OMACVM_DISPLAYS_DEBUG=1` | off | log the display port | built |
 | `OMACVM_BACKGROUND=1`, `OMACVM_COCOA_HIDDEN=1` | off | test only: window behind / no window | built |
-| `OMACVM_VIRGL_SHADER_FAILURES=lose` | skip | a shader the Mac's GL refuses loses the whole context (upstream behaviour) instead of skipping its draws | built (`gpu-robust`) |
+| `OMACVM_VIRGL_SHADER_FAILURES=lose` | skip | a shader vrend cannot translate or the Mac's GL refuses loses the whole context (upstream behaviour) instead of skipping its draws | built (`gpu-robust`) |
 | `OMACVM_VIRGL_TEST_FAIL_GLSL=TEXT` | unset | test runtimes only (`OMACVM_RUNTIME_TEST_HOOKS=1` build): refuse shaders whose GLSL contains TEXT | built |
 | `OMACVM_TEST_SKIP_DISPLAYS`, `OMACVM_TEST_MAIN_DISPLAY` | off | test only: virtual displays | built |
 
@@ -375,8 +375,9 @@ What crosses and who checks it:
 
 - **virgl command streams and shaders**: virglrenderer's decoder (bounds,
   handles, formats). Upstream code plus our patches; every patch that touches
-  a decoder states its bounds check. A shader the Mac's GL refuses skips its
-  draws; any other decoder error loses that guest context only, logs once, and
+  a decoder states its bounds check. A shader vrend cannot translate or the
+  Mac's GL refuses skips its draws; any other decoder error loses that guest
+  context only, logs once, and
   writes "guilty" into the guest's reset status buffer when it named one
   (section 13). The status buffer must be guest memory (`VIRGL_BIND_CUSTOM`,
   4 bytes or more); the host writes 4 bytes at offset 0 through the checked iov
@@ -384,7 +385,26 @@ What crosses and who checks it:
   context on the Mac's GL (libFuzzer + ASan). Its first minutes found two
   upstream bugs, both fixed: a NULL shader variant that crashed QEMU
   (`virgl-shader-variant-null-checks.patch`) and shader sizes that asked for
-  4 GiB (`virgl-shader-size-limits.patch`).
+  4 GiB (`virgl-shader-size-limits.patch`). The conformance runs found a
+  third: ending transform feedback with no program bound crashed Apple's GL
+  (`virgl-transform-feedback-end.patch`); the fuzzer's contexts now get a GL
+  buffer and a colour buffer too, and that stream is one of its regression
+  inputs.
+- **GPU memory a guest draw reaches** (ADR 0017): Apple's GL has no robust
+  buffer access, so a range past a buffer is a read or write the GPU really
+  does, and a GPU fault resets the GPU (on 2026-10-04 that hung WindowServer
+  and panicked macOS). vrend now checks, before any GL call: buffer binding
+  points take GL buffers only, with ranges inside them
+  (`virgl-buffer-binding-checks.patch`); every vertex, instance and index a
+  draw fetches lies inside its buffers, indices read back from the GL buffer,
+  indirect commands read and drawn as checked direct draws
+  (`virgl-draw-range-checks.patch`); every active uniform block has a buffer
+  that covers it (`virgl-uniform-buffer-checks.patch`); run-time shader array
+  indexes are clamped (`virgl-shader-index-clamp.patch`). A draw that fails is
+  skipped and logged. The fuzzer runs on Apple's software renderer only, with
+  a GL oracle that aborts on any draw leaving a buffer (STANDARDS 14).
+  Venus has the same exposure (no robust buffer access forced yet; off by
+  default).
 - **resource and blob sizes**: QEMU checks sizes against guest RAM and the
   hostmem window; blob sizes are rounded to the host page by QEMU, never
   trusted.
@@ -415,7 +435,8 @@ What crosses and who checks it:
 | Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs expectation, `OMACVM_GL_DUMP` frame upright with right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
-| Context loss | build time: `Tests/virgl/test-context-loss.c`; in a VM: `tests/graphics/context-loss.sh --expect contain|recover|dead` (Chrome WebGL), `guest/gl-lost.c` (GLES), `guest/vk-lost.c` (Venus) | `gpu-robust` |
+| GPU ranges | build time: `Tests/virgl/test-gpu-ranges.c` (software renderer + GL oracle); `fuzz-cmd-stream.sh` (software renderer only); in a VM: dEQP GLES3 draw/buffer/ubo/indexing groups per case before/after | `gpu-robust` |
+| Context loss | build time: `Tests/virgl/test-context-loss.c`, `Tests/virgl/test-transform-feedback.c`; in a VM: `tests/graphics/context-loss.sh --expect contain|recover|dead` (Chrome WebGL), `guest/gl-lost.c` (GLES), `guest/vk-lost.c` (Venus) | `gpu-robust` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
 | Stability | 30 min soak per path (browser + video + glmark2 loop), sleep/wake, display plug/unplug | per track |
 
@@ -449,12 +470,19 @@ The tracks share one runtime. Order and overlaps known today:
 6. `gpu-robust` adds, after `virgl-texture-integer-samplers.patch`:
    `virgl-shader-failure-skip-draws.patch`, `virgl-context-loss-report.patch`,
    `virgl-shader-variant-null-checks.patch`, `virgl-shader-size-limits.patch`,
-   `virgl-venus-lost-context-fences.patch`, `virgl-core-instance-id.patch`, and
-   the test-only `virgl-test-shader-fault.patch` behind
-   `OMACVM_RUNTIME_TEST_HOOKS=1`. The first two were built on `gpu-venus`'s tree
-   unchanged (branch `gpu-robust-venus`); the Venus fence patch was developed
-   there. `gpu-robust` also carries the `conformance` harness and this document
-   as cherry-picks (same content, merge without conflict).
+   `virgl-venus-lost-context-fences.patch`, `virgl-core-instance-id.patch`,
+   `virgl-transform-feedback-end.patch`, `virgl-stream-output-checks.patch`,
+   `virgl-gl-error-skip-command.patch`, `virgl-buffer-binding-checks.patch`,
+   `virgl-draw-range-checks.patch`, `virgl-uniform-buffer-checks.patch`,
+   `virgl-shader-index-clamp.patch`, and the test-only
+   `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. The
+   patches up to the Venus fence one passed the build-time tests on
+   `gpu-venus`'s tree (branch `gpu-robust-venus`, c0988e2); the Venus fence
+   patch is only exercised there, since `rc-2.6.0` has no Venus. The whole
+   series applies without conflict after the virgl patches of `gpu-2.9.0`,
+   `release-2.7.0`, `gl-compat`, `gpu-venus` and `video-decode` (checked
+   2026-10-04). `gpu-robust` also carries the `conformance` harness and this
+   document as cherry-picks (same content, merge without conflict).
 
 ## 13. Errors and context loss (built: `gpu-robust`)
 

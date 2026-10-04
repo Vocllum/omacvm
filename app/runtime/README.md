@@ -37,6 +37,18 @@ commit 82927e9. Changes here:
 - `patches/virgl-stream-output-checks.patch`: a shader's stream output info
   (from the guest) could name a register past the translator's outputs: an
   assertion aborted QEMU; found by the fuzzer, replayed in every build
+- `patches/virgl-gl-error-skip-command.patch`: a GL error after a guest
+  command skips that command; the context keeps running (out of memory and a
+  lost GL context still end it)
+- `patches/virgl-buffer-binding-checks.patch`,
+  `patches/virgl-draw-range-checks.patch`,
+  `patches/virgl-uniform-buffer-checks.patch`,
+  `patches/virgl-shader-index-clamp.patch`: the guest cannot make the Mac's GPU
+  read or write outside a buffer (a GPU fault resets the GPU; on 2026-10-04 it
+  panicked macOS). Buffer bindings, vertex, instance and index ranges,
+  indirect commands and uniform blocks are checked before any GL call; a draw
+  that fails is skipped; run-time shader array indexes are clamped (ADR 0017).
+  Checked by `Tests/virgl/test-gpu-ranges.c`
 - `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
   server ended signals its fences, so the guest app ends instead of hanging
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
@@ -46,8 +58,14 @@ commit 82927e9. Changes here:
   shipping it. `Tests/virgl/test-context-loss.c` runs in every build
 
 Every build also replays `Tests/virgl/fuzz-regressions/` (inputs that once
-crashed QEMU or asked for 4 GiB) through the fuzz harness without libFuzzer
-(`fuzz-replay-main.c`).
+crashed QEMU, asked for 4 GiB or reached past a buffer) through the fuzz
+harness without libFuzzer (`fuzz-replay-main.c`).
+
+The virgl API tests and the fuzzer run on Apple's software renderer only
+(`Tests/virgl/soft-gl.h`): invalid or random command streams must never reach
+the GPU. `Tests/virgl/gl-oracle.c`, linked into the fuzzer, the replay and
+`test-gpu-ranges`, checks every GL draw call's buffer ranges against the GL's
+state and aborts on one that leaves a buffer.
 
 Build: `./build-qemu-gpu-runtime.sh` (about 70 seconds, needs only the Command
 Line Tools). Output: `.build/qemu-gpu-runtime` and `.build/firmware`.
