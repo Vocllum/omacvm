@@ -269,10 +269,50 @@ Switch: `defaults write org.omacvm.app venus -bool true` adds
 guest needs Mesa with blob rounding.
 
 Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
-no float64. So Zink (GL on Vulkan) and ANGLE-on-Vulkan in Chrome do not
-work; they wait for KosmicKrisp, which needs Metal 4 (macOS 26). See
-ADR 0013. Frame latency is Venus's ring polling (guest `vn_relax`, host
+no float64, no `VK_EXT_provoking_vertex`. So Zink as a GL driver and
+ANGLE-on-Vulkan in Chrome do not work; they wait for KosmicKrisp, which
+needs Metal 4 (macOS 26). See ADR 0013. Zink for compute (rusticl) works
+with two patches: next section, ADR 0016. Frame latency is Venus's ring polling (guest `vn_relax`, host
 `vkr_ring_relax`), about 1.3 ms per frame: vkmark ~800 is latency, not GPU.
+
+### WebGPU and OpenCL on Venus (built: `webgpu-compute`)
+
+```
+ Firefox (WebGPU, wgpu)      OpenCL app (Geekbench, ffmpeg, clpeak)
+        |                         |
+        |                    rusticl (Mesa OpenCL 3.0) -> Zink (Gallium on Vulkan)
+        |                         |
+ /opt/omacvm-mesa: Mesa 26.2.4 venus (+2 Zink patches), built in the guest
+        \________________________/
+                  |  Venus ring, as in the chain above
+                  v
+            vkr -> MoltenVK -> Metal
+```
+
+- `src/app/guest/venus/install.sh`, called by the app's guest install,
+  does nothing without Venus (it reads the capset count and the host
+  visible region from virtio-gpu's debugfs). With Venus it builds the
+  pinned Mesa once (stamp: version + patch hash), registers
+  `/etc/vulkan/icd.d/omacvm_venus_icd.json` and
+  `/etc/OpenCL/vendors/omacvm-rusticl.icd`, writes
+  `/etc/environment.d/90-omacvm-venus.conf` (`RUSTICL_ENABLE=zink`,
+  `VK_LOADER_DRIVERS_DISABLE=virtio_icd.json`: the distro's venus, Mesa
+  26.2.3, fails on 16 KiB blob pages) and Firefox's `dom.webgpu.enabled`.
+- Patches (guest Mesa, `src/app/guest/venus/patches`):
+  `mesa-zink-moltenvk-no-push-descriptors.patch` (SPIRV-Cross can alias
+  zink's typed bo arrays only in argument buffers, which MoltenVK never
+  uses for push sets: every kernel failed) and
+  `mesa-zink-moltenvk-null-descriptor.patch` (start without
+  `nullDescriptor`; unbound slots are undefined on MoltenVK).
+- GL stays on virgl. Zink as a GL driver is not installed (GL 2.1 only on
+  MoltenVK).
+- Chrome's WebGPU stays on SwiftShader: Chrome on Linux needs either a
+  Vulkan compositor (ANGLE on Vulkan: ES 2.0 only, MoltenVK lacks
+  `VK_EXT_provoking_vertex`) or GL<->Vulkan memory sharing
+  (`GL_EXT_memory_object_fd` + `GL_EXT_semaphore_fd`), and virgl and Venus
+  cannot share memory on the Mac yet. ADR 0016 has the route to fix it.
+- Kernel launches cross the Venus ring like draw calls: launch-heavy
+  OpenCL work pays Venus's latency (see vkmark above).
 
 ## 7. Video decode (built: `video-decode`)
 
@@ -334,6 +374,7 @@ falls back and logs once.
 | `OMACVM_GL_DUMP=FILE` | off | write a shown frame as PPM (orientation/colour check) | built |
 | `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
+| Guest: `src/app/guest/venus/install.sh` (`--remove`) | only on Venus VMs | OmacVM's Mesa for Vulkan, OpenCL (rusticl), Firefox WebGPU | built (`webgpu-compute`) |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
 | `OMACVM_VIDEO_AV1=1` | set by the app when the VM has the shim | offer AV1 | built |
 | `OMACVM_VIDEO_NO_VP9`, `OMACVM_VIDEO_NO_HEVC` | off | hide one codec | built |
@@ -402,6 +443,7 @@ What crosses and who checks it:
 | Conformance | dEQP GLES2/3 subset (virgl), Vulkan CTS subset (Venus), WebGL conformance in Chrome | planned |
 | Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs expectation, `OMACVM_GL_DUMP` frame upright with right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
+| Compute | `src/app/guest/venus/cltest.c` (saxpy + reduction vs CPU), Geekbench 7 GPU OpenCL validation, WebGPU matmul vs CPU sample (`webgpu-compute` scratch tools) | `webgpu-compute` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
 | Stability | 30 min soak per path (browser + video + glmark2 loop), sleep/wake, display plug/unplug | per track |

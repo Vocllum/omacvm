@@ -13,5 +13,6 @@ a new record replaces it and says so.
 | [0013](0013-moltenvk-then-kosmickrisp.md) | MoltenVK now, KosmicKrisp on macOS 26 | accepted, MoltenVK built |
 | [0014](0014-videotoolbox-in-virglrenderer.md) | VideoToolbox inside virglrenderer's video path | accepted, built (`video-decode`) |
 | [0015](0015-one-window-per-display.md) | One window per Mac display | accepted, built (`app-displays`) |
+| [0016](0016-webgpu-firefox-opencl-rusticl.md) | WebGPU through Firefox, OpenCL through rusticl on MoltenVK | accepted, built (`webgpu-compute`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).
