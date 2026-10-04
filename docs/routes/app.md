@@ -38,8 +38,9 @@ OmacVM's version.
 - GPU in browsers: WebGL 1 and 2 on the hardware in Chromium, Google Chrome,
   Brave and Firefox (`virgl (Apple M4 Max)`), no flags.
 - Video decoding on the Mac's media engine: H.264, VP9 and AV1 in Google
-  Chrome (YouTube 4K at 60 fps, the VM's CPU nearly idle), H.264 and VP9 in
-  Firefox. Not in Arch Linux ARM's Chromium (built without VA-API).
+  Chrome and Brave (YouTube 4K at 60 fps, the VM's CPU nearly idle), H.264
+  and VP9 in Firefox, H.264, VP9 and HEVC in mpv. Not in Arch Linux ARM's
+  Chromium (built without VA-API).
   [How it works](../video-decode.md).
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
