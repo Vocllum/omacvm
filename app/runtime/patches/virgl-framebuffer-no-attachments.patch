@@ -1,0 +1,94 @@
+virglrenderer: a framebuffer without attachments gets a 1x1 depth stand-in
+
+What: when the guest's framebuffer has no colour and no depth/stencil buffer and
+the host has no ARB_framebuffer_no_attachments, a 1x1 DEPTH_COMPONENT16
+renderbuffer is attached to the host framebuffer, and removed again when the
+guest binds real buffers (unless one of them already replaced it).
+Why: the guest sends such a framebuffer when all its draw buffers are GL_NONE
+(WebGL conformance: webgl-draw-buffers.html, conformance2/rendering/
+draw-buffers.html). That is legal and writes nothing, but Apple's GL answers the
+draw with GL_INVALID_FRAMEBUFFER_OPERATION (missing attachment), and with
+check-gl-errors that stopped the whole guest context: Chrome drew nothing for
+the rest of its life (WebGL 1 in one Chrome: 430/787 pages). A colour
+renderbuffer is no stand-in: Apple calls a framebuffer whose only colour
+attachment no draw buffer selects "unsupported". Occlusion queries in such a
+framebuffer count at most the one pixel.
+Upstreamable in spirit (hosts without framebuffer_no_attachments); not sent.
+Tests: Tests/virgl/test-empty-framebuffer.c (public API on the Mac's OpenGL:
+draws without attachments are accepted, the context keeps working, a clear after
+switching back covers the whole colour buffer; fails without this patch).
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -761,6 +761,9 @@ struct vrend_sub_context {
+    uint32_t nr_cbufs;
+    struct vrend_surface *zsurf;
+    struct vrend_surface *surf[PIPE_MAX_COLOR_BUFS];
++   /* see vrend_hw_set_fb_placeholder() */
++   GLuint fb_placeholder_rb;
++   bool fb_placeholder_attached;
+ 
+    struct vrend_viewport vps[PIPE_MAX_VIEWPORTS];
+    /* viewport is negative */
+@@ -3142,6 +3145,43 @@ static void vrend_hw_set_color_surface(struct vrend_sub_context *sub_ctx, GLuint
+    }
+ }
+ 
++/* Without ARB_framebuffer_no_attachments (macOS) the host GL refuses to draw
++ * or clear into a framebuffer that has no attachments (GL error, which stops
++ * the guest context). The guest has such a framebuffer when all its draw
++ * buffers are GL_NONE: legal, nothing is written. A 1x1 depth renderbuffer
++ * makes the host framebuffer complete; Apple's GL calls a framebuffer whose
++ * only colour attachment no draw buffer selects "unsupported", so it is not a
++ * colour buffer. Occlusion queries count at most that one pixel. */
++static void vrend_hw_set_fb_placeholder(struct vrend_sub_context *sub_ctx)
++{
++   bool needed = !sub_ctx->nr_cbufs && !sub_ctx->zsurf && !has_feature(feat_fb_no_attach);
++
++   if (needed == sub_ctx->fb_placeholder_attached)
++      return;
++
++   if (needed) {
++      if (!sub_ctx->fb_placeholder_rb) {
++         glGenRenderbuffers(1, &sub_ctx->fb_placeholder_rb);
++         glBindRenderbuffer(GL_RENDERBUFFER, sub_ctx->fb_placeholder_rb);
++         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 1, 1);
++         glBindRenderbuffer(GL_RENDERBUFFER, 0);
++      }
++      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
++                                sub_ctx->fb_placeholder_rb);
++   } else {
++      /* Unless a depth buffer of the guest has replaced it already. */
++      GLint type = GL_NONE, name = 0;
++      glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++                                            GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &type);
++      if (type == GL_RENDERBUFFER)
++         glGetFramebufferAttachmentParameteriv(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
++                                               GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &name);
++      if (type == GL_RENDERBUFFER && (GLuint)name == sub_ctx->fb_placeholder_rb)
++         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
++   }
++   sub_ctx->fb_placeholder_attached = needed;
++}
++
+ static void vrend_hw_emit_framebuffer_state(struct vrend_sub_context *sub_ctx)
+ {
+    static const GLenum buffers[8] = {
+@@ -3155,6 +3195,8 @@ static void vrend_hw_emit_framebuffer_state(struct vrend_sub_context *sub_ctx)
+       GL_COLOR_ATTACHMENT7,
+    };
+ 
++   vrend_hw_set_fb_placeholder(sub_ctx);
++
+    if (sub_ctx->nr_cbufs == 0) {
+       glReadBuffer(GL_NONE);
+       /* In core profile, must explicitly disable draw buffers when no color attachments */
+@@ -8046,6 +8088,9 @@ static void vrend_destroy_sub_context(struct vrend_sub_context *sub)
+    if (sub->fb_id)
+       glDeleteFramebuffers(1, &sub->fb_id);
+ 
++   if (sub->fb_placeholder_rb)
++      glDeleteRenderbuffers(1, &sub->fb_placeholder_rb);
++
+    if (sub->blit_fb_ids[0])
+       glDeleteFramebuffers(2, sub->blit_fb_ids);
+ 

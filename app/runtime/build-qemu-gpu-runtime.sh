@@ -83,6 +83,7 @@ virgl_shader_shadow_grad_patch="$native_dir/patches/virgl-shader-shadow-grad.pat
 virgl_shader_float_ops_patch="$native_dir/patches/virgl-shader-float-ops-integer-outputs.patch"
 virgl_blitter_core_glsl_version_patch="$native_dir/patches/virgl-blitter-core-glsl-version.patch"
 virgl_blitter_integer_msaa_patch="$native_dir/patches/virgl-blitter-integer-msaa.patch"
+virgl_framebuffer_no_attachments_patch="$native_dir/patches/virgl-framebuffer-no-attachments.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -117,6 +118,7 @@ virgl_shader_shadow_grad_patch_sha256=a9a4f7f0f646137425d8ad5b7b61c5a46d3e5ef528
 virgl_shader_float_ops_patch_sha256=7c7746729e613b62b79bb016d32a0dd3a2ade80c9fb6f05498a2f1f30e1dae6b
 virgl_blitter_core_glsl_version_patch_sha256=f11ace2d9b32a4c70e9a1072bca4e69a61023d193b2a087cf75fcb5c39e6fb91
 virgl_blitter_integer_msaa_patch_sha256=7c38f7998e5190deeec6d8012bcc42ad0ed26f0cc22ca1287b176348795b4334
+virgl_framebuffer_no_attachments_patch_sha256=33d3d12d1eac356957fd474c16412d5fe21d866c9d68c2661fa970b17266582d
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -659,6 +661,8 @@ verify_file_sha "Blitter GLSL version patch" "$virgl_blitter_core_glsl_version_p
 patch -d "$virgl_source" -p1 -f -i "$virgl_blitter_core_glsl_version_patch"
 verify_file_sha "Blitter integer multisample patch" "$virgl_blitter_integer_msaa_patch" "$virgl_blitter_integer_msaa_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_blitter_integer_msaa_patch"
+verify_file_sha "Framebuffer without attachments patch" "$virgl_framebuffer_no_attachments_patch" "$virgl_framebuffer_no_attachments_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_framebuffer_no_attachments_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
