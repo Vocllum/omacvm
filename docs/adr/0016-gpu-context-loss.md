@@ -72,8 +72,13 @@ guest's Mesa venus (not done: upstream chose abort).
   `GL_GUILTY_CONTEXT_RESET` on the frame it was lost (`gl-lost`), and Mesa offers
   `EXT/KHR_robustness` and `EGL_EXT_create_context_robustness` on virgl. KHR
   robustness without robust buffer access (Apple's GL 4.1 lacks
-  ARB_robust_buffer_access_behavior) is allowed by the spec; robust buffer access
-  stays off, so ANGLE keeps its own bounds checks.
+  ARB_robust_buffer_access_behavior) is allowed by the spec. Robust buffer
+  access stays off in the extension strings and in the context flags: an app
+  that asks for a robust access context gets `EGL_BAD_CONFIG`/`EGL_BAD_MATCH`
+  from EGL (Mesa's own check) and a refused context from GLX (the guest patch
+  adds the same check to the dri frontend), never a context with
+  `GL_CONTEXT_FLAG_ROBUST_ACCESS_BIT` and unbounded reads. ANGLE keeps its own
+  bounds checks.
 - Ending a non-robust app is the price of recovery: if the compositor's own
   context were lost, Hyprland would end too (before, the desktop froze). Losses
   are rare now that refused shaders no longer lose the context; they mean a

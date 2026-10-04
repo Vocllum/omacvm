@@ -18,7 +18,11 @@ VIRGL_RESET_STATUS_GUILTY there when it loses the context. virgl then:
     reports resets but has no robust buffer access (Apple's GL 4.1 has no
     ARB_robust_buffer_access_behavior). KHR_robustness allows undefined values for
     out-of-bounds reads; robust buffer access itself stays off, so ANGLE keeps its
-    own bounds checks. On virgl/Apple this changes no GL or GLES version.
+    own bounds checks. On virgl/Apple this changes no GL or GLES version;
+  - dri: a context asking for robust buffer access (GLX_CONTEXT_ROBUST_ACCESS_BIT_ARB)
+    is refused unless the driver has robust_buffer_access_behavior, as EGL already
+    does (EGL_BAD_CONFIG/EGL_BAD_MATCH). Without this, offering reset notification
+    would hand GLX apps GL_CONTEXT_FLAG_ROBUST_ACCESS_BIT with no bounded reads.
 Why: without it a lost host context leaves the app drawing into nothing: Chrome's
 WebGL page freezes. With it, robust apps (gl-lost) see GL_GUILTY_CONTEXT_RESET
 and recreate their context; Chrome recovers through the GPU process restart.
@@ -233,6 +237,22 @@ index d295725..dfeb52b 100644
 +   const uint32_t *reset_status;
  };
  
+ 
+diff --git a/src/gallium/frontends/dri/dri_context.c b/src/gallium/frontends/dri/dri_context.c
+index cfeb490..7461e88 100644
+--- a/src/gallium/frontends/dri/dri_context.c
++++ b/src/gallium/frontends/dri/dri_context.c
+@@ -69,7 +69,10 @@ dri_create_context(struct dri_screen *screen,
+     * available.
+     */
+    if (screen->has_reset_status_query) {
+-      allowed_flags |= __DRI_CTX_FLAG_ROBUST_BUFFER_ACCESS;
++      /* Like EGL (disp->RobustBufferAccess): a robust access context only where
++       * the driver bounds out-of-bounds accesses, not just reports resets. */
++      if (screen->base.screen->caps.robust_buffer_access_behavior)
++         allowed_flags |= __DRI_CTX_FLAG_ROBUST_BUFFER_ACCESS;
+       allowed_attribs |= __DRIVER_CONTEXT_ATTRIB_RESET_STRATEGY;
+    }
  
 diff --git a/src/mesa/state_tracker/st_extensions.c b/src/mesa/state_tracker/st_extensions.c
 index 577ca92..77177a9 100644
