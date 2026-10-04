@@ -15,5 +15,6 @@ a new record replaces it and says so.
 | [0015](0015-one-window-per-display.md) | One window per Mac display | accepted, built (`app-displays`) |
 | [0016](0016-gpu-context-loss.md) | A refused shader skips its draws; a lost context tells the guest | accepted, built (`gpu-robust`) |
 | [0017](0017-guest-gpu-ranges.md) | The host checks every buffer range a guest draw reaches | accepted, built (`gpu-robust`) |
+| [0018](0018-guest-gpu-memory.md) | Every GL context is flushed; guest resources have a memory budget | accepted, built (`gpu-robust`) |
 
 The whole chain: [../architecture/graphics.md](../architecture/graphics.md).

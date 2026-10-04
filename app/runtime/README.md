@@ -75,6 +75,15 @@ commit 82927e9. Changes here:
   (software renderer; runs the patched `with_gl_view_ctx()` taken from
   `ui/cocoa.m`); `Tests/display/view-texture-churn.c` measures the GPU memory
   per switch by hand (GPU, capped, not run by the build)
+- `patches/virgl-control-queue-flush.patch`: vrend's own context is flushed
+  after QEMU's resource create, unref and transfer-to-host commands; the
+  guest's new screen, uploaded there on every mode change, stayed in GPU
+  memory too (ADR 0018). Checked in a test VM by
+  `tests/graphics/scanout-churn.sh`
+- `patches/virgl-resource-memory-budget.patch`: guest resources are charged
+  their estimated size against a budget (`OMACVM_GPU_MEMORY_MB`, default a
+  quarter of the Mac's memory, 0 = off); past it, creation fails and the
+  QEMU log says so (ADR 0018). Checked by `Tests/virgl/test-resource-budget.c`
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

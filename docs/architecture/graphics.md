@@ -431,22 +431,29 @@ What crosses and who checks it:
   (finite `NSNumber` below 1e7, else the monitor is skipped), at most one
   update applied per second (`app-displays` round 2; tested with nulls,
   arrays, 1e300, 101 flips).
-- **display mode changes**: every `set_scanout` with a new size makes QEMU a
-  new surface and, in the Cocoa view's GL context, a new surface texture.
-  That context was never flushed, and Apple's GL keeps the memory of large
-  textures (a 4K screen or more) made, deleted or uploaded on a context until
-  it is flushed: each guest mode change left a screen texture behind (about
-  1.1 GB per switch for two large modes, 20 GB after 18 switches, in 2.6.0
-  too). `with_gl_view_ctx()` now flushes (`qemu-cocoa-gl-view-flush.patch`;
-  build-time test `Tests/display/test-gl-view-flush.c` on the software
-  renderer; `Tests/display/view-texture-churn.c` measures the GPU memory per
-  switch by hand).
-- **no host pointers** reach the guest. Limited: hostmem 4 GiB, 2D resources
-  (QEMU's `max_hostmem`), outputs 5, retained pixel buffers 3, IOSurfaces 3
-  per window. Not limited: virgl 3D resources (textures, buffers) a guest
-  creates; each is bounded by the GL's maximum sizes, but their number is
-  not, so a guest can still fill the Mac's memory with them (open, needs a
-  per-VM GPU memory budget).
+- **display mode changes**: Apple's GL keeps the memory of textures made,
+  deleted or uploaded on a context until that context is flushed. On every
+  guest mode change QEMU makes a new surface texture in the Cocoa view's
+  context, and the guest's new screen is uploaded through QEMU's 2D path on
+  vrend's own context (ctx0); neither context was ever flushed, so a guest
+  switching modes grew QEMU without end (about 1.1 GB per switch for two
+  large modes, 20 GB after 18 switches, in 2.6.0 and 2.7.0 too). Both are
+  flushed now (`qemu-cocoa-gl-view-flush.patch`,
+  `virgl-control-queue-flush.patch`; ADR 0018). Test VM, 4K <-> 1440p:
+  about 100 MB per switch before, 16 MB with the view flush only, flat with
+  both (also flat at 5K and 8000x6000). Tests: `Tests/display/test-gl-view-flush.c`
+  (build time, software renderer), `Tests/display/view-texture-churn.c`
+  (GPU, by hand), `tests/graphics/scanout-churn.sh` (test VM).
+- **resource memory**: every resource a guest makes is charged its estimated
+  size against a budget, a quarter of the Mac's memory by default
+  (`OMACVM_GPU_MEMORY_MB`, 0 = off); past it, resource creation fails
+  (`virgl-resource-memory-budget.patch`, ADR 0018; build-time test
+  `Tests/virgl/test-resource-budget.c`).
+- **no host pointers** reach the guest. Limited: hostmem 4 GiB, virgl
+  resources (the budget above), outputs 5, retained pixel buffers 3,
+  IOSurfaces 3 per window. Not limited: Venus device memory
+  (`vkAllocateMemory`; Venus is off by default) and the number of small GL
+  objects (queries, samplers, surfaces) per context.
 
 ## 11. Test strategy
 
@@ -500,12 +507,15 @@ The tracks share one runtime. Order and overlaps known today:
    `virgl-shader-index-clamp.patch`, `virgl-vertex-format-checks.patch`,
    `virgl-uniform-buffer-alignment.patch`, `virgl-uniform-block-array.patch`,
    `virgl-draw-gl-error-check.patch`, `virgl-vertex-unused-first-input.patch`,
+   `virgl-resource-memory-budget.patch`, `virgl-control-queue-flush.patch`,
    `virgl-venus-robust-buffer-access.patch`, and the test-only
    `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. On
    QEMU it adds `qemu-cocoa-gl-view-flush.patch` after the `omacvm-cocoa-*`
    patches; it applies after the QEMU patches of `rel-2.7.0`, `gpu-2.9.0`,
    `display-bugs`, `gpu-native`, `pacing-hdr`, `kosmickrisp`, `gl-compat`,
-   `video-encode` and `webgpu-compute` (checked 2026-10-04). The
+   `video-encode` and `webgpu-compute` (checked 2026-10-04). `gpu-2.9.0`
+   pins every patch in `patches/SHA256SUMS` (`verify_patch_manifest`): a
+   cherry-picked patch needs its line there too, or the build stops. The
    patches up to the Venus fence one passed the build-time tests on
    `gpu-venus`'s tree (branch `gpu-robust-venus`, c0988e2); the Venus fence
    patch is only exercised there, since `rc-2.6.0` has no Venus. The whole
