@@ -155,6 +155,10 @@ end
 -- its original ID again. pin() then moves it to that display. An emptied
 -- parked workspace is gone and simply dropped; parked workspaces of displays
 -- still missing stay parked.
+--
+-- `ids` is kept in step with every renumbering (Hyprland refuses an ID that
+-- is taken), and the records go in order of their original ID, so several
+-- parked workspaces of one display all come back.
 local function unpark()
   local parked = read_parked()
   if next(parked) == nil then
@@ -163,27 +167,47 @@ local function unpark()
 
   local present = externals()
   local ids = workspace_ids()
+  local wanted = {}
+  local slots = {}
+  for slot, original in pairs(parked) do
+    wanted[original] = true
+    slots[#slots + 1] = slot
+  end
+  table.sort(slots, function(a, b) return parked[a] < parked[b] end)
+
+  local function move(from, to)
+    change_id(from, to)
+    ids[to], ids[from] = ids[from], nil
+  end
+
   local left = {}
   local back = {}
-  for slot, original in pairs(parked) do
+  for _, slot in ipairs(slots) do
+    local original = parked[slot]
+    local range = range_of(original)
     if not ids[slot] then
       -- emptied: gone
-    elseif not present[range_of(original)] then
+    elseif not present[range] then
       left[slot] = original
     elseif not ids[original] then
-      change_id(slot, original)
+      move(slot, original)
     elseif (ids[original].windows or 1) == 0 then
       -- Hyprland already opened the empty workspace "original" on the
-      -- display that came back: rename that one out of the way first.
-      local spare = original + 1
-      while ids[spare] and spare < range_of(original) + M.OFFSET do
-        spare = spare + 1
+      -- display that came back: rename that one out of the way first, to
+      -- an ID that is free and that no other parked workspace wants.
+      local spare
+      for id = range + 1, range + M.OFFSET do
+        if not ids[id] and not wanted[id] then
+          spare = id
+          break
+        end
       end
-      if not ids[spare] then
-        change_id(original, spare)
-        change_id(slot, original)
-        ids[spare] = true
+      if spare then
+        move(original, spare)
+        move(slot, original)
         back[#back + 1] = original
+      else
+        left[slot] = original
       end
     end
   end
