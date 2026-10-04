@@ -184,6 +184,30 @@ static int run_limit(void)
    if (big)
       virgl_renderer_resource_unref(big);
 
+   /* 3-component formats are charged as 4 (Apple's GL pads them): 1024x1024 RGB32F is
+    * 12 MB by the format, 16 MB stored; 4 fit, not 5 */
+   expect_fit("1024x1024 RGB32F (charged 16 MB)",
+              (struct spec){T_2D, VIRGL_FORMAT_R32G32B32_FLOAT, sv, 1024, 1024, 1, 1, 1, 0}, 4);
+
+   /* with the budget full, screens and cursors still get up to 256 MB more */
+   n = 0;
+   while (n < 64 && (h[n] = tex2d(1024, 1024, 1)))
+      n++;
+   check(n == 16, "budget filled with textures again");
+   uint32_t scan = make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
+                        3840, 2160, 1, 1, 0, 0);
+   check(scan != 0, "a 4K screen still fits past the budget (display reserve)");
+   check(make(T_2D, VIRGL_FORMAT_B8G8R8A8_UNORM, VIRGL_BIND_CURSOR, 64, 64, 1, 1, 0, 0) != 0,
+         "and a cursor");
+   check(tex2d(256, 256, 1) == 0, "an ordinary texture is still refused");
+   check(make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT, 8192, 8192, 1, 1, 0, 0) == 0,
+         "a screen past the reserve is refused");
+   if (scan)
+      virgl_renderer_resource_unref(scan);
+   unref(h, n);
+   memset(h, 0, sizeof h);
+   next_handle += 8;
+
    /* staging buffers only use guest memory: 4 KB each */
    expect_fit("1 GB staging buffers", (struct spec){T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_STAGING,
               1u << 30, 1, 1, 1, 1, 0}, 64);

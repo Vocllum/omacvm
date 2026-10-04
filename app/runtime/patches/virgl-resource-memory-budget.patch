@@ -1,11 +1,14 @@
 virglrenderer: a memory budget for guest resources
 
 What: every resource a guest makes (3D and 2D resources, blob pipe resources) is
-charged its estimated size: all mip levels, layers and samples, at least 4 KiB.
+charged its estimated size: all mip levels, layers and samples, at least 4 KiB;
+3-component formats count as 4 (Apple's GL pads them).
 A resource that would take the total past the budget is refused like a failed
 allocation (resource create fails, the guest's later use of it is refused);
 freeing a resource gives its bytes back. OMACVM_GPU_MEMORY_MB sets the budget,
-0 turns it off; the default is a quarter of the Mac's memory. The QEMU log says
+0 turns it off; the default is a quarter of the Mac's memory. Screens and
+cursors may go 256 MB past it, so an app that fills the budget does not also
+stop the desktop's next screen or cursor. The QEMU log says
 the budget at start ("guest GPU memory budget: N MB") and logs refusals at the
 1st, 2nd, 4th, 8th ... one. Blob pipe resources a guest made but never
 claimed are now freed with their context including their GL storage (upstream
@@ -18,7 +21,8 @@ Upstream: not sent; upstream has no host memory limit for vrend resources.
 Tests: Tests/virgl/test-resource-budget.c (build time, Apple's software
 renderer): exact fit and refusal at the budget, mip chains, arrays, 3D, MSAA,
 staging buffers, giving bytes back on unref and on context destroy (unclaimed
-pipe resource), budget off with 0.
+pipe resource), RGB32F charged as RGBA32F, the screen/cursor reserve, budget
+off with 0.
 --- a/src/vrend/vrend_renderer.h
 +++ b/src/vrend/vrend_renderer.h
 @@ -121,6 +121,8 @@
@@ -32,28 +36,28 @@ pipe resource), budget off with 0.
  
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -377,6 +377,12 @@
- 
+@@ -378,6 +378,12 @@
     float tess_factors[6];
     int eventfd;
-+
+ 
 +   /* OmacVM: estimated bytes of all live guest resources and their limit (0: none).
 +    * Only touched where resources are made and freed, on the renderer thread. */
 +   uint64_t resource_bytes;
 +   uint64_t resource_budget;
 +   uint64_t resource_refusals;
- 
++
     uint32_t max_draw_buffers;
     uint32_t max_texture_buffer_size;
-@@ -431,6 +437,8 @@
+    uint32_t max_texture_2d_size;
+@@ -430,6 +436,8 @@
+ };
  
  static struct global_renderer_state vrend_state;
- 
-+static void vrend_resource_budget_init(void);
 +
++static void vrend_resource_budget_init(void);
+ 
  bool vrend_renderer_video_available(void)
  {
-    return vrend_state.video_available;
 @@ -8480,6 +8488,7 @@
     struct virgl_gl_ctx_param ctx_params = {0};
  
@@ -75,10 +79,12 @@ pipe resource), budget off with 0.
     }
  
     list_for_each_entry_safe(struct vrend_untyped_resource, untyped_res, &ctx->untyped_resources, head)
-@@ -9867,6 +9879,112 @@
+@@ -9865,6 +9877,123 @@
+    gt->cur_base = -1;
+    gt->cur_max = 10000;
     return 0;
- }
- 
++}
++
 +/*
 + * OmacVM: a memory budget for guest resources. Without it a guest can make
 + * textures and buffers until the Mac runs out of memory (QEMU's max_hostmem only
@@ -87,9 +93,13 @@ pipe resource), budget off with 0.
 + * count too) when it is made and gets it back when it is freed. A resource that
 + * would take the total past the budget is refused like a failed allocation.
 + * OMACVM_GPU_MEMORY_MB sets the budget, 0 turns it off; the default is a quarter
-+ * of the Mac's memory (16 GB on a 64 GB Mac, 2 GB on an 8 GB one).
++ * of the Mac's memory (16 GB on a 64 GB Mac, 2 GB on an 8 GB one). Screens and
++ * cursors may go up to VREND_RESOURCE_DISPLAY_RESERVE past it, so one app that
++ * fills the budget does not also stop the desktop's next screen or cursor.
 + */
 +#define VREND_RESOURCE_MIN_CHARGE 4096u
++#define VREND_RESOURCE_DISPLAY_RESERVE (256ull << 20)
++#define VREND_RESOURCE_DISPLAY_BINDS    (VIRGL_BIND_SCANOUT | VIRGL_BIND_DISPLAY_TARGET | VIRGL_BIND_CURSOR)
 +
 +static uint64_t budget_mul(uint64_t a, uint64_t b)
 +{
@@ -117,6 +127,10 @@ pipe resource), budget off with 0.
 +
 +      if (!blocksize)
 +         blocksize = 16;
++      /* Apple's GL stores 3-component formats (RGB8, RGB16F, RGB32F) as 4 */
++      if (util_format_get_nr_components(format) == 3 && util_format_get_blockwidth(format) == 1 &&
++          blocksize % 3 == 0)
++         blocksize = blocksize / 3 * 4;
 +      for (uint32_t l = 0; l <= args->last_level && l < 32; l++) {
 +         uint64_t depth = args->target == PIPE_TEXTURE_3D ? u_minify(args->depth, l) : 1;
 +         uint64_t level = budget_mul(util_format_get_nblocksx(format, u_minify(args->width, l)),
@@ -161,8 +175,11 @@ pipe resource), budget off with 0.
 +{
 +   uint64_t size = vrend_resource_estimated_size(args);
 +   uint64_t budget = vrend_state.resource_budget;
++   uint64_t limit = budget;
 +
-+   if (budget && (size > budget || vrend_state.resource_bytes > budget - size)) {
++   if (budget && (args->bind & VREND_RESOURCE_DISPLAY_BINDS))
++      limit = budget_add(budget, VREND_RESOURCE_DISPLAY_RESERVE);
++   if (budget && (size > limit || vrend_state.resource_bytes > limit - size)) {
 +      /* logged at the 1st, 2nd, 4th, 8th ... refusal: a guest in a loop cannot flood the log */
 +      uint64_t n = ++vrend_state.resource_refusals;
 +      if (!(n & (n - 1)))
@@ -183,12 +200,10 @@ pipe resource), budget off with 0.
 +{
 +   vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
 +   gr->budget_bytes = 0;
-+}
-+
+ }
+ 
  static struct vrend_resource *
- vrend_resource_create(const struct vrend_renderer_resource_create_args *args)
- {
-@@ -9906,6 +10024,11 @@
+@@ -9906,6 +10035,11 @@
     if (!gr)
        return NULL;
  
@@ -200,7 +215,7 @@ pipe resource), budget off with 0.
     if (args->target == PIPE_BUFFER) {
        ret = vrend_resource_alloc_buffer(gr, args->flags);
     } else {
-@@ -9914,6 +10037,7 @@
+@@ -9914,6 +10048,7 @@
     }
  
     if (ret) {
@@ -208,7 +223,7 @@ pipe resource), budget off with 0.
        FREE(gr);
        return NULL;
     }
-@@ -9923,6 +10047,7 @@
+@@ -9923,6 +10058,7 @@
  
  void vrend_renderer_resource_destroy(struct vrend_resource *res)
  {
