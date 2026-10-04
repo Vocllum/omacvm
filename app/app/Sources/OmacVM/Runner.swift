@@ -68,7 +68,7 @@ final class Runner {
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
         }
         // HDR: the guest's display sync reads it (omacvm-app-host).
-        if Settings.hdr {
+        if Settings.hdrActive {
             a += ["-smbios", "type=11,value=omacvm.hdr=1"]
         }
         let console = c.folder.appendingPathComponent("logs/console.log").path
@@ -105,7 +105,7 @@ final class Runner {
         // ports: Omanotch, Gestures and Bridge (patched libslirp).
         env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
         env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
-        if Settings.hdr {
+        if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
         }
         if Settings.gpuSafeMode {
@@ -119,6 +119,9 @@ final class Runner {
         let log = try FileHandle(forWritingTo: logURL)
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
+        }
+        if Settings.hdr && !Mac.hasHDRDisplay {
+            log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
         p.standardOutput = log
         p.standardError = log

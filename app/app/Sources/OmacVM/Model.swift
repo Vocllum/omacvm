@@ -318,6 +318,8 @@ enum Settings {
     /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).
     /// Hidden: defaults write org.omacvm.app hdr -bool true
     static var hdr: Bool { UserDefaults.standard.bool(forKey: "hdr") }
+    /// HDR as the VM gets it: only while a display can show it.
+    static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
@@ -335,6 +337,13 @@ extension Mac {
     /// The built-in display has a camera housing.
     static var hasNotch: Bool {
         NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+    }
+
+    /// A display that can show HDR (EDR headroom above SDR white: the XDR
+    /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs
+    /// without one (MacBook Air, SDR monitors) keep the 8-bit SDR path.
+    static var hasHDRDisplay: Bool {
+        NSScreen.screens.contains { $0.maximumPotentialExtendedDynamicRangeColorComponentValue > 1 }
     }
 
     /// A MacBook: its battery shows in Omarchy's bar.
