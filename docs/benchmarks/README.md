@@ -166,15 +166,31 @@ On the Mac, with all files in one folder:
 ```bash
 cd ~/bench
 ~/.omacvm/src/bench/report.py mac.jsonl parallels.jsonl utm.jsonl fusion.jsonl app.jsonl --json results.json
-~/.omacvm/src/bench/chart.py results.json ~/.omacvm/docs/images/benchmarks.svg \
-  "MacBook Pro M4 Max · macOS 15.7 · 16 CPUs, 48 GB per VM"
+~/.omacvm/src/bench/chart.py ~/.omacvm/docs/benchmarks/chart.json ~/.omacvm/docs/images/benchmarks.svg \
+  "MacBook Pro M4 Max · macOS 15.7 · Google Chrome 154 · October 2026"
 ```
 
 - `report.py` prints a Markdown table: the median of each test, and each route
   as a share of the first file (the Mac).
-- `chart.py` draws the bar chart for the README from `results.json`: each route
-  as a percentage of the Mac. glmark2 is left out, since it has no Mac value,
-  and so is Geekbench GPU, which no VM can run.
+- `chart.py` draws the bar chart for the README: OmacVM.app first, then UTM,
+  VMware Fusion and Parallels, each as a share of the Mac (the dashed line at
+  100 %). Five rows: Geekbench 7 multi-core, Speedometer 3.1, WebGL Aquarium,
+  Basemark Web 3.0 and Geekbench 7 GPU (OpenCL). Tests without a Mac value
+  (glmark2, vkmark) and MotionMark (no stable result) are left out.
+- The chart's input is [`chart.json`](chart.json): the medians from
+  `results.json` with the GPU rounds added. CPU and Speedometer come from the
+  2026-10-03 round, Aquarium and Basemark from the 2026-10-04 GPU round, both
+  in [Results](#results). Numbers from a build that is not released yet are
+  listed under `"unreleased"`; the chart stripes those bars and tags them.
+- GPU compute in the chart: OmacVM.app with Vulkan in the VM (Venus on
+  MoltenVK, OpenCL through rusticl), not released yet. Geekbench 7 GPU OpenCL,
+  one locked batch on 2026-10-04: Mac 95,380
+  ([252722](https://browser.geekbench.com/v7/gpu/252722)), OmacVM.app 42,486
+  ([252731](https://browser.geekbench.com/v7/gpu/252731)), 45 %. Parallels, UTM
+  and Fusion offer no OpenCL or Vulkan to the VM.
+- OmacVM.app's Basemark has no full-screen run yet (2157 in a window, not
+  comparable), so its bar is empty. The 2.9.0 candidate (not released) gives
+  the same Aquarium as before on a quiet Mac, 21 to 23 fps in a window.
 
 **About Geekbench.** The free version uploads every result to
 browser.geekbench.com and prints only a link. `bench.sh` saves the link;
