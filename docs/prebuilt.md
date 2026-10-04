@@ -96,7 +96,8 @@ src/prebuilt/make-image.sh parallels clean     # delete the image VM
 
 - **build**: `omacvm build --image`, a normal build with the placeholder user
   `omacvmuser`, timezone UTC, keyboard `us`, `en_US.UTF-8`, a 64 GB disk, the
-  default features without Omanotch, and nothing of the Mac: no Bridge token,
+  default features without Omanotch and the battery (both depend on the Mac),
+  and nothing of the Mac: no Bridge token,
   no Mac side, no Parallels Tools.
 - **generalize** (`src/prebuilt/guest/generalize.sh`, in the VM):
   - the user goes; its home becomes the template
