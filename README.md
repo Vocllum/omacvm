@@ -151,7 +151,7 @@ Free and open source, one display: UTM.
 | YouTube 4K | 24.2 W · 4.1 h | 39.2 W · 2.6 h | **20.4 W · 4.9 h** | 21.3 W · 4.7 h |
 | Every CPU core busy | 72 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 71 W · 1.4 h |
 | **Displays** | | | | |
-| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** | not yet |
+| External displays | **✓ every one, in your macOS arrangement** | ✗ one display | **✓ every one, in your macOS arrangement** | **✓ every one, in your macOS arrangement** (full screen) |
 | Native Retina, 120 Hz | ✓ | ✓ | ✓ | ✓ |
 | Resolution changes | **live** | fixed at boot | **live** | **live** |
 | **Mac integration** | | | | |

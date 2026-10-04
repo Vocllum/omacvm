@@ -9,6 +9,11 @@ in more words.
   Fusion. It brings QEMU (try-omarchy's patched build) and runs it with
   Apple's Hypervisor framework. Download `OmacVM-2.6.0.zip` from the release,
   signed with a Developer ID. See [docs/routes/app.md](docs/routes/app.md).
+- OmacVM.app uses every Mac display in full screen: a window and an Omarchy
+  output per display, at its resolution and scale, placed as in macOS, with
+  plugging in and out live. "Use external displays" in Omarchy's display
+  panel keeps full screen on one display. Per-display workspaces now work
+  with any number of displays (Parallels and Fusion too).
 - `omacvm build --vm-type app`: builds the VM through OmacVM.app with the same
   questions as the other routes. It downloads the app when it is missing
   (after asking), checks the zip against its `.sha256` and that the app is
