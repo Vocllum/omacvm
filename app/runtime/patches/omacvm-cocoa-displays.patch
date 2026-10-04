@@ -210,7 +210,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
          (omacvm_notch_mode() && !([w styleMask] & NSWindowStyleMaskFullScreen) &&
           [[w screen] safeAreaInsets].top > 0)) {
          omacvm_toggle_notch_full_screen();
-@@ -2915,13 +2999,1042 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2915,13 +2999,1047 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -269,6 +269,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +static bool omacvm_external_enabled = true;
 +static bool omacvm_guest_ready;                        /* the guest said hello */
 +static bool omacvm_full_busy;
++static int omacvm_full_busy_output;              /* the window macOS is moving */
 +static OmacVMBox omacvm_mac_box[OMACVM_MAX_OUTPUTS];  /* points, top-left origin */
 +static OmacVMBox omacvm_mac_bounds;
 +static int omacvm_mac_count = 1;
@@ -873,6 +874,9 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +
 +static void omacvm_head_off(OmacVMHead *hd)
 +{
++    if (omacvm_full_busy && omacvm_full_busy_output == hd->output) {
++        omacvm_full_busy = false;   /* its window goes: do not wait for it */
++    }
 +    hd->display = 0;
 +    hd->want_full = false;
 +    hd->full = false;
@@ -908,12 +912,13 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +            continue;
 +        }
 +        omacvm_full_busy = true;
++        omacvm_full_busy_output = i;
 +        [hd->window toggleFullScreen:nil];
 +        int output = i;
 +        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
 +                       dispatch_get_main_queue(), ^{
 +            /* No word from macOS: try again (or the next one). */
-+            if (omacvm_full_busy && omacvm_heads[output].want_full) {
++            if (omacvm_full_busy && omacvm_full_busy_output == output) {
 +                omacvm_full_busy = false;
 +                omacvm_full_next();
 +            }
@@ -989,8 +994,8 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    omacvm_update_mac_layout();
 +    omacvm_send_layout();
 +    omacvm_full_next();
-+}
-+
+ }
+ 
 +/* The guest channel: org.omacvm.display (JSON lines). */
 +
 +static int omacvm_chan_fd = -1;
@@ -1170,8 +1175,8 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    if ([omacvm_chan_buf length] > 65536) {
 +        [omacvm_chan_buf setLength:0];
 +    }
- }
- 
++}
++
 +static void omacvm_chan_connect(void)
 +{
 +    const char *path = getenv("OMACVM_DISPLAY_SOCKET");
@@ -1254,7 +1259,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
  static void cocoa_display_early_init(DisplayOptions *o)
  {
-@@ -2967,10 +4080,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2967,10 +4085,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1272,7 +1277,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -2985,6 +4104,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2985,6 +4109,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1280,7 +1285,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3037,6 +4157,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -3037,6 +4162,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          dcl.ops = &dcl_ops;
      }
  
