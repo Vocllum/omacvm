@@ -150,8 +150,11 @@ the GPU's own recovery, not a memory fault.
     review fixes: the 9196 cases again the same per case (final runtime,
     aefb119); the every-50th sample (first version of the fixes) is the same
     per case as before this series and differs from the previous runtime only
-    in that timing test (Pass again); no draw skipped, no GPU fault. The
-    unused-first-input fix came after these runs.
+    in that timing test (Pass again); no draw skipped, no GPU fault. With
+    the unused-first-input fix (f542995): the 9196 cases the same per case
+    as all runs before; the every-50th sample the same per case as the
+    first gpu-robust runtime, flush_wait again CompatibilityWarning (it
+    flips between runs); no draw skipped, no GPU fault.
   - WebGL 2 conformance (transform_feedback, vertex_arrays, buffers, rendering,
     uniforms, attribs; 33 pages): 30 pass after, 29 before (draw-buffers.html
     now passes).
@@ -163,7 +166,12 @@ the GPU's own recovery, not a memory fault.
   612, 600, 615. The spread is larger than any effect: no slowdown is
   visible, a few percent cannot be ruled out. The dEQP range run took 216 s
   before, 273 s with this series and 183 s after the review fixes, all
-  without the lock; those times say nothing about speed.
+  without the lock; those times say nothing about speed. With the lock and
+  every other test QEMU paused, median of 3 (f542995 against the runtime
+  before this series, 2026-10-04 21:30): 521 against 520. A second pair,
+  during which two QEMUs outside the pause rule started: 561 against 531.
+  No slowdown visible; differences of a few percent stay inside the noise.
+  Raw: `bench-r2-r6.jsonl` in the track's work folder.
 - Index read-back (`glGetBufferSubData` and a scan for the largest index
   before every indexed draw) grows with the index count. Measured on the M4
   Max with the bench lock (2 test QEMUs paused, 3 outside the pause rule
