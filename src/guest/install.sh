@@ -110,7 +110,19 @@ log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
 # network) may still reach SSH.
 ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
-pacman -S --needed --noconfirm jq >/dev/null 2>&1
+# A VM switched off during pacman keeps pacman's lock, and every pacman below
+# would fail. Wait for one that runs (omarchy update); a lock without pacman goes.
+for ((i = 0; i < 120; i++)); do
+  [[ -e /var/lib/pacman/db.lck ]] && pgrep -x pacman >/dev/null || break
+  (( i )) || log "waiting for pacman (another install runs)"
+  sleep 5
+done
+if [[ -e /var/lib/pacman/db.lck ]]; then
+  pgrep -x pacman >/dev/null && { echo "guest/install.sh: pacman still runs after 10 minutes: try again when it is done" >&2; exit 1; }
+  log "pacman's lock from an install that was cut off: removed"
+  rm -f /var/lib/pacman/db.lck
+fi
+pacman -S --needed --noconfirm jq >/dev/null 2>&1 || { echo "guest/install.sh: pacman could not install jq (no network?)" >&2; exit 1; }
 if command -v grub-mkconfig >/dev/null; then
   # Snapshots (snapper, set up by omarchy-mac) appear in the GRUB menu.
   pacman -S --needed --noconfirm grub-btrfs inotify-tools >/dev/null 2>&1
