@@ -5,7 +5,8 @@ Mesa already accepted (a TGSI->GLSL translation gap or a host limit, e.g. Apple'
 4096 uniform components), the shader is marked failed and the draws and compute
 dispatches that need it are skipped, like a native driver does. The context keeps
 running. Failures are logged three times per context at most (the first with the
-GLSL and the GL info log), the "dropping rendering" line once per context. A
+GLSL and the GL info log), one line about skipped draws or dispatches once per
+context (compute too, though Apple's GL 4.1 has no compute shaders). A
 failed compile is never retried; failed links are remembered per fragment shader
 (by a serial that is never reused, unlike GL names) so a page that keeps drawing
 does not relink every draw.
@@ -59,10 +60,12 @@ shader, with virgl-test-shader-fault.patch).
  #ifdef ENABLE_TRACING
     struct hash_table *active_markers;
  #endif
-@@ -1145,6 +1161,40 @@
+@@ -1143,6 +1159,40 @@
+    virgl_error("%s: context error reported %d \"%s\" %s %d\n", fname,
+                ctx->ctx_id, ctx->debug_name, vrend_ctx_error_strings[error],
                 value);
- }
- 
++}
++
 +/* The guest compiled the shader; only the host GL refused it (a translation gap or a
 + * host limit). A native driver skips the draws that need such a shader, so do the
 + * same instead of stopping the whole context, which leaves the guest app drawing into
@@ -95,21 +98,19 @@ shader, with virgl-test-shader-fault.patch).
 +      return;
 +   ctx->dropped_draws_logged = true;
 +   virgl_error("%s: %s (logged once per context)\n", what, ctx->debug_name);
-+}
-+
+ }
+ 
  #define CORE_PROFILE_WARN_NONE 0
- #define CORE_PROFILE_WARN_STIPPLE 1
- #define CORE_PROFILE_WARN_POLYGON_MODE 2
-@@ -1404,6 +1454,9 @@
+@@ -1403,6 +1453,9 @@
+    GLint param;
     const char *shader_parts[SHADER_MAX_STRINGS];
     char *modified_shaders[SHADER_MAX_STRINGS] = {NULL};
- 
++
 +   if (shader->compile_failed)
 +      return false;
-+
+ 
     /* Firefox uses GL_EXT_shader_texture_lod (GLES extension), but on OpenGL 4.1 Core Profile
      * textureLod is built into the core spec - no extension directive needed.
-     * Remove the extension directive entirely. */
 @@ -1452,9 +1505,13 @@
        char infolog[65536];
        int len;
@@ -127,16 +128,16 @@ shader, with virgl-test-shader-fault.patch).
        return false;
     }
  
-@@ -1946,6 +2003,9 @@
+@@ -1945,6 +2002,9 @@
+ {
     int i;
     char name[64];
- 
++
 +   if (shader->compile_failed || shader->link_failed)
 +      return false;
-+
+ 
     if (type == PIPE_SHADER_VERTEX || type == PIPE_SHADER_GEOMETRY ||
         type == PIPE_SHADER_TESS_EVAL)
-        set_stream_out_varyings(sub_ctx, shader->program_id, &shader->sel->sinfo);
 @@ -1992,9 +2052,9 @@
     shader->is_linked = vrend_link(shader->program_id);
  
@@ -293,6 +294,15 @@ shader, with virgl-test-shader-fault.patch).
        return 0;
     }
  
+@@ -6314,7 +6425,7 @@
+       }
+       if (!sub_ctx->shaders[PIPE_SHADER_COMPUTE]->current->is_compiled) {
+          if (!vrend_compile_shader(sub_ctx, sub_ctx->shaders[PIPE_SHADER_COMPUTE]->current)) {
+-            virgl_error("Failure to compile compute shader variant: %s\n", ctx->debug_name);
++            vrend_report_dropped_draws(ctx, "Skipping compute shader execution, its shader failed to compile");
+             return;
+          }
+       }
 @@ -6340,8 +6451,7 @@
     }
  
