@@ -3,7 +3,27 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 2.8.0
+
+- OmacVM.app uses every Mac display in full screen: a window (in its own
+  Space) and an Omarchy output per display, at its resolution, scale and
+  refresh rate, placed as in macOS's arrangement, with plugging in and out
+  live. "Use external displays" in Omarchy's display panel keeps full screen
+  on one display. Tested on a real external monitor next to a MacBook with a
+  notch, and on virtual displays.
+- OmacVM.app in full screen on a Mac with a notch: Omarchy gets the window's
+  real size (1728x1080 points on a 14-inch MacBook Pro, was 1728x1085). The
+  picture is no longer squeezed and the pointer lands where it is on the Mac
+  (it was up to 5 points off at the bottom).
+- Cmd-drag moves an Omarchy window from one Mac display to another; a held
+  modifier key is no longer let go when the pointer crosses to another
+  display's window.
+- Per-display workspaces handle more than two displays (Virtual-3 gets
+  21..30, and so on), and several workspaces of an unplugged display all
+  come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
+  the same file.
+
+## 2.7.0
 
 - OmacVM.app: videos are decoded by the Mac's media engine. YouTube in 4K at
   60 fps plays in Google Chrome (H.264, VP9, AV1) with the VM's CPU nearly

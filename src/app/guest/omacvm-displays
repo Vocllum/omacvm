@@ -1,0 +1,332 @@
+#!/usr/bin/python3
+"""OmacVM.app: Omarchy on every Mac display.
+
+In full screen, OmacVM.app opens a window on every Mac display and gives the
+VM one output per display (Virtual-1 is the main window, Virtual-2 ... the
+others). This agent is the VM's side of that, over the virtio port
+org.omacvm.display, one JSON object per line:
+
+  from the Mac  {"layout": [{"output": "Virtual-2", "x": 1728, "y": 0,
+                 "width": 1920, "height": 1080, "scale": 1}, ...],
+                 "external": true, "fullscreen": true}
+                where each output sits in the Mac's arrangement (points);
+  to the Mac    {"hello": 1, "external": true}  when it starts,
+                {"external": false}             when the switch changes,
+                {"monitors": [{"name": "Virtual-1", "x": 0, "y": 0,
+                 "width": 1728, "height": 1085}, ...]}
+                where Hyprland put its outputs (logical pixels), so the
+                Mac points the pointer at the right one.
+
+The layout goes to $XDG_RUNTIME_DIR/omacvm/displays.json, where
+omacvm-display-sync takes the positions from.
+
+The switch "Use external displays" is ~/.config/omacvm/displays.conf
+(external=on or off; on when missing):
+
+  omacvm-displays                   run the agent (the user service)
+  omacvm-displays external on|off|toggle
+  omacvm-displays state             "on" or "off" (nothing without the port)
+  omacvm-displays status            the switch and the outputs, as JSON
+
+The switch also sits in Omarchy's display panel (the bar widget
+omacvm.monitor, built from Omarchy's own by monitor-widget/build.py; rebuilt
+here when Omarchy's panel changes with an update).
+"""
+
+from __future__ import annotations
+
+import errno
+import json
+import os
+from pathlib import Path
+import select
+import socket
+import subprocess
+import sys
+import time
+
+PORT = Path("/dev/virtio-ports/org.omacvm.display")
+CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omacvm/displays.conf"
+RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+STATE = RUNTIME / "omacvm/displays.json"
+SYNC = "/usr/local/bin/omacvm-display-sync"
+WIDGET = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omarchy/plugins/omacvm.monitor"
+WIDGET_BUILD = Path("/usr/local/share/omacvm/app/guest/monitor-widget/build.py")
+OMARCHY_PANEL = Path("/usr/share/omarchy/shell/plugins/panels/monitor/Panel.qml")
+
+
+def log(message: str) -> None:
+    print(f"omacvm-displays: {message}", file=sys.stderr, flush=True)
+
+
+def external_on() -> bool:
+    try:
+        for line in CONFIG.read_text().splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "external":
+                return value.strip().lower() not in ("off", "0", "no", "false")
+    except OSError:
+        pass
+    return True
+
+
+def set_external(on: bool) -> None:
+    CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    tmp = CONFIG.with_suffix(".tmp")
+    tmp.write_text(f"external={'on' if on else 'off'}\n")
+    tmp.replace(CONFIG)
+
+
+def config_mtime() -> float:
+    try:
+        return CONFIG.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def hypr_dir() -> Path | None:
+    sig = os.environ.get("HYPRLAND_INSTANCE_SIGNATURE")
+    base = RUNTIME / "hypr"
+    if sig and (base / sig).is_dir():
+        return base / sig
+    try:
+        dirs = [d for d in base.iterdir() if (d / ".socket.sock").exists()]
+    except OSError:
+        return None
+    return max(dirs, key=lambda d: d.stat().st_mtime) if dirs else None
+
+
+def hypr_request(command: str) -> str | None:
+    d = hypr_dir()
+    if not d:
+        return None
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            s.connect(str(d / ".socket.sock"))
+            s.sendall(command.encode())
+            chunks = []
+            while True:
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+        return b"".join(chunks).decode(errors="replace")
+    except OSError:
+        return None
+
+
+def monitors() -> list[dict] | None:
+    """Hyprland's outputs in logical pixels, as its absolute pointer sees them."""
+    reply = hypr_request("j/monitors")
+    if reply is None:
+        return None
+    try:
+        data = json.loads(reply)
+    except ValueError:
+        return None
+    out = []
+    for m in data:
+        if m.get("disabled"):
+            continue
+        scale = float(m.get("scale") or 1) or 1.0
+        w, h = m.get("width", 0) / scale, m.get("height", 0) / scale
+        if m.get("transform", 0) % 2:
+            w, h = h, w
+        out.append({"name": m.get("name", ""), "x": m.get("x", 0), "y": m.get("y", 0),
+                    "width": round(w, 3), "height": round(h, 3)})
+    return sorted(out, key=lambda m: m["name"])
+
+
+def run_sync() -> None:
+    try:
+        subprocess.run([SYNC, "--once"], timeout=20, check=False,
+                       stdout=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        log(f"display sync failed: {error}")
+
+
+def refresh_widget() -> None:
+    """Rebuild omacvm.monitor when an Omarchy update changed its display panel."""
+    stamp = WIDGET / ".source-sha256"
+    if not stamp.exists() or not WIDGET_BUILD.exists() or not OMARCHY_PANEL.exists():
+        return
+    import hashlib
+    digest = hashlib.sha256(OMARCHY_PANEL.read_bytes()).hexdigest()
+    if stamp.read_text().strip() == digest:
+        return
+    try:
+        subprocess.run([sys.executable, str(WIDGET_BUILD), str(WIDGET)], timeout=30, check=True)
+        subprocess.run(["omarchy-shell", "-q", "shell", "rescanPlugins"], timeout=30, check=False)
+        log("display widget rebuilt for the updated Omarchy")
+    except (OSError, subprocess.SubprocessError) as error:
+        log(f"display widget not rebuilt: {error}")
+
+
+def write_state(message: dict) -> None:
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(message) + "\n")
+    tmp.replace(STATE)
+
+
+class Agent:
+    def __init__(self) -> None:
+        self.fd = os.open(PORT, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+        self.buffer = b""
+        self.outbox = b""
+        self.external = external_on()
+        self.mtime = config_mtime()
+        self.reported: list[dict] | None = None
+        self.events: socket.socket | None = None
+        self.check_at = 0.0
+        self.last_check = 0.0
+
+    def send(self, message: dict) -> None:
+        self.outbox += json.dumps(message, separators=(",", ":")).encode() + b"\n"
+        self.flush()
+
+    def flush(self) -> None:
+        while self.outbox:
+            try:
+                n = os.write(self.fd, self.outbox)
+            except OSError as error:
+                if error.errno in (errno.EAGAIN, errno.EINTR):
+                    return
+                raise
+            self.outbox = self.outbox[n:]
+
+    def connect_events(self) -> None:
+        d = hypr_dir()
+        if not d or self.events:
+            return
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.connect(str(d / ".socket2.sock"))
+            s.setblocking(False)
+            self.events = s
+        except OSError:
+            self.events = None
+
+    def soon(self, delay: float) -> None:
+        when = time.monotonic() + delay
+        if not self.check_at or when < self.check_at:
+            self.check_at = when
+
+    def report(self) -> None:
+        current = monitors()
+        if current is not None and current != self.reported:
+            self.reported = current
+            self.send({"monitors": current})
+
+    def on_line(self, line: bytes) -> None:
+        try:
+            message = json.loads(line)
+        except ValueError:
+            return
+        if not isinstance(message, dict) or not isinstance(message.get("layout"), list):
+            return
+        write_state(message)
+        run_sync()
+        self.soon(0.3)
+
+    def run(self) -> None:
+        self.send({"hello": 1, "external": self.external})
+        while True:
+            self.connect_events()
+            readers = [self.fd] + ([self.events] if self.events else [])
+            writers = [self.fd] if self.outbox else []
+            now = time.monotonic()
+            # A report at least every 5 s, in case an event slipped by.
+            timeout = 1.0 if not self.check_at else max(0.0, min(1.0, self.check_at - now))
+            ready, writable, _ = select.select(readers, writers, [], timeout)
+            if writable:
+                self.flush()
+            if self.fd in ready:
+                try:
+                    data = os.read(self.fd, 65536)
+                except OSError as error:
+                    if error.errno not in (errno.EAGAIN, errno.EINTR):
+                        raise
+                    data = None
+                if data:
+                    self.buffer += data
+                    while b"\n" in self.buffer:
+                        line, self.buffer = self.buffer.split(b"\n", 1)
+                        self.on_line(line)
+                    if len(self.buffer) > 1 << 20:
+                        self.buffer = b""
+                elif data == b"":
+                    # The Mac side is not connected (yet): say hello again
+                    # once it is, so it sends the layout.
+                    if b'"hello"' not in self.outbox:
+                        self.send({"hello": 1, "external": self.external})
+                    time.sleep(1)
+            if self.events and self.events in ready:
+                try:
+                    data = self.events.recv(65536)
+                except OSError:
+                    data = b""
+                if not data:
+                    self.events.close()
+                    self.events = None
+                elif b"monitor" in data or b"configreloaded" in data:
+                    self.soon(0.3)
+            mtime = config_mtime()
+            if mtime != self.mtime:
+                self.mtime = mtime
+                on = external_on()
+                if on != self.external:
+                    self.external = on
+                    self.send({"external": on})
+            now = time.monotonic()
+            if (self.check_at and now >= self.check_at) or now - self.last_check >= 5:
+                self.check_at = 0.0
+                self.last_check = now
+                self.report()
+
+
+def notify(text: str) -> None:
+    try:
+        subprocess.run(["notify-send", "-a", "OmacVM", "-t", "2500", text],
+                       timeout=5, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) >= 2 and argv[1] == "external":
+        want = argv[2] if len(argv) > 2 else "toggle"
+        if want not in ("on", "off", "toggle"):
+            print("usage: omacvm-displays external on|off|toggle", file=sys.stderr)
+            return 2
+        on = (not external_on()) if want == "toggle" else want == "on"
+        set_external(on)
+        notify("External displays: " + ("on (in full screen)" if on else "off"))
+        return 0
+    if len(argv) >= 2 and argv[1] == "state":
+        if PORT.exists():
+            print("on" if external_on() else "off")
+        return 0
+    if len(argv) >= 2 and argv[1] == "status":
+        layout = None
+        try:
+            layout = json.loads(STATE.read_text())
+        except (OSError, ValueError):
+            pass
+        print(json.dumps({"external": external_on(), "port": PORT.exists(),
+                          "layout": layout, "monitors": monitors()}, indent=2))
+        return 0
+    if len(argv) >= 2 and argv[1] not in ("run",):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
+    if not PORT.exists():
+        log(f"{PORT} is missing (an OmacVM.app without external displays)")
+        return 0
+    refresh_widget()
+    Agent().run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

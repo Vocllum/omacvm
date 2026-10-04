@@ -503,15 +503,22 @@ patch -d "$source_dir" -p1 -f -i "$iso_swap_patch"
 patch -d "$source_dir" -p1 -f -i "$injected_text_patch"
 patch -d "$source_dir" -p1 -f -i "$usb_exact_bus_patch"
 # OmacVM: app name and icon from the launcher; Quit shuts the guest down;
-# full screen beside the notch; the window keeps its size; the recording
-# device opens off the BQL.
+# full screen beside the notch; the window keeps its size; full screen at the
+# window's real size; modifiers only from input events; the recording device
+# opens off the BQL.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-identity.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdown.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
 verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
+# OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
+# OmacVM: outputs switched on or off together reach the guest (virtio-gpu).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-event-race.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
