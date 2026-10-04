@@ -214,18 +214,22 @@ window per guest screen:
 - Two outputs switched at once could leave Linux with an old list (it
   clears the display event after reading); a small virtio-gpu patch
   (`qemu-virtio-gpu-display-event-race.patch`) raises the event again.
-- Outputs move when displays come and go. Hyprland leaves a mapped layer
-  surface (the bar, the wallpaper) at its output's old place, and Omarchy's
-  remap for that never fires (it waits for x/y signals Quickshell's screens
-  do not have), so a display could end up dark grey with no bar until the
-  shell restarted. Omanotch's patched bar and wallpaper remap themselves
-  when their output moves. For Omarchy's own, `omacvm-displays` checks where
-  the wallpaper layers are once the layout has settled, and when one is
-  still off its display a few seconds later it restarts the shell (at most
-  every 2 minutes, 3 times per session, not again when a restart changed
-  nothing; `repair-shell=off` in
+- A display with only Hyprland's dark grey (no wallpaper, no bar) means the
+  shell draws nothing there. The cause found: QEMU refused the memory of a
+  big texture (the wallpaper) when it came in more than 16384 pieces, as it
+  does in fragmented guest memory, and virglrenderer then dropped the
+  shell's GPU context (`qemu-virtio-gpu-mapping-entries.patch` allows 1 GiB).
+  `omacvm-displays` also looks at what each display shows (a small
+  screenshot) after the shell starts and after the layout changes; a display
+  that shows only the grey with no window on it gets the shell restarted
+  (not while locked, at most every 2 minutes, 3 times per session, not again
+  when a restart changed nothing; `repair-shell=off` in
   `~/.config/omacvm/displays.conf` turns that off). `omacvm check` says
-  "wallpaper" when one is off its display.
+  "desktop" in the VM and "GPU contexts" on the Mac (QEMU's log).
+- Outputs move when displays come and go. Omarchy's remap for a layer
+  surface left at its output's old place never fires (it waits for x/y
+  signals Quickshell's screens do not have); Omanotch's patched bar and
+  wallpaper remap themselves when their output moves.
 
 Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
 virtual Mac display (killing it is unplugging it). With

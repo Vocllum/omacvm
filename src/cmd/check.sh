@@ -165,6 +165,15 @@ if [[ -n $miclog && -f $miclog ]]; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
 fi
+# A VM app whose GPU context virglrenderer dropped draws nothing until it
+# restarts; for the shell that is a black display without bar. QEMU's log
+# (this run of the VM) names it.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  lost=$(grep -o 'context error reported [0-9]* "[^"]*"' "$miclog" | sed 's/.*"\(.*\)"$/\1/' | sort -u | paste -sd, - | sed 's/,/, /g')
+  if [[ -n $lost ]]; then
+    bad "GPU contexts" "lost by: $lost (it draws nothing until restarted; the shell: omarchy-restart-shell)"
+  else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then

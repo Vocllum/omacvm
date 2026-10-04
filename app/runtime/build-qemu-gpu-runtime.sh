@@ -522,6 +522,8 @@ verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_wind
 patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 # OmacVM: outputs switched on or off together reach the guest (virtio-gpu).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-event-race.patch"
+# OmacVM: big buffers in fragmented guest memory attach (virtio-gpu).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-mapping-entries.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
