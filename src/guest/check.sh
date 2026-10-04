@@ -58,6 +58,8 @@ mon=$(as_user hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) 
 if [[ -z $mon ]]; then bad "display" "no monitor from hyprctl"
 elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode (monitors.lua not applied)"
 else ok "display" "$mon"; fi
+bg=$H/.local/state/omarchy/current/background
+if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is missing: omacvm apply, then log in again"; fi
 
 section "The Mac in the bar (Bridge)"
 if [[ $BRIDGE == on ]]; then
