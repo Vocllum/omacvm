@@ -1,0 +1,87 @@
+From: OmacVM
+Subject: [PATCH] vrend: wait for fences without spinning a core on macOS
+
+Apple's glClientWaitSync spins on the CPU until the fence signals, so the
+sync thread kept a core busy while the guest rendered. Test the fence
+instead: busy for the first 100 us (most fences are done by then), then
+wait 50 us at a time with mach_wait_until. The sync thread becomes a
+time-constraint thread, so macOS wakes it when asked; plain nanosleep was
+stretched by timer coalescing and cut WebGL Aquarium to 7-15 fps.
+
+Measured in an OmacVM.app VM (bench lock held): QEMU's CPU during glmark2
+195% -> 165%, during Aquarium 194% -> 176%; glmark2 3351/3417 -> 3361/3310,
+Aquarium 19.2-20.1 -> 19.6-20.4 fps.
+
+Upstream: macOS-specific; could go upstream with the thread-sync support.
+
+diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
+index 394fb9b..677c6c6 100644
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -95,6 +95,12 @@ static const uint32_t fake_occlusion_query_samples_passed_default = 1024;
+ 
+ const struct vrend_if_cbs *vrend_clicbs;
+ 
++#ifdef __APPLE__
++#include <mach/mach.h>
++#include <mach/mach_time.h>
++#include <mach/thread_policy.h>
++#endif
++
+ struct vrend_fence {
+    /* When the sync thread is waiting on the fence and the main thread
+     * destroys the context, ctx is set to NULL.  Otherwise, ctx is always
+@@ -7384,6 +7390,30 @@ static bool do_wait(struct vrend_fence *fence, bool can_block)
+ 
+    bool done = false;
+    int timeout = can_block ? 1000000000 : 0;
++#ifdef __APPLE__
++   /* Apple's glClientWaitSync spins on the CPU until the fence signals.
++    * Test instead, busy for the first 100 us (most fences are done by
++    * then), then wait 50 us between tests with mach_wait_until: the sync
++    * thread is a time-constraint thread, so macOS wakes it on time. */
++   if (can_block) {
++      static mach_timebase_info_data_t tb;
++      if (!tb.denom)
++         mach_timebase_info(&tb);
++      const uint64_t t0 = mach_absolute_time();
++      const uint64_t spin = 100000ull * tb.denom / tb.numer;
++      const uint64_t nap = 50000ull * tb.denom / tb.numer;
++      for (;;) {
++         GLenum glret = glClientWaitSync(fence->glsyncobj, 0, 0);
++         if (glret == GL_WAIT_FAILED)
++            virgl_warn("Wait sync failed: illegal fence object %p\n", (void*) fence->glsyncobj);
++         if (glret != GL_TIMEOUT_EXPIRED)
++            return true;
++         const uint64_t now = mach_absolute_time();
++         if (now - t0 > spin)
++            mach_wait_until(now + nap);
++      }
++   }
++#endif
+    do {
+       GLenum glret = glClientWaitSync(fence->glsyncobj, 0, timeout);
+       if (glret == GL_WAIT_FAILED) {
+@@ -7479,6 +7509,22 @@ static int thread_sync(UNUSED void *arg)
+    virgl_gl_context gl_context = vrend_state.sync_context;
+ 
+    u_thread_setname("vrend-sync");
++#ifdef __APPLE__
++   {
++      /* Short, punctual waits (see do_wait): a time-constraint thread is
++       * woken when asked, not when timer coalescing gets round to it. */
++      mach_timebase_info_data_t tb;
++      mach_timebase_info(&tb);
++      thread_time_constraint_policy_data_t pol = {
++         .period = 0,
++         .computation = (uint32_t)(50000ull * tb.denom / tb.numer),
++         .constraint = (uint32_t)(1000000ull * tb.denom / tb.numer),
++         .preemptible = 1,
++      };
++      thread_policy_set(mach_thread_self(), THREAD_TIME_CONSTRAINT_POLICY,
++                        (thread_policy_t)&pol, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
++   }
++#endif
+ 
+    mtx_lock(&vrend_state.fence_mutex);
+    vrend_clicbs->make_current_surfaceless(gl_context);

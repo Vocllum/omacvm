@@ -1,0 +1,102 @@
+From: OmacVM
+Subject: [PATCH] virtio-gpu: async virgl fences with the Cocoa GL display
+
+QEMU only turns on virglrenderer's sync thread (VIRGL_RENDERER_THREAD_SYNC
+with ASYNC_FENCE_CB) for an EGL display. With Cocoa's CGL contexts the
+fences were polled from a 1 ms timer, so every guest wait on the GPU took
+up to a millisecond more than the GPU needed (glmark2 stuck near 1250,
+fence-to-reply median 1.56 ms in QEMU's trace).
+
+CGL contexts can be current on any thread, so the sync thread works here:
+each fence is reported the moment the GPU finishes it (median 0.2 ms).
+The sync thread's query signal fd is served at once from the main loop.
+Needs the virglrenderer eventfd for macOS (virgl-darwin-thread-sync.patch).
+OMACVM_VIRGL_POLL_FENCES=1 goes back to polling; the log says which.
+
+A faster poll timer is no alternative: without ppoll, QEMU's main loop on
+macOS waits in whole milliseconds.
+
+--- a/hw/display/virtio-gpu-virgl.c	2026-10-04 10:26:39
++++ b/hw/display/virtio-gpu-virgl.c	2026-10-04 10:26:39
+@@ -14,6 +14,7 @@
+ #include "qemu/osdep.h"
+ #include "qemu/error-report.h"
+ #include "qemu/iov.h"
++#include "qemu/main-loop.h"
+ #include "trace.h"
+ #include "hw/virtio/virtio.h"
+ #include "hw/virtio/virtio-gpu.h"
+@@ -1465,7 +1466,20 @@
+     virtio_gpu_virgl_reset_async_fences(g);
+ 
+     return true;
++}
++
++#ifdef CONFIG_DARWIN
++static void virtio_gpu_virgl_poll_fd_read(void *opaque)
++{
++    VirtIOGPU *g = opaque;
++    VirtIOGPUGL *gl = VIRTIO_GPU_GL(g);
++
++    if (gl->renderer_state != RS_INITED) {
++        return;
++    }
++    virgl_renderer_poll();
+ }
++#endif
+ 
+ static int virtio_gpu_virgl_init(VirtIOGPU *g)
+ {
+@@ -1485,6 +1499,21 @@
+ #endif
+     }
+ #endif
++#if defined(CONFIG_DARWIN) && VIRGL_CHECK_VERSION(1, 1, 2)
++    /*
++     * The Cocoa display's CGL contexts can be current on any thread, so
++     * virglrenderer can wait for fences on its own thread and report each
++     * one the moment the GPU is done, instead of being polled every 1 ms.
++     * OMACVM_VIRGL_POLL_FENCES=1 goes back to polling.
++     */
++    if (!(flags & VIRGL_RENDERER_ASYNC_FENCE_CB) &&
++        !getenv("OMACVM_VIRGL_POLL_FENCES")) {
++        virtio_gpu_3d_cbs.write_fence         = virgl_write_async_fence;
++        virtio_gpu_3d_cbs.write_context_fence = virgl_write_async_context_fence;
++        flags |= VIRGL_RENDERER_ASYNC_FENCE_CB;
++        flags |= VIRGL_RENDERER_THREAD_SYNC;
++    }
++#endif
+ #ifdef VIRGL_RENDERER_D3D11_SHARE_TEXTURE
+     if (qemu_egl_angle_d3d) {
+         flags |= VIRGL_RENDERER_D3D11_SHARE_TEXTURE;
+@@ -1520,10 +1549,30 @@
+         error_report("virgl could not be initialized: %d", ret);
+         return ret;
+     }
++#ifdef CONFIG_DARWIN
++    /* Which fence path this VM took, once, for logs and checks. */
++    info_report("virtio-gpu: virgl fences %s",
++                (flags & VIRGL_RENDERER_ASYNC_FENCE_CB) ?
++                "reported by the sync thread" : "polled every 1 ms");
++#endif
+ 
+     gl->fence_poll = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                   virtio_gpu_fence_poll, g);
+ 
++#ifdef CONFIG_DARWIN
++    /*
++     * With async fences the sync thread signals this fd when queries need
++     * the render thread; serve it at once rather than on the next poll.
++     */
++    if (flags & VIRGL_RENDERER_ASYNC_FENCE_CB) {
++        int poll_fd = virgl_renderer_get_poll_fd();
++        if (poll_fd >= 0) {
++            qemu_set_fd_handler(poll_fd, virtio_gpu_virgl_poll_fd_read,
++                                NULL, g);
++        }
++    }
++#endif
++
+     if (virtio_gpu_stats_enabled(g->parent_obj.conf)) {
+         gl->print_stats = timer_new_ms(QEMU_CLOCK_VIRTUAL,
+                                        virtio_gpu_print_stats, g);
