@@ -49,9 +49,11 @@ panel's full rate.
 
 ## Consequences
 
-- 98.3-99.8 % of guest frames shown exactly once on the 120 Hz panel
-  (119.2-120.0 distinct frames a second), was 74-82 % (107.9-110.0).
-- One refresh more delay: QEMU flush to screen 10-14 ms median, was 6-7 ms.
+- 99.0-99.6 % of guest frames shown exactly once on the 120 Hz panel
+  (119.8 distinct frames a second), was 74-82 % (107.9-110.0); external
+  60 Hz 99.7 % (was 82 %), virtual 120 Hz display 98.2 % (was 55.5 %).
+- One refresh more delay: QEMU flush to screen 12.6-14.2 ms median, was
+  5-7 ms.
   Option 1 would win it back (the guest renders right after the latch).
 - `OMACVM_GL_VSYNC=0` restores showing frames when drawn.
 - Two more threads in QEMU (display link, commit queue); no BQL on either.
