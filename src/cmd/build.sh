@@ -154,12 +154,13 @@ fi
 # ---------- 1. Parallels, UTM, VMware Fusion or OmacVM.app ----------
 if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels, utm, fusion or app"
+  # OmacVM.app first: the README recommends it.
   ui_select pick "Where should Omarchy run?" 0 \
-    "Parallels Desktop|near-native speed, every display · paid" \
+    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · one display" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
-    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it (new)" \
-    "OmacVM.app|free · its own app, nothing else to install · one display (new)"
-  case $pick in 0) TYPE=parallels ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=app ;; esac
+    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it" \
+    "Parallels Desktop|near-native speed, every display · paid"
+  case $pick in 0) TYPE=app ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=parallels ;; esac
   say "    Comparison: $README_ROUTES"
 fi
 # The app itself: installed now (after asking) when it is missing.
