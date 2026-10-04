@@ -173,6 +173,10 @@ gestures_legacy_forget "$IP"   # its daemon says the token now
 # hid Omarchy's pointer and need the Mac's until they get this apply.
 if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   echo omarchy > "$d/guest-pointer"
+  # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot
+  # go to the Mac's decoder): the app may offer AV1 to this VM.
+  gssh "$IP" "test -x /usr/local/lib/dri/omacvm_drv_video.so" < /dev/null 2>/dev/null &&
+    echo av1 > "$d/video-decode"
 fi
 
 if [[ $TYPE == parallels ]]; then

@@ -4,15 +4,23 @@
  * next to NV12; FFmpeg then picks I420 (it matches yuv420p), and Firefox
  * cannot show I420 surfaces, so it falls back to decoding on the CPU. This
  * shim loads Mesa's driver unchanged and hides I420/YV12 from the surface
- * formats, as drivers for real hardware do. Everything else is Mesa's.
+ * formats, as drivers for real hardware do.
+ *
+ * AV1: the Mac decodes whole AV1 frames with their headers, which Chromium
+ * sends; FFmpeg (Firefox, mpv) sends only tile data, which cannot work. So
+ * AV1 is listed for Chromium-based browsers only (OMACVM_VA_AV1=1 or 0
+ * overrides). Everything else is Mesa's.
  *
  * Built in the VM by install.sh; used through LIBVA_DRIVER_NAME=omacvm.
  * MIT, part of OmacVM.
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <va/va.h>
 #include <va/va_backend.h>
 
@@ -49,6 +57,39 @@ static VAStatus query_surface_attributes(VADriverContextP ctx, VAConfigID config
     return st;
 }
 
+static VAStatus (*mesa_query_config_profiles)(VADriverContextP, VAProfile *, int *);
+
+static int av1_allowed(void)
+{
+    const char *env = getenv("OMACVM_VA_AV1");
+    char exe[PATH_MAX];
+    ssize_t n;
+
+    if (env && *env)
+        return *env == '1';
+    n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+    if (n <= 0)
+        return 0;
+    exe[n] = 0;
+    return strstr(exe, "chrom") || strstr(exe, "brave") || strstr(exe, "electron");
+}
+
+static VAStatus query_config_profiles(VADriverContextP ctx, VAProfile *list, int *num)
+{
+    VAStatus st = mesa_query_config_profiles(ctx, list, num);
+    int i, n = 0;
+
+    if (st != VA_STATUS_SUCCESS || av1_allowed())
+        return st;
+    for (i = 0; i < *num; i++) {
+        if (list[i] == VAProfileAV1Profile0 || list[i] == VAProfileAV1Profile1)
+            continue;
+        list[n++] = list[i];
+    }
+    *num = n;
+    return st;
+}
+
 typedef VAStatus (*init_fn)(VADriverContextP);
 
 static VAStatus shim_init(VADriverContextP ctx)
@@ -73,6 +114,10 @@ static VAStatus shim_init(VADriverContextP ctx)
     if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaQuerySurfaceAttributes) {
         mesa_query_surface_attributes = ctx->vtable->vaQuerySurfaceAttributes;
         ctx->vtable->vaQuerySurfaceAttributes = query_surface_attributes;
+    }
+    if (st == VA_STATUS_SUCCESS && ctx->vtable && ctx->vtable->vaQueryConfigProfiles) {
+        mesa_query_config_profiles = ctx->vtable->vaQueryConfigProfiles;
+        ctx->vtable->vaQueryConfigProfiles = query_config_profiles;
     }
     return st;
 }

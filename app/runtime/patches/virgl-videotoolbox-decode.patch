@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..8f5e1e1
+index 0000000..2fbca89
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,1448 @@
+@@ -0,0 +1,1614 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -117,9 +117,11 @@ index 0000000..8f5e1e1
 + *  - H.264: the slice NAL units come through unchanged; SPS and PPS are
 + *    rebuilt from the picture parameters (or taken from the data when the
 + *    guest sends them in-band).
-+ *  - VP9: each frame comes through whole (uncompressed header included);
-+ *    hidden frames are held back and sent together with the next shown frame
-+ *    as a superframe, which is how VideoToolbox wants them.
++ *  - VP9: each frame comes through whole (uncompressed header included)
++ *    and goes to VideoToolbox as it is; hidden frames get their picture too.
++ *  - AV1 (opt-in, OMACVM_VIDEO_AV1=1): Chrome sends the whole temporal unit
++ *    for every frame in it; the frame's own OBUs are cut out and decoded
++ *    alone. FFmpeg sends tile data without headers, which cannot work.
 + * Reference frames are tracked by VideoToolbox from the bitstream, so the
 + * guest's reference surface ids are not needed.
 + *
@@ -275,8 +277,6 @@ index 0000000..8f5e1e1
 +    size_t cap;
 +};
 +
-+#define VP9_MAX_PENDING 8
-+
 +struct virgl_video_codec {
 +    uint32_t guest_profile;
 +    enum pipe_video_profile profile;
@@ -322,9 +322,7 @@ index 0000000..8f5e1e1
 +    uint8_t inband_pps[512];
 +    size_t inband_pps_size;
 +
-+    /* VP9: hidden frames waiting for the next shown frame */
-+    struct vt_bytes pending[VP9_MAX_PENDING];
-+    unsigned num_pending;
++    /* VP9 */
 +    uint32_t vp9_width;
 +    uint32_t vp9_height;
 +    uint32_t vp9_bit_depth;
@@ -1134,19 +1132,6 @@ index 0000000..8f5e1e1
 +    return h;
 +}
 +
-+static bool vp9_has_superframe_index(const uint8_t *data, size_t size)
-+{
-+    if (!size)
-+        return false;
-+    uint8_t marker = data[size - 1];
-+    if ((marker & 0xe0) != 0xc0)
-+        return false;
-+    unsigned frames = (marker & 7) + 1;
-+    unsigned mag = ((marker >> 3) & 3) + 1;
-+    size_t index = 2 + mag * frames;
-+    return size >= index && data[size - index] == marker;
-+}
-+
 +static bool vp9_set_format(struct virgl_video_codec *codec, uint32_t width,
 +                           uint32_t height, uint32_t profile, uint32_t bit_depth)
 +{
@@ -1209,8 +1194,6 @@ index 0000000..8f5e1e1
 +    uint32_t width = d->picture_parameter.frame_width;
 +    uint32_t height = d->picture_parameter.frame_height;
 +    uint32_t bit_depth = d->picture_parameter.bit_depth ? d->picture_parameter.bit_depth : 8;
-+    bool superframe = vp9_has_superframe_index(codec->bits.data, codec->bits.size);
-+    struct vt_bytes sample = { 0 };
 +
 +    if (!h.valid || h.show_existing)
 +        return h.valid ? 0 : -1;
@@ -1220,58 +1203,233 @@ index 0000000..8f5e1e1
 +        height = codec->vp9_height ? codec->vp9_height : codec->height;
 +    }
 +
-+    if (h.key_frame || !codec->session) {
-+        if (!h.key_frame && !codec->session) {
-+            /* Joined in the middle: wait for a key frame. */
-+            return 0;
++    if (!codec->session && !h.key_frame)
++        return 0;   /* joined in the middle: wait for a key frame */
++    if (h.key_frame && (!codec->session || width != codec->vp9_width ||
++                        height != codec->vp9_height || bit_depth != codec->vp9_bit_depth)) {
++        if (!vp9_set_format(codec, width, height, h.profile, bit_depth))
++            return -1;
++    }
++
++    /* One frame per sample, hidden ones too: VideoToolbox returns a picture
++     * for hidden frames as well, which a later show_existing_frame shows
++     * from the guest's surface. */
++    if (decode_sample(codec, codec->bits.data, codec->bits.size))
++        deliver_output(codec, target);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------ */
++/* AV1                                                                       */
++/* ------------------------------------------------------------------------ */
++
++struct av1_obu {
++    uint8_t type;
++    size_t start;       /* header */
++    size_t payload;     /* payload start */
++    size_t end;
++};
++
++static size_t av1_leb128(const uint8_t *p, size_t avail, uint64_t *value)
++{
++    uint64_t v = 0;
++    for (size_t i = 0; i < 8 && i < avail; i++) {
++        v |= (uint64_t)(p[i] & 0x7f) << (7 * i);
++        if (!(p[i] & 0x80)) {
++            *value = v;
++            return i + 1;
 +        }
-+        if (!codec->session || width != codec->vp9_width ||
-+            height != codec->vp9_height || bit_depth != codec->vp9_bit_depth) {
-+            for (unsigned i = 0; i < codec->num_pending; i++)
-+                bytes_free(&codec->pending[i]);
-+            codec->num_pending = 0;
-+            if (!vp9_set_format(codec, width, height, h.profile, bit_depth))
++    }
++    return 0;
++}
++
++/* Splits low-overhead AV1 data (OBUs with sizes) into OBUs. */
++static unsigned av1_split(const uint8_t *d, size_t n, struct av1_obu *obus, unsigned max)
++{
++    size_t p = 0;
++    unsigned count = 0;
++
++    while (p < n && count < max) {
++        uint8_t hd = d[p];
++        bool ext = hd & 4, has_size = hd & 2;
++        size_t hp = p + 1 + (ext ? 1 : 0), ll;
++        uint64_t len;
++
++        if (hd & 0x80)                  /* forbidden bit */
++            return 0;
++        if (!has_size || hp >= n)
++            return 0;                   /* not what VideoToolbox takes */
++        ll = av1_leb128(d + hp, n - hp, &len);
++        if (!ll || hp + ll + len > n)
++            return 0;
++        obus[count].type = (hd >> 3) & 15;
++        obus[count].start = p;
++        obus[count].payload = hp + ll;
++        obus[count].end = hp + ll + len;
++        count++;
++        p = hp + ll + len;
++    }
++    return p == n ? count : 0;
++}
++
++/* seq_level_idx of operating point 0, from a sequence header OBU payload. */
++static uint8_t av1_seq_level(const uint8_t *pl, size_t n, uint8_t *tier)
++{
++    struct bitr r;
++    unsigned timing, decoder_model = 0, ops;
++    uint8_t level = 31;
++
++    r.size = n < sizeof(r.rbsp) ? n : sizeof(r.rbsp);
++    memcpy(r.rbsp, pl, r.size);
++    r.pos = 0;
++    r.error = false;
++    *tier = 0;
++
++    br_u(&r, 3);                        /* seq_profile */
++    br_u(&r, 1);                        /* still_picture */
++    if (br_u(&r, 1))                    /* reduced_still_picture_header */
++        return br_u(&r, 5);
++    timing = br_u(&r, 1);
++    if (timing) {
++        br_u(&r, 32);
++        br_u(&r, 32);
++        if (br_u(&r, 1)) {              /* equal_picture_interval: uvlc */
++            unsigned z = 0;
++            while (!r.error && !br_u(&r, 1) && z < 32)
++                z++;
++            br_u(&r, z);
++        }
++        decoder_model = br_u(&r, 1);
++        if (decoder_model) {
++            br_u(&r, 5);
++            br_u(&r, 32);
++            br_u(&r, 5);
++            br_u(&r, 5);
++        }
++    }
++    br_u(&r, 1);                        /* initial_display_delay_present */
++    ops = br_u(&r, 5) + 1;
++    (void)ops;
++    br_u(&r, 12);                       /* operating_point_idc[0] */
++    level = br_u(&r, 5);
++    if (level > 7)
++        *tier = br_u(&r, 1);
++    return r.error ? 31 : level;
++}
++
++static bool av1_set_format(struct virgl_video_codec *codec, const uint8_t *seq_obu,
++                           size_t seq_size, const uint8_t *seq_payload, size_t payload_size)
++{
++    const struct virgl_av1_picture_desc *d = &codec->desc.av1;
++    CMVideoFormatDescriptionRef fmt = NULL;
++    CFMutableDictionaryRef ext, atoms;
++    CFDataRef data;
++    uint8_t *cfg;
++    uint8_t tier, level = av1_seq_level(seq_payload, payload_size, &tier);
++    uint8_t depth = d->picture_parameter.bit_depth_idx;
++    uint32_t w = d->picture_parameter.max_width ? d->picture_parameter.max_width + 1u : codec->width;
++    uint32_t h = d->picture_parameter.max_height ? d->picture_parameter.max_height + 1u : codec->height;
++    OSStatus st;
++
++    /* AV1CodecConfigurationRecord + the sequence header as configOBUs. */
++    cfg = malloc(4 + seq_size);
++    if (!cfg)
++        return false;
++    cfg[0] = 0x81;
++    cfg[1] = (uint8_t)((seq_payload[0] >> 5) << 5) | level;
++    cfg[2] = (uint8_t)((tier << 7) | ((depth >= 1) << 6) | ((depth == 2) << 5) |
++                       (d->picture_parameter.seq_info_fields.mono_chrome << 4) |
++                       (1 << 3) | (1 << 2));    /* 4:2:0 */
++    cfg[3] = 0;
++    memcpy(cfg + 4, seq_obu, seq_size);
++    data = CFDataCreate(kCFAllocatorDefault, cfg, 4 + seq_size);
++    free(cfg);
++
++    atoms = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
++                                      &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(atoms, CFSTR("av1C"), data);
++    CFRelease(data);
++    ext = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
++                                    &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(ext, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms, atoms);
++    CFRelease(atoms);
++    st = CMVideoFormatDescriptionCreate(kCFAllocatorDefault, kCMVideoCodecType_AV1,
++                                        w, h, ext, &fmt);
++    CFRelease(ext);
++    if (st != noErr) {
++        virgl_error("vt-video: AV1 format description failed: %d\n", (int)st);
++        return false;
++    }
++    session_destroy(codec);
++    if (codec->format)
++        CFRelease(codec->format);
++    codec->format = fmt;
++    return session_create(codec);
++}
++
++/* The guest sends the whole temporal unit (Chrome) once for every frame in
++ * it; the picture's first tile offset says which frame this call is about.
++ * VideoToolbox gets that frame alone (with a temporal delimiter, and the
++ * sequence header when there is one), and returns its picture, hidden or
++ * not. FFmpeg sends bare tile data, without headers: not supported. */
++static int av1_end_frame(struct virgl_video_codec *codec,
++                         struct virgl_video_buffer *target)
++{
++    const struct virgl_av1_picture_desc *d = &codec->desc.av1;
++    const uint8_t *data = codec->bits.data;
++    struct av1_obu obus[64];
++    unsigned n = av1_split(data, codec->bits.size, obus, 64), i, first = 0, last = 0;
++    size_t tile = d->slice_parameter.slice_data_offset[0];
++    int seq = -1, frame = -1;
++    struct vt_bytes sample = { 0 };
++    static const uint8_t td[2] = { 0x12, 0x00 };
++
++    if (!n) {
++        if (codec->errors++ < 5)
++            virgl_warn("vt-video: AV1 data without OBU headers (not supported)\n");
++        return -1;
++    }
++    for (i = 0; i < n; i++) {
++        if (obus[i].type == 1)
++            seq = i;
++        if (tile >= obus[i].payload && tile < obus[i].end)
++            frame = i;
++    }
++    if (frame < 0)
++        return -1;
++    /* A frame is a frame OBU, or a frame header OBU and its tile groups. */
++    first = last = frame;
++    if (obus[frame].type == 4) {
++        while (first > 0 && obus[first].type != 3)
++            first--;
++        while (last + 1 < n && obus[last + 1].type == 4)
++            last++;
++    }
++
++    if (seq >= 0) {
++        const uint8_t *seq_obu = data + obus[seq].start;
++        size_t seq_size = obus[seq].end - obus[seq].start;
++        if (!codec->session || seq_size != codec->sps_size ||
++            memcmp(codec->sps, seq_obu, seq_size)) {
++            if (seq_size > sizeof(codec->sps))
++                return -1;
++            memcpy(codec->sps, seq_obu, seq_size);
++            codec->sps_size = seq_size;
++            if (!av1_set_format(codec, seq_obu, seq_size, data + obus[seq].payload,
++                                obus[seq].end - obus[seq].payload))
 +                return -1;
 +        }
 +    }
++    if (!codec->session)
++        return 0;   /* no sequence header yet */
 +
-+    if (!h.show_frame && !superframe) {
-+        /* Hidden frame (alt-ref): VideoToolbox wants it in a superframe with
-+         * the next shown frame. Nothing is shown for it. */
-+        if (codec->num_pending == VP9_MAX_PENDING) {
-+            virgl_warn("vt-video: too many hidden VP9 frames\n");
-+            return -1;
-+        }
-+        bytes_append(&codec->pending[codec->num_pending++],
-+                     codec->bits.data, codec->bits.size);
-+        return 0;
-+    }
-+
-+    if (codec->num_pending && !superframe) {
-+        unsigned frames = codec->num_pending + 1;
-+        uint8_t marker = 0xc0 | (3 << 3) | (frames - 1);    /* 4-byte sizes */
-+
-+        for (unsigned i = 0; i < codec->num_pending; i++)
-+            bytes_append(&sample, codec->pending[i].data, codec->pending[i].size);
-+        bytes_append(&sample, codec->bits.data, codec->bits.size);
-+        bytes_append(&sample, &marker, 1);
-+        for (unsigned i = 0; i < frames; i++) {
-+            uint32_t s = i < codec->num_pending ? codec->pending[i].size : codec->bits.size;
-+            uint8_t le[4] = { s, s >> 8, s >> 16, s >> 24 };
-+            bytes_append(&sample, le, 4);
-+        }
-+        bytes_append(&sample, &marker, 1);
-+        for (unsigned i = 0; i < codec->num_pending; i++)
-+            bytes_free(&codec->pending[i]);
-+        codec->num_pending = 0;
-+        if (decode_sample(codec, sample.data, sample.size))
-+            deliver_output(codec, target);
-+        bytes_free(&sample);
-+        return 0;
-+    }
-+
-+    if (decode_sample(codec, codec->bits.data, codec->bits.size))
++    bytes_append(&sample, td, sizeof(td));
++    if (seq >= 0 && (unsigned)seq < first)
++        bytes_append(&sample, data + obus[seq].start, obus[seq].end - obus[seq].start);
++    bytes_append(&sample, data + obus[first].start, obus[last].end - obus[first].start);
++    if (decode_sample(codec, sample.data, sample.size))
 +        deliver_output(codec, target);
++    bytes_free(&sample);
 +    return 0;
 +}
 +
@@ -1296,9 +1454,10 @@ index 0000000..8f5e1e1
 +    callbacks = cbs;
 +    VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9);
 +    vt_initialized = true;
-+    virgl_info("vt-video: VideoToolbox video decode on (H.264 %s, VP9 %s, guest profile numbers: %s)\n",
++    virgl_info("vt-video: VideoToolbox video decode on (H.264 %s, VP9 %s, AV1 %s, guest profile numbers: %s)\n",
 +               vt_supports(kCMVideoCodecType_H264) ? "hw" : "sw",
 +               vt_supports(kCMVideoCodecType_VP9) ? "hw" : "no",
++               vt_supports(kCMVideoCodecType_AV1) ? "hw" : "no",
 +               abi_legacy ? "legacy" : "Mesa 26");
 +    return 0;
 +}
@@ -1349,6 +1508,11 @@ index 0000000..8f5e1e1
 +    if (vt_supports(kCMVideoCodecType_VP9) && !getenv("OMACVM_VIDEO_NO_VP9")) {
 +        add_caps(caps, PIPE_VIDEO_PROFILE_VP9_PROFILE0, 8192, 8192, PIPE_FORMAT_NV12);
 +    }
++    /* AV1 works only for guests that send whole temporal units (Chrome). */
++    if (vt_supports(kCMVideoCodecType_AV1) && getenv("OMACVM_VIDEO_AV1") &&
++        !strcmp(getenv("OMACVM_VIDEO_AV1"), "1")) {
++        add_caps(caps, PIPE_VIDEO_PROFILE_AV1_MAIN, 8192, 8192, PIPE_FORMAT_NV12);
++    }
 +    return 0;
 +}
 +
@@ -1363,7 +1527,7 @@ index 0000000..8f5e1e1
 +
 +    p = host_profile(args->profile);
 +    if (args->entrypoint != PIPE_VIDEO_ENTRYPOINT_BITSTREAM || kind_of(p) == VT_KIND_NONE ||
-+        kind_of(p) == VT_KIND_HEVC || kind_of(p) == VT_KIND_AV1) {
++        kind_of(p) == VT_KIND_HEVC) {
 +        virgl_warn("vt-video: unsupported profile %u entrypoint %u\n",
 +                   (unsigned)args->profile, (unsigned)args->entrypoint);
 +        return NULL;
@@ -1384,7 +1548,8 @@ index 0000000..8f5e1e1
 +    codec->l1_default = -1;
 +
 +    vt_log("codec profile %u (%s) %ux%u\n", (unsigned)args->profile,
-+           codec->kind == VT_KIND_H264 ? "H.264" : "VP9", args->width, args->height);
++           codec->kind == VT_KIND_H264 ? "H.264" : codec->kind == VT_KIND_VP9 ? "VP9" : "AV1",
++           args->width, args->height);
 +    return codec;
 +}
 +
@@ -1402,8 +1567,6 @@ index 0000000..8f5e1e1
 +        if (codec->held[i])
 +            CVPixelBufferRelease(codec->held[i]);
 +    bytes_free(&codec->bits);
-+    for (unsigned i = 0; i < VP9_MAX_PENDING; i++)
-+        bytes_free(&codec->pending[i]);
 +    free(codec);
 +}
 +
@@ -1519,6 +1682,9 @@ index 0000000..8f5e1e1
 +        break;
 +    case VT_KIND_VP9:
 +        ret = vp9_end_frame(codec, target);
++        break;
++    case VT_KIND_AV1:
++        ret = av1_end_frame(codec, target);
 +        break;
 +    default:
 +        break;
