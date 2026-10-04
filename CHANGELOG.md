@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- Omanotch no longer asks for Accessibility. It picks the VM for the strip by
+  the full-screen window's app; with two VMs of one app it keeps the one it
+  serves (or takes the one that connected last) instead of reading window
+  titles.
+
 ## 2.6.0
 
 - OmacVM.app: Omarchy in its own Mac app, without Parallels, UTM or VMware

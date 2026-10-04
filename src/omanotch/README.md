@@ -199,13 +199,11 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
   is deliberate; `notchbar.lua` dismisses that one warning and nothing else.
 - Several VMs at once: the strip shows the bar of the VM whose window is full
   screen on the built-in display, and only that VM's bar is parked; the
-  others keep their own bar. Omanotch tells VMs of the same app apart by the
-  window title (the VM's name), which it reads through Accessibility: allow
-  Omanotch in System Settings → Privacy & Security → Accessibility when it
-  asks (only needed with two or more VMs of one app connected). The VM says
-  its name if [OmacVM](https://github.com/gillesgoetsch/omacvm) set it up
-  (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`); a VM without a name is matched
-  by its app only.
+  others keep their own bar. Omanotch needs no macOS permission for this: it
+  knows the window's app (Parallels, UTM, VMware Fusion or OmacVM.app), not
+  which of its VMs the window shows. With two VMs of one app connected, the
+  strip keeps the one it serves, else takes the one that connected last;
+  switching between them does not switch the strip.
 - OmacVM.app's VMs reach the Mac at 127.0.0.1, where any Mac program could
   connect, or listen in Omanotch's place. There `notchcast` and the Mac first
   prove to each other that they know OmacVM's Bridge token (HMAC-SHA256 over
@@ -241,7 +239,7 @@ up by itself.
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
 | Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
 | OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …") · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
-| Strip shows another VM's bar | `~/Library/Logs/omanotch.log` ("strip serves guest …; front window …"): Omanotch needs Accessibility permission, and the VM's name (`OMACVM_VM_NAME_B64` in `/etc/omacvm/env`) must appear in its window title |
+| Strip shows another VM's bar | two VMs of one app are connected: Omanotch tells apps apart, not VMs of one app (`~/Library/Logs/omanotch.log`: "strip serves guest …"); stop the other VM or restart its `notchcast` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
 | Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display |
 
