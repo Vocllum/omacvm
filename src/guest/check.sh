@@ -89,6 +89,12 @@ if [[ $BRIDGE == on ]]; then
   else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
+  # Right after the first login omacvm-plugins may still be enabling the widgets.
+  for _ in $(seq 60); do
+    [[ -s $H/.local/state/omacvm/pending-plugins &&
+       $(systemctl --user -M "$U@" show -p ActiveState --value omacvm-plugins.service 2>/dev/null) == activating ]] || break
+    sleep 1
+  done
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
   bt=$(as_user omacvm-bridge bluetooth 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$bt"; then
@@ -156,6 +162,9 @@ elif [[ $BATTERY == on ]]; then
     elif [[ ! -f /usr/lib/modules/$k/build/Makefile ]]; then bad "battery: kernel $k" "no headers to build the module with: omarchy update, reboot, omacvm apply"
     else bad "battery: kernel $k" "module not built (omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
   done
+  # Right after a boot the agent (and its first snapshot) may need a moment.
+  for _ in $(seq 15); do systemctl is-active -q omacvm-battery && break; sleep 1; done
+  for _ in $(seq 5); do [[ -d /sys/class/power_supply/BAT0 ]] && break; sleep 1; done
   if systemctl is-active -q omacvm-battery; then ok "battery agent" "omacvm-battery feeds it the Mac's"
   else bad "battery agent" "omacvm-battery.service not running ($(journalctl -u omacvm-battery -n1 -o cat 2>/dev/null | sed 's/^omacvm-battery: //'))"; fi
   up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
