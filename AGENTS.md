@@ -369,6 +369,7 @@ The less obvious ones, with causes and where the fix lives, are in
 | Build stops right after the Omarchy install | Omarchy enables ufw; new SSH connections from the Mac are refused | `src/vm/omarchy-install.sh` adds the rule while its own session is open |
 | `ERROR: problem running` from ufw | rule stored but not applicable live right after the install | ignored on purpose; verified with `ufw show added` |
 | UTM desktop blank after a resolution change | virgl under UTM cannot switch modes live | fixed mode in `monitors.lua`, reboot to change it |
+| OmacVM.app: video still decodes on the CPU | Arch Linux ARM's Chromium has no VA-API; or the app predates video decoding; or `vainfo` lists nothing | Google Chrome, Brave or Firefox; `omacvm check` (video decoding); `OMACVM_VIDEO_DEBUG=1` logs each stream in the VM's `logs/qemu.log` (`docs/video-decode.md`) |
 | UTM VM very slow | UTM started with `open -g` (background priority) or Vulkan driver on | start UTM normally; `QEMUVulkanDriver` 1 |
 | VM resumes a dead state after a hard kill (Parallels) | suspend files | delete `<pvm>/*.mem*` and `vm.lock` |
 | The Mac's pointer shows over the full-screen VM | another app's window over the VM hit-test area (Bartender's menu-bar overlay brings it back) | the gestures helper hides the pointer by AppKit hit test (click-through overlays such as `screencaptureui`'s are skipped); quit such menu-bar tools |
