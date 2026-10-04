@@ -3,11 +3,14 @@
 (the crashed case is recorded and skipped). dEQP writes its log into a pipe; each case is
 printed as one JSON line on stdout as soon as it is known, plus {"status": "Running"} when
 it starts, so the host still knows the case if the whole VM dies (QEMU crash).
+With DEQP_ISOLATE=1 dEQP is restarted after every failing case: on virgl one failed shader
+compile puts the whole guest context in error and every later case in that process fails too.
 Usage: deqp-run.py BINARY CASELIST [extra dEQP args...]"""
 import json, os, re, subprocess, sys, tempfile
 
 binary, caselist = sys.argv[1:3]
 extra = sys.argv[3:]
+isolate = os.environ.get("DEQP_ISOLATE") == "1"
 todo = [c.strip() for c in open(caselist) if c.strip()]
 os.chdir(os.path.dirname(os.path.abspath(binary)))  # dEQP finds its data next to the binary
 
@@ -36,8 +39,12 @@ while todo:
             seen.add(case); case = None
         elif line.startswith("#endTestCaseResult") and case:
             s = re.search(r'StatusCode="(\w+)"', "".join(body))
-            emit(case, s.group(1) if s else "Unknown")
+            status = s.group(1) if s else "Unknown"
+            emit(case, status)
             seen.add(case); case = None
+            if isolate and status == "Fail":
+                p.kill()
+                break
         elif case:
             body.append(line)
     p.wait()
