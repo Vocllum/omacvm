@@ -144,10 +144,14 @@ the GPU's own recovery, not a memory fault.
   = the previous gpu-robust runtime, after = this series):
   - dEQP GLES3 draw, instanced, vertex array, uniform block, transform
     feedback, primitive restart, buffer and indexing groups: 9196 cases, the
-    same result per case; dEQP GLES3 every 50th case (896): the same per case.
-    No draw was skipped by a check. After the review fixes: the 9196 cases
-    again the same per case (final runtime, aefb119), the every-50th sample
-    too (first version of the fixes); no draw skipped, no GPU fault.
+    same result per case; dEQP GLES3 every 50th case (896): the same per case
+    except `functional.flush_finish.flush_wait`, a timing test (Pass before,
+    CompatibilityWarning after). No draw was skipped by a check. After the
+    review fixes: the 9196 cases again the same per case (final runtime,
+    aefb119); the every-50th sample (first version of the fixes) is the same
+    per case as before this series and differs from the previous runtime only
+    in that timing test (Pass again); no draw skipped, no GPU fault. The
+    unused-first-input fix came after these runs.
   - WebGL 2 conformance (transform_feedback, vertex_arrays, buffers, rendering,
     uniforms, attribs; 33 pages): 30 pass after, 29 before (draw-buffers.html
     now passes).
