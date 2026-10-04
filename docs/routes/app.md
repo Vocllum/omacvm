@@ -48,7 +48,8 @@ OmacVM's version.
   the VM's clock is set to the Mac's.
 - Full screen in its own Space, below the notch, like Parallels; Omanotch puts
   Omarchy's bar into the strip beside the notch, as on the other routes.
-- Every Mac display in full screen: with an external display connected, full
+- Every Mac display in full screen (so far tested on virtual displays only,
+  see [Not done yet](#not-done-yet)): with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
   ...), each at that display's resolution, scale and refresh rate, placed as
@@ -185,10 +186,15 @@ window per guest screen:
   displays are. A display with its own rule in `monitors.lua` keeps it.
 - QEMU opens the other windows only after `omacvm-displays` said hello on
   that port (a VM without it keeps one screen) and while the switch is on.
+  It applies the VM's switch at most once a second, and it takes only
+  numbers it can use from the port: anything else is ignored.
 - The pointer: the VM has one tablet, and Hyprland spreads it over the box
   around all its outputs. `omacvm-displays` reports where Hyprland put each
   output, and QEMU points the tablet at the matching spot of that box, so
   the pointer lands where it is on the Mac, also with Omarchy's zoom.
+  The other displays' windows take the pointer (and with it the keyboard)
+  only while OmacVM.app is in front, or on a click; another app coming to
+  the front gets both back.
 - Two outputs switched at once could leave Linux with an old list (it
   clears the display event after reading); a small virtio-gpu patch
   (`qemu-virtio-gpu-display-event-race.patch`) raises the event again.
