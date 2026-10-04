@@ -54,7 +54,10 @@ OmacVM's version.
 - Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
   `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
   VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
-  newer); otherwise Vulkan apps fail to get memory. OpenGL stays on virgl.
+  newer; Arch Linux ARM has 26.2.3, so
+  [`app/scripts/dev/guest-mesa-venus.sh`](../../app/scripts/dev/guest-mesa-venus.sh)
+  builds the Venus driver into `/opt/mesa-venus`); otherwise Vulkan apps fail
+  to get memory. vkmark about 5,200. OpenGL stays on virgl.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

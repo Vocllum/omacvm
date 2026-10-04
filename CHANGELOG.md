@@ -17,7 +17,8 @@ in more words.
   back to the 2.8.0 GPU path.
 - Vulkan in the VM, hidden and experimental (Venus on MoltenVK):
   `defaults write org.omacvm.app venus -bool true`. Needs Mesa 26.2.4 or newer
-  in the VM.
+  in the VM (`app/scripts/dev/guest-mesa-venus.sh` builds it while Arch Linux
+  ARM has 26.2.3). vkmark about 5,200.
 
 ## 2.8.0
 
