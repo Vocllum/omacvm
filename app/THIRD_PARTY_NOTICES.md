@@ -28,11 +28,14 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   Workshop / Khronos) and the Khronos Vulkan loader 1.4.357 (Apache-2.0), from
   Homebrew's arm64_sequoia bottles. When the app carries KosmicKrisp, Mesa's
   Vulkan driver on Metal, Venus uses it on macOS 26 and newer. It is built
-  from a pinned Mesa commit and is mostly MIT, with BSD-2-Clause (xxHash) and
-  BLAKE3 (CC0-1.0 / Apache-2.0) parts: `LICENSE.mesa-kosmickrisp.txt` in the
-  licences folder has the licence texts and the copyright lines of every Mesa
-  file it is built from. virglrenderer's macOS and Venus-on-Metal patches come
-  from github.com/startergo/homebrew-virglrenderer (MIT).
+  from a pinned Mesa commit and is mostly MIT. Other parts: BSD-2-Clause
+  (xxHash), BSD-3-Clause (Berkeley SoftFloat), BSL-1.0 (the C11 threads code),
+  BLAKE3 (CC0-1.0 / Apache-2.0, used under Apache-2.0), and the Khronos
+  headers under Apache-2.0 and SGI-B-2.0. `LICENSE.mesa-kosmickrisp.txt` in
+  the licences folder lists the Mesa files it is built from, with their
+  licence texts and the copyright lines of their headers. virglrenderer's
+  macOS and Venus-on-Metal patches come from
+  github.com/startergo/homebrew-virglrenderer (MIT).
 - **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
