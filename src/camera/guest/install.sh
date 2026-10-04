@@ -17,6 +17,7 @@ if [[ $ON != on || $TYPE == parallels ]]; then
   [[ -e /usr/local/bin/omacvm-camera ]] || exit 0
   systemctl --global disable omacvm-camera.service >/dev/null 2>&1 || true
   user_ctl stop omacvm-camera.service 2>/dev/null || true
+  systemctl --user -M root@ stop omacvm-camera.service >/dev/null 2>&1 || true
   rm -f "${FILES[@]}"
   rmmod v4l2loopback 2>/dev/null || true
   echo "camera: off"
@@ -67,6 +68,8 @@ fi
 udevadm trigger --subsystem-match=video4linux --subsystem-match=virtio-ports 2>/dev/null || true
 
 systemctl --global enable omacvm-camera.service >/dev/null 2>&1
+# root's own manager (an SSH login) may run one from before ConditionUser.
+systemctl --user -M root@ stop omacvm-camera.service >/dev/null 2>&1 || true
 if user_ctl daemon-reload 2>/dev/null; then
   user_ctl restart omacvm-camera.service 2>/dev/null || true
 fi
