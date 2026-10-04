@@ -24,10 +24,11 @@ The first build compiles QEMU (about 70 seconds) and the UEFI firmware (about
 `../src` as committed: the build stops when `src/` has uncommitted changes.
 
 The firmware is edk2 as QEMU ships it (edk2-stable202408, QEMU's own build
-flags), built on the Mac by `runtime/build-edk2.sh`, with one change: a VM
-starts with Omarchy's logo instead of TianoCore's. When that build or its boot
-test fails, the app gets QEMU's prebuilt firmware (TianoCore logo) and the
-build says so; `OMACVM_FIRMWARE=qemu scripts/build-app.sh` asks for it.
+flags), built on the Mac by `runtime/build-edk2.sh`: a VM starts with
+Omarchy's logo instead of TianoCore's, and otherwise sees the same firmware
+(see `runtime/README.md`). When that build or its test fails, the app gets
+QEMU's prebuilt firmware (TianoCore logo) and the build says so;
+`OMACVM_FIRMWARE=qemu scripts/build-app.sh` asks for it.
 `Contents/Resources/firmware/firmware-source` says which one an app has, and
 `omacvm check` shows it for a running VM.
 
