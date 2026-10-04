@@ -32,7 +32,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | 📷 **Camera and microphone**<br>Video calls in the VM. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
 | 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
 
-**[See the full compatibility list per app below.](#which-app)**
+**[See the full compatibility list per app below](#which-app), or [every feature in detail](docs/features.md).**
 
 <p align="center">
   <img src="docs/images/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
@@ -120,37 +120,6 @@ Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && .
 Or let your coding agent do it: [the prompt and more](docs/agents.md).
 
 
-## What you get
-
-| Feature | What it does |
-|---|---|
-| **The bar beside the notch** | With [Omanotch](src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
-| **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
-| **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
-| **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
-| **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
-| **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](#how-it-works)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
-| **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with three dimmer steps below macOS's lowest, Option takes small steps, as in Omarchy |
-| **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
-| **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](docs/troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](docs/troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
-| **Per-display workspaces** | Each display has its own workspaces 1…0, like Spaces. Unplug and they park on the Mac's screen; plug back in and they return |
-| **Clipboard both ways, Cmd+V** | Copy in Omarchy, paste on the Mac and back; Cmd+V pastes everywhere, terminals included |
-| **Night Shift and True Tone** | The Mac's Night Shift in Omarchy's bar, with Omarchy's own night light icon, lit while it is on. A click opens a panel like Omarchy's own: Night Shift, its strength and True Tone, all on the Mac (Super+Ctrl+N switches Night Shift directly). It replaces Omarchy's own night light, so the screen is never tinted twice |
-| **Wallpaper follows the theme** | Switch Omarchy's theme or background and the Mac's desktop wallpaper follows, on every Space (macOS also shows it behind its own lock screen) |
-| **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
-| **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge and charging, as on a laptop, plus time left and Omarchy's low-battery warning (not tested yet with the Mac on battery; the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
-| **Your keyboard layout** | Taken from the Mac |
-| **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
-
-<p align="center">
-  <img src="docs/images/features.svg" alt="Eight small animations: clipboard both ways with Cmd+V, Omarchy's Wi-Fi QR card after macOS asks, AirPods switching Omarchy's audio output, the Mac's wallpaper following the Omarchy theme, workspaces per display that park when unplugged, the keyboard layout taken from the Mac, the Omarchy Dock icon, and the omacvm command." width="100%">
-</p>
-
-<p align="center">
-  <img src="docs/images/displays.svg" alt="The macOS display arrangement and the Omarchy VM's monitors: when a display is moved in macOS, the VM's monitor moves the same way." width="100%">
-</p>
-
 ## Four ways: Parallels, UTM, VMware Fusion or OmacVM.app
 
 OmacVM builds the same Omarchy VM in Parallels Desktop, UTM, VMware Fusion or
@@ -161,7 +130,7 @@ download `OmacVM-<version>.zip` from the
 browser, macOS blocks it the first time: click Open Anyway in System Settings ›
 Privacy & Security. The app builds the VM with its own steps, then OmacVM is
 applied as on the other routes ([docs/routes/app.md](docs/routes/app.md)).
-Everything in [What you get](#what-you-get) works in all four apps, except
+Everything in [the feature list](docs/features.md) works in all four apps, except
 where the table says otherwise.
 
 **Which one?** Fastest and least to set up, and fine with paying: Parallels.
