@@ -6,6 +6,8 @@
  *  - a fatal error (a framebuffer with a surface that does not exist) loses the
  *    context: the guest's status buffer reads VIRGL_RESET_STATUS_GUILTY, its later
  *    commands are refused, and a second context keeps working;
+ *  - a shader vrend cannot translate to GLSL (a property it does not know) is
+ *    treated the same way: its draws are skipped, the context lives;
  *  - a refused program is not linked again on every draw, also with dual-source
  *    blending on and one fragment output, and its skipped draws log one line. */
 #include <OpenGL/OpenGL.h>
@@ -175,6 +177,15 @@ static const char *fs_too_many_uniforms =
    "  1: MOV OUT[0], CONST[0][ADDR[0].x]\n"
    "  2: END\n";
 
+/* A property vrend's TGSI -> GLSL translator does not handle. */
+static const char *fs_untranslatable =
+   "FRAG\n"
+   "PROPERTY FS_POST_DEPTH_COVERAGE 1\n"
+   "DCL OUT[0], COLOR\n"
+   "IMM[0] FLT32 {    1.0000,     0.0000,     0.0000,     1.0000}\n"
+   "  0: MOV OUT[0], IMM[0]\n"
+   "  1: END\n";
+
 int main(void)
 {
    setvbuf(stdout, NULL, _IONBF, 0);
@@ -269,6 +280,25 @@ int main(void)
    check(refused_lines == 1 && dropped_lines == 1,
          "linked once, one refused line and one dropped-draws line");
    virgl_renderer_context_destroy(3);
+
+   /* A translation gap is contained like a refused compile. */
+   check(!virgl_renderer_context_create(4, 12, "untranslated"), "fourth context");
+   virgl_renderer_ctx_attach_resource(4, 7);
+   refused_lines = dropped_lines = 0;
+   status[0] = 0;
+   emit(&c, VIRGL_CMD0(VIRGL_CCMD_SET_RESET_STATUS_BUFFER, 0, VIRGL_SET_RESET_STATUS_BUFFER_SIZE));
+   emit(&c, 7);
+   emit_shader(&c, 51, TEST_SHADER_VERTEX, vs_text);
+   emit_shader(&c, 52, TEST_SHADER_FRAGMENT, fs_untranslatable);
+   for (int i = 0; i < 5; i++)
+      emit_draw(&c);
+   /* Translated once at creation and once for the draw's variant key. */
+   check(submit(4, &c) == 0 && refused_lines == 2 && dropped_lines == 1,
+         "an untranslatable shader is accepted, its draws skipped, no line per draw");
+   emit_shader(&c, 53, TEST_SHADER_VERTEX, vs_text);
+   check(submit(4, &c) == 0 && status[0] == 0, "the context is still alive");
+   virgl_renderer_ctx_detach_resource(4, 7);
+   virgl_renderer_context_destroy(4);
 
    virgl_renderer_ctx_detach_resource(1, 7);
    virgl_renderer_ctx_detach_resource(2, 8);
