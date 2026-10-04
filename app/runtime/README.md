@@ -49,6 +49,9 @@ commit 82927e9. Changes here:
   indirect commands and uniform blocks are checked before any GL call; a draw
   that fails is skipped; run-time shader array indexes are clamped (ADR 0017).
   Checked by `Tests/virgl/test-gpu-ranges.c`
+- `patches/virgl-venus-robust-buffer-access.patch`: Venus devices always get
+  robust buffer access where the host's Vulkan device offers it (MoltenVK
+  does), whatever the guest asked for
 - `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
   server ended signals its fences, so the guest app ends instead of hanging
 - `patches/virgl-test-shader-fault.patch`: test runtimes only

@@ -403,8 +403,8 @@ What crosses and who checks it:
   indexes are clamped (`virgl-shader-index-clamp.patch`). A draw that fails is
   skipped and logged. The fuzzer runs on Apple's software renderer only, with
   a GL oracle that aborts on any draw leaving a buffer (STANDARDS 14).
-  Venus has the same exposure (no robust buffer access forced yet; off by
-  default).
+  Venus has the same exposure: its devices always get robust buffer access
+  where the host driver has it (`virgl-venus-robust-buffer-access.patch`).
 - **resource and blob sizes**: QEMU checks sizes against guest RAM and the
   hostmem window; blob sizes are rounded to the host page by QEMU, never
   trusted.
@@ -474,7 +474,8 @@ The tracks share one runtime. Order and overlaps known today:
    `virgl-transform-feedback-end.patch`, `virgl-stream-output-checks.patch`,
    `virgl-gl-error-skip-command.patch`, `virgl-buffer-binding-checks.patch`,
    `virgl-draw-range-checks.patch`, `virgl-uniform-buffer-checks.patch`,
-   `virgl-shader-index-clamp.patch`, and the test-only
+   `virgl-shader-index-clamp.patch`, `virgl-venus-robust-buffer-access.patch`,
+   and the test-only
    `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. The
    patches up to the Venus fence one passed the build-time tests on
    `gpu-venus`'s tree (branch `gpu-robust-venus`, c0988e2); the Venus fence

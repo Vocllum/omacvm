@@ -83,7 +83,8 @@ and aborts on any range a GPU would read or write outside a buffer.
   as vec4 array fits a buffer sized to the C struct.
 - Persistently mapped index buffers are refused (the guest could change the
   indices after the check). macOS' GL has no persistent buffers.
-- Not covered: Venus. Vulkan has the same problem without robust buffer
-  access; Venus is off by default (ADR 0012). Enabling `robustBufferAccess`
-  on the host device where MoltenVK/KosmicKrisp offer it is the next step.
+- Venus: Vulkan has the same exposure. `virgl-venus-robust-buffer-access.patch`
+  turns on `robustBufferAccess` for every device whose host driver offers it
+  (MoltenVK does), whatever the guest asked; without it the log says so once.
+  Venus is off by default (ADR 0012).
 - Varying and output arrays (GPU registers) are not clamped.
