@@ -41,7 +41,13 @@ if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk
       || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
   log "QEMU (from source)"
   "$ROOT/runtime/build-qemu-gpu-runtime.sh"
-  echo "$INPUTS" > "$RT/inputs.sha256"
+  # A fallback to QEMU's firmware (the edk2 build or its test failed, maybe
+  # just a download) is not kept: the next build tries again.
+  if [[ $(cat "$RT/firmware/firmware-source" 2>/dev/null) == omacvm* || ${OMACVM_FIRMWARE:-} == qemu ]]; then
+    echo "$INPUTS" > "$RT/inputs.sha256"
+  else
+    rm -f "$RT/inputs.sha256"
+  fi
 fi
 FIRMWARE=$(cat "$RT/firmware/firmware-source" 2>/dev/null || echo "unknown")
 log "firmware: $FIRMWARE"
