@@ -3,6 +3,25 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 2.8.0
+
+- OmacVM.app uses every Mac display in full screen: a window (in its own
+  Space) and an Omarchy output per display, at its resolution, scale and
+  refresh rate, placed as in macOS's arrangement, with plugging in and out
+  live. "Use external displays" in Omarchy's display panel keeps full screen
+  on one display. Tested on a real external monitor next to a MacBook with a
+  notch, and on virtual displays.
+- OmacVM.app in full screen on a Mac with a notch: Omarchy gets the window's
+  real size (1728x1080 points on a 14-inch MacBook Pro, was 1728x1085). The
+  picture is no longer squeezed and the pointer lands where it is on the Mac
+  (it was up to 5 points off at the bottom).
+- OmacVM.app: dragging a window with Cmd to another display moves it there.
+  Super was let go at the display edge, and Hyprland dropped the move.
+- Per-display workspaces handle more than two displays (Virtual-3 gets
+  21..30, and so on), and several workspaces of an unplugged display all
+  come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
+  the same file.
+
 ## 2.7.0
 
 - OmacVM.app: videos are decoded by the Mac's media engine instead of the
@@ -41,15 +60,6 @@ in more words.
   Fusion. It brings QEMU (try-omarchy's patched build) and runs it with
   Apple's Hypervisor framework. Download `OmacVM-2.6.0.zip` from the release,
   signed with a Developer ID. See [docs/routes/app.md](docs/routes/app.md).
-- OmacVM.app can use every Mac display in full screen: a window and an
-  Omarchy output per display, at its resolution and scale, placed as in
-  macOS, with plugging in and out live. "Use external displays" in Omarchy's
-  display panel keeps full screen on one display. Tested on virtual Mac
-  displays only so far; a real external monitor is not confirmed yet.
-- Per-display workspaces handle more than two displays (Virtual-3 gets
-  21..30, and so on), and several workspaces of an unplugged display all
-  come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
-  the same file.
 - `omacvm build --vm-type app`: builds the VM through OmacVM.app with the same
   questions as the other routes. It downloads the app when it is missing
   (after asking), checks the zip against its `.sha256` and that the app is

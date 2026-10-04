@@ -36,7 +36,7 @@ UTM, or choose their password: hand those over, never work around them.
      display, paid: Standard 4 CPUs / 8 GB per VM), UTM (free, one display,
      slower) or VMware Fusion (free, every display, GPU in Chrome, about 71 %
      of the Mac in the browser, about 15 more build minutes, Broadcom sign-in to
-     download) or OmacVM.app (free, every display in full screen, so far tested on virtual displays only; `--vm-type app` installs the
+     download) or OmacVM.app (free, every display in full screen; `--vm-type app` installs the
      app if it is missing, after asking, and runs its own create script); the resource tiers; each feature (`omacvm features --json` has
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
