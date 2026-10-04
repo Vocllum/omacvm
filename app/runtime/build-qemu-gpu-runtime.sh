@@ -512,6 +512,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-iosu
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subregion.patch"
 # OmacVM tests: OMACVM_BACKGROUND=1 opens the window without taking the focus.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-background.patch"
+# Frames on the display's refresh: one per refresh, no judder.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-vsync.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
