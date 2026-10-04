@@ -504,6 +504,7 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
 # OmacVM Venus: blobs on 16 KiB host pages, so Vulkan memory maps into the guest.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-alignment.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subregion.patch"
 # OmacVM tests: OMACVM_BACKGROUND=1 opens the window without taking the focus.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-background.patch"
 
