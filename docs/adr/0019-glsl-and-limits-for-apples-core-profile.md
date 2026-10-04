@@ -1,4 +1,4 @@
-# 0018: GLSL and limits that Apple's core profile accepts
+# 0019: GLSL and limits that Apple's core profile accepts
 
 ## Context
 
@@ -33,11 +33,12 @@ process, one Chrome):
 - the blitter's shaders take their version from the blit context (4.00 on the Mac);
 - shadow lookups ask for `GL_EXT_texture_shadow_lod` only for what it adds (lod
   forms, bias on array samplers);
-- float math written to an integer output keeps its bits (floatBitsToUint),
-  an upstream bug that also hits Linux hosts;
-- a guest framebuffer without attachments gets a 1x1 depth stand-in on hosts
-  without `ARB_framebuffer_no_attachments`;
-- the reported sampler limit is the host's.
+- results written to an integer output keep their bits (integers as they are,
+  floats through floatBitsToUint), an upstream bug that also hits Linux hosts;
+- a guest framebuffer without attachments gets a depth stand-in on hosts without
+  `ARB_framebuffer_no_attachments`, as large as the viewports, with the depth
+  test off while it is there (as GL behaves without a depth buffer);
+- the reported sampler limit is the smallest of the host's stages.
 
 Option 1 stays useful as a safety net and is gpu-robust's track (ADR 0016: a
 refused shader skips its draws, a lost context is reported to the guest).
@@ -52,8 +53,9 @@ refused shader skips its draws, a lost context is reported to the guest).
   caught by gpu-robust's containment.
 - GLSL 3.30 instead of 1.40/1.50 changes nothing for the guest: the translation
   writes no construct that 3.30 core removed; the build tests compile it.
-- Occlusion queries in a framebuffer whose draw buffers are all GL_NONE count at
-  most one pixel (the stand-in is 1x1); before, the context died.
+- A framebuffer whose draw buffers are all GL_NONE costs a depth renderbuffer of
+  the viewport's size (2 bytes a pixel, at most the largest 2D texture); occlusion
+  queries in it count every fragment. Before, the context died.
 - Guests see 16 samplers per stage instead of 32 (GLES 3.0 needs 16).
 - Linux hosts: unchanged except the GLSL version on core profiles (3.30 where
   supported), the blitter version and the integer-output bit cast; all are

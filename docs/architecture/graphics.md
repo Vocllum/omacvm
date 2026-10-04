@@ -116,24 +116,25 @@ done" sets the frame rate of anything light.
 virglrenderer was written for Linux drivers. Where Apple's OpenGL 4.1 core profile
 disagrees, one refused shader or one GL error used to put the guest's whole virgl
 context in error (`vrend_report_context_error`): everything that app drew later was
-black, and the guest was never told. Fixed in the translation and the caps (ADR 0018),
+black, and the guest was never told. Fixed in the translation and the caps (ADR 0019),
 one patch each, each with a build-time test that compiles or runs on the Mac's GL:
 
 | Gap on the Mac | Patch | Test (`app/runtime/Tests/virgl`) |
 |---|---|---|
 | floatBitsToInt() etc. need GLSL 3.30; `GL_ARB_draw_instanced` refused | `virgl-shader-core-glsl-version.patch` | `test-core-glsl-shaders.c` |
 | `GL_EXT_texture_shadow_lod` asked for core lookups (gradients, cube shadow bias, gather) | `virgl-shader-shadow-lod-extension.patch` | `test-core-glsl-shaders.c` |
-| float math into an integer output: `uint(x)` instead of `floatBitsToUint(x)` (upstream bug) | `virgl-shader-float-ops-integer-outputs.patch` | `test-core-glsl-shaders.c` |
+| results written to an integer output lost their bits or did not compile (upstream bug) | `virgl-shader-integer-outputs.patch` | `test-core-glsl-shaders.c` |
 | blitter shaders were GLSL 1.30: every shader blit drew nothing | `virgl-blitter-core-glsl-version.patch` | `test-blitter-shaders.c` |
 | integer multisample blit used texture() on a MS sampler (upstream bug) | `virgl-blitter-integer-msaa.patch` | `test-blitter-shaders.c` |
-| framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` | `test-empty-framebuffer.c` |
-| guest told 32 samplers per stage, the Mac has 16 | `virgl-caps-sampler-limit.patch` | `test-sampler-limit.c` |
+| framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` (depth stand-in as large as the viewports, depth test off while it is there) | `test-empty-framebuffer.c` |
+| guest told 32 samplers per stage, the Mac has 16 | `virgl-caps-sampler-limit.patch` (smallest limit of all stages) | `test-sampler-limit.c` |
 
 The patches apply after gpu-native's and only touch `vrend_shader.c`,
 `vrend_blitter.[ch]` and `vrend_renderer.c` (framebuffer state, caps).
 `virgl-shader-core-glsl-version.patch` covers gpu-robust's `virgl-core-instance-id.patch`
-(same loop in `emit_header`): drop that one when both land. gpu-robust's containment
-(refused shader skips its draws) is the safety net for gaps not found yet.
+(same loop in `emit_header`); both apply in either order, drop that one when both land.
+gpu-robust's containment (refused shader skips its draws) is the safety net for gaps
+not found yet.
 
 Measured with tests/graphics (branch conformance-runs; VK-GL-CTS vulkan-cts-1.4.6.2,
 WebGL conformance 1.0.4 and 2.0.0, Chrome 154; transform feedback left out, see
@@ -149,11 +150,10 @@ branch. Correctness runs, no bench lock.
 | WebGL 1 pages (787) | 430 | 776 | 776 | 776 |
 | WebGL 2 pages (967 without TF) | 97 of 970 | 960 of 970 | 959 | 959 |
 | dEQP-GLES2, whole list (17165) | 16971 | | 16972 | 16972 |
-| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42832 + 104 QW | 42830 + 104 QW |
+| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42832 + 104 QW | 42832 + 104 QW |
 
-After the patches the one-process numbers equal the isolated ones (the isolated whole
-GLES3 run lost 5 cases to timeouts under load; they pass in one process). Against the
-isolated "before" no case got worse; 22 dEQP-GLES3 cases (stride) and WebGL 2
+After the patches the one-process numbers equal the isolated ones, case by case. Against
+the isolated "before" no case got worse; 22 dEQP-GLES3 cases (stride) and WebGL 2
 `rendering/draw-buffers.html` pass now. The QEMU log of the one-process runs has no
 context error. What still fails fails in both modes: cube map filtering, one blit
 format conversion (rgb8 to rg32f), 11 WebGL 1 and 8 WebGL 2 pages, and the

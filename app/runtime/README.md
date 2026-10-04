@@ -19,12 +19,13 @@ commit 82927e9. Changes here:
   error stopped the guest's whole GL context; the app drew black from then on):
   `patches/virgl-shader-core-glsl-version.patch` (GLSL 3.30, no extensions that
   are core), `virgl-shader-shadow-lod-extension.patch`,
-  `virgl-shader-float-ops-integer-outputs.patch`, `virgl-blitter-core-glsl-version.patch`,
+  `virgl-shader-integer-outputs.patch`, `virgl-blitter-core-glsl-version.patch`,
   `virgl-blitter-integer-msaa.patch`, `virgl-framebuffer-no-attachments.patch`,
   `virgl-caps-sampler-limit.patch`. Checked at build time by
   `Tests/virgl/test-core-glsl-shaders.c`, `test-blitter-shaders.c`,
   `test-empty-framebuffer.c` and `test-sampler-limit.c` on the Mac's OpenGL
-  (docs/architecture/graphics.md, ADR 0018)
+  (shared CGL setup: `Tests/virgl/cgl-context.h`)
+  (docs/architecture/graphics.md, ADR 0019)
 
 Build: `./build-qemu-gpu-runtime.sh` (about 70 seconds, needs only the Command
 Line Tools). Output: `.build/qemu-gpu-runtime` and `.build/firmware`.
