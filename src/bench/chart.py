@@ -20,6 +20,8 @@ TESTS = [
     ("geekbench-cpu-multi", "CPU, all cores", "Geekbench 7"),
     ("speedometer", "Web apps", "Speedometer 3.1"),
     ("motionmark", "Graphics in the browser", "MotionMark 1.3.1"),
+    ("basemark", "GPU in the browser", "Basemark Web 3.0"),
+    ("aquarium", "3D in the browser", "WebGL Aquarium, 30,000 fish"),
 ]
 
 
