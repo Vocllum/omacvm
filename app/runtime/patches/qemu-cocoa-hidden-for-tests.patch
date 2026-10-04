@@ -1,0 +1,28 @@
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -1801,7 +1801,11 @@
+             ? [NSString stringWithUTF8String:qemu_name]
+             : @"QEMU"];
+         [window setContentView:cocoaView];
+-        [window makeKeyAndOrderFront:self];
++        if (getenv("OMACVM_COCOA_HIDDEN")) {
++            [window orderOut:self];
++        } else {
++            [window makeKeyAndOrderFront:self];
++        }
+         [window center];
+         [window setDelegate: self];
+ 
+@@ -2967,7 +2971,11 @@
+     // Pull this console process up to being a fully-fledged graphical
+     // app with a menubar and Dock icon
+     ProcessSerialNumber psn = { 0, kCurrentProcess };
+-    TransformProcessType(&psn, kProcessTransformToForegroundApplication);
++    /* OmacVM: OMACVM_COCOA_HIDDEN=1 keeps the VM out of sight (no window, no
++     * Dock icon) for tests that need the GPU but not the screen. */
++    if (!getenv("OMACVM_COCOA_HIDDEN")) {
++        TransformProcessType(&psn, kProcessTransformToForegroundApplication);
++    }
+ 
+     [[NSProcessInfo processInfo] setProcessName:omacvm_product_name()];
+     [QemuApplication sharedApplication];

@@ -61,7 +61,11 @@ live_fetch() {
   local d=$CACHE/live dmg vol app g
   mkdir -p "$d"
   LIVE_KERNEL=$d/vmlinuz-linux LIVE_INITRD=$d/initramfs-linux.img LIVE_ROOTFS=$d/rootfs.ext4
-  if [[ -f $d/ok-$LIVE_RELEASE ]]; then log "live system cached"; return; fi
+  # macOS may clear Caches: the marker counts only with the files still there.
+  if [[ -f $d/ok-$LIVE_RELEASE && -f $LIVE_KERNEL && -f $LIVE_INITRD && -f $LIVE_ROOTFS ]]; then
+    log "live system cached"; return
+  fi
+  rm -f "$d/ok-$LIVE_RELEASE"
   dmg=$d/TryOmarchy-$LIVE_RELEASE.dmg
   if [[ ! -f $dmg ]]; then
     # The omacvm command keeps the same download.

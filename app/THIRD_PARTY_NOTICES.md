@@ -24,6 +24,9 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
 - **QEMU's libraries** in the app: GLib, libintl, libusb (LGPL-2.1+, kept as
   replaceable .dylib files); virglrenderer, libepoxy, pixman (MIT); ANGLE,
   libslirp, PCRE2 (BSD); SDL (zlib); zstd, lz4 (BSD); xz (0BSD).
+  virglrenderer is built with OmacVM's VideoToolbox video backend
+  (`runtime/patches/virgl-videotoolbox-decode.patch`, MIT like
+  virglrenderer); it uses Apple's VideoToolbox, part of macOS.
 - **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come

@@ -1,0 +1,2815 @@
+diff --git a/config.h.meson b/config.h.meson
+index da93f61..2fc6849 100644
+--- a/config.h.meson
++++ b/config.h.meson
+@@ -57,6 +57,7 @@
+ #mesondefine HAVE_LINUX_UDMABUF_H
+ #mesondefine HAVE_DLFCN_H
+ #mesondefine ENABLE_VIDEO
++#mesondefine ENABLE_VIDEO_VIDEOTOOLBOX
+ #mesondefine ENABLE_TRACING
+ #mesondefine ENABLE_TESTS
+ #mesondefine UTIL_ARCH_LITTLE_ENDIAN
+diff --git a/meson.build b/meson.build
+index 5cf89e7..6d73750 100644
+--- a/meson.build
++++ b/meson.build
+@@ -135,7 +135,7 @@ if with_drm_renderers
+   conf_data.set('ENABLE_DRM', 1)
+ endif
+ 
+-libdrm_dep = dependency('libdrm', version : '>=2.4.50', required: with_drm_renderers or get_option('video'))
++libdrm_dep = dependency('libdrm', version : '>=2.4.50', required: with_drm_renderers or (get_option('video') and not with_host_darwin))
+ libdrm_amdgpu_dep = dependency('libdrm_amdgpu', version : '>=2.4.121', required: with_drm_amdgpu)
+ conf_data.set('ENABLE_LIBDRM', libdrm_dep.found())
+ drm_uapi_dep = declare_dependency(
+@@ -411,8 +411,14 @@ if with_video
+      error('video require EGL, but it is not available')
+   endif
+   conf_data.set('ENABLE_VIDEO', 1)
+-  libva_dep = dependency('libva')
+-  libvadrm_dep = dependency('libva-drm')
++  if with_host_darwin
++    # macOS: decode with VideoToolbox (the Mac's media engine) instead of VA-API.
++    conf_data.set('ENABLE_VIDEO_VIDEOTOOLBOX', 1)
++    video_dep = dependency('appleframeworks',
++                           modules : ['VideoToolbox', 'CoreMedia', 'CoreVideo', 'CoreFoundation', 'OpenGL', 'IOSurface'])
++  else
++    video_dep = [dependency('libva'), dependency('libva-drm')]
++  endif
+ endif
+ 
+ with_tests = get_option('tests')
+diff --git a/src/meson.build b/src/meson.build
+index 951f48e..202ce3d 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -254,8 +254,12 @@ if with_render_server_worker == 'thread'
+ endif
+ 
+ if with_video
+-  virgl_sources += video_sources
+-  virgl_depends += [libva_dep, libvadrm_dep]
++  if with_host_darwin
++    virgl_sources += ['vrend/virgl_video_vt.c', 'vrend/vrend_video.c']
++  else
++    virgl_sources += video_sources
++  endif
++  virgl_depends += [video_dep]
+ endif
+ 
+ if with_host_windows
+diff --git a/src/vrend/virgl_video.h b/src/vrend/virgl_video.h
+index e954559..5cc19a2 100644
+--- a/src/vrend/virgl_video.h
++++ b/src/vrend/virgl_video.h
+@@ -97,6 +97,9 @@ struct virgl_video_dma_buf {
+         uint32_t offset;
+         uint32_t pitch;
+     } planes[4];
++
++    /* VideoToolbox backend: the decoded CVPixelBufferRef (planes unused) */
++    void *native;
+ };
+ 
+ /*
+diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
+new file mode 100644
+index 0000000..6c95bf9
+--- /dev/null
++++ b/src/vrend/virgl_video_vt.c
+@@ -0,0 +1,2365 @@
++/**************************************************************************
++ *
++ * Copyright (C) 2026 OmacVM contributors
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included
++ * in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
++ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
++ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
++ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
++ * OTHER DEALINGS IN THE SOFTWARE.
++ *
++ **************************************************************************/
++
++/**
++ * @file
++ * VideoToolbox backend for virgl video (macOS hosts).
++ *
++ * The guest's VA-API driver (Mesa virgl) is a "stateless" decoder: it parses
++ * the stream itself and sends, per picture, the parsed parameters plus the
++ * compressed slice data. VideoToolbox is a "stateful" decoder: it wants the
++ * stream's parameter sets in a format description and whole access units as
++ * samples, and keeps its own reference frames.
++ *
++ * So this backend rebuilds a stream VideoToolbox can take:
++ *  - H.264: the slice NAL units come through unchanged; SPS and PPS are
++ *    rebuilt from the picture parameters (or taken from the data when the
++ *    guest sends them in-band).
++ *  - VP9: each frame comes through whole (uncompressed header included)
++ *    and goes to VideoToolbox as it is; hidden frames get their picture too.
++ *  - AV1 (opt-in, OMACVM_VIDEO_AV1=1): Chrome sends the whole temporal unit
++ *    for every frame in it; the frame's own OBUs are cut out and decoded
++ *    alone. FFmpeg sends tile data without headers, which cannot work.
++ * Reference frames are tracked by VideoToolbox from the bitstream, so the
++ * guest's reference surface ids are not needed.
++ *
++ * Decoded pictures come back as CVPixelBuffers (NV12 or P010), and
++ * vrend_video.c copies their planes into the guest's plane textures.
++ *
++ * Profile numbers: the guest sends Mesa's enum pipe_video_profile values.
++ * Mesa 26.0 removed the MPEG-4 part 2 profiles and Mesa 24 added more HEVC
++ * profiles, so a current guest and virglrenderer's own copy of the enum no
++ * longer agree. The guest numbering used here is Mesa's current one
++ * (OMACVM_VIRGL_VIDEO_ABI=legacy switches to virglrenderer's).
++ */
++
++#include <stdio.h>
++#include <stdint.h>
++#include <stdbool.h>
++#include <stdlib.h>
++#include <string.h>
++
++#include <CoreFoundation/CoreFoundation.h>
++#include <CoreMedia/CoreMedia.h>
++#include <CoreVideo/CoreVideo.h>
++#include <VideoToolbox/VideoToolbox.h>
++#include <time.h>
++
++#include "pipe/p_video_state.h"
++#include "util/u_formats.h"
++#include "util/u_memory.h"
++#include "virgl_hw.h"
++#include "virgl_video_hw.h"
++#include "virgl_util.h"
++#include "virgl_video.h"
++
++/* ------------------------------------------------------------------------ */
++/* Profiles                                                                  */
++/* ------------------------------------------------------------------------ */
++
++enum vt_codec_kind {
++    VT_KIND_NONE,
++    VT_KIND_H264,
++    VT_KIND_HEVC,
++    VT_KIND_VP9,
++    VT_KIND_AV1,
++};
++
++/* Guest numbering (Mesa >= 26.0, src/gallium/include/pipe/p_video_enums.h). */
++enum {
++    G26_AVC_BASELINE = 7,
++    G26_AVC_CONSTRAINED_BASELINE = 8,
++    G26_AVC_MAIN = 9,
++    G26_AVC_EXTENDED = 10,
++    G26_AVC_HIGH = 11,
++    G26_AVC_HIGH10 = 12,
++    G26_AVC_HIGH422 = 13,
++    G26_AVC_HIGH444 = 14,
++    G26_HEVC_MAIN = 15,
++    G26_HEVC_MAIN_10 = 16,
++    G26_JPEG_BASELINE = 23,
++    G26_VP9_PROFILE0 = 24,
++    G26_VP9_PROFILE2 = 25,
++    G26_AV1_MAIN = 26,
++};
++
++static bool abi_legacy;
++
++/* Guest profile value -> virglrenderer's enum pipe_video_profile. */
++static enum pipe_video_profile host_profile(uint32_t guest)
++{
++    if (abi_legacy)
++        return (enum pipe_video_profile)guest;
++
++    switch (guest) {
++    case G26_AVC_BASELINE: return PIPE_VIDEO_PROFILE_MPEG4_AVC_BASELINE;
++    case G26_AVC_CONSTRAINED_BASELINE: return PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE;
++    case G26_AVC_MAIN: return PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN;
++    case G26_AVC_EXTENDED: return PIPE_VIDEO_PROFILE_MPEG4_AVC_EXTENDED;
++    case G26_AVC_HIGH: return PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH;
++    case G26_AVC_HIGH10: return PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH10;
++    case G26_AVC_HIGH422: return PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH422;
++    case G26_AVC_HIGH444: return PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH444;
++    case G26_HEVC_MAIN: return PIPE_VIDEO_PROFILE_HEVC_MAIN;
++    case G26_HEVC_MAIN_10: return PIPE_VIDEO_PROFILE_HEVC_MAIN_10;
++    case G26_JPEG_BASELINE: return PIPE_VIDEO_PROFILE_JPEG_BASELINE;
++    case G26_VP9_PROFILE0: return PIPE_VIDEO_PROFILE_VP9_PROFILE0;
++    case G26_VP9_PROFILE2: return PIPE_VIDEO_PROFILE_VP9_PROFILE2;
++    case G26_AV1_MAIN: return PIPE_VIDEO_PROFILE_AV1_MAIN;
++    default: return PIPE_VIDEO_PROFILE_UNKNOWN;
++    }
++}
++
++/* virglrenderer's enum -> the value the guest uses (for the caps). */
++static uint32_t guest_profile(enum pipe_video_profile host)
++{
++    if (abi_legacy)
++        return host;
++
++    switch (host) {
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_BASELINE: return G26_AVC_BASELINE;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE: return G26_AVC_CONSTRAINED_BASELINE;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN: return G26_AVC_MAIN;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_EXTENDED: return G26_AVC_EXTENDED;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH: return G26_AVC_HIGH;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH10: return G26_AVC_HIGH10;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH422: return G26_AVC_HIGH422;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH444: return G26_AVC_HIGH444;
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN: return G26_HEVC_MAIN;
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN_10: return G26_HEVC_MAIN_10;
++    case PIPE_VIDEO_PROFILE_JPEG_BASELINE: return G26_JPEG_BASELINE;
++    case PIPE_VIDEO_PROFILE_VP9_PROFILE0: return G26_VP9_PROFILE0;
++    case PIPE_VIDEO_PROFILE_VP9_PROFILE2: return G26_VP9_PROFILE2;
++    case PIPE_VIDEO_PROFILE_AV1_MAIN: return G26_AV1_MAIN;
++    default: return 0;
++    }
++}
++
++static enum vt_codec_kind kind_of(enum pipe_video_profile p)
++{
++    switch (p) {
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_BASELINE:
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE:
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN:
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_EXTENDED:
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH:
++        return VT_KIND_H264;
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN:
++    case PIPE_VIDEO_PROFILE_HEVC_MAIN_10:
++        return VT_KIND_HEVC;
++    case PIPE_VIDEO_PROFILE_VP9_PROFILE0:
++    case PIPE_VIDEO_PROFILE_VP9_PROFILE2:
++        return VT_KIND_VP9;
++    case PIPE_VIDEO_PROFILE_AV1_MAIN:
++        return VT_KIND_AV1;
++    default:
++        return VT_KIND_NONE;
++    }
++}
++
++/* ------------------------------------------------------------------------ */
++/* Objects                                                                   */
++/* ------------------------------------------------------------------------ */
++
++struct virgl_video_buffer {
++    enum pipe_format format;
++    uint32_t width;
++    uint32_t height;
++    uint32_t id;
++    void *opaque;
++};
++
++struct vt_bytes {
++    uint8_t *data;
++    size_t size;
++    size_t cap;
++};
++
++struct virgl_video_codec {
++    uint32_t guest_profile;
++    enum pipe_video_profile profile;
++    enum vt_codec_kind kind;
++    enum pipe_video_entrypoint entrypoint;
++    uint32_t level;
++    uint32_t width;
++    uint32_t height;
++    void *opaque;
++
++    struct virgl_video_buffer *target;
++    struct vt_bytes bits;               /* compressed data of this picture */
++    union virgl_picture_desc desc;      /* last picture description */
++    bool have_desc;
++
++    VTDecompressionSessionRef session;
++    CMVideoFormatDescriptionRef format;
++    OSType pixel_format;
++    CVPixelBufferRef output;            /* set by the output callback */
++    /* The GPU copies from the frames after we return: keep the last few
++     * so VideoToolbox does not reuse them too early. */
++    CVPixelBufferRef held[3];
++    unsigned held_next;
++    OSStatus output_status;
++    uint32_t frames;
++    uint32_t errors;
++    uint64_t ns_decode;                 /* debug timing, per 120 frames */
++    uint64_t ns_upload;
++    uint64_t ns_wall_start;
++    uint64_t ns_decode_max;
++    uint64_t ns_gap_max;                /* longest wait between two frames */
++    uint64_t ns_last_end;
++
++    /* H.264 */
++    uint8_t sps[2048];                  /* H.264 SPS, AV1 sequence header, HEVC VPS+SPS+PPS */
++    size_t sps_size;
++    uint8_t pps[512];
++    size_t pps_size;
++    int l0_default;                     /* PPS defaults, learned from slices */
++    int l1_default;
++    uint8_t inband_sps[512];
++    size_t inband_sps_size;
++    uint8_t inband_pps[512];
++    size_t inband_pps_size;
++
++    /* VP9 */
++    uint32_t vp9_width;
++    uint32_t vp9_height;
++    uint32_t vp9_bit_depth;
++};
++
++static struct virgl_video_callbacks *callbacks;
++static bool vt_initialized;
++static bool vt_debug;
++static uint32_t next_buffer_id = 1;
++
++#define vt_log(...) do { if (vt_debug) virgl_info("vt-video: " __VA_ARGS__); } while (0)
++
++static uint64_t now_ns(void)
++{
++    return clock_gettime_nsec_np(CLOCK_UPTIME_RAW);
++}
++
++static bool bytes_reserve(struct vt_bytes *b, size_t extra)
++{
++    if (b->size + extra <= b->cap)
++        return true;
++    size_t cap = b->cap ? b->cap : 65536;
++    while (cap < b->size + extra)
++        cap *= 2;
++    uint8_t *p = realloc(b->data, cap);
++    if (!p)
++        return false;
++    b->data = p;
++    b->cap = cap;
++    return true;
++}
++
++static bool bytes_append(struct vt_bytes *b, const void *data, size_t size)
++{
++    if (!bytes_reserve(b, size))
++        return false;
++    memcpy(b->data + b->size, data, size);
++    b->size += size;
++    return true;
++}
++
++static void bytes_free(struct vt_bytes *b)
++{
++    free(b->data);
++    memset(b, 0, sizeof(*b));
++}
++
++/* ------------------------------------------------------------------------ */
++/* Bit writer / reader (H.264 parameter sets and slice headers)              */
++/* ------------------------------------------------------------------------ */
++
++struct bitw {
++    uint8_t buf[4096];
++    unsigned bits;
++    bool overflow;
++};
++
++static void bw_u(struct bitw *w, unsigned n, uint64_t v)
++{
++    for (int i = (int)n - 1; i >= 0; i--) {
++        if (w->bits >= sizeof(w->buf) * 8) {
++            w->overflow = true;
++            return;
++        }
++        if ((v >> i) & 1)
++            w->buf[w->bits >> 3] |= 0x80 >> (w->bits & 7);
++        w->bits++;
++    }
++}
++
++static void bw_ue(struct bitw *w, uint32_t v)
++{
++    uint64_t x = (uint64_t)v + 1;
++    unsigned len = 0;
++    while ((x >> (len + 1)) != 0)
++        len++;
++    bw_u(w, len, 0);
++    bw_u(w, len + 1, x);
++}
++
++static void bw_se(struct bitw *w, int32_t v)
++{
++    bw_ue(w, v > 0 ? (uint32_t)(2 * (int64_t)v - 1) : (uint32_t)(-2 * (int64_t)v));
++}
++
++static void bw_trailing(struct bitw *w)
++{
++    bw_u(w, 1, 1);
++    while (w->bits & 7)
++        bw_u(w, 1, 0);
++}
++
++/* NAL unit = header byte + RBSP with emulation prevention. */
++static size_t make_nal(uint8_t header, const struct bitw *w, uint8_t *out, size_t cap)
++{
++    size_t n = 0, zeros = 0, len = w->bits / 8;
++    if (cap < 1)
++        return 0;
++    out[n++] = header;
++    for (size_t i = 0; i < len; i++) {
++        uint8_t b = w->buf[i];
++        if (zeros >= 2 && b <= 3) {
++            if (n >= cap)
++                return 0;
++            out[n++] = 3;
++            zeros = 0;
++        }
++        if (n >= cap)
++            return 0;
++        out[n++] = b;
++        zeros = b ? 0 : zeros + 1;
++    }
++    return n;
++}
++
++struct bitr {
++    uint8_t rbsp[256];
++    unsigned size;
++    unsigned pos;
++    bool error;
++};
++
++/* First bytes of a NAL unit payload, without emulation prevention bytes. */
++static void br_init(struct bitr *r, const uint8_t *nal, size_t size)
++{
++    unsigned zeros = 0;
++    r->size = 0;
++    r->pos = 0;
++    r->error = false;
++    for (size_t i = 0; i < size && r->size < sizeof(r->rbsp); i++) {
++        if (zeros >= 2 && nal[i] == 3) {
++            zeros = 0;
++            continue;
++        }
++        r->rbsp[r->size++] = nal[i];
++        zeros = nal[i] ? 0 : zeros + 1;
++    }
++}
++
++static uint32_t br_u(struct bitr *r, unsigned n)
++{
++    uint32_t v = 0;
++    for (unsigned i = 0; i < n; i++) {
++        if (r->pos >= r->size * 8) {
++            r->error = true;
++            return 0;
++        }
++        v = (v << 1) | ((r->rbsp[r->pos >> 3] >> (7 - (r->pos & 7))) & 1);
++        r->pos++;
++    }
++    return v;
++}
++
++static uint32_t br_ue(struct bitr *r)
++{
++    unsigned zeros = 0;
++    while (!r->error && br_u(r, 1) == 0) {
++        if (++zeros > 31) {
++            r->error = true;
++            return 0;
++        }
++    }
++    if (r->error)
++        return 0;
++    return ((1u << zeros) - 1) + br_u(r, zeros);
++}
++
++static int32_t br_se(struct bitr *r)
++{
++    uint32_t v = br_ue(r);
++    return (v & 1) ? (int32_t)((v + 1) / 2) : -(int32_t)(v / 2);
++}
++
++/* ------------------------------------------------------------------------ */
++/* VideoToolbox session                                                      */
++/* ------------------------------------------------------------------------ */
++
++static void output_callback(void *ref_con, void *frame_ref_con, OSStatus status,
++                            VTDecodeInfoFlags info_flags, CVImageBufferRef image,
++                            CMTime pts, CMTime duration)
++{
++    struct virgl_video_codec *codec = ref_con;
++    (void)frame_ref_con;
++    (void)pts;
++    (void)duration;
++
++    codec->output_status = status;
++    if (info_flags & kVTDecodeInfo_FrameDropped)
++        vt_log("frame dropped\n");
++    if (status == noErr && image) {
++        if (codec->output)
++            CVPixelBufferRelease(codec->output);
++        codec->output = CVPixelBufferRetain(image);
++    }
++}
++
++static void session_destroy(struct virgl_video_codec *codec)
++{
++    if (codec->session) {
++        VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
++        VTDecompressionSessionInvalidate(codec->session);
++        CFRelease(codec->session);
++        codec->session = NULL;
++    }
++}
++
++static void cf_dict_set_int(CFMutableDictionaryRef d, CFStringRef key, int32_t v)
++{
++    CFNumberRef n = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &v);
++    CFDictionarySetValue(d, key, n);
++    CFRelease(n);
++}
++
++/* The output layout follows the guest's surfaces: NV12 (Chrome, Firefox),
++ * I420 (ffmpeg and mpv pick it when offered) or P010 (10-bit). */
++static OSType pixel_format_for(const struct virgl_video_codec *codec)
++{
++    enum pipe_format f = codec->target ? codec->target->format : PIPE_FORMAT_NV12;
++
++    if (f == PIPE_FORMAT_P010)
++        return kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
++    if (f == PIPE_FORMAT_IYUV)
++        return kCVPixelFormatType_420YpCbCr8Planar;
++    return kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
++}
++
++static bool session_create(struct virgl_video_codec *codec)
++{
++    CFMutableDictionaryRef spec, attrs, iosurface;
++    VTDecompressionOutputCallbackRecord cb = { output_callback, codec };
++    OSStatus st;
++
++    codec->pixel_format = pixel_format_for(codec);
++
++    spec = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++                                     &kCFTypeDictionaryKeyCallBacks,
++                                     &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(spec,
++        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder,
++        kCFBooleanTrue);
++
++    attrs = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++                                      &kCFTypeDictionaryKeyCallBacks,
++                                      &kCFTypeDictionaryValueCallBacks);
++    cf_dict_set_int(attrs, kCVPixelBufferPixelFormatTypeKey, (int32_t)codec->pixel_format);
++    iosurface = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++                                          &kCFTypeDictionaryKeyCallBacks,
++                                          &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(attrs, kCVPixelBufferIOSurfacePropertiesKey, iosurface);
++    CFRelease(iosurface);
++
++    st = VTDecompressionSessionCreate(kCFAllocatorDefault, codec->format, spec,
++                                      attrs, &cb, &codec->session);
++    CFRelease(spec);
++    CFRelease(attrs);
++    if (st != noErr) {
++        virgl_error("vt-video: VTDecompressionSessionCreate failed: %d\n", (int)st);
++        codec->session = NULL;
++        return false;
++    }
++
++    /* Video playback: ask for the low-latency (real-time) path. */
++    if (!getenv("OMACVM_VIDEO_NO_REALTIME"))
++        VTSessionSetProperty(codec->session, kVTDecompressionPropertyKey_RealTime,
++                             kCFBooleanTrue);
++
++    CFBooleanRef hw = NULL;
++    if (VTSessionCopyProperty(codec->session,
++            kVTDecompressionPropertyKey_UsingHardwareAcceleratedVideoDecoder,
++            kCFAllocatorDefault, &hw) == noErr && hw) {
++        virgl_info("vt-video: %s session %ux%u, hardware decoder: %s\n",
++                   codec->kind == VT_KIND_H264 ? "H.264" :
++                   codec->kind == VT_KIND_VP9 ? "VP9" :
++                   codec->kind == VT_KIND_HEVC ? "HEVC" : "AV1",
++                   codec->width, codec->height,
++                   CFBooleanGetValue(hw) ? "yes" : "no");
++        CFRelease(hw);
++    }
++    return true;
++}
++
++/* Use a new format description: keep the session (and its reference frames)
++ * when VideoToolbox can take it, else start a new one. */
++static bool set_format(struct virgl_video_codec *codec, CMVideoFormatDescriptionRef fmt)
++{
++    if (codec->format)
++        CFRelease(codec->format);
++    codec->format = fmt;
++
++    if (codec->session && codec->pixel_format == pixel_format_for(codec) &&
++        VTDecompressionSessionCanAcceptFormatDescription(codec->session, fmt))
++        return true;
++
++    session_destroy(codec);
++    return session_create(codec);
++}
++
++static bool decode_sample(struct virgl_video_codec *codec, const uint8_t *data, size_t size)
++{
++    CMBlockBufferRef block = NULL;
++    CMSampleBufferRef sample = NULL;
++    VTDecodeInfoFlags info = 0;
++    OSStatus st;
++
++    if (!codec->session || !codec->format || !size)
++        return false;
++
++    st = CMBlockBufferCreateWithMemoryBlock(kCFAllocatorDefault, NULL, size,
++                                            kCFAllocatorDefault, NULL, 0, size,
++                                            kCMBlockBufferAssureMemoryNowFlag, &block);
++    if (st != noErr)
++        return false;
++    st = CMBlockBufferReplaceDataBytes(data, block, 0, size);
++    if (st != noErr) {
++        CFRelease(block);
++        return false;
++    }
++
++    st = CMSampleBufferCreate(kCFAllocatorDefault, block, true, NULL, NULL,
++                              codec->format, 1, 0, NULL, 1, &size, &sample);
++    CFRelease(block);
++    if (st != noErr)
++        return false;
++
++    codec->output_status = noErr;
++    uint64_t t0 = now_ns();
++    st = VTDecompressionSessionDecodeFrame(codec->session, sample, 0, NULL, &info);
++    CFRelease(sample);
++    if (st == noErr)
++        st = VTDecompressionSessionWaitForAsynchronousFrames(codec->session);
++    uint64_t dt = now_ns() - t0;
++    codec->ns_decode += dt;
++    if (dt > codec->ns_decode_max)
++        codec->ns_decode_max = dt;
++    if (codec->ns_last_end && t0 - codec->ns_last_end > codec->ns_gap_max)
++        codec->ns_gap_max = t0 - codec->ns_last_end;
++    codec->ns_last_end = now_ns();
++
++    if (st != noErr || codec->output_status != noErr) {
++        if (codec->errors++ < 20)
++            virgl_warn("vt-video: decode failed: %d / %d\n", (int)st,
++                       (int)codec->output_status);
++        /* A broken session stays broken: start over at the next picture. */
++        if (st == kVTInvalidSessionErr || st == kVTVideoDecoderMalfunctionErr) {
++            session_destroy(codec);
++            session_create(codec);
++        }
++        return false;
++    }
++    return true;
++}
++
++/* Hand the decoded picture to vrend, which copies it into the plane textures. */
++static void deliver_output(struct virgl_video_codec *codec,
++                           struct virgl_video_buffer *target)
++{
++    struct virgl_video_dma_buf dmabuf;
++    CVPixelBufferRef pix = codec->output;
++
++    codec->output = NULL;
++    if (!pix)
++        return;
++
++    codec->frames++;
++    if (callbacks && callbacks->decode_completed && target) {
++        memset(&dmabuf, 0, sizeof(dmabuf));
++        dmabuf.buf = target;
++        dmabuf.width = (uint32_t)CVPixelBufferGetWidth(pix);
++        dmabuf.height = (uint32_t)CVPixelBufferGetHeight(pix);
++        dmabuf.flags = VIRGL_VIDEO_DMABUF_READ_ONLY;
++        dmabuf.num_planes = (uint32_t)CVPixelBufferGetPlaneCount(pix);
++        dmabuf.native = pix;
++        uint64_t t0 = now_ns();
++        callbacks->decode_completed(codec, &dmabuf);
++        codec->ns_upload += now_ns() - t0;
++    }
++    if (codec->held[codec->held_next])
++        CVPixelBufferRelease(codec->held[codec->held_next]);
++    codec->held[codec->held_next] = CVPixelBufferRetain(pix);
++    codec->held_next = (codec->held_next + 1) % 3;
++    if (vt_debug && codec->frames % 120 == 0) {
++        uint64_t wall = now_ns() - codec->ns_wall_start;
++        vt_log("%u frames: decode %.2f ms (max %.1f), copy %.2f ms per frame, longest gap %.1f ms, %.1f fps\n",
++               codec->frames, codec->ns_decode / 120 / 1e6, codec->ns_decode_max / 1e6,
++               codec->ns_upload / 120 / 1e6, codec->ns_gap_max / 1e6,
++               codec->ns_wall_start ? 120 / (wall / 1e9) : 0.0);
++        codec->ns_decode = codec->ns_upload = codec->ns_decode_max = codec->ns_gap_max = 0;
++        codec->ns_wall_start = now_ns();
++    }
++    CVPixelBufferRelease(pix);
++}
++
++/* ------------------------------------------------------------------------ */
++/* H.264                                                                     */
++/* ------------------------------------------------------------------------ */
++
++static uint8_t h264_profile_idc(enum pipe_video_profile p, uint8_t *constraints)
++{
++    *constraints = 0;
++    switch (p) {
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE:
++        *constraints = 0xc0;   /* constraint_set0 and set1 */
++        return 66;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_BASELINE: return 66;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN: return 77;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_EXTENDED: return 88;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH10: return 110;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH422: return 122;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH444: return 244;
++    case PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH:
++    default: return 100;
++    }
++}
++
++static bool flat_list(const uint8_t *l, unsigned n)
++{
++    for (unsigned i = 0; i < n; i++)
++        if (l[i] != 16 && l[i] != 0)
++            return false;
++    return true;
++}
++
++static void write_scaling_list(struct bitw *w, const uint8_t *l, unsigned n)
++{
++    int last = 8;
++    for (unsigned i = 0; i < n; i++) {
++        int v = l[i] ? l[i] : 16;
++        bw_se(w, (int8_t)(uint8_t)(v - last));
++        last = v;
++    }
++}
++
++static void h264_build_sps(struct virgl_video_codec *codec,
++                           const struct virgl_h264_picture_desc *d)
++{
++    const struct virgl_h264_sps *sps = &d->pps.sps;
++    struct bitw w;
++    uint8_t constraints;
++    uint8_t profile_idc = h264_profile_idc(codec->profile, &constraints);
++    uint32_t mbs_w = (codec->width + 15) / 16;
++    uint32_t mbs_h = (codec->height + 15) / 16;
++    uint8_t level = sps->level_idc > 51 ? sps->level_idc : 51;
++
++    memset(&w, 0, sizeof(w));
++    bw_u(&w, 8, profile_idc);
++    bw_u(&w, 8, constraints);
++    bw_u(&w, 8, level);
++    bw_ue(&w, 0);                                   /* seq_parameter_set_id */
++    if (profile_idc == 100 || profile_idc == 110 || profile_idc == 122 ||
++        profile_idc == 244) {
++        bw_ue(&w, sps->chroma_format_idc ? sps->chroma_format_idc : 1);
++        if (sps->chroma_format_idc == 3)
++            bw_u(&w, 1, sps->separate_colour_plane_flag);
++        bw_ue(&w, sps->bit_depth_luma_minus8);
++        bw_ue(&w, sps->bit_depth_chroma_minus8);
++        bw_u(&w, 1, 0);                             /* qpprime_y_zero_transform_bypass */
++        bw_u(&w, 1, 0);                             /* scaling matrix: in the PPS */
++    }
++    bw_ue(&w, sps->log2_max_frame_num_minus4);
++    bw_ue(&w, sps->pic_order_cnt_type);
++    if (sps->pic_order_cnt_type == 0) {
++        bw_ue(&w, sps->log2_max_pic_order_cnt_lsb_minus4);
++    } else if (sps->pic_order_cnt_type == 1) {
++        bw_u(&w, 1, sps->delta_pic_order_always_zero_flag);
++        bw_se(&w, sps->offset_for_non_ref_pic);
++        bw_se(&w, sps->offset_for_top_to_bottom_field);
++        bw_ue(&w, sps->num_ref_frames_in_pic_order_cnt_cycle);
++        for (unsigned i = 0; i < sps->num_ref_frames_in_pic_order_cnt_cycle; i++)
++            bw_se(&w, sps->offset_for_ref_frame[i]);
++    }
++    /* VA-API carries this as num_ref_frames, outside the SPS struct. */
++    bw_ue(&w, sps->max_num_ref_frames ? sps->max_num_ref_frames : d->num_ref_frames);
++    bw_u(&w, 1, 0);                                 /* gaps_in_frame_num_allowed */
++    bw_ue(&w, mbs_w - 1);
++    bw_ue(&w, (sps->frame_mbs_only_flag ? mbs_h : mbs_h / 2) - 1);
++    bw_u(&w, 1, sps->frame_mbs_only_flag);
++    if (!sps->frame_mbs_only_flag)
++        bw_u(&w, 1, sps->mb_adaptive_frame_field_flag);
++    bw_u(&w, 1, sps->direct_8x8_inference_flag);
++    bw_u(&w, 1, 0);                                 /* frame_cropping_flag */
++    bw_u(&w, 1, 0);                                 /* vui_parameters_present */
++    bw_trailing(&w);
++
++    codec->sps_size = make_nal(0x67, &w, codec->sps, sizeof(codec->sps));
++}
++
++static void h264_build_pps(struct virgl_video_codec *codec,
++                           const struct virgl_h264_picture_desc *d,
++                           uint32_t pps_id)
++{
++    const struct virgl_h264_pps *pps = &d->pps;
++    struct bitw w;
++    bool high = codec->profile == PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH ||
++                codec->profile == PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH10 ||
++                codec->profile == PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH422 ||
++                codec->profile == PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH444;
++    bool lists = !flat_list(&pps->ScalingList4x4[0][0], 6 * 16) ||
++                 (pps->transform_8x8_mode_flag &&
++                  !flat_list(&pps->ScalingList8x8[0][0], 2 * 64));
++    int l0 = codec->l0_default >= 0 ? codec->l0_default : d->num_ref_idx_l0_active_minus1;
++    int l1 = codec->l1_default >= 0 ? codec->l1_default : d->num_ref_idx_l1_active_minus1;
++
++    memset(&w, 0, sizeof(w));
++    bw_ue(&w, pps_id);
++    bw_ue(&w, 0);                                   /* seq_parameter_set_id */
++    bw_u(&w, 1, pps->entropy_coding_mode_flag);
++    bw_u(&w, 1, pps->bottom_field_pic_order_in_frame_present_flag);
++    bw_ue(&w, 0);                                   /* num_slice_groups_minus1 */
++    bw_ue(&w, l0);
++    bw_ue(&w, l1);
++    bw_u(&w, 1, pps->weighted_pred_flag);
++    bw_u(&w, 2, pps->weighted_bipred_idc);
++    bw_se(&w, pps->pic_init_qp_minus26);
++    bw_se(&w, pps->pic_init_qs_minus26);
++    bw_se(&w, pps->chroma_qp_index_offset);
++    bw_u(&w, 1, pps->deblocking_filter_control_present_flag);
++    bw_u(&w, 1, pps->constrained_intra_pred_flag);
++    bw_u(&w, 1, pps->redundant_pic_cnt_present_flag);
++    if (high && (pps->transform_8x8_mode_flag || lists ||
++                 pps->second_chroma_qp_index_offset != pps->chroma_qp_index_offset)) {
++        bw_u(&w, 1, pps->transform_8x8_mode_flag);
++        bw_u(&w, 1, lists);
++        if (lists) {
++            for (unsigned i = 0; i < 6; i++) {
++                bw_u(&w, 1, 1);
++                write_scaling_list(&w, pps->ScalingList4x4[i], 16);
++            }
++            if (pps->transform_8x8_mode_flag) {
++                for (unsigned i = 0; i < 2; i++) {
++                    bw_u(&w, 1, 1);
++                    write_scaling_list(&w, pps->ScalingList8x8[i], 64);
++                }
++            }
++        }
++        bw_se(&w, pps->second_chroma_qp_index_offset);
++    }
++    bw_trailing(&w);
++
++    codec->pps_size = make_nal(0x68, &w, codec->pps, sizeof(codec->pps));
++}
++
++struct h264_slice_info {
++    uint32_t type;          /* 0 P, 1 B, 2 I, 3 SP, 4 SI */
++    uint32_t pps_id;
++    bool override;
++    bool valid;
++};
++
++static struct h264_slice_info h264_parse_slice(const struct virgl_h264_picture_desc *d,
++                                               const uint8_t *nal, size_t size)
++{
++    const struct virgl_h264_pps *pps = &d->pps;
++    const struct virgl_h264_sps *sps = &pps->sps;
++    struct h264_slice_info si = { 0 };
++    struct bitr r;
++    uint8_t nal_type = nal[0] & 0x1f;
++    bool field_pic = false;
++
++    br_init(&r, nal + 1, size - 1);
++    br_ue(&r);                                      /* first_mb_in_slice */
++    si.type = br_ue(&r) % 5;
++    si.pps_id = br_ue(&r);
++    if (sps->separate_colour_plane_flag)
++        br_u(&r, 2);
++    br_u(&r, sps->log2_max_frame_num_minus4 + 4);   /* frame_num */
++    if (!sps->frame_mbs_only_flag) {
++        field_pic = br_u(&r, 1);
++        if (field_pic)
++            br_u(&r, 1);
++    }
++    if (nal_type == 5)
++        br_ue(&r);                                  /* idr_pic_id */
++    if (sps->pic_order_cnt_type == 0) {
++        br_u(&r, sps->log2_max_pic_order_cnt_lsb_minus4 + 4);
++        if (pps->bottom_field_pic_order_in_frame_present_flag && !field_pic)
++            br_se(&r);
++    }
++    if (sps->pic_order_cnt_type == 1 && !sps->delta_pic_order_always_zero_flag) {
++        br_se(&r);
++        if (pps->bottom_field_pic_order_in_frame_present_flag && !field_pic)
++            br_se(&r);
++    }
++    if (pps->redundant_pic_cnt_present_flag)
++        br_ue(&r);
++    if (si.type == 1)
++        br_u(&r, 1);                                /* direct_spatial_mv_pred */
++    if (si.type == 0 || si.type == 1 || si.type == 3)
++        si.override = br_u(&r, 1);
++    si.valid = !r.error;
++    return si;
++}
++
++/* Calls fn for each NAL unit (without start code) in Annex B data. */
++static void for_each_nal(const uint8_t *data, size_t size,
++                         void (*fn)(void *ctx, const uint8_t *nal, size_t size),
++                         void *ctx)
++{
++    size_t i = 0, start = SIZE_MAX;
++
++    while (i + 2 < size) {
++        if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
++            if (start != SIZE_MAX) {
++                size_t end = i;
++                while (end > start && data[end - 1] == 0)
++                    end--;
++                if (end > start)
++                    fn(ctx, data + start, end - start);
++            }
++            i += 3;
++            start = i;
++            continue;
++        }
++        i++;
++    }
++    if (start == SIZE_MAX) {
++        /* No start code at all: one bare NAL unit. */
++        if (size)
++            fn(ctx, data, size);
++    } else if (start < size) {
++        fn(ctx, data + start, size - start);
++    }
++}
++
++struct h264_au {
++    struct virgl_video_codec *codec;
++    struct vt_bytes sample;         /* AVCC: 4-byte lengths */
++    struct h264_slice_info first;
++    struct h264_slice_info last;
++    unsigned slices;
++};
++
++static void h264_collect(void *ctx, const uint8_t *nal, size_t size)
++{
++    struct h264_au *au = ctx;
++    struct virgl_video_codec *codec = au->codec;
++    uint8_t type = nal[0] & 0x1f;
++    uint8_t len[4];
++
++    switch (type) {
++    case 7:
++        if (size <= sizeof(codec->inband_sps)) {
++            memcpy(codec->inband_sps, nal, size);
++            codec->inband_sps_size = size;
++        }
++        return;
++    case 8:
++        if (size <= sizeof(codec->inband_pps)) {
++            memcpy(codec->inband_pps, nal, size);
++            codec->inband_pps_size = size;
++        }
++        return;
++    case 1:
++    case 5: {
++        struct h264_slice_info si = h264_parse_slice(&codec->desc.h264, nal, size);
++        if (!au->slices++)
++            au->first = si;
++        au->last = si;
++        break;
++    }
++    case 9:     /* access unit delimiter */
++    case 10:    /* end of sequence */
++    case 11:    /* end of stream */
++    case 12:    /* filler */
++        return;
++    default:
++        break;
++    }
++
++    len[0] = size >> 24;
++    len[1] = size >> 16;
++    len[2] = size >> 8;
++    len[3] = size;
++    bytes_append(&au->sample, len, 4);
++    bytes_append(&au->sample, nal, size);
++}
++
++static int h264_end_frame(struct virgl_video_codec *codec,
++                          struct virgl_video_buffer *target)
++{
++    const struct virgl_h264_picture_desc *d = &codec->desc.h264;
++    struct h264_au au;
++    const uint8_t *sets[2];
++    size_t sizes[2];
++    CMVideoFormatDescriptionRef fmt = NULL;
++    OSStatus st;
++    bool changed;
++
++    memset(&au, 0, sizeof(au));
++    au.codec = codec;
++    for_each_nal(codec->bits.data, codec->bits.size, h264_collect, &au);
++    if (!au.slices) {
++        bytes_free(&au.sample);
++        return -1;
++    }
++
++    if (codec->inband_sps_size && codec->inband_pps_size) {
++        /* The guest sent real parameter sets: use them. */
++        sets[0] = codec->inband_sps;
++        sizes[0] = codec->inband_sps_size;
++        sets[1] = codec->inband_pps;
++        sizes[1] = codec->inband_pps_size;
++        changed = !codec->format ||
++                  codec->sps_size != sizes[0] || memcmp(codec->sps, sets[0], sizes[0]) ||
++                  codec->pps_size != sizes[1] || memcmp(codec->pps, sets[1], sizes[1]);
++        if (changed) {
++            memcpy(codec->sps, sets[0], sizes[0]);
++            codec->sps_size = sizes[0];
++            memcpy(codec->pps, sets[1], sizes[1]);
++            codec->pps_size = sizes[1];
++        }
++    } else {
++        uint8_t old_sps[sizeof(codec->sps)], old_pps[sizeof(codec->pps)];
++        size_t old_sps_size = codec->sps_size, old_pps_size = codec->pps_size;
++
++        /* The default number of active references comes from the PPS, which
++         * the guest does not send: learn it from a slice that uses it. */
++        if (au.last.valid && !au.last.override) {
++            if (au.last.type == 0 || au.last.type == 1 || au.last.type == 3)
++                codec->l0_default = d->num_ref_idx_l0_active_minus1;
++            if (au.last.type == 1)
++                codec->l1_default = d->num_ref_idx_l1_active_minus1;
++        }
++
++        /* Not learned yet: keep the first value, so the PPS (and the
++         * format description) does not change with every frame. */
++        if (codec->l0_default < 0)
++            codec->l0_default = d->num_ref_idx_l0_active_minus1;
++        if (codec->l1_default < 0)
++            codec->l1_default = d->num_ref_idx_l1_active_minus1;
++
++        memcpy(old_sps, codec->sps, old_sps_size);
++        memcpy(old_pps, codec->pps, old_pps_size);
++        h264_build_sps(codec, d);
++        h264_build_pps(codec, d, au.first.valid ? au.first.pps_id : 0);
++        changed = !codec->format ||
++                  old_sps_size != codec->sps_size || memcmp(old_sps, codec->sps, old_sps_size) ||
++                  old_pps_size != codec->pps_size || memcmp(old_pps, codec->pps, old_pps_size);
++    }
++
++    if (changed) {
++        sets[0] = codec->sps;
++        sizes[0] = codec->sps_size;
++        sets[1] = codec->pps;
++        sizes[1] = codec->pps_size;
++        st = CMVideoFormatDescriptionCreateFromH264ParameterSets(
++                kCFAllocatorDefault, 2, sets, sizes, 4, &fmt);
++        if (st != noErr) {
++            virgl_error("vt-video: H.264 parameter sets rejected: %d\n", (int)st);
++            bytes_free(&au.sample);
++            return -1;
++        }
++        if (vt_debug) {
++            char hex[2 * 1024 + 8];
++            size_t n = 0;
++            for (size_t i = 0; i < codec->sps_size && n + 3 < sizeof(hex); i++)
++                n += snprintf(hex + n, sizeof(hex) - n, "%02x", codec->sps[i]);
++            n += snprintf(hex + n, sizeof(hex) - n, " ");
++            for (size_t i = 0; i < codec->pps_size && n + 3 < sizeof(hex); i++)
++                n += snprintf(hex + n, sizeof(hex) - n, "%02x", codec->pps[i]);
++            vt_log("H.264 format: l0 %d l1 %d sps+pps %s\n",
++                   codec->l0_default, codec->l1_default, hex);
++        }
++        if (!set_format(codec, fmt)) {
++            bytes_free(&au.sample);
++            return -1;
++        }
++    }
++
++    if (decode_sample(codec, au.sample.data, au.sample.size))
++        deliver_output(codec, target);
++    bytes_free(&au.sample);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------ */
++/* HEVC                                                                      */
++/* ------------------------------------------------------------------------ */
++
++/* VA-API sends the slices and parsed parameters, not the parameter sets.
++ * VPS, SPS and PPS are rebuilt; what VA-API leaves out of the SPS are the
++ * short-term reference picture sets, so every slice header gets its own
++ * explicit set instead, made from the guest's reference list (all short-term
++ * references with their POCs, "used" when in StCurrBefore/After). The rest
++ * of each slice header is copied bit for bit; HEVC slice data starts byte
++ * aligned, so only the header is rewritten. */
++
++struct hbits {          /* bit reader over a whole RBSP */
++    const uint8_t *d;
++    size_t size;        /* bytes */
++    size_t pos;         /* bits */
++    bool error;
++};
++
++static uint32_t hb_u(struct hbits *r, unsigned n)
++{
++    uint32_t v = 0;
++    for (unsigned i = 0; i < n; i++) {
++        if (r->pos >= r->size * 8) {
++            r->error = true;
++            return 0;
++        }
++        v = (v << 1) | ((r->d[r->pos >> 3] >> (7 - (r->pos & 7))) & 1);
++        r->pos++;
++    }
++    return v;
++}
++
++static uint32_t hb_ue(struct hbits *r)
++{
++    unsigned zeros = 0;
++    while (!r->error && hb_u(r, 1) == 0) {
++        if (++zeros > 31) {
++            r->error = true;
++            return 0;
++        }
++    }
++    return r->error ? 0 : ((1u << zeros) - 1) + hb_u(r, zeros);
++}
++
++static int32_t hb_se(struct hbits *r)
++{
++    uint32_t v = hb_ue(r);
++    return (v & 1) ? (int32_t)((v + 1) / 2) : -(int32_t)(v / 2);
++}
++
++struct hwbits {         /* growing bit writer */
++    uint8_t *d;
++    size_t cap;
++    size_t bits;
++    bool error;
++};
++
++static void hw_u(struct hwbits *w, unsigned n, uint64_t v)
++{
++    for (int i = (int)n - 1; i >= 0; i--) {
++        if (w->bits / 8 + 1 >= w->cap) {
++            size_t cap = w->cap ? w->cap * 2 : 1024;
++            uint8_t *p = realloc(w->d, cap);
++            if (!p) {
++                w->error = true;
++                return;
++            }
++            memset(p + w->cap, 0, cap - w->cap);
++            w->d = p;
++            w->cap = cap;
++        }
++        if ((v >> i) & 1)
++            w->d[w->bits >> 3] |= 0x80 >> (w->bits & 7);
++        w->bits++;
++    }
++}
++
++static void hw_ue(struct hwbits *w, uint32_t v)
++{
++    uint64_t x = (uint64_t)v + 1;
++    unsigned len = 0;
++    while ((x >> (len + 1)) != 0)
++        len++;
++    hw_u(w, len, 0);
++    hw_u(w, len + 1, x);
++}
++
++static void hw_se(struct hwbits *w, int32_t v)
++{
++    hw_ue(w, v > 0 ? (uint32_t)(2 * (int64_t)v - 1) : (uint32_t)(-2 * (int64_t)v));
++}
++
++static void hw_copy(struct hwbits *w, struct hbits *r, size_t from, size_t to)
++{
++    size_t save = r->pos;
++    r->pos = from;
++    while (r->pos < to && !r->error) {
++        unsigned n = to - r->pos > 32 ? 32 : (unsigned)(to - r->pos);
++        hw_u(w, n, hb_u(r, n));
++    }
++    r->pos = save;
++}
++
++/* Bits needed for values below v. The guest picks v: capped at 32. */
++static unsigned ceil_log2(uint64_t v)
++{
++    unsigned n = 0;
++    while (n < 32 && ((uint64_t)1 << n) < v)
++        n++;
++    return n;
++}
++
++/* RBSP (emulation prevention bytes removed) of a whole NAL unit payload. */
++static uint8_t *nal_to_rbsp(const uint8_t *nal, size_t size, size_t *out)
++{
++    uint8_t *r = malloc(size ? size : 1);
++    size_t n = 0, zeros = 0;
++    if (!r)
++        return NULL;
++    for (size_t i = 0; i < size; i++) {
++        if (zeros >= 2 && nal[i] == 3) {
++            zeros = 0;
++            continue;
++        }
++        r[n++] = nal[i];
++        zeros = nal[i] ? 0 : zeros + 1;
++    }
++    *out = n;
++    return r;
++}
++
++/* NAL unit from a 2-byte header and an RBSP (adds emulation prevention). */
++static void rbsp_to_nal(struct vt_bytes *out, uint8_t h0, uint8_t h1,
++                        const uint8_t *rbsp, size_t size)
++{
++    size_t zeros = 0;
++    uint8_t three = 3;
++    bytes_append(out, &h0, 1);
++    bytes_append(out, &h1, 1);
++    for (size_t i = 0; i < size; i++) {
++        if (zeros >= 2 && rbsp[i] <= 3) {
++            bytes_append(out, &three, 1);
++            zeros = 0;
++        }
++        bytes_append(out, &rbsp[i], 1);
++        zeros = rbsp[i] ? 0 : zeros + 1;
++    }
++}
++
++static void hevc_ptl(struct hwbits *w, enum pipe_video_profile p)
++{
++    uint8_t idc = p == PIPE_VIDEO_PROFILE_HEVC_MAIN_10 ? 2 : 1;
++    hw_u(w, 2, 0);                      /* general_profile_space */
++    hw_u(w, 1, 0);                      /* general_tier_flag */
++    hw_u(w, 5, idc);
++    for (unsigned j = 0; j < 32; j++)   /* compatibility: Main10 decoders take Main */
++        hw_u(w, 1, j == idc || (idc == 1 && j == 2));
++    hw_u(w, 1, 1);                      /* progressive_source */
++    hw_u(w, 1, 0);                      /* interlaced_source */
++    hw_u(w, 1, 0);                      /* non_packed_constraint */
++    hw_u(w, 1, 1);                      /* frame_only_constraint */
++    hw_u(w, 32, 0);                     /* 43 reserved bits + inbld */
++    hw_u(w, 12, 0);
++    hw_u(w, 8, 186);                    /* general_level_idc: 6.2, the largest */
++}
++
++static void hw_trailing(struct hwbits *w)
++{
++    hw_u(w, 1, 1);
++    while (w->bits & 7)
++        hw_u(w, 1, 0);
++}
++
++/* Scaling lists as transmitted (the guest gives them in coefficient order). */
++static void hevc_scaling_lists(struct hwbits *w, const struct virgl_h265_sps *s)
++{
++    for (unsigned size = 0; size < 4; size++) {
++        for (unsigned m = 0; m < 6; m += (size == 3) ? 3 : 1) {
++            const uint8_t *l;
++            unsigned n = size == 0 ? 16 : 64;
++            int next = 8;
++            hw_u(w, 1, 1);              /* scaling_list_pred_mode_flag */
++            switch (size) {
++            case 0: l = s->ScalingList4x4[m]; break;
++            case 1: l = s->ScalingList8x8[m]; break;
++            case 2: l = s->ScalingList16x16[m]; break;
++            default: l = s->ScalingList32x32[m / 3]; break;
++            }
++            if (size > 1) {
++                int dc = size == 2 ? s->ScalingListDCCoeff16x16[m] : s->ScalingListDCCoeff32x32[m / 3];
++                hw_se(w, dc - 8);
++                next = dc;
++            }
++            for (unsigned i = 0; i < n; i++) {
++                int v = l[i] ? l[i] : 16;
++                hw_se(w, (int8_t)(uint8_t)(v - next));
++                next = v;
++            }
++        }
++    }
++}
++
++static void hevc_build_sets(struct virgl_video_codec *codec,
++                            const struct virgl_h265_picture_desc *d,
++                            uint32_t pps_id, struct vt_bytes *vps,
++                            struct vt_bytes *sps, struct vt_bytes *pps)
++{
++    const struct virgl_h265_pps *p = &d->pps;
++    const struct virgl_h265_sps *s = &p->sps;
++    struct hwbits w;
++
++    memset(&w, 0, sizeof(w));
++    hw_u(&w, 4, 0);                     /* vps_video_parameter_set_id */
++    hw_u(&w, 1, 1);
++    hw_u(&w, 1, 1);
++    hw_u(&w, 6, 0);                     /* vps_max_layers_minus1 */
++    hw_u(&w, 3, 0);                     /* vps_max_sub_layers_minus1 */
++    hw_u(&w, 1, 1);                     /* vps_temporal_id_nesting_flag */
++    hw_u(&w, 16, 0xffff);
++    hevc_ptl(&w, codec->profile);
++    hw_u(&w, 1, 1);                     /* sub_layer_ordering_info_present */
++    hw_ue(&w, s->sps_max_dec_pic_buffering_minus1);
++    hw_ue(&w, 0);                       /* max_num_reorder_pics */
++    hw_ue(&w, 0);                       /* max_latency_increase_plus1 */
++    hw_u(&w, 6, 0);                     /* vps_max_layer_id */
++    hw_ue(&w, 0);                       /* vps_num_layer_sets_minus1 */
++    hw_u(&w, 1, 0);                     /* vps_timing_info_present_flag */
++    hw_u(&w, 1, 0);                     /* vps_extension_flag */
++    hw_trailing(&w);
++    vps->size = 0;
++    rbsp_to_nal(vps, 32 << 1, 1, w.d, w.bits / 8);
++    free(w.d);
++
++    memset(&w, 0, sizeof(w));
++    hw_u(&w, 4, 0);                     /* sps_video_parameter_set_id */
++    hw_u(&w, 3, 0);                     /* sps_max_sub_layers_minus1 */
++    hw_u(&w, 1, 1);                     /* sps_temporal_id_nesting_flag */
++    hevc_ptl(&w, codec->profile);
++    hw_ue(&w, 0);                       /* sps_seq_parameter_set_id */
++    hw_ue(&w, s->chroma_format_idc);
++    if (s->chroma_format_idc == 3)
++        hw_u(&w, 1, s->separate_colour_plane_flag);
++    hw_ue(&w, s->pic_width_in_luma_samples);
++    hw_ue(&w, s->pic_height_in_luma_samples);
++    hw_u(&w, 1, 0);                     /* conformance_window_flag */
++    hw_ue(&w, s->bit_depth_luma_minus8);
++    hw_ue(&w, s->bit_depth_chroma_minus8);
++    hw_ue(&w, s->log2_max_pic_order_cnt_lsb_minus4);
++    hw_u(&w, 1, 1);                     /* sub_layer_ordering_info_present */
++    hw_ue(&w, s->sps_max_dec_pic_buffering_minus1);
++    hw_ue(&w, 0);
++    hw_ue(&w, 0);
++    hw_ue(&w, s->log2_min_luma_coding_block_size_minus3);
++    hw_ue(&w, s->log2_diff_max_min_luma_coding_block_size);
++    hw_ue(&w, s->log2_min_transform_block_size_minus2);
++    hw_ue(&w, s->log2_diff_max_min_transform_block_size);
++    hw_ue(&w, s->max_transform_hierarchy_depth_inter);
++    hw_ue(&w, s->max_transform_hierarchy_depth_intra);
++    hw_u(&w, 1, s->scaling_list_enabled_flag);
++    if (s->scaling_list_enabled_flag) {
++        hw_u(&w, 1, 1);                 /* sps_scaling_list_data_present */
++        hevc_scaling_lists(&w, s);
++    }
++    hw_u(&w, 1, s->amp_enabled_flag);
++    hw_u(&w, 1, s->sample_adaptive_offset_enabled_flag);
++    hw_u(&w, 1, s->pcm_enabled_flag);
++    if (s->pcm_enabled_flag) {
++        hw_u(&w, 4, s->pcm_sample_bit_depth_luma_minus1);
++        hw_u(&w, 4, s->pcm_sample_bit_depth_chroma_minus1);
++        hw_ue(&w, s->log2_min_pcm_luma_coding_block_size_minus3);
++        hw_ue(&w, s->log2_diff_max_min_pcm_luma_coding_block_size);
++        hw_u(&w, 1, s->pcm_loop_filter_disabled_flag);
++    }
++    hw_ue(&w, 0);                       /* num_short_term_ref_pic_sets: slices carry their own */
++    hw_u(&w, 1, s->long_term_ref_pics_present_flag);
++    if (s->long_term_ref_pics_present_flag)
++        hw_ue(&w, 0);                   /* num_long_term_ref_pics_sps */
++    hw_u(&w, 1, s->sps_temporal_mvp_enabled_flag);
++    hw_u(&w, 1, s->strong_intra_smoothing_enabled_flag);
++    hw_u(&w, 1, 0);                     /* vui_parameters_present_flag */
++    hw_u(&w, 1, 0);                     /* sps_extension_present_flag */
++    hw_trailing(&w);
++    sps->size = 0;
++    rbsp_to_nal(sps, 33 << 1, 1, w.d, w.bits / 8);
++    free(w.d);
++
++    memset(&w, 0, sizeof(w));
++    hw_ue(&w, pps_id);
++    hw_ue(&w, 0);                       /* pps_seq_parameter_set_id */
++    hw_u(&w, 1, p->dependent_slice_segments_enabled_flag);
++    hw_u(&w, 1, p->output_flag_present_flag);
++    hw_u(&w, 3, p->num_extra_slice_header_bits);
++    hw_u(&w, 1, p->sign_data_hiding_enabled_flag);
++    hw_u(&w, 1, p->cabac_init_present_flag);
++    hw_ue(&w, p->num_ref_idx_l0_default_active_minus1);
++    hw_ue(&w, p->num_ref_idx_l1_default_active_minus1);
++    hw_se(&w, p->init_qp_minus26);
++    hw_u(&w, 1, p->constrained_intra_pred_flag);
++    hw_u(&w, 1, p->transform_skip_enabled_flag);
++    hw_u(&w, 1, p->cu_qp_delta_enabled_flag);
++    if (p->cu_qp_delta_enabled_flag)
++        hw_ue(&w, p->diff_cu_qp_delta_depth);
++    hw_se(&w, p->pps_cb_qp_offset);
++    hw_se(&w, p->pps_cr_qp_offset);
++    hw_u(&w, 1, p->pps_slice_chroma_qp_offsets_present_flag);
++    hw_u(&w, 1, p->weighted_pred_flag);
++    hw_u(&w, 1, p->weighted_bipred_flag);
++    hw_u(&w, 1, p->transquant_bypass_enabled_flag);
++    hw_u(&w, 1, p->tiles_enabled_flag);
++    hw_u(&w, 1, p->entropy_coding_sync_enabled_flag);
++    if (p->tiles_enabled_flag) {
++        hw_ue(&w, p->num_tile_columns_minus1);
++        hw_ue(&w, p->num_tile_rows_minus1);
++        hw_u(&w, 1, p->uniform_spacing_flag);
++        if (!p->uniform_spacing_flag) {
++            for (unsigned i = 0; i < p->num_tile_columns_minus1 && i < 20; i++)
++                hw_ue(&w, p->column_width_minus1[i]);
++            for (unsigned i = 0; i < p->num_tile_rows_minus1 && i < 22; i++)
++                hw_ue(&w, p->row_height_minus1[i]);
++        }
++        hw_u(&w, 1, p->loop_filter_across_tiles_enabled_flag);
++    }
++    hw_u(&w, 1, p->pps_loop_filter_across_slices_enabled_flag);
++    hw_u(&w, 1, p->deblocking_filter_control_present_flag);
++    if (p->deblocking_filter_control_present_flag) {
++        hw_u(&w, 1, p->deblocking_filter_override_enabled_flag);
++        hw_u(&w, 1, p->pps_deblocking_filter_disabled_flag);
++        if (!p->pps_deblocking_filter_disabled_flag) {
++            hw_se(&w, p->pps_beta_offset_div2);
++            hw_se(&w, p->pps_tc_offset_div2);
++        }
++    }
++    hw_u(&w, 1, 0);                     /* pps_scaling_list_data_present: in the SPS */
++    hw_u(&w, 1, p->lists_modification_present_flag);
++    hw_ue(&w, p->log2_parallel_merge_level_minus2);
++    hw_u(&w, 1, p->slice_segment_header_extension_present_flag);
++    hw_u(&w, 1, 0);                     /* pps_extension_present_flag */
++    hw_trailing(&w);
++    pps->size = 0;
++    rbsp_to_nal(pps, 34 << 1, 1, w.d, w.bits / 8);
++    free(w.d);
++}
++
++/* The explicit short-term reference picture set for this picture. */
++static void hevc_write_rps(struct hwbits *w, const struct virgl_h265_picture_desc *d)
++{
++    int neg[16], pos[16];
++    bool neg_used[16], pos_used[16];
++    unsigned nn = 0, np = 0;
++
++    for (unsigned i = 0; i < 15; i++) {
++        bool used = false;
++        int64_t delta;
++        if (!d->ref[i] || d->IsLongTerm[i])
++            continue;
++        for (unsigned k = 0; k < d->NumPocStCurrBefore && k < 8; k++)
++            used |= d->RefPicSetStCurrBefore[k] == i;
++        for (unsigned k = 0; k < d->NumPocStCurrAfter && k < 8; k++)
++            used |= d->RefPicSetStCurrAfter[k] == i;
++        delta = (int64_t)d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
++        if (delta < -32768 || delta > 32768)   /* not a valid stream */
++            continue;
++        if (delta < 0) {
++            neg[nn] = (int)delta;
++            neg_used[nn++] = used;
++        } else if (delta > 0) {
++            pos[np] = (int)delta;
++            pos_used[np++] = used;
++        }
++    }
++    /* closest first */
++    for (unsigned a = 0; a < nn; a++)
++        for (unsigned b = a + 1; b < nn; b++)
++            if (neg[b] > neg[a]) {
++                int t = neg[a]; neg[a] = neg[b]; neg[b] = t;
++                bool u = neg_used[a]; neg_used[a] = neg_used[b]; neg_used[b] = u;
++            }
++    for (unsigned a = 0; a < np; a++)
++        for (unsigned b = a + 1; b < np; b++)
++            if (pos[b] < pos[a]) {
++                int t = pos[a]; pos[a] = pos[b]; pos[b] = t;
++                bool u = pos_used[a]; pos_used[a] = pos_used[b]; pos_used[b] = u;
++            }
++    hw_ue(w, nn);
++    hw_ue(w, np);
++    for (unsigned i = 0, prev = 0; i < nn; i++) {
++        hw_ue(w, (uint32_t)(-neg[i]) - prev - 1);
++        hw_u(w, 1, neg_used[i]);
++        prev = (uint32_t)(-neg[i]);
++    }
++    for (unsigned i = 0, prev = 0; i < np; i++) {
++        hw_ue(w, (uint32_t)pos[i] - prev - 1);
++        hw_u(w, 1, pos_used[i]);
++        prev = (uint32_t)pos[i];
++    }
++}
++
++/* Skips a short-term RPS in a slice header (inter prediction from the SPS's
++ * sets is possible there: NumDeltaPocsOfRefRpsIdx says how many). */
++static void hevc_skip_rps(struct hbits *r, const struct virgl_h265_picture_desc *d)
++{
++    const struct virgl_h265_sps *s = &d->pps.sps;
++    if (s->num_short_term_ref_pic_sets != 0 && hb_u(r, 1)) {
++        /* inter_ref_pic_set_prediction_flag; in a slice header idx == num */
++        hb_ue(r);                       /* delta_idx_minus1 */
++        hb_u(r, 1);                     /* delta_rps_sign */
++        hb_ue(r);                       /* abs_delta_rps_minus1 */
++        /* At most 16 pictures in a set; the count comes from the guest. */
++        for (unsigned j = 0; j <= d->NumDeltaPocsOfRefRpsIdx && j <= 16 && !r->error; j++)
++            if (!hb_u(r, 1))            /* used_by_curr_pic_flag */
++                hb_u(r, 1);             /* use_delta_flag */
++    } else {
++        unsigned nn = hb_ue(r), np = hb_ue(r);
++        for (unsigned i = 0; i < nn + np && !r->error; i++) {
++            hb_ue(r);
++            hb_u(r, 1);
++        }
++    }
++}
++
++struct hevc_slice {
++    uint32_t pps_id;
++    bool ok;
++};
++
++/* Rewrites one slice segment NAL unit (without start code) into out. */
++static struct hevc_slice hevc_rewrite_slice(const struct virgl_h265_picture_desc *d,
++                                            const uint8_t *nal, size_t size,
++                                            struct vt_bytes *out)
++{
++    const struct virgl_h265_pps *p = &d->pps;
++    const struct virgl_h265_sps *s = &p->sps;
++    struct hevc_slice res = { 0 };
++    struct hbits r = { 0 };
++    struct hwbits w = { 0 };
++    size_t rbsp_size, rps_start = 0, rps_end = 0, end;
++    uint8_t *rbsp;
++    unsigned type = (nal[0] >> 1) & 63, slice_type = 2;
++    bool dependent = false, first, idr = type == 19 || type == 20;
++    bool sao_luma = false, sao_chroma = false, tmvp = false;
++    bool deblock_disabled = p->pps_deblocking_filter_disabled_flag;
++    unsigned ctb_log2 = s->log2_min_luma_coding_block_size_minus3 + 3 +
++                        s->log2_diff_max_min_luma_coding_block_size;
++    uint64_t ctbs;
++    unsigned chroma = s->separate_colour_plane_flag ? 0 : s->chroma_format_idc;
++
++    if (ctb_log2 < 4 || ctb_log2 > 6)   /* CTBs are 16, 32 or 64 pixels */
++        return res;
++    ctbs = (((uint64_t)s->pic_width_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2) *
++           (((uint64_t)s->pic_height_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2);
++    rbsp = nal_to_rbsp(nal + 2, size - 2, &rbsp_size);
++    if (!rbsp)
++        return res;
++    r.d = rbsp;
++    r.size = rbsp_size;
++
++    first = hb_u(&r, 1);
++    if (type >= 16 && type <= 23)
++        hb_u(&r, 1);                    /* no_output_of_prior_pics_flag */
++    res.pps_id = hb_ue(&r);
++    if (!first) {
++        if (p->dependent_slice_segments_enabled_flag)
++            dependent = hb_u(&r, 1);
++        hb_u(&r, ceil_log2(ctbs));      /* slice_segment_address */
++    }
++    if (!dependent) {
++        hb_u(&r, p->num_extra_slice_header_bits);
++        slice_type = hb_ue(&r);
++        if (p->output_flag_present_flag)
++            hb_u(&r, 1);
++        if (s->separate_colour_plane_flag)
++            hb_u(&r, 2);
++        if (!idr) {
++            hb_u(&r, s->log2_max_pic_order_cnt_lsb_minus4 + 4);
++            rps_start = r.pos;
++            if (!hb_u(&r, 1))
++                hevc_skip_rps(&r, d);
++            else if (s->num_short_term_ref_pic_sets > 1)
++                hb_u(&r, ceil_log2(s->num_short_term_ref_pic_sets));
++            rps_end = r.pos;
++            if (s->long_term_ref_pics_present_flag) {
++                unsigned lt_sps = 0, lt_pics;
++                if (s->num_long_term_ref_pics_sps > 0)
++                    goto out;           /* LT pictures from the SPS: not known */
++                lt_pics = hb_ue(&r);
++                for (unsigned i = 0; i < lt_sps + lt_pics && !r.error; i++) {
++                    hb_u(&r, s->log2_max_pic_order_cnt_lsb_minus4 + 4);
++                    hb_u(&r, 1);
++                    if (hb_u(&r, 1))
++                        hb_ue(&r);
++                }
++            }
++            if (s->sps_temporal_mvp_enabled_flag)
++                tmvp = hb_u(&r, 1);
++        }
++        if (s->sample_adaptive_offset_enabled_flag) {
++            sao_luma = hb_u(&r, 1);
++            if (chroma)
++                sao_chroma = hb_u(&r, 1);
++        }
++        if (slice_type == 0 || slice_type == 1) {   /* B or P */
++            unsigned l0 = p->num_ref_idx_l0_default_active_minus1;
++            unsigned l1 = p->num_ref_idx_l1_default_active_minus1;
++            bool col_l0 = true;
++            if (hb_u(&r, 1)) {
++                l0 = hb_ue(&r);
++                if (slice_type == 0)
++                    l1 = hb_ue(&r);
++            }
++            if (l0 > 14 || l1 > 14)     /* at most 15 references per list */
++                goto out;
++            if (p->lists_modification_present_flag && d->NumPocTotalCurr > 1) {
++                unsigned bits = ceil_log2(d->NumPocTotalCurr);
++                if (hb_u(&r, 1))
++                    for (unsigned i = 0; i <= l0; i++)
++                        hb_u(&r, bits);
++                if (slice_type == 0 && hb_u(&r, 1))
++                    for (unsigned i = 0; i <= l1; i++)
++                        hb_u(&r, bits);
++            }
++            if (slice_type == 0)
++                hb_u(&r, 1);            /* mvd_l1_zero_flag */
++            if (p->cabac_init_present_flag)
++                hb_u(&r, 1);
++            if (tmvp) {
++                if (slice_type == 0)
++                    col_l0 = hb_u(&r, 1);
++                if ((col_l0 && l0 > 0) || (!col_l0 && l1 > 0))
++                    hb_ue(&r);
++            }
++            if ((p->weighted_pred_flag && slice_type == 1) ||
++                (p->weighted_bipred_flag && slice_type == 0)) {
++                bool lf[16], cf[16];
++                hb_ue(&r);              /* luma_log2_weight_denom */
++                if (chroma)
++                    hb_se(&r);
++                for (unsigned list = 0; list < (slice_type == 0 ? 2u : 1u); list++) {
++                    unsigned n = (list ? l1 : l0) + 1;
++                    for (unsigned i = 0; i < n && i < 16; i++)
++                        lf[i] = hb_u(&r, 1);
++                    for (unsigned i = 0; i < n && i < 16; i++)
++                        cf[i] = chroma ? hb_u(&r, 1) : false;
++                    for (unsigned i = 0; i < n && i < 16; i++) {
++                        if (lf[i]) {
++                            hb_se(&r);
++                            hb_se(&r);
++                        }
++                        if (cf[i])
++                            for (unsigned j = 0; j < 2; j++) {
++                                hb_se(&r);
++                                hb_se(&r);
++                            }
++                    }
++                }
++            }
++            hb_ue(&r);                  /* five_minus_max_num_merge_cand */
++        }
++        hb_se(&r);                      /* slice_qp_delta */
++        if (p->pps_slice_chroma_qp_offsets_present_flag) {
++            hb_se(&r);
++            hb_se(&r);
++        }
++        if (p->deblocking_filter_override_enabled_flag && hb_u(&r, 1)) {
++            deblock_disabled = hb_u(&r, 1);
++            if (!deblock_disabled) {
++                hb_se(&r);
++                hb_se(&r);
++            }
++        }
++        if (p->pps_loop_filter_across_slices_enabled_flag &&
++            (sao_luma || sao_chroma || !deblock_disabled))
++            hb_u(&r, 1);
++    }
++    if (p->tiles_enabled_flag || p->entropy_coding_sync_enabled_flag) {
++        unsigned n = hb_ue(&r);
++        if (n) {
++            unsigned len = hb_ue(&r) + 1;
++            for (unsigned i = 0; i < n && !r.error; i++)
++                hb_u(&r, len);
++        }
++    }
++    if (p->slice_segment_header_extension_present_flag) {
++        unsigned n = hb_ue(&r);
++        for (unsigned i = 0; i < n && !r.error; i++)
++            hb_u(&r, 8);
++    }
++    end = r.pos;
++    if (r.error || hb_u(&r, 1) != 1)    /* byte_alignment: a one, then zeros */
++        goto out;
++    while (r.pos & 7)
++        if (hb_u(&r, 1))
++            goto out;
++
++    if (rps_end) {
++        hw_copy(&w, &r, 0, rps_start);
++        hw_u(&w, 1, 0);                 /* short_term_ref_pic_set_sps_flag */
++        hevc_write_rps(&w, d);
++        hw_copy(&w, &r, rps_end, end);
++    } else {
++        hw_copy(&w, &r, 0, end);
++    }
++    hw_u(&w, 1, 1);
++    while (w.bits & 7)
++        hw_u(&w, 1, 0);
++    for (size_t i = r.pos / 8; i < rbsp_size; i++)
++        hw_u(&w, 8, rbsp[i]);
++    if (!w.error) {
++        uint8_t len[4];
++        struct vt_bytes nal_out = { 0 };
++        rbsp_to_nal(&nal_out, nal[0], nal[1], w.d, w.bits / 8);
++        len[0] = nal_out.size >> 24;
++        len[1] = nal_out.size >> 16;
++        len[2] = nal_out.size >> 8;
++        len[3] = nal_out.size;
++        bytes_append(out, len, 4);
++        bytes_append(out, nal_out.data, nal_out.size);
++        bytes_free(&nal_out);
++        res.ok = true;
++    }
++out:
++    free(w.d);
++    free(rbsp);
++    return res;
++}
++
++struct hevc_au {
++    struct virgl_video_codec *codec;
++    struct vt_bytes sample;
++    uint32_t pps_id;
++    unsigned slices;
++    bool failed;
++};
++
++static void hevc_collect(void *ctx, const uint8_t *nal, size_t size)
++{
++    struct hevc_au *au = ctx;
++    unsigned type;
++
++    if (size < 3)
++        return;
++    type = (nal[0] >> 1) & 63;
++    if (type > 31)                      /* parameter sets, SEI, AUD...: rebuilt or not needed */
++        return;
++    struct hevc_slice s = hevc_rewrite_slice(&au->codec->desc.h265, nal, size, &au->sample);
++    if (!s.ok)
++        au->failed = true;
++    else if (!au->slices++)
++        au->pps_id = s.pps_id;
++}
++
++static int hevc_end_frame(struct virgl_video_codec *codec,
++                          struct virgl_video_buffer *target)
++{
++    const struct virgl_h265_picture_desc *d = &codec->desc.h265;
++    struct hevc_au au;
++    struct vt_bytes vps = { 0 }, sps = { 0 }, pps = { 0 };
++    int ret = -1;
++
++    memset(&au, 0, sizeof(au));
++    au.codec = codec;
++    for_each_nal(codec->bits.data, codec->bits.size, hevc_collect, &au);
++    if (au.failed || !au.slices) {
++        if (codec->errors++ < 5)
++            virgl_warn("vt-video: HEVC slice header not understood\n");
++        goto done;
++    }
++
++    hevc_build_sets(codec, d, au.pps_id, &vps, &sps, &pps);
++    if (!codec->format || vps.size + sps.size + pps.size != codec->sps_size ||
++        memcmp(codec->sps, vps.data, vps.size) ||
++        memcmp(codec->sps + vps.size, sps.data, sps.size) ||
++        memcmp(codec->sps + vps.size + sps.size, pps.data, pps.size)) {
++        const uint8_t *sets[3] = { vps.data, sps.data, pps.data };
++        size_t sizes[3] = { vps.size, sps.size, pps.size };
++        CMVideoFormatDescriptionRef fmt = NULL;
++        OSStatus st;
++
++        if (vps.size + sps.size + pps.size > sizeof(codec->sps))
++            goto done;
++        memcpy(codec->sps, vps.data, vps.size);
++        memcpy(codec->sps + vps.size, sps.data, sps.size);
++        memcpy(codec->sps + vps.size + sps.size, pps.data, pps.size);
++        codec->sps_size = vps.size + sps.size + pps.size;
++        st = CMVideoFormatDescriptionCreateFromHEVCParameterSets(kCFAllocatorDefault, 3, sets,
++                                                                 sizes, 4, NULL, &fmt);
++        if (st != noErr) {
++            virgl_error("vt-video: HEVC parameter sets rejected: %d\n", (int)st);
++            goto done;
++        }
++        vt_log("HEVC format: vps %zu sps %zu pps %zu bytes\n", vps.size, sps.size, pps.size);
++        if (!set_format(codec, fmt))
++            goto done;
++    }
++    if (decode_sample(codec, au.sample.data, au.sample.size))
++        deliver_output(codec, target);
++    ret = 0;
++done:
++    bytes_free(&au.sample);
++    bytes_free(&vps);
++    bytes_free(&sps);
++    bytes_free(&pps);
++    return ret;
++}
++
++/* ------------------------------------------------------------------------ */
++/* VP9                                                                       */
++/* ------------------------------------------------------------------------ */
++
++struct vp9_header {
++    bool valid;
++    bool show_existing;
++    bool key_frame;
++    bool show_frame;
++    uint32_t profile;
++};
++
++static struct vp9_header vp9_parse(const uint8_t *data, size_t size)
++{
++    struct vp9_header h = { 0 };
++    struct bitr r;
++
++    if (!size)
++        return h;
++    /* br_init skips emulation bytes, which VP9 does not have: copy directly. */
++    r.size = size < sizeof(r.rbsp) ? size : sizeof(r.rbsp);
++    memcpy(r.rbsp, data, r.size);
++    r.pos = 0;
++    r.error = false;
++
++    if (br_u(&r, 2) != 2)
++        return h;
++    h.profile = br_u(&r, 1);
++    h.profile |= br_u(&r, 1) << 1;
++    if (h.profile == 3)
++        br_u(&r, 1);
++    h.show_existing = br_u(&r, 1);
++    if (h.show_existing) {
++        h.valid = !r.error;
++        return h;
++    }
++    h.key_frame = br_u(&r, 1) == 0;
++    h.show_frame = br_u(&r, 1);
++    h.valid = !r.error;
++    return h;
++}
++
++static bool vp9_set_format(struct virgl_video_codec *codec, uint32_t width,
++                           uint32_t height, uint32_t profile, uint32_t bit_depth)
++{
++    CMVideoFormatDescriptionRef fmt = NULL;
++    CFMutableDictionaryRef ext, atoms;
++    uint8_t vpcc[12];
++    CFDataRef vpcc_data;
++    OSStatus st;
++
++    /* VPCodecConfigurationRecord, version 1 (a full box: version + flags). */
++    vpcc[0] = 1;
++    vpcc[1] = vpcc[2] = vpcc[3] = 0;
++    vpcc[4] = profile;
++    vpcc[5] = 0;                                    /* level: not known */
++    vpcc[6] = (bit_depth << 4) | (1 << 1) | 0;      /* 4:2:0 colocated, limited range */
++    vpcc[7] = 1;                                    /* BT.709 primaries */
++    vpcc[8] = 1;                                    /* BT.709 transfer */
++    vpcc[9] = 1;                                    /* BT.709 matrix */
++    vpcc[10] = vpcc[11] = 0;                        /* no initialization data */
++
++    vpcc_data = CFDataCreate(kCFAllocatorDefault, vpcc, sizeof(vpcc));
++    atoms = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++                                      &kCFTypeDictionaryKeyCallBacks,
++                                      &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(atoms, CFSTR("vpcC"), vpcc_data);
++    CFRelease(vpcc_data);
++    ext = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++                                    &kCFTypeDictionaryKeyCallBacks,
++                                    &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(ext, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms,
++                         atoms);
++    CFRelease(atoms);
++
++    st = CMVideoFormatDescriptionCreate(kCFAllocatorDefault, kCMVideoCodecType_VP9,
++                                        width, height, ext, &fmt);
++    CFRelease(ext);
++    if (st != noErr) {
++        virgl_error("vt-video: VP9 format description failed: %d\n", (int)st);
++        return false;
++    }
++
++    codec->vp9_width = width;
++    codec->vp9_height = height;
++    codec->vp9_bit_depth = bit_depth;
++    codec->width = width;
++    codec->height = height;
++    /* A key frame resets the decoder anyway: always start a fresh session. */
++    session_destroy(codec);
++    if (codec->format)
++        CFRelease(codec->format);
++    codec->format = fmt;
++    return session_create(codec);
++}
++
++static int vp9_end_frame(struct virgl_video_codec *codec,
++                         struct virgl_video_buffer *target)
++{
++    const struct virgl_vp9_picture_desc *d = &codec->desc.vp9;
++    struct vp9_header h = vp9_parse(codec->bits.data, codec->bits.size);
++    uint32_t width = d->picture_parameter.frame_width;
++    uint32_t height = d->picture_parameter.frame_height;
++    uint32_t bit_depth = d->picture_parameter.bit_depth ? d->picture_parameter.bit_depth : 8;
++
++    if (!h.valid || h.show_existing)
++        return h.valid ? 0 : -1;
++
++    if (!width || !height) {
++        width = codec->vp9_width ? codec->vp9_width : codec->width;
++        height = codec->vp9_height ? codec->vp9_height : codec->height;
++    }
++
++    if (!codec->session && !h.key_frame)
++        return 0;   /* joined in the middle: wait for a key frame */
++    if (h.key_frame && (!codec->session || width != codec->vp9_width ||
++                        height != codec->vp9_height || bit_depth != codec->vp9_bit_depth)) {
++        if (!vp9_set_format(codec, width, height, h.profile, bit_depth))
++            return -1;
++    }
++
++    /* One frame per sample, hidden ones too: VideoToolbox returns a picture
++     * for hidden frames as well, which a later show_existing_frame shows
++     * from the guest's surface. */
++    if (decode_sample(codec, codec->bits.data, codec->bits.size))
++        deliver_output(codec, target);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------ */
++/* AV1                                                                       */
++/* ------------------------------------------------------------------------ */
++
++struct av1_obu {
++    uint8_t type;
++    size_t start;       /* header */
++    size_t payload;     /* payload start */
++    size_t end;
++};
++
++static size_t av1_leb128(const uint8_t *p, size_t avail, uint64_t *value)
++{
++    uint64_t v = 0;
++    for (size_t i = 0; i < 8 && i < avail; i++) {
++        v |= (uint64_t)(p[i] & 0x7f) << (7 * i);
++        if (!(p[i] & 0x80)) {
++            *value = v;
++            return i + 1;
++        }
++    }
++    return 0;
++}
++
++/* Splits low-overhead AV1 data (OBUs with sizes) into OBUs. */
++static unsigned av1_split(const uint8_t *d, size_t n, struct av1_obu *obus, unsigned max)
++{
++    size_t p = 0;
++    unsigned count = 0;
++
++    while (p < n && count < max) {
++        uint8_t hd = d[p];
++        bool ext = hd & 4, has_size = hd & 2;
++        size_t hp = p + 1 + (ext ? 1 : 0), ll;
++        uint64_t len;
++
++        if (hd & 0x80)                  /* forbidden bit */
++            return 0;
++        if (!has_size || hp >= n)
++            return 0;                   /* not what VideoToolbox takes */
++        ll = av1_leb128(d + hp, n - hp, &len);
++        if (!ll || hp + ll + len > n)
++            return 0;
++        obus[count].type = (hd >> 3) & 15;
++        obus[count].start = p;
++        obus[count].payload = hp + ll;
++        obus[count].end = hp + ll + len;
++        count++;
++        p = hp + ll + len;
++    }
++    return p == n ? count : 0;
++}
++
++/* seq_level_idx of operating point 0, from a sequence header OBU payload. */
++static uint8_t av1_seq_level(const uint8_t *pl, size_t n, uint8_t *tier)
++{
++    struct bitr r;
++    unsigned timing, decoder_model = 0, ops;
++    uint8_t level = 31;
++
++    r.size = n < sizeof(r.rbsp) ? n : sizeof(r.rbsp);
++    memcpy(r.rbsp, pl, r.size);
++    r.pos = 0;
++    r.error = false;
++    *tier = 0;
++
++    br_u(&r, 3);                        /* seq_profile */
++    br_u(&r, 1);                        /* still_picture */
++    if (br_u(&r, 1))                    /* reduced_still_picture_header */
++        return br_u(&r, 5);
++    timing = br_u(&r, 1);
++    if (timing) {
++        br_u(&r, 32);
++        br_u(&r, 32);
++        if (br_u(&r, 1)) {              /* equal_picture_interval: uvlc */
++            unsigned z = 0;
++            while (!r.error && !br_u(&r, 1) && z < 32)
++                z++;
++            br_u(&r, z);
++        }
++        decoder_model = br_u(&r, 1);
++        if (decoder_model) {
++            br_u(&r, 5);
++            br_u(&r, 32);
++            br_u(&r, 5);
++            br_u(&r, 5);
++        }
++    }
++    br_u(&r, 1);                        /* initial_display_delay_present */
++    ops = br_u(&r, 5) + 1;
++    (void)ops;
++    br_u(&r, 12);                       /* operating_point_idc[0] */
++    level = br_u(&r, 5);
++    if (level > 7)
++        *tier = br_u(&r, 1);
++    return r.error ? 31 : level;
++}
++
++static bool av1_set_format(struct virgl_video_codec *codec, const uint8_t *seq_obu,
++                           size_t seq_size, const uint8_t *seq_payload, size_t payload_size)
++{
++    const struct virgl_av1_picture_desc *d = &codec->desc.av1;
++    CMVideoFormatDescriptionRef fmt = NULL;
++    CFMutableDictionaryRef ext, atoms;
++    CFDataRef data;
++    uint8_t *cfg;
++    uint8_t tier, level = av1_seq_level(seq_payload, payload_size, &tier);
++    uint8_t depth = d->picture_parameter.bit_depth_idx;
++    uint32_t w = d->picture_parameter.max_width ? d->picture_parameter.max_width + 1u : codec->width;
++    uint32_t h = d->picture_parameter.max_height ? d->picture_parameter.max_height + 1u : codec->height;
++    OSStatus st;
++
++    if (!payload_size)                  /* seq_profile is in the first byte */
++        return false;
++    /* AV1CodecConfigurationRecord + the sequence header as configOBUs. */
++    cfg = malloc(4 + seq_size);
++    if (!cfg)
++        return false;
++    cfg[0] = 0x81;
++    cfg[1] = (uint8_t)((seq_payload[0] >> 5) << 5) | level;
++    cfg[2] = (uint8_t)((tier << 7) | ((depth >= 1) << 6) | ((depth == 2) << 5) |
++                       (d->picture_parameter.seq_info_fields.mono_chrome << 4) |
++                       (1 << 3) | (1 << 2));    /* 4:2:0 */
++    cfg[3] = 0;
++    memcpy(cfg + 4, seq_obu, seq_size);
++    data = CFDataCreate(kCFAllocatorDefault, cfg, 4 + seq_size);
++    free(cfg);
++
++    atoms = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
++                                      &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(atoms, CFSTR("av1C"), data);
++    CFRelease(data);
++    ext = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks,
++                                    &kCFTypeDictionaryValueCallBacks);
++    CFDictionarySetValue(ext, kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms, atoms);
++    CFRelease(atoms);
++    st = CMVideoFormatDescriptionCreate(kCFAllocatorDefault, kCMVideoCodecType_AV1,
++                                        w, h, ext, &fmt);
++    CFRelease(ext);
++    if (st != noErr) {
++        virgl_error("vt-video: AV1 format description failed: %d\n", (int)st);
++        return false;
++    }
++    session_destroy(codec);
++    if (codec->format)
++        CFRelease(codec->format);
++    codec->format = fmt;
++    return session_create(codec);
++}
++
++/* The guest sends the whole temporal unit (Chrome) once for every frame in
++ * it; the picture's first tile offset says which frame this call is about.
++ * VideoToolbox gets that frame alone (with a temporal delimiter, and the
++ * sequence header when there is one), and returns its picture, hidden or
++ * not. FFmpeg sends bare tile data, without headers: not supported. */
++static int av1_end_frame(struct virgl_video_codec *codec,
++                         struct virgl_video_buffer *target)
++{
++    const struct virgl_av1_picture_desc *d = &codec->desc.av1;
++    const uint8_t *data = codec->bits.data;
++    struct av1_obu obus[64];
++    unsigned n = av1_split(data, codec->bits.size, obus, 64), i, first = 0, last = 0;
++    size_t tile = d->slice_parameter.slice_data_offset[0];
++    int seq = -1, frame = -1;
++    struct vt_bytes sample = { 0 };
++    static const uint8_t td[2] = { 0x12, 0x00 };
++
++    if (!n) {
++        if (codec->errors++ < 5)
++            virgl_warn("vt-video: AV1 data without OBU headers (not supported)\n");
++        return -1;
++    }
++    for (i = 0; i < n; i++) {
++        if (obus[i].type == 1)
++            seq = i;
++        if (tile >= obus[i].payload && tile < obus[i].end)
++            frame = i;
++    }
++    if (frame < 0)
++        return -1;
++    /* A frame is a frame OBU, or a frame header OBU and its tile groups. */
++    first = last = frame;
++    if (obus[frame].type == 4) {
++        while (first > 0 && obus[first].type != 3)
++            first--;
++        while (last + 1 < n && obus[last + 1].type == 4)
++            last++;
++    }
++
++    if (seq >= 0) {
++        const uint8_t *seq_obu = data + obus[seq].start;
++        size_t seq_size = obus[seq].end - obus[seq].start;
++        if (!codec->session || seq_size != codec->sps_size ||
++            memcmp(codec->sps, seq_obu, seq_size)) {
++            if (seq_size > sizeof(codec->sps))
++                return -1;
++            memcpy(codec->sps, seq_obu, seq_size);
++            codec->sps_size = seq_size;
++            if (!av1_set_format(codec, seq_obu, seq_size, data + obus[seq].payload,
++                                obus[seq].end - obus[seq].payload))
++                return -1;
++        }
++    }
++    if (!codec->session)
++        return 0;   /* no sequence header yet */
++
++    bytes_append(&sample, td, sizeof(td));
++    if (seq >= 0 && (unsigned)seq < first)
++        bytes_append(&sample, data + obus[seq].start, obus[seq].end - obus[seq].start);
++    bytes_append(&sample, data + obus[first].start, obus[last].end - obus[first].start);
++    if (decode_sample(codec, sample.data, sample.size))
++        deliver_output(codec, target);
++    bytes_free(&sample);
++    return 0;
++}
++
++/* ------------------------------------------------------------------------ */
++/* Interface (virgl_video.h)                                                 */
++/* ------------------------------------------------------------------------ */
++
++static bool vt_supports(CMVideoCodecType type)
++{
++    return VTIsHardwareDecodeSupported(type);
++}
++
++/* What this host offers. A codec the caps leave out is refused too, so a
++ * guest can't reach its parser by asking for it anyway. */
++static bool kind_offered(enum vt_codec_kind kind)
++{
++    const char *av1 = getenv("OMACVM_VIDEO_AV1");
++
++    switch (kind) {
++    case VT_KIND_H264:
++        return vt_supports(kCMVideoCodecType_H264);
++    case VT_KIND_VP9:
++        return vt_supports(kCMVideoCodecType_VP9) && !getenv("OMACVM_VIDEO_NO_VP9");
++    case VT_KIND_HEVC:
++        return vt_supports(kCMVideoCodecType_HEVC) && !getenv("OMACVM_VIDEO_NO_HEVC");
++    case VT_KIND_AV1:
++        /* AV1 works only for guests that send whole temporal units (Chrome). */
++        return vt_supports(kCMVideoCodecType_AV1) && av1 && !strcmp(av1, "1");
++    default:
++        return false;
++    }
++}
++
++int virgl_video_init(int drm_fd, struct virgl_video_callbacks *cbs,
++                     unsigned int flags)
++{
++    const char *abi = getenv("OMACVM_VIRGL_VIDEO_ABI");
++    (void)drm_fd;
++    (void)flags;
++
++    vt_debug = getenv("OMACVM_VIDEO_DEBUG") && *getenv("OMACVM_VIDEO_DEBUG") == '1';
++    abi_legacy = abi && !strcmp(abi, "legacy");
++    callbacks = cbs;
++    VTRegisterSupplementalVideoDecoderIfAvailable(kCMVideoCodecType_VP9);
++    vt_initialized = true;
++    virgl_info("vt-video: VideoToolbox video decode on (H.264 %s, VP9 %s, AV1 %s, guest profile numbers: %s)\n",
++               vt_supports(kCMVideoCodecType_H264) ? "hw" : "sw",
++               vt_supports(kCMVideoCodecType_VP9) ? "hw" : "no",
++               vt_supports(kCMVideoCodecType_AV1) ? "hw" : "no",
++               abi_legacy ? "legacy" : "Mesa 26");
++    return 0;
++}
++
++void virgl_video_destroy(void)
++{
++    vt_initialized = false;
++    callbacks = NULL;
++}
++
++static void add_caps(union virgl_caps *caps, enum pipe_video_profile p,
++                     uint32_t max_w, uint32_t max_h, enum pipe_format fmt)
++{
++    struct virgl_video_caps *v;
++    uint32_t g = guest_profile(p);
++
++    if (!g || caps->v2.num_video_caps >= ARRAY_SIZE(caps->v2.video_caps))
++        return;
++    v = &caps->v2.video_caps[caps->v2.num_video_caps++];
++    memset(v, 0, sizeof(*v));
++    v->profile = g;
++    v->entrypoint = PIPE_VIDEO_ENTRYPOINT_BITSTREAM;
++    v->max_level = 0;
++    v->stacked_frames = 0;
++    v->max_width = max_w;
++    v->max_height = max_h;
++    v->prefered_format = fmt;
++    v->max_macroblocks = (max_w / 16) * (max_h / 16) > 0xffff ? 0xffff :
++                         (max_w / 16) * (max_h / 16);
++    v->npot_texture = 1;
++    v->supports_progressive = 1;
++    v->supports_interlaced = 0;
++    v->prefers_interlaced = 0;
++    v->max_temporal_layers = 0;
++}
++
++int virgl_video_fill_caps(union virgl_caps *caps)
++{
++    if (!vt_initialized || !caps)
++        return -1;
++
++    caps->v2.num_video_caps = 0;
++    if (kind_offered(VT_KIND_H264)) {
++        add_caps(caps, PIPE_VIDEO_PROFILE_MPEG4_AVC_CONSTRAINED_BASELINE, 4096, 4096, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_MPEG4_AVC_MAIN, 4096, 4096, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_MPEG4_AVC_HIGH, 4096, 4096, PIPE_FORMAT_NV12);
++    }
++    if (kind_offered(VT_KIND_VP9)) {
++        add_caps(caps, PIPE_VIDEO_PROFILE_VP9_PROFILE0, 8192, 8192, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_VP9_PROFILE2, 8192, 8192, PIPE_FORMAT_P010);
++    }
++    if (kind_offered(VT_KIND_HEVC)) {
++        add_caps(caps, PIPE_VIDEO_PROFILE_HEVC_MAIN, 8192, 8192, PIPE_FORMAT_NV12);
++        add_caps(caps, PIPE_VIDEO_PROFILE_HEVC_MAIN_10, 8192, 8192, PIPE_FORMAT_P010);
++    }
++    if (kind_offered(VT_KIND_AV1)) {
++        add_caps(caps, PIPE_VIDEO_PROFILE_AV1_MAIN, 8192, 8192, PIPE_FORMAT_NV12);
++    }
++    return 0;
++}
++
++struct virgl_video_codec *virgl_video_create_codec(
++        const struct virgl_video_create_codec_args *args)
++{
++    struct virgl_video_codec *codec;
++    enum pipe_video_profile p;
++
++    if (!vt_initialized || !args)
++        return NULL;
++
++    p = host_profile(args->profile);
++    if (args->entrypoint != PIPE_VIDEO_ENTRYPOINT_BITSTREAM || !kind_offered(kind_of(p)) ||
++        (kind_of(p) == VT_KIND_HEVC && p != PIPE_VIDEO_PROFILE_HEVC_MAIN &&
++         p != PIPE_VIDEO_PROFILE_HEVC_MAIN_10)) {
++        virgl_warn("vt-video: unsupported profile %u entrypoint %u\n",
++                   (unsigned)args->profile, (unsigned)args->entrypoint);
++        return NULL;
++    }
++
++    codec = calloc(1, sizeof(*codec));
++    if (!codec)
++        return NULL;
++    codec->guest_profile = args->profile;
++    codec->profile = p;
++    codec->kind = kind_of(p);
++    codec->entrypoint = args->entrypoint;
++    codec->level = args->level;
++    codec->width = args->width;
++    codec->height = args->height;
++    codec->opaque = args->opaque;
++    codec->l0_default = -1;
++    codec->l1_default = -1;
++
++    vt_log("codec profile %u (%s) %ux%u\n", (unsigned)args->profile,
++           codec->kind == VT_KIND_H264 ? "H.264" : codec->kind == VT_KIND_VP9 ? "VP9" :
++           codec->kind == VT_KIND_HEVC ? "HEVC" : "AV1",
++           args->width, args->height);
++    return codec;
++}
++
++void virgl_video_destroy_codec(struct virgl_video_codec *codec)
++{
++    if (!codec)
++        return;
++    vt_log("codec done: %u frames, %u errors\n", codec->frames, codec->errors);
++    session_destroy(codec);
++    if (codec->format)
++        CFRelease(codec->format);
++    if (codec->output)
++        CVPixelBufferRelease(codec->output);
++    for (unsigned i = 0; i < 3; i++)
++        if (codec->held[i])
++            CVPixelBufferRelease(codec->held[i]);
++    bytes_free(&codec->bits);
++    free(codec);
++}
++
++enum pipe_video_profile virgl_video_codec_profile(const struct virgl_video_codec *codec)
++{
++    return codec ? codec->profile : PIPE_VIDEO_PROFILE_UNKNOWN;
++}
++
++void *virgl_video_codec_opaque_data(struct virgl_video_codec *codec)
++{
++    return codec ? codec->opaque : NULL;
++}
++
++struct virgl_video_buffer *virgl_video_create_buffer(
++        const struct virgl_video_create_buffer_args *args)
++{
++    struct virgl_video_buffer *buffer;
++
++    if (!vt_initialized || !args)
++        return NULL;
++    if (args->format != PIPE_FORMAT_NV12 && args->format != PIPE_FORMAT_P010 &&
++        args->format != PIPE_FORMAT_IYUV) {
++        virgl_warn("vt-video: buffer format %d not supported\n", args->format);
++        return NULL;
++    }
++
++    buffer = calloc(1, sizeof(*buffer));
++    if (!buffer)
++        return NULL;
++    buffer->format = args->format;
++    buffer->width = args->width;
++    buffer->height = args->height;
++    buffer->opaque = args->opaque;
++    buffer->id = next_buffer_id++;
++    return buffer;
++}
++
++void virgl_video_destroy_buffer(struct virgl_video_buffer *buffer)
++{
++    free(buffer);
++}
++
++uint32_t virgl_video_buffer_id(const struct virgl_video_buffer *buffer)
++{
++    return buffer ? buffer->id : 0;
++}
++
++void *virgl_video_buffer_opaque_data(struct virgl_video_buffer *buffer)
++{
++    return buffer ? buffer->opaque : NULL;
++}
++
++int virgl_video_begin_frame(struct virgl_video_codec *codec,
++                            struct virgl_video_buffer *target)
++{
++    if (!codec || !target)
++        return -1;
++    codec->target = target;
++    codec->bits.size = 0;
++    codec->have_desc = false;
++    return 0;
++}
++
++int virgl_video_decode_bitstream(struct virgl_video_codec *codec,
++                                 struct virgl_video_buffer *target,
++                                 const union virgl_picture_desc *desc,
++                                 unsigned num_buffers,
++                                 const void * const *buffers,
++                                 const unsigned *sizes)
++{
++    if (!codec || !target || !desc)
++        return -1;
++
++    if (desc->base.profile != codec->guest_profile) {
++        virgl_error("vt-video: profiles not matched, picture: %d, codec: %u\n",
++                    desc->base.profile, codec->guest_profile);
++        return -1;
++    }
++
++    codec->target = target;
++    codec->desc = *desc;
++    codec->have_desc = true;
++    for (unsigned i = 0; i < num_buffers; i++) {
++        /* One compressed picture; far below this even for 8K. */
++        if (codec->bits.size + sizes[i] > 64u * 1024 * 1024)
++            return -1;
++        if (!bytes_append(&codec->bits, buffers[i], sizes[i]))
++            return -1;
++    }
++    return 0;
++}
++
++int virgl_video_encode_bitstream(struct virgl_video_codec *codec,
++                                 struct virgl_video_buffer *source,
++                                 const union virgl_picture_desc *desc)
++{
++    (void)codec;
++    (void)source;
++    (void)desc;
++    return -1;
++}
++
++int virgl_video_end_frame(struct virgl_video_codec *codec,
++                          struct virgl_video_buffer *target)
++{
++    int ret = -1;
++
++    if (!codec || !target)
++        return -1;
++    /* The guest may have destroyed the buffer it named earlier: use this one. */
++    codec->target = target;
++    if (!codec->have_desc || !codec->bits.size) {
++        codec->target = NULL;
++        return 0;
++    }
++
++    switch (codec->kind) {
++    case VT_KIND_H264:
++        ret = h264_end_frame(codec, target);
++        break;
++    case VT_KIND_VP9:
++        ret = vp9_end_frame(codec, target);
++        break;
++    case VT_KIND_AV1:
++        ret = av1_end_frame(codec, target);
++        break;
++    case VT_KIND_HEVC:
++        ret = hevc_end_frame(codec, target);
++        break;
++    default:
++        break;
++    }
++    codec->bits.size = 0;
++    codec->have_desc = false;
++    codec->target = NULL;
++    return ret;
++}
+diff --git a/src/vrend/vrend_renderer.c b/src/vrend/vrend_renderer.c
+index 394fb9b..ba0a885 100644
+--- a/src/vrend/vrend_renderer.c
++++ b/src/vrend/vrend_renderer.c
+@@ -7909,7 +7909,15 @@ int vrend_renderer_init(const struct vrend_if_cbs *cbs, uint32_t flags)
+       goto cleanup_and_fail;
+    }
+ 
+-#ifdef ENABLE_VIDEO
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++   /* VideoToolbox needs no DRM device. QEMU does not ask for video, so it is
++    * on unless OMACVM_VIDEO_DECODE=0. */
++   {
++      const char *video_env = getenv("OMACVM_VIDEO_DECODE");
++      if (!video_env || strcmp(video_env, "0"))
++         vrend_state.video_available = vrend_video_init(-1) == 0;
++   }
++#elif defined(ENABLE_VIDEO)
+    if (flags & VREND_USE_VIDEO) {
+         if (vrend_clicbs->get_drm_fd)
+             vrend_video_init(vrend_clicbs->get_drm_fd());
+diff --git a/src/vrend/vrend_video.c b/src/vrend/vrend_video.c
+index 57341d8..d3d8065 100644
+--- a/src/vrend/vrend_video.c
++++ b/src/vrend/vrend_video.c
+@@ -74,6 +74,12 @@
+ #include "vrend_renderer.h"
+ #include "vrend_video.h"
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++#include <CoreVideo/CoreVideo.h>
++#include <IOSurface/IOSurfaceRef.h>
++/* CoreVideo brings CGL: CGLGetCurrentContext, CGLTexImageIOSurface2D. */
++#endif
++
+ struct vrend_context;
+ 
+ struct vrend_video_context {
+@@ -93,9 +99,11 @@ struct vrend_video_codec {
+ 
+ struct vrend_video_plane {
+     uint32_t res_handle;
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+     GLuint texture;         /* texture for temporary use */
+     GLuint framebuffer;     /* framebuffer for temporary use */
+     EGLImageKHR egl_image;  /* egl image for temporary use */
++#endif
+ };
+ 
+ struct vrend_video_buffer {
+@@ -146,6 +154,187 @@ static struct vrend_video_buffer *get_video_buffer(
+ }
+ 
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++/* Zero-copy path: bind the decoded frame's IOSurface planes as rectangle
++ * textures and let the GPU copy them into the guest's plane textures.
++ * GL state touched here is put back exactly as it was. */
++static bool blit_pixbuf_to_video_buffer(struct vrend_video_buffer *buf,
++                                        CVPixelBufferRef pix,
++                                        bool sixteen, bool interleaved)
++{
++    IOSurfaceRef surface = CVPixelBufferGetIOSurface(pix);
++    CGLContextObj cgl = CGLGetCurrentContext();
++    GLint old_read = 0, old_draw = 0, old_rect = 0;
++    GLboolean scissor, srgb, mask[4];
++    GLuint tex[3] = { 0 }, fbo[2] = { 0 };
++    size_t planes;
++    bool ok = true;
++
++    if (!surface || !cgl)
++        return false;
++    planes = IOSurfaceGetPlaneCount(surface);
++    if (planes > 3)
++        planes = 3;
++
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &old_read);
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_draw);
++    glGetIntegerv(GL_TEXTURE_BINDING_RECTANGLE, &old_rect);
++    scissor = glIsEnabled(GL_SCISSOR_TEST);
++    srgb = glIsEnabled(GL_FRAMEBUFFER_SRGB);
++    glGetBooleanv(GL_COLOR_WRITEMASK, mask);
++
++    glDisable(GL_SCISSOR_TEST);
++    glDisable(GL_FRAMEBUFFER_SRGB);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glGenTextures((GLsizei)planes, tex);
++    glGenFramebuffers(2, fbo);
++
++    for (unsigned i = 0; ok && i < planes && i < buf->num_planes; i++) {
++        struct vrend_resource *res;
++        bool rg = i && interleaved;
++        GLsizei sw = (GLsizei)IOSurfaceGetWidthOfPlane(surface, i);
++        GLsizei sh = (GLsizei)IOSurfaceGetHeightOfPlane(surface, i);
++        GLsizei w = sw, h = sh;
++        GLenum internal = sixteen ? (rg ? GL_RG16 : GL_R16) : (rg ? GL_RG8 : GL_R8);
++
++        res = vrend_renderer_ctx_res_lookup(buf->ctx->ctx, buf->planes[i].res_handle);
++        if (!res) {
++            ok = false;
++            break;
++        }
++        if ((uint32_t)w > res->base.width0)
++            w = res->base.width0;
++        if ((uint32_t)h > res->base.height0)
++            h = res->base.height0;
++
++        glBindTexture(GL_TEXTURE_RECTANGLE, tex[i]);
++        if (CGLTexImageIOSurface2D(cgl, GL_TEXTURE_RECTANGLE, internal, sw, sh,
++                                   rg ? GL_RG : GL_RED,
++                                   sixteen ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE,
++                                   surface, i) != kCGLNoError) {
++            ok = false;
++            break;
++        }
++
++        glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo[0]);
++        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                               GL_TEXTURE_RECTANGLE, tex[i], 0);
++        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo[1]);
++        if (res->target == GL_TEXTURE_2D_ARRAY)
++            glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                                      res->gl_id, 0, 0);
++        else
++            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
++                                   res->target, res->gl_id, 0);
++        if (glCheckFramebufferStatus(GL_READ_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE ||
++            glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
++            ok = false;
++            break;
++        }
++        glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    }
++
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, old_read);
++    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, old_draw);
++    glDeleteFramebuffers(2, fbo);
++    glBindTexture(GL_TEXTURE_RECTANGLE, old_rect);
++    glDeleteTextures((GLsizei)planes, tex);
++    if (scissor)
++        glEnable(GL_SCISSOR_TEST);
++    if (srgb)
++        glEnable(GL_FRAMEBUFFER_SRGB);
++    glColorMask(mask[0], mask[1], mask[2], mask[3]);
++    /* Other contexts (the guest's compositor) read these textures. */
++    glFlush();
++    return ok;
++}
++
++/* Copy a decoded CVPixelBuffer (NV12 or P010) into the guest's plane
++ * textures: plane 0 is Y (R8/R16), plane 1 is interleaved UV (RG8/RG16). */
++static int sync_pixbuf_to_video_buffer(struct vrend_video_buffer *buf,
++                                       const struct virgl_video_dma_buf *dmabuf)
++{
++    CVPixelBufferRef pix = dmabuf->native;
++    GLint old_row = 0, old_align = 4, old_pbo = 0, old_tex = 0;
++    bool sixteen, interleaved;
++    size_t planes;
++
++    if (!pix)
++        return -1;
++
++    sixteen = CVPixelBufferGetPixelFormatType(pix) ==
++              kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
++    /* NV12/P010: plane 1 holds U and V interleaved; I420: three planes. */
++    interleaved = CVPixelBufferGetPixelFormatType(pix) !=
++                  kCVPixelFormatType_420YpCbCr8Planar;
++    planes = CVPixelBufferGetPlaneCount(pix);
++
++    {
++        static int zero_copy = -1;
++        static unsigned zero_copy_failures;
++        if (zero_copy < 0) {
++            /* Only on the Mac's own OpenGL: under ANGLE (OpenGL ES) the
++             * current CGL context, if any, is ANGLE's internal one. */
++            const char *version = (const char *)glGetString(GL_VERSION);
++            zero_copy = !getenv("OMACVM_VIDEO_COPY") &&
++                        !(version && strstr(version, "OpenGL ES"));
++        }
++        if (zero_copy) {
++            if (blit_pixbuf_to_video_buffer(buf, pix, sixteen, interleaved))
++                return 0;
++            /* Only this frame goes the CPU way: a guest's odd plane
++             * texture must not slow down every other VM context. */
++            if (zero_copy_failures++ < 5)
++                virgl_warn("video: zero-copy failed, copying this frame with the CPU\n");
++        }
++    }
++
++    if (CVPixelBufferLockBaseAddress(pix, kCVPixelBufferLock_ReadOnly) != kCVReturnSuccess)
++        return -1;
++
++    glGetIntegerv(GL_UNPACK_ROW_LENGTH, &old_row);
++    glGetIntegerv(GL_UNPACK_ALIGNMENT, &old_align);
++    glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &old_pbo);
++    glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_tex);
++    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++
++    for (unsigned i = 0; i < planes && i < buf->num_planes; i++) {
++        struct vrend_resource *res;
++        bool rg = i && interleaved;
++        unsigned texel = (rg ? 2 : 1) * (sixteen ? 2 : 1);
++        size_t row = CVPixelBufferGetBytesPerRowOfPlane(pix, i);
++        uint32_t w = CVPixelBufferGetWidthOfPlane(pix, i);
++        uint32_t h = CVPixelBufferGetHeightOfPlane(pix, i);
++        const void *base = CVPixelBufferGetBaseAddressOfPlane(pix, i);
++
++        res = vrend_renderer_ctx_res_lookup(buf->ctx->ctx, buf->planes[i].res_handle);
++        if (!res || !base) {
++            virgl_error("%s: res %d not found\n", __func__, buf->planes[i].res_handle);
++            continue;
++        }
++        if (w > res->base.width0)
++            w = res->base.width0;
++        if (h > res->base.height0)
++            h = res->base.height0;
++
++        glBindTexture(res->target, res->gl_id);
++        glPixelStorei(GL_UNPACK_ROW_LENGTH, row / texel);
++        glTexSubImage2D(res->target, 0, 0, 0, w, h, rg ? GL_RG : GL_RED,
++                        sixteen ? GL_UNSIGNED_SHORT : GL_UNSIGNED_BYTE, base);
++    }
++
++    glPixelStorei(GL_UNPACK_ROW_LENGTH, old_row);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, old_align);
++    glBindBuffer(GL_PIXEL_UNPACK_BUFFER, old_pbo);
++    glBindTexture(GL_TEXTURE_2D, old_tex);
++    CVPixelBufferUnlockBaseAddress(pix, kCVPixelBufferLock_ReadOnly);
++    /* Other contexts (the guest's compositor, readbacks) read these textures. */
++    glFlush();
++    return 0;
++}
++#else
++
+ static int sync_dmabuf_to_video_buffer(struct vrend_video_buffer *buf,
+                                        const struct virgl_video_dma_buf *dmabuf)
+ {
+@@ -268,6 +457,7 @@ static int sync_video_buffer_to_dmabuf(struct vrend_video_buffer *buf,
+ 
+     return 0;
+ }
++#endif /* ENABLE_VIDEO_VIDEOTOOLBOX */
+ 
+ 
+ static void vrend_video_decode_completed(
+@@ -278,7 +468,11 @@ static void vrend_video_decode_completed(
+ 
+     (void)codec;
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++    sync_pixbuf_to_video_buffer(buf, dmabuf);
++#else
+     sync_dmabuf_to_video_buffer(buf, dmabuf);
++#endif
+ }
+ 
+ 
+@@ -290,7 +484,11 @@ static void vrend_video_enocde_upload_picture(
+ 
+     (void)codec;
+ 
++#ifdef ENABLE_VIDEO_VIDEOTOOLBOX
++    (void)buf;
++#else
+     sync_video_buffer_to_dmabuf(buf, dmabuf);
++#endif
+ }
+ 
+ static void vrend_video_encode_completed(
+@@ -354,8 +552,10 @@ static struct virgl_video_callbacks video_callbacks = {
+ 
+ int vrend_video_init(int drm_fd)
+ {
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+     if (drm_fd < 0)
+         return -1;
++#endif
+ 
+     return virgl_video_init(drm_fd, &video_callbacks, 0);
+ }
+@@ -384,12 +584,17 @@ int vrend_video_create_codec(struct vrend_video_context *ctx,
+     struct vrend_video_codec *cdc = get_video_codec(ctx, handle);
+     struct virgl_video_create_codec_args args;
+ 
++    virgl_debug("video: create codec %u: profile %u entrypoint %u chroma %u level %u %ux%u\n",
++                handle, profile, entrypoint, chroma_format, level, width, height);
+     if (cdc)
+         return 0;
+ 
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
++    /* The VideoToolbox backend checks the guest's profile numbers itself. */
+     if (profile <= PIPE_VIDEO_PROFILE_UNKNOWN ||
+         profile >= PIPE_VIDEO_PROFILE_MAX)
+         return -1;
++#endif
+ 
+     if (entrypoint <= PIPE_VIDEO_ENTRYPOINT_UNKNOWN ||
+         entrypoint > PIPE_VIDEO_ENTRYPOINT_ENCODE)
+@@ -457,6 +662,8 @@ int vrend_video_create_buffer(struct vrend_video_context *ctx,
+     struct vrend_video_buffer *buf = get_video_buffer(ctx, handle);
+     struct virgl_video_create_buffer_args args;
+ 
++    virgl_debug("video: create buffer %u: format %u %ux%u, %u planes\n",
++                handle, format, width, height, num_res);
+     if (buf)
+         return 0;
+ 
+@@ -483,8 +690,10 @@ int vrend_video_create_buffer(struct vrend_video_context *ctx,
+         return -1;
+     }
+ 
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+     for (i = 0; i < ARRAY_SIZE(buf->planes); i++)
+         buf->planes[i].egl_image = EGL_NO_IMAGE_KHR;
++#endif
+ 
+     for (i = 0, buf->num_planes = 0;
+          i < num_res && buf->num_planes < ARRAY_SIZE(buf->planes); i++) {
+@@ -494,6 +703,7 @@ int vrend_video_create_buffer(struct vrend_video_context *ctx,
+ 
+         plane = &buf->planes[buf->num_planes++];
+         plane->res_handle = res_handles[i];
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+         glGenFramebuffers(1, &plane->framebuffer);
+         glGenTextures(1, &plane->texture);
+         glBindTexture(GL_TEXTURE_2D, plane->texture);
+@@ -502,6 +712,7 @@ int vrend_video_create_buffer(struct vrend_video_context *ctx,
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+         glBindTexture(GL_TEXTURE_2D, 0);
++#endif
+     }
+ 
+     buf->handle = handle;
+@@ -521,6 +732,7 @@ static void destroy_video_buffer(struct vrend_video_buffer *buf)
+ 
+     list_del(&buf->head);
+ 
++#ifndef ENABLE_VIDEO_VIDEOTOOLBOX
+     for (i = 0; i < buf->num_planes; i++) {
+         plane = &buf->planes[i];
+ 
+@@ -529,6 +741,10 @@ static void destroy_video_buffer(struct vrend_video_buffer *buf)
+         if (plane->egl_image == EGL_NO_IMAGE_KHR)
+             eglDestroyImageKHR(eglGetCurrentDisplay(), plane->egl_image);
+     }
++#else
++    (void)i;
++    (void)plane;
++#endif
+ 
+     virgl_video_destroy_buffer(buf->buffer);
+ 
+@@ -771,10 +987,11 @@ int vrend_video_decode_bitstream(struct vrend_video_context *ctx,
+             continue;
+         }
+ 
+-        vrend_read_from_iovec(res->iov, res->num_iovs, 0,
+-                              res->ptr, buffer_sizes[i]);
++        /* The size comes from the guest: never past the buffer. */
++        uint32_t size = MIN2(buffer_sizes[i], res->base.width0);
++        vrend_read_from_iovec(res->iov, res->num_iovs, 0, res->ptr, size);
+         bs_buffers[num_bs] = res->ptr;
+-        bs_sizes[num_bs] = buffer_sizes[i];
++        bs_sizes[num_bs] = size;
+         num_bs++;
+     }
+ 

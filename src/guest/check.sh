@@ -58,6 +58,8 @@ mon=$(as_user hyprctl monitors -j 2>/dev/null | jq -r 'max_by(.width * .height) 
 if [[ -z $mon ]]; then bad "display" "no monitor from hyprctl"
 elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode (monitors.lua not applied)"
 else ok "display" "$mon"; fi
+bg=$H/.local/state/omarchy/current/background
+if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is missing: omacvm apply, then log in again"; fi
 
 section "The Mac in the bar (Bridge)"
 if [[ $BRIDGE == on ]]; then
@@ -89,6 +91,12 @@ if [[ $BRIDGE == on ]]; then
   else bad "shared event stream" "$n connections to the Mac (widgets from before it: log out and in)"; fi
   if user_active omacvm-bridge-osd.service; then ok "media keys OSD" "omacvm-bridge-osd"
   else bad "media keys OSD" "omacvm-bridge-osd.service not running"; fi
+  # Right after the first login omacvm-plugins may still be enabling the widgets.
+  for _ in $(seq 60); do
+    [[ -s $H/.local/state/omacvm/pending-plugins &&
+       $(systemctl --user -M "$U@" show -p ActiveState --value omacvm-plugins.service 2>/dev/null) == activating ]] || break
+    sleep 1
+  done
   layout=$(jq -r '[.bar.layout[]?[]?.id] | join(" ")' "$H/.config/omarchy/shell.json" 2>/dev/null)
   bt=$(as_user omacvm-bridge bluetooth 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$bt"; then
@@ -144,7 +152,8 @@ else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fus
 
 section "The Mac's battery"
 if [[ $TYPE == parallels ]]; then
-  skip "battery" "Parallels gives the VM the Mac's battery itself"
+  if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
+  else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
 elif [[ $BATTERY == on ]]; then
   if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
   else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
@@ -155,6 +164,9 @@ elif [[ $BATTERY == on ]]; then
     elif [[ ! -f /usr/lib/modules/$k/build/Makefile ]]; then bad "battery: kernel $k" "no headers to build the module with: omarchy update, reboot, omacvm apply"
     else bad "battery: kernel $k" "module not built (omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
   done
+  # Right after a boot the agent (and its first snapshot) may need a moment.
+  for _ in $(seq 15); do systemctl is-active -q omacvm-battery && break; sleep 1; done
+  for _ in $(seq 5); do [[ -d /sys/class/power_supply/BAT0 ]] && break; sleep 1; done
   if systemctl is-active -q omacvm-battery; then ok "battery agent" "omacvm-battery feeds it the Mac's"
   else bad "battery agent" "omacvm-battery.service not running ($(journalctl -u omacvm-battery -n1 -o cat 2>/dev/null | sed 's/^omacvm-battery: //'))"; fi
   up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
@@ -242,7 +254,18 @@ app)
     *virgl*) ok "GPU" "$r" ;;
     "") skip "GPU" "no glxinfo/eglinfo to ask (mesa-utils)" ;;
     *) bad "GPU" "software rendering: $r" ;;
-  esac ;;
+  esac
+  # Video decoding on the Mac's media engine (an app with it lists decoders).
+  drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
+  v=$(as_user env LIBVA_DRIVER_NAME=$drv LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri \
+      vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' | tr '\n' ' ')
+  if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v"
+  elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
+  else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
+  if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
+    check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
+      grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
+  fi ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx

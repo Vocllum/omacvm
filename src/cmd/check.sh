@@ -142,7 +142,9 @@ if [[ $BRIDGE == on ]]; then
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
   c=~/Library/Application\ Support/omacvm-bridge/config.json
-  if [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
+  if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
+    skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
+  elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
   else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
 else skip "Bridge" "off (chosen at setup)"; fi
@@ -173,8 +175,18 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
+    # A Mac mini, iMac or Studio may have no trackpad yet: the helper waits for one.
+    if [[ $GESTURES == on && $keysonly == 0 ]]; then
+      t=$(last_line "$L/omacvm-gestures.log" 'no trackpad found|trackpad: ')
+      case $t in
+        "no trackpad"*) skip "trackpad" "none connected: the swipes start when a Magic Trackpad connects" ;;
+        trackpad:*) ok "trackpad" "${t#trackpad: }" ;;
+      esac
+    fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
-      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
+      # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
+      g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
+      [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
@@ -240,6 +252,7 @@ if pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
   [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
   ok "Omanotch (Mac)" "running, bar height: $h"
+elif [[ $(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none) != notch ]]; then skip "Omanotch (Mac)" "no notch on this Mac"
 else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?

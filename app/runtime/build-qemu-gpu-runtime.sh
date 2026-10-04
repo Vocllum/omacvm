@@ -78,6 +78,9 @@ udp_patch="$native_dir/patches/libslirp-ipv4-udp-translation.patch"
 fence_poll_patch="$native_dir/patches/qemu-darwin-gpu-fence-poll.patch"
 virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
+virgl_videotoolbox_patch="$native_dir/patches/virgl-videotoolbox-decode.patch"
+virgl_row_size_patch="$native_dir/patches/virgl-transfer-row-size.patch"
+hidden_window_patch="$native_dir/patches/qemu-cocoa-hidden-for-tests.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -107,6 +110,9 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
+virgl_videotoolbox_patch_sha256=12c0863d818a1b26da3be9c59220ee22ce55a037887297cd6dac53e62dbc37c3
+virgl_row_size_patch_sha256=5858714fd4f7bcfaa1c9e10fc9ea706df30e59a37be62ad4c20003e049e347e9
+hidden_window_patch_sha256=286aa59317d16f21cb0fe1dd42b6636995d24f1c65312175e40f36b14272dc93
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -260,7 +266,13 @@ remove_work_dir() {
 cleanup() {
   local exit_status=$?
   trap - EXIT HUP INT TERM
-  [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  # OMACVM_RUNTIME_KEEP_WORK=1 keeps the sources and build trees (for
+  # rebuilding one library by hand while working on a patch).
+  if [[ -n $work_dir && ${OMACVM_RUNTIME_KEEP_WORK:-} == 1 ]]; then
+    echo "[qemu-source-build] kept work dir: $work_dir" >&2
+  else
+    [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
+  fi
   exit "$exit_status"
 }
 
@@ -500,6 +512,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-quit-powerdow
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-notch.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
+verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -622,6 +636,12 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_native_patch"
 # GL context stopped for good (Chrome's GPU process hung in Basemark Web 3.0).
 verify_file_sha "Integer sampler shader patch" "$virgl_int_tex_patch" "$virgl_int_tex_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_int_tex_patch"
+# Video decode on the Mac's media engine: guest VA-API -> VideoToolbox.
+verify_file_sha "VideoToolbox video decode patch" "$virgl_videotoolbox_patch" "$virgl_videotoolbox_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_videotoolbox_patch"
+# No texture transfer moves more bytes per row in GL than the guest's buffers hold.
+verify_file_sha "Transfer row size patch" "$virgl_row_size_patch" "$virgl_row_size_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_row_size_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -635,7 +655,7 @@ env MACOSX_DEPLOYMENT_TARGET="$macos_deployment_target" \
   LDFLAGS="-mmacosx-version-min=$macos_deployment_target -Wl,-headerpad_max_install_names" \
   python3 "$meson" setup "$virgl_build" "$virgl_source" \
     --prefix="$virgl_root" --libdir=lib --buildtype=debugoptimized -Db_ndebug=false --wrap-mode=nodownload \
-    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=false -Dtracing=none
+    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=true -Dtracing=none
 "$ninja" ${ninja_jobs[@]+"${ninja_jobs[@]}"} -C "$virgl_build"
 # These test the actual shader generator and blend-state transitions, without a VM.
 env DYLD_LIBRARY_PATH="$private_libraries" \
@@ -643,6 +663,7 @@ env DYLD_LIBRARY_PATH="$private_libraries" \
     "$virgl_build" "$work_dir/virgl-regressions" -- \
     "-L$epoxy_root/lib" -lepoxy \
     -framework Metal -framework CoreFoundation -lobjc \
+    -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework OpenGL -framework IOSurface \
     "-Wl,-rpath,$epoxy_root/lib" "-Wl,-rpath,$angle_root/lib"
 # Probe real format-selection code with controlled GL availability and failures.
 env DYLD_LIBRARY_PATH="$private_libraries" \
@@ -650,6 +671,7 @@ env DYLD_LIBRARY_PATH="$private_libraries" \
     "$virgl_build" "$work_dir/virgl-regressions" -- \
     "-L$epoxy_root/lib" -lepoxy \
     -framework Metal -framework CoreFoundation -lobjc \
+    -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework OpenGL -framework IOSurface \
     "-Wl,-rpath,$epoxy_root/lib" "-Wl,-rpath,$angle_root/lib"
 python3 "$meson" install -C "$virgl_build" --no-rebuild
 require_private_pkg_version virglrenderer 1.3.0

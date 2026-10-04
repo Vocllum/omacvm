@@ -5,6 +5,8 @@
 #  * Quit on the Mac (the VM's power button) shuts Omarchy down
 #  * the clipboard, both ways (omacvm-clipboard, from try-omarchy)
 #  * the QEMU guest agent
+#  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
+#    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
 set -euo pipefail
 cd "$(dirname "$0")"
 U=${1:?usage: install.sh <desktop-user>}
@@ -31,4 +33,20 @@ grep -qxF 'require("hypr.omacvm_app")' "$B" || {
   printf -- '-- OmacVM.app: the display follows the Mac window.\nrequire("hypr.omacvm_app")\n' >> "$B"; chown "$U:$U" "$B"; }
 A=$H/.config/hypr/autostart.lua
 grep -q omacvm-display-sync "$A" 2>/dev/null || { echo 'o.launch_on_start("omacvm-display-sync")' >> "$A"; chown "$U:$U" "$A"; }
-echo "OmacVM.app: display sync, guest agent"
+# Video decoding on the Mac's media engine (the app's QEMU passes VA-API to
+# VideoToolbox): vainfo, the driver shim for Firefox, and Firefox's switch.
+pacman -S --needed --noconfirm libva-utils >/dev/null 2>&1 || true
+T=$(mktemp -d)
+if cc -shared -fPIC -O2 -o "$T/omacvm_drv_video.so" omacvm_drv_video.c -ldl 2>/dev/null; then
+  install -Dm755 "$T/omacvm_drv_video.so" /usr/local/lib/dri/omacvm_drv_video.so
+  install -Dm644 90-omacvm-video.conf /etc/environment.d/90-omacvm-video.conf
+  # Firefox decodes in its sandboxed RDD process, which may read only the
+  # library paths ld.so knows: without this vaInitialize fails there.
+  echo /usr/local/lib/dri > /etc/ld.so.conf.d/omacvm-video.conf
+  ldconfig
+else
+  echo "OmacVM.app: no C compiler, video decoding without the Firefox shim"
+fi
+rm -rf "$T"
+install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-video.js
+echo "OmacVM.app: display sync, guest agent, video decoding"

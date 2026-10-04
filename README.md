@@ -144,7 +144,7 @@ Free and open source, one display: UTM.
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
-| YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
+| YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | **✓ decoded by the Mac's media engine** in Google Chrome, Brave and Firefox ([which apps](docs/video-decode.md)) |
 | GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
 | Idle desktop | 5.7 W · 18 h | being re-measured | **5.5 W · 18 h** | 6.2 W · 16 h |
@@ -175,7 +175,13 @@ Free and open source, one display: UTM.
 On the Mac itself, for the same loads: idle 6.1 W (16 h), reading 6.6 W
 (15 h), YouTube 4K 8.0 W (12.5 h, in hardware), every core busy 75 W (1.3 h).
 The difference for video is decoding: macOS decodes YouTube's 4K in hardware,
-and none of these apps gives Linux hardware video decoding.
+and Parallels, UTM and Fusion give Linux no hardware video decoding. OmacVM.app
+does since 2.7.0: Google Chrome, Brave, Firefox (H.264 and VP9; AV1 in Chrome,
+not yet in Firefox), mpv, FFmpeg and GStreamer apps decode on the Mac's media
+engine. Omarchy's
+default Chromium (Arch Linux ARM) is built without VA-API, so it still decodes
+on the CPU; a route for it (V4L2) is planned. OmacVM.app's YouTube 4K power
+number above is from before, with the CPU decoding.
 
 How we measured: a MacBook Pro 16" M4 Max (macOS 15.7, 100 Wh battery), 16
 CPUs and 48 GB per VM, one VM at a time in full screen on the built-in
