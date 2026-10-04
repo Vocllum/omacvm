@@ -34,6 +34,9 @@ commit 82927e9. Changes here:
   the program it began with bound; with none bound Apple's GL crashed QEMU
   (dEQP and WebGL 2 transform feedback tests); checked by
   `Tests/virgl/test-transform-feedback.c`
+- `patches/virgl-stream-output-checks.patch`: a shader's stream output info
+  (from the guest) could name a register past the translator's outputs: an
+  assertion aborted QEMU; found by the fuzzer, replayed in every build
 - `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
   server ended signals its fences, so the guest app ends instead of hanging
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
@@ -41,6 +44,10 @@ commit 82927e9. Changes here:
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
   (`.build/qemu-gpu-runtime.test-hooks`) and `build-app.sh` rebuilds instead of
   shipping it. `Tests/virgl/test-context-loss.c` runs in every build
+
+Every build also replays `Tests/virgl/fuzz-regressions/` (inputs that once
+crashed QEMU or asked for 4 GiB) through the fuzz harness without libFuzzer
+(`fuzz-replay-main.c`).
 
 Build: `./build-qemu-gpu-runtime.sh` (about 70 seconds, needs only the Command
 Line Tools). Output: `.build/qemu-gpu-runtime` and `.build/firmware`.

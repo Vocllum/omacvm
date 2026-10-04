@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the format regression against the pinned renderer's compile flags."""
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -52,8 +53,28 @@ def run_api_test(name):
     subprocess.run([str(binary)], check=True)
 
 
+def run_fuzz_replay():
+    """Every input the fuzzer once crashed on, through the same harness, without libFuzzer."""
+    entry = next(item for item in entries if item["file"].endswith("/virglrenderer.c"))
+    command = entry.get("arguments") or shlex.split(entry["command"])
+    directory = Path(entry["directory"])
+    source = (directory / entry["file"]).resolve().parent
+    here = Path(__file__).parent
+    binary = output / "fuzz-replay"
+    subprocess.run([command[0], "-I" + str(source), "-I" + str(build / "src"),
+                    str(here / "fuzz-cmd-stream.c"), str(here / "fuzz-replay-main.c"),
+                    "-L" + str(build / "src"), "-lvirglrenderer",
+                    "-Wl,-rpath," + str(build / "src"),
+                    "-framework", "OpenGL", "-Wno-deprecated-declarations", "-o", str(binary)],
+                   cwd=directory, check=True)
+    inputs = sorted(str(p) for p in (here / "fuzz-regressions").iterdir())
+    subprocess.run([str(binary), *inputs], check=True,
+                   env={**os.environ, "VIRGL_LOG_LEVEL": "silent"})
+
+
 run_test("test-multisample-formats", "vrend_formats.c")
 run_test("test-native-shader-inputs", "vrend_renderer.c")
 run_test("test-integer-sampler-shader", "vrend_shader.c")
 run_api_test("test-context-loss")
 run_api_test("test-transform-feedback")
+run_fuzz_replay()
