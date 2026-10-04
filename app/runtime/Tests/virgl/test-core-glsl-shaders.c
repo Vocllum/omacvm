@@ -65,7 +65,8 @@ static int convert(const char *name, const char *text, const struct vrend_shader
       printf("FAIL: %s:\n%s\n", name, glsl);
       return 1;
    }
-   GLenum type = strncmp(text, "VERT", 4) ? GL_FRAGMENT_SHADER : GL_VERTEX_SHADER;
+   GLenum type = !strncmp(text, "VERT", 4) ? GL_VERTEX_SHADER :
+                 !strncmp(text, "GEOM", 4) ? GL_GEOMETRY_SHADER : GL_FRAGMENT_SHADER;
    if (have_gl && !gl_compiles(name, type, glsl))
       return 1;
    printf("PASS: %s%s\n", name, have_gl ? " (compiled by the Mac's OpenGL)" : "");
@@ -113,60 +114,72 @@ int main(void)
                      "MOV OUT[0], IN[0]\nEND\n",
                      &key, NULL, NULL, have_gl);
 
-   /* Results written straight to an integer render target (the guest's TGSI
-    * folds floatBitsToUint(f(x)) or uint(i) into "OP OUT[n], ..."). Float results
-    * must keep their bits: dEQP-GLES3 builtin_functions.precision.sqrt read 315
-    * for sqrt(99463) (uint(1.0 / x)), and CMP, UCMP or SEQ into such an output
-    * did not compile at all. Integer results are stored as they are, without a
-    * detour through uintBitsToFloat() (uvec4(uintBitsToFloat(a + b)) converts). */
+   /* Results written straight to an integer output (the guest's TGSI folds
+    * floatBitsToUint(f(x)) or uint(i) into "OP OUT[n], ..."). Every write goes
+    * to a float temporary, with the same GLSL as for a TEMP register, and one
+    * store keeps its bits: dEQP-GLES3 builtin_functions.precision.sqrt read 315
+    * for sqrt(99463) (uint(1.0 / x)), and texture fetches, CMP, SEQ or TXQ into
+    * such an output did not compile at all. */
    static const struct {
-      const char *op, *must, *must_not;
+      const char *op, *decls;
+      bool mac_has_it;          /* images, buffers: the Mac's GL 4.1 has none */
    } int_out[] = {
-      {"RCP OUT[0].x, IN[0].xxxx", "floatBitsToUint(1.0/", NULL},
-      {"RSQ OUT[0].x, IN[0].xxxx", "floatBitsToUint(inversesqrt", NULL},
-      {"SQRT OUT[0], IN[0]", "floatBitsToUint(sqrt", NULL},
-      {"DP3 OUT[0].x, IN[0], IN[0]", "floatBitsToUint(dot", NULL},
-      {"MAD OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(", NULL},
-      {"POW OUT[0].x, IN[0].xxxx, IN[0].yyyy", "floatBitsToUint(pow", NULL},
-      {"LRP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
-      {"CMP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
-      {"UCMP OUT[0], IN[0], IN[0], IN[0]", "floatBitsToUint(mix", NULL},
-      {"SEQ OUT[0], IN[0], IN[0]", "floatBitsToUint(vec4(equal", NULL},
-      {"I2F OUT[0], IN[0]", "floatBitsToUint(vec4(ivec4", NULL},
-      {"U2F OUT[0], IN[0]", "floatBitsToUint(vec4(uvec4", NULL},
-      {"UADD OUT[0], IN[0], IN[0]", "fsout_c0 = uvec4((uvec4(", "BitsToFloat"},
-      {"AND OUT[0], IN[0], IN[0]", "fsout_c0 = uvec4((", "BitsToFloat"},
-      {"NOT OUT[0], IN[0]", "fsout_c0 = uvec4((~", "BitsToFloat"},
-      {"USEQ OUT[0], IN[0], IN[0]", "* uvec4(0xffffffff)", "BitsToFloat"},
-      {"FSLT OUT[0], IN[0], IN[0]", "* uvec4(0xffffffff)", "BitsToFloat"},
-      {"F2U OUT[0], IN[0]", "fsout_c0 = uvec4((uvec4(", "BitsToFloat"},
+      {"RCP OUT[0].x, IN[0].xxxx", "", true},
+      {"SQRT OUT[0], IN[0]", "", true},
+      {"DP3 OUT[0].x, IN[0], IN[0]", "", true},
+      {"LRP OUT[0], IN[0], IN[0], IN[0]", "", true},
+      {"CMP OUT[0], IN[0], IN[0], IN[0]", "", true},
+      {"UCMP OUT[0], IN[0], IN[0], IN[0]", "", true},
+      {"SEQ OUT[0], IN[0], IN[0]", "", true},
+      {"I2F OUT[0], IN[0]", "", true},
+      {"UADD OUT[0], IN[0], IN[0]", "", true},
+      {"NOT OUT[0], IN[0]", "", true},
+      {"USEQ OUT[0], IN[0], IN[0]", "", true},
+      {"F2U OUT[0], IN[0]", "", true},
+      {"TEX OUT[0], IN[0], SAMP[0], 2D", "DCL SAMP[0]\nDCL SVIEW[0], 2D, FLOAT\n", true},
+      {"TXF OUT[0], IN[0], SAMP[0], 2D", "DCL SAMP[0]\nDCL SVIEW[0], 2D, UINT\n", true},
+      {"TXQ OUT[0].xy, IN[0].xxxx, SAMP[0], 2D", "DCL SAMP[0]\nDCL SVIEW[0], 2D, FLOAT\n", true},
+      {"LOAD OUT[0], IMAGE[0], IN[0], 2D, PIPE_FORMAT_R32G32B32A32_UINT",
+       "DCL IMAGE[0], 2D, PIPE_FORMAT_R32G32B32A32_UINT, WR\n", false},
+      {"RESQ OUT[0].xy, IMAGE[0]", "DCL IMAGE[0], 2D, PIPE_FORMAT_R32G32B32A32_UINT, WR\n", false},
+      {"ATOMUADD OUT[0].x, BUFFER[0], IN[0].xxxx, IN[0].yyyy", "DCL BUFFER[0]\n", false},
    };
    for (unsigned i = 0; i < sizeof(int_out) / sizeof(int_out[0]); i++) {
-      char name[96], text[256];
-      snprintf(name, sizeof(name), "%.*s into an integer color output",
-               (int)strcspn(int_out[i].op, " "), int_out[i].op);
-      snprintf(text, sizeof(text), "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n%s\nEND\n",
-               int_out[i].op);
-      memset(&key, 0, sizeof(key));
-      key.fs.cbufs_unsigned_int_bitmask = 0x1;
-      failed |= convert(name, text, &key, int_out[i].must, int_out[i].must_not, have_gl);
+      for (int sign = 0; sign < 2; sign++) {
+         char name[128], text[512];
+         snprintf(name, sizeof(name), "%.*s into an %s color output",
+                  (int)strcspn(int_out[i].op, " "), int_out[i].op, sign ? "int" : "uint");
+         snprintf(text, sizeof(text), "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
+                  "DCL TEMP[0]\n%s%s\nEND\n", int_out[i].decls, int_out[i].op);
+         memset(&key, 0, sizeof(key));
+         if (sign)
+            key.fs.cbufs_signed_int_bitmask = 0x1;
+         else
+            key.fs.cbufs_unsigned_int_bitmask = 0x1;
+         failed |= convert(name, text, &key,
+                           sign ? "fsout_c0 = floatBitsToInt(int_out_tmp0);"
+                                : "fsout_c0 = floatBitsToUint(int_out_tmp0);",
+                           NULL, have_gl && int_out[i].mac_has_it);
+      }
    }
 
-   /* Query results (ints) into an integer output, and an integer op into
-    * gl_SampleMask: stored as they are, not through intBitsToFloat() or
-    * floatBitsToInt() (a vec assigned to a uvec, or floatBitsToInt(uint)). */
-   memset(&key, 0, sizeof(key));
-   key.fs.cbufs_unsigned_int_bitmask = 0x1;
-   failed |= convert("TXQ into an integer color output",
-                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL SAMP[0]\n"
-                     "DCL SVIEW[0], 2D, FLOAT\nTXQ OUT[0].xy, IN[0].xxxx, SAMP[0], 2D\nEND\n",
-                     &key, "uvec2(textureSize", "BitsToFloat", have_gl);
+   /* The other integer outputs: gl_SampleMask from an integer op, gl_Layer
+    * from a geometry shader (stored before each EmitVertex). */
    memset(&key, 0, sizeof(key));
    failed |= convert("AND into gl_SampleMask",
                      "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
                      "DCL OUT[1], SAMPLEMASK\nMOV OUT[0], IN[0]\n"
                      "AND OUT[1].x, IN[0].xxxx, IN[0].yyyy\nEND\n",
-                     &key, "gl_SampleMask[0] = int((", "BitsToFloat", have_gl);
+                     &key, "gl_SampleMask[0] = floatBitsToInt(int_out_tmp1.x);", NULL, have_gl);
+   memset(&key, 0, sizeof(key));
+   failed |= convert("UADD into gl_Layer (geometry shader)",
+                     "GEOM\nPROPERTY GS_INPUT_PRIMITIVE TRIANGLES\n"
+                     "PROPERTY GS_OUTPUT_PRIMITIVE TRIANGLE_STRIP\n"
+                     "PROPERTY GS_MAX_OUTPUT_VERTICES 1\nPROPERTY GS_INVOCATIONS 1\n"
+                     "DCL IN[][0], POSITION\nDCL OUT[0], POSITION\nDCL OUT[1], LAYER\n"
+                     "IMM[0] UINT32 {1, 0, 0, 0}\nMOV OUT[0], IN[0][0]\n"
+                     "UADD OUT[1].x, IMM[0].xxxx, IMM[0].xxxx\nEMIT IMM[0].yyyy\nEND\n",
+                     &key, "gl_Layer = floatBitsToInt(int_out_tmp1.x);", NULL, have_gl);
 
    /* Instanced drawing (WebGL through ANGLE): gl_InstanceID is core GLSL;
     * Apple's core profile refuses "#extension GL_ARB_draw_instanced". */
@@ -209,6 +222,19 @@ int main(void)
                      "TG4 TEMP[0], IN[0], IMM[0].xxxx, SAMP[0], SHADOWCUBE\n"
                      "MOV OUT[0], TEMP[0]\nEND\n",
                      &key, "textureGather", "GL_EXT_texture_shadow_lod", have_gl);
+
+   /* Compute shaders are always "#version 330" (hosts with compute; the Mac
+    * has none): a shader that needs GLSL 4.30 for a vote still needs the
+    * texture gather extension line. Text only. */
+   memset(&key, 0, sizeof(key));
+   failed |= convert("compute shader with a vote and a gather",
+                     "COMP\nPROPERTY CS_FIXED_BLOCK_WIDTH 1\nPROPERTY CS_FIXED_BLOCK_HEIGHT 1\n"
+                     "PROPERTY CS_FIXED_BLOCK_DEPTH 1\nDCL SAMP[0]\nDCL SVIEW[0], 2D, FLOAT\n"
+                     "DCL TEMP[0]\nIMM[0] FLT32 {    0.5000,     0.5000,     0.0000,     0.0000}\n"
+                     "IMM[1] UINT32 {0, 0, 0, 0}\n"
+                     "TG4 TEMP[0], IMM[0], IMM[1].xxxx, SAMP[0], 2D\n"
+                     "VOTE_ANY TEMP[0].x, TEMP[0].xxxx\nEND\n",
+                     &key, "#extension GL_ARB_texture_gather", NULL, false);
 
    /* A plain float shader is unchanged apart from the version. */
    memset(&key, 0, sizeof(key));

@@ -1,41 +1,43 @@
 virglrenderer: core profile shaders ask for GLSL 3.30, no extensions that are core
 
 What: on a desktop core profile that supports GLSL 3.30 (macOS: 4.10), every
-translated shader is "#version 330" or newer instead of 140/150. "#extension"
-lines are left out when the emitted version has the feature in core, from one
-table (ext_core_glsl_ver, used by every desktop "#extension" in emit_header):
-ARB_texture_rectangle, ARB_draw_instanced and ARB_uniform_buffer_object (1.40),
-ARB_texture_multisample and ARB_fragment_coord_conventions (1.50),
-ARB_shader_bit_encoding and ARB_explicit_attrib_location (3.30), and the 4.00/
-4.10 ones for shaders that need those versions. ARB_texture_query_lod is not in
-the table: the translation writes its textureQueryLOD() spelling.
+translated shader is "#version 330" or newer instead of 140/150. Every
+desktop "#extension" line goes through one table of the GLSL version where
+the extension is core (ext_core_glsl_ver), compared with the "#version" that
+emit_header() really writes (desktop_glsl_ver(): compute shaders stay 330);
+the separate version checks next to some lines are gone. Not in the table:
+extensions without a core version and those whose GLSL the translator writes
+with the extension's names (textureQueryLOD, *ARB functions).
 Why: Apple's core profile refuses floatBitsToInt()/intBitsToFloat() and friends
 below 3.30, and many translations use them without setting SHADER_REQ_INTS (e.g.
 integer vertex attributes passed on: dEQP-GLES3.functional.shaders.precision.int.*).
-It also refuses "#extension GL_ARB_draw_instanced" (Chrome's instanced WebGL
-shaders). One refused shader stopped the guest's whole GL context, so every
-later draw of that app was black (dEQP-GLES3 in one process: 455/896 pass).
+It also refuses "#extension" lines for what it has in core, e.g.
+GL_ARB_draw_instanced (Chrome's instanced WebGL shaders). One refused shader
+stopped the guest's whole GL context, so every later draw of that app was
+black (dEQP-GLES3 in one process: 455/896 pass).
 Upstreamable (desktop core profiles only; GLES and compatibility hosts are
 unchanged); not sent.
 Overlap: gpu-robust's virgl-core-instance-id.patch does the ARB_draw_instanced
-part only. This patch leaves the upstream ARB_texture_rectangle line in place
-and adds its check above it, so both patches apply in either order (checked);
+part only and touches the same loop; both apply in either order (checked),
 drop virgl-core-instance-id.patch when both land.
 Tests: Tests/virgl/test-core-glsl-shaders.c (generated GLSL compiled by the
-Mac's OpenGL; every case checks the version and extension lines; fails without
-this patch).
+Mac's OpenGL; every case checks the version and extension lines; a compute
+shader that needs 4.30 keeps its extension lines; fails without this patch).
 --- a/src/vrend/vrend_shader.c
 +++ b/src/vrend/vrend_shader.c
-@@ -363,6 +363,44 @@
+@@ -361,8 +361,77 @@
+     { SHADER_REQ_SHADER_DRAW_PARAMETERS, "ARB_shader_draw_parameters"},
+     { SHADER_REQ_SHADER_GROUP_VOTE, "ARB_shader_group_vote"},
      { SHADER_REQ_EXPLICIT_UNIFORM_LOCATION, "ARB_explicit_uniform_location"},
- };
- 
++};
++
 +/* Desktop GLSL version from which an extension is core. From that version on
 + * the "#extension" line is not needed, and core profiles that do not list the
-+ * extension (macOS) refuse the shader. One table for every place that asks
-+ * for an extension (emit_ext_unless_core()). Only extensions whose GLSL the
-+ * translator writes with the core names (not ARB_texture_query_lod: it writes
-+ * textureQueryLOD). */
++ * extension (macOS) refuse the shader. Every desktop "#extension" goes through
++ * emit_ext_unless_core(). Left out (the extension stays): those without a core
++ * version, and those whose GLSL the translator writes with the extension's
++ * names (ARB_texture_query_lod: textureQueryLOD; ARB_shader_group_vote,
++ * ARB_shader_draw_parameters, ARB_shader_atomic_counter_ops: *ARB names). */
 +static const struct {
 +   const char *name;
 +   int glsl_ver;
@@ -55,7 +57,37 @@ this patch).
 +   { "ARB_tessellation_shader", 400 },
 +   { "ARB_viewport_array", 410 },
 +   { "ARB_separate_shader_objects", 410 },
-+};
++   { "ARB_shader_image_load_store", 420 },
++   { "ARB_shader_atomic_counters", 420 },
++   { "ARB_conservative_depth", 420 },
++   { "ARB_compute_shader", 430 },
++   { "ARB_arrays_of_arrays", 430 },
++   { "ARB_shader_storage_buffer_object", 430 },
++   { "ARB_texture_query_levels", 430 },
++   { "ARB_shader_image_size", 430 },
++   { "ARB_fragment_layer_viewport", 430 },
++   { "ARB_explicit_uniform_location", 430 },
++   { "ARB_enhanced_layouts", 440 },
++   { "ARB_cull_distance", 450 },
++   { "ARB_derivative_control", 450 },
++   { "ARB_shader_texture_image_samples", 450 },
++   { "ARB_ES3_1_compatibility", 450 },
+ };
+ 
++/* The "#version" emit_header() writes on desktop GL. */
++static int desktop_glsl_ver(const struct dump_ctx *ctx)
++{
++   if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE)
++      return 330;
++   if (ctx->glsl_ver_required > 150)
++      return ctx->glsl_ver_required;
++   if (ctx->prog_type == TGSI_PROCESSOR_GEOMETRY ||
++       ctx->prog_type == TGSI_PROCESSOR_TESS_EVAL ||
++       ctx->prog_type == TGSI_PROCESSOR_TESS_CTRL ||
++       ctx->glsl_ver_required == 150)
++      return 150;
++   return ctx->glsl_ver_required == 140 ? 140 : 130;
++}
 +
 +static bool ext_is_core(const struct dump_ctx *ctx, const char *name)
 +{
@@ -63,7 +95,7 @@ this patch).
 +      return false;
 +   for (unsigned i = 0; i < ARRAY_SIZE(ext_core_glsl_ver); i++) {
 +      if (!strcmp(name, ext_core_glsl_ver[i].name))
-+         return ctx->glsl_ver_required >= ext_core_glsl_ver[i].glsl_ver;
++         return desktop_glsl_ver(ctx) >= ext_core_glsl_ver[i].glsl_ver;
 +   }
 +   return false;
 +}
@@ -71,7 +103,7 @@ this patch).
  enum vrend_type_qualifier {
     TYPE_CONVERSION_NONE = 0,
     FLOAT = 1,
-@@ -6205,6 +6243,14 @@
+@@ -6205,6 +6274,14 @@
                       const char *verb)
  {
     emit_ver_extf(glsl_strbufs, "#extension GL_%s : %s\n", name, verb);
@@ -86,17 +118,29 @@ this patch).
  }
  
  static void emit_header(const struct dump_ctx *ctx, struct vrend_glsl_strbufs *glsl_strbufs)
-@@ -6300,7 +6346,7 @@
+@@ -6298,61 +6375,48 @@
+       emit_hdr(glsl_strbufs, "precision highp float;\n");
+       emit_hdr(glsl_strbufs, "precision highp int;\n");
     } else {
-       if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE) {
-          emit_ver_ext(glsl_strbufs, "#version 330\n");
+-      if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE) {
+-         emit_ver_ext(glsl_strbufs, "#version 330\n");
 -         emit_ext(glsl_strbufs, "ARB_compute_shader", "require");
+-      } else {
+-         if (ctx->glsl_ver_required > 150)
+-            emit_ver_extf(glsl_strbufs, "#version %d\n", ctx->glsl_ver_required);
+-         else if (ctx->prog_type == TGSI_PROCESSOR_GEOMETRY ||
+-             ctx->prog_type == TGSI_PROCESSOR_TESS_EVAL ||
+-             ctx->prog_type == TGSI_PROCESSOR_TESS_CTRL ||
+-             ctx->glsl_ver_required == 150)
+-            emit_ver_ext(glsl_strbufs, "#version 150\n");
+-         else if (ctx->glsl_ver_required == 140)
+-            emit_ver_ext(glsl_strbufs, "#version 140\n");
+-         else
+-            emit_ver_ext(glsl_strbufs, "#version 130\n");
+-      }
++      emit_ver_extf(glsl_strbufs, "#version %d\n", desktop_glsl_ver(ctx));
++      if (ctx->prog_type == TGSI_PROCESSOR_COMPUTE)
 +         emit_ext_unless_core(ctx, glsl_strbufs, "ARB_compute_shader", "require");
-       } else {
-          if (ctx->glsl_ver_required > 150)
-             emit_ver_extf(glsl_strbufs, "#version %d\n", ctx->glsl_ver_required);
-@@ -6316,42 +6362,44 @@
-       }
  
        if (ctx->shader_req_bits & SHADER_REQ_ENHANCED_LAYOUTS)
 -         emit_ext(glsl_strbufs, "ARB_enhanced_layouts", "require");
@@ -121,15 +165,19 @@ this patch).
  
        if (ctx->prog_type == TGSI_PROCESSOR_VERTEX && ctx->cfg->use_explicit_locations)
 -         emit_ext(glsl_strbufs, "ARB_explicit_attrib_location", "require");
-+         emit_ext_unless_core(ctx, glsl_strbufs, "ARB_explicit_attrib_location", "require");
-       /* Core GLSL 150 already includes fragment coord layouts; avoid extension require on hosts that omit the ARB string (e.g., macOS core GL). */
-       if (ctx->prog_type == TGSI_PROCESSOR_FRAGMENT && fs_emit_layout(ctx) && ctx->glsl_ver_required < 150)
+-      /* Core GLSL 150 already includes fragment coord layouts; avoid extension require on hosts that omit the ARB string (e.g., macOS core GL). */
+-      if (ctx->prog_type == TGSI_PROCESSOR_FRAGMENT && fs_emit_layout(ctx) && ctx->glsl_ver_required < 150)
 -         emit_ext(glsl_strbufs, "ARB_fragment_coord_conventions", "require");
++         emit_ext_unless_core(ctx, glsl_strbufs, "ARB_explicit_attrib_location", "require");
++      /* core in GLSL 1.50 (ext_core_glsl_ver) */
++      if (ctx->prog_type == TGSI_PROCESSOR_FRAGMENT && fs_emit_layout(ctx))
 +         emit_ext_unless_core(ctx, glsl_strbufs, "ARB_fragment_coord_conventions", "require");
  
-       /* Uniform buffers are core in GLSL 1.40+; only request the ARB extension when targeting older versions. */
-       if (ctx->ubo_used_mask && ctx->glsl_ver_required < 140)
+-      /* Uniform buffers are core in GLSL 1.40+; only request the ARB extension when targeting older versions. */
+-      if (ctx->ubo_used_mask && ctx->glsl_ver_required < 140)
 -         emit_ext(glsl_strbufs, "ARB_uniform_buffer_object", "require");
++      /* core in GLSL 1.40 (ext_core_glsl_ver) */
++      if (ctx->ubo_used_mask)
 +         emit_ext_unless_core(ctx, glsl_strbufs, "ARB_uniform_buffer_object", "require");
  
        if (ctx->num_cull_dist_prop || ctx->key->num_in_cull || ctx->key->num_out_cull)
@@ -147,12 +195,12 @@ this patch).
        }
  
        for (uint32_t i = 0; i < ARRAY_SIZE(shader_req_table); i++) {
+-         if (shader_req_table[i].key == SHADER_REQ_SAMPLER_RECT && ctx->glsl_ver_required >= 140)
 +         if (ext_is_core(ctx, shader_req_table[i].string))
-+            continue;
-          if (shader_req_table[i].key == SHADER_REQ_SAMPLER_RECT && ctx->glsl_ver_required >= 140)
              continue;
  
-@@ -8177,6 +8225,12 @@
+          if (ctx->shader_req_bits & shader_req_table[i].key) {
+@@ -8177,6 +8241,12 @@
     /* if we are in core profile mode we should use GLSL 1.40 */
     if (cfg->glsl_version >= 140)
        ctx.glsl_ver_required = require_glsl_ver(&ctx, 140);
