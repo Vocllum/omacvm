@@ -207,6 +207,8 @@ code="$work/pc-bios/edk2-aarch64-code.fd"
 [[ -f $code && $(stat -f %z "$code") == 67108864 ]] || fail "the edk2 build (no 64 MiB edk2-aarch64-code.fd)"
 grep -A3 'FV Space Information' "$build_log" | sed 's/^/[edk2-build] /'
 
+# Only the latest build is kept.
+find "$cache" -maxdepth 1 -name 'out-*' -type d -exec rm -rf {} +
 mkdir -p "$built"
 install -m 0644 "$code" "$edk2/MdeModulePkg/Logo/Logo.bmp" "$built/"
 install -m 0644 "$build_log" "$built/"

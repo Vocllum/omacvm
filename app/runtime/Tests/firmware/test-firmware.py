@@ -45,18 +45,14 @@ def read_bmp(path):
 def read_ppm(path):
     """QEMU's screendump (binary PPM, P6, maxval 255) as (w, h, rgb bytes)."""
     data = open(path, "rb").read()
-    fields, pos = [], 0
-    while len(fields) < 4:
-        while data[pos:pos + 1].isspace():
-            pos += 1
-        end = pos
-        while not data[end:end + 1].isspace():
-            end += 1
-        fields.append(data[pos:end])
-        pos = end
-    if fields[0] != b"P6" or fields[3] != b"255":
-        raise ValueError("unexpected screendump format")
-    return int(fields[1]), int(fields[2]), data[pos + 1:]
+    fields = data[:64].split(maxsplit=4)
+    if len(fields) < 5 or fields[0] != b"P6" or fields[3] != b"255":
+        raise ValueError("not a whole screendump")
+    w, h = int(fields[1]), int(fields[2])
+    pixels = data[-w * h * 3:]
+    if len(data) <= w * h * 3:
+        raise ValueError("not a whole screendump")
+    return w, h, pixels
 
 
 def logo_shown(shot, logo):
@@ -165,10 +161,19 @@ def main():
             try:
                 qmp = qmp or QMP(qmp_path)
                 qmp.call("screendump", filename=shot_path)
+            except (OSError, RuntimeError):
+                # Not up yet, or no answer in time: a new connection, so that a
+                # late answer is not taken for the next one.
+                if qmp:
+                    qmp.sock.close()
+                qmp = None
+                time.sleep(0.25)
+                continue
+            try:
                 if logo_shown(read_ppm(shot_path), logo):
                     break
-            except (OSError, ValueError, RuntimeError):
-                pass                               # not up yet, or a half-written dump
+            except (OSError, ValueError):
+                pass                               # no whole dump this time
             time.sleep(0.25)
         else:
             print("test-firmware: no boot logo on the screen after 30 seconds", file=sys.stderr)
