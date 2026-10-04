@@ -32,10 +32,10 @@ pipe resource), budget off with 0.
  
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -392,6 +392,12 @@
-    uint32_t ubo_offset_alignment;
-    uint32_t ssbo_offset_alignment;
-    uint32_t max_ubo_bindings;
+@@ -377,6 +377,12 @@
+ 
+    float tess_factors[6];
+    int eventfd;
 +
 +   /* OmacVM: estimated bytes of all live guest resources and their limit (0: none).
 +    * Only touched where resources are made and freed, on the renderer thread. */
@@ -43,8 +43,8 @@ pipe resource), budget off with 0.
 +   uint64_t resource_budget;
 +   uint64_t resource_refusals;
  
-    /* inferred GL caching type */
-    uint32_t inferred_gl_caching_type;
+    uint32_t max_draw_buffers;
+    uint32_t max_texture_buffer_size;
 @@ -431,6 +437,8 @@
  
  static struct global_renderer_state vrend_state;

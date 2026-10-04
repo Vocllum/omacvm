@@ -81,10 +81,18 @@ flat at 680-694 MB; raw output in the track's results folder).
   are not per draw; glmark2 and WebGL numbers before and after are in the
   track notes.
 - A guest that goes past the budget sees resource creation fail. The guest
-  kernel does not pass the error on, so the guest program typically sees its
-  context fail at the next command that uses the resource (GL context lost
-  with ADR 0016), not `GL_OUT_OF_MEMORY`. The host and the other guest
-  programs keep running.
+  kernel does not pass the error on, so the program does not get
+  `GL_OUT_OF_MEMORY`; its context is lost on the host at the next command
+  that uses the missing resource (ADR 0016) and draws nothing from then on.
+  Test VM with `OMACVM_GPU_MEMORY_MB=1024` (`tests/graphics/guest/gl-alloc.c`,
+  64 MB textures): 10 drawn and read back right, the 11th refused (1006 MB in
+  use with the desktop), the rest read back wrong without a GL error (Arch's
+  Mesa offers no robust context, so no reset status either). The program
+  ended normally; run again, its 8 textures were all fine (the bytes came
+  back), the desktop kept drawing and QEMU kept running.
+- Blob pipe resources a guest made but never claimed were freed without
+  their GL storage when their context went (upstream); they are now freed
+  like any resource, or a guest could have used up its own budget for good.
 - The estimate is not the driver's real allocation (alignment, compression,
   renaming). It is close for large resources, which is what matters here.
 
