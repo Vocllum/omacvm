@@ -4,30 +4,35 @@
 <body style="margin:0;background:#000">
 <canvas id="c" width="1280" height="720"></canvas>
 <script>
-// Steady WebGL load: 20k instanced quads with a per-pixel shader. Every 5 s it posts its frame
-// count and the share of non-black pixels in a 64x64 sample (0 = the page draws nothing).
+// Steady WebGL load: 20k quads with a per-pixel shader. Every 5 s it posts its frame count and the
+// share of non-black pixels (0 = the page draws nothing). No instancing and no gl_InstanceID:
+// on virgl over Apple GL that shader fails on the host and Chrome's context draws nothing.
 const gl = document.getElementById("c").getContext("webgl2", {preserveDrawingBuffer: true});
 const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); return o; };
 const p = gl.createProgram();
 gl.attachShader(p, sh(gl.VERTEX_SHADER, `#version 300 es
-uniform float t; out vec2 uv;
-void main() { int i = gl_InstanceID; vec2 q = vec2(gl_VertexID & 1, gl_VertexID >> 1);
-  float a = float(i) * 0.37 + t; vec2 c = vec2(sin(a * 1.3), cos(a * 0.7)) * 0.9;
-  uv = q; gl_Position = vec4(c + (q - 0.5) * 0.06, 0.0, 1.0); }`));
+in vec3 a; uniform float t; out vec2 uv;
+void main() { float f = a.x * 0.37 + t; vec2 c = vec2(sin(f * 1.3), cos(f * 0.7)) * 0.9;
+  uv = a.yz; gl_Position = vec4(c + (a.yz - 0.5) * 0.06, 0.0, 1.0); }`));
 gl.attachShader(p, sh(gl.FRAGMENT_SHADER, `#version 300 es
 precision highp float; in vec2 uv; uniform float t; out vec4 o;
 void main() { float v = 0.0; for (int k = 0; k < 16; k++) v += sin(uv.x * float(k) + t) * cos(uv.y * float(k) - t);
   o = vec4(0.5 + 0.5 * sin(v), uv, 0.3); }`));
+gl.bindAttribLocation(p, 0, "a");
 gl.linkProgram(p); gl.useProgram(p);
+const N = 20000, corners = [0, 0, 1, 0, 0, 1, 0, 1, 1, 0, 1, 1], v = new Float32Array(N * 18);
+for (let i = 0; i < N; i++) for (let k = 0; k < 6; k++) v.set([i, corners[2 * k], corners[2 * k + 1]], (i * 6 + k) * 3);
+gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer()); gl.bufferData(gl.ARRAY_BUFFER, v, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
 const ut = gl.getUniformLocation(p, "t"); let frames = 0;
 (function f(ms) { gl.uniform1f(ut, ms / 1000); gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, 20000); frames++; requestAnimationFrame(f); })(0);
-const px = new Uint8Array(64 * 64 * 4);
+  gl.drawArrays(gl.TRIANGLES, 0, N * 6); frames++; requestAnimationFrame(f); })(0);
+const px = new Uint8Array(1280 * 720 * 4);
 setInterval(() => {
-  gl.readPixels(608, 328, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  gl.readPixels(0, 0, 1280, 720, gl.RGBA, gl.UNSIGNED_BYTE, px);
   let lit = 0;
   for (let i = 0; i < px.length; i += 4) if (px[i] | px[i + 1] | px[i + 2]) lit++;
-  fetch("/frames", {method: "POST", body: `${frames} ${(lit / 4096).toFixed(2)}`});
+  fetch("/frames", {method: "POST", body: `${frames} ${(lit / (1280 * 720)).toFixed(3)}`});
 }, 5000);
 </script>

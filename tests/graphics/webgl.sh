@@ -14,28 +14,59 @@ WV=1; [[ $VERSION == 2* ]] && WV=2
 "$V" ssh "mkdir -p $G; [ -d $G/src ] || (git clone -q --depth 1 --filter=blob:none --sparse https://github.com/KhronosGroup/WebGL $G/src && git -C $G/src sparse-checkout set conformance-suites/2.0.0); git -C $G/src rev-parse HEAD > $G/commit"
 "$V" ssh "cat > $G/server.py" < "$H/guest/webgl-server.py"
 "$V" ssh "cat > $G/runner.html" < "$H/guest/webgl-runner.html"
-"$V" ssh "pkill -f '$G/[s]erver.py'" || true
-"$V" ssh "rm -f $G/out.jsonl; nohup python3 $G/server.py $G/src/conformance-suites/2.0.0 $G/runner.html $G/out.jsonl $VERSION '$FILTER' 8765 >/dev/null 2>&1 &"
-sleep 1
 "$V" ssh "cat > $G/driver.py" < "$H/guest/webgl-driver.py"
-"$V" ssh "pkill -f '$G/[d]river.py'; pkill -9 -f '/tmp/[w]ebgl-prof'; rm -rf /tmp/webgl-prof /tmp/webgl-chrome.log" || true
-# the driver (guest) restarts Chrome after failing or hung pages; ISOLATE=0 runs all pages in one Chrome
-"$V" session bash -c "nohup python3 $G/driver.py $G/out.jsonl $WV ${ISOLATE:-1} ${STALL:-300} > /tmp/webgl-driver.log 2>&1 &"
-end=$(( $(date +%s) + MIN*60 )); status=complete
-while ! "$V" ssh -o ConnectTimeout=20 "grep -q '\"kind\": \"done\"' $G/out.jsonl" 2>/dev/null; do
-  qp=$("$V" pid); [ -z "$qp" ] && { status=qemu-exited; break; }
+# Results stream to the host as they are posted (OUT.jsonl), so a page that takes QEMU down is
+# known: it is recorded as hostcrash, the VM restarted and the run goes on at the next page.
+: > "$OUT.jsonl"; TAILP=
+launch() {  # launch FIRST_PAGE: server + driver (Chrome) in the guest, stream into OUT.jsonl
+  "$V" ssh "pkill -f '$G/[s]erver.py'; pkill -f '$G/[d]river.py'; pkill -9 -f '/tmp/[w]ebgl-prof'; rm -rf /tmp/webgl-prof" || true
+  "$V" ssh "cat > $G/out.jsonl" < "$OUT.jsonl"
+  "$V" ssh "nohup python3 $G/server.py $G/src/conformance-suites/2.0.0 $G/runner.html $G/out.jsonl $VERSION '$FILTER' 8765 >/dev/null 2>&1 &"
+  sleep 1
+  # the driver restarts Chrome after failing or hung pages; ISOLATE=0 runs all pages in one Chrome
+  "$V" session bash -c "nohup python3 $G/driver.py $G/out.jsonl $WV ${ISOLATE:-1} ${STALL:-300} $1 > /tmp/webgl-driver.log 2>&1 &"
+  "$V" ssh -o ServerAliveInterval=5 -o ServerAliveCountMax=3 "tail -n +$(( $(wc -l < "$OUT.jsonl") + 1 )) -F $G/out.jsonl" >> "$OUT.jsonl" 2>/dev/null &
+  TAILP=$!
+}
+launch 0
+end=$(( $(date +%s) + MIN*60 )); status=complete; crashes=0
+while ! grep -q '"kind": "done"' "$OUT.jsonl"; do
+  qp=$("$V" pid)
+  if [ -z "$qp" ]; then
+    kill $TAILP 2>/dev/null || true
+    crashes=$((crashes + 1))
+    cp "$("$V" log)" "$OUT.qemu-$crashes.log" 2>/dev/null || true
+    next=$(python3 - "$OUT.jsonl" <<'PY'
+import json, sys
+recs = [json.loads(l) for l in open(sys.argv[1]) if l.strip().endswith("}")]
+begun = [r for r in recs if r["kind"] == "begin"]
+done = {(r["test"], r.get("attempt")) for r in recs if r["kind"] == "result"}
+b = begun[-1] if begun else None
+if b and (b["test"], b["attempt"]) not in done:
+    print(json.dumps({"test": b["test"], "index": b["index"], "attempt": b["attempt"], "status": "hostcrash",
+                      "pass": 0, "fail": 1, "skip": 0, "ms": 0, "msgs": ["QEMU exited during this page"],
+                      "kind": "result"}), file=open(sys.argv[1], "a"))
+    print(b["index"] + 1)
+else:
+    print(max([r["index"] for r in recs if "index" in r] or [-1]) + 1)
+PY
+)
+    echo "QEMU exited (crash $crashes), restarting the VM at page $next"
+    [ $crashes -gt ${MAX_RESTARTS:-10} ] && { status=qemu-exited; break; }
+    "$V" start >/dev/null || { status=qemu-exited; break; }
+    launch "$next"; continue
+  fi
   [ "$(date +%s)" -ge $end ] && { status=time-limit; break; }
   # paused by another track's benchmark (kill -STOP): the time limit waits too
-  [[ $(ps -o stat= -p "$qp") == T* ]] && end=$((end + 10))
-  sleep 10
+  [[ $(ps -o stat= -p "$qp") == T* ]] && end=$((end + 5))
+  sleep 5
 done
-"$V" ssh "pkill -f '$G/[d]river.py'" || true
-"$V" ssh "pkill -f '/tmp/[w]ebgl-prof'; pkill -f '$G/[s]erver.py'; cat $G/commit" > "$OUT.commit" || true
-"$V" ssh "cat $G/out.jsonl" > "$OUT.jsonl" || true
-python3 - "$OUT.jsonl" "$OUT" "$VERSION" "$FILTER" "$status" "$(cat "$OUT.commit")" <<'PY'
+kill $TAILP 2>/dev/null || true
+"$V" ssh "pkill -f '$G/[d]river.py'; pkill -f '/tmp/[w]ebgl-prof'; pkill -f '$G/[s]erver.py'; cat $G/commit" > "$OUT.commit" || true
+python3 - "$OUT.jsonl" "$OUT" "$VERSION" "$FILTER" "$status" "$(cat "$OUT.commit")" "$crashes" <<'PY'
 import json, sys
-src, out, version, filt, status, commit = sys.argv[1:7]
-recs = [json.loads(l) for l in open(src) if l.strip()]
+src, out, version, filt, status, commit, crashes = sys.argv[1:8]
+recs = [json.loads(l) for l in open(src) if l.strip().endswith("}")]
 start = next((r for r in recs if r["kind"] == "start"), {})
 first, last = {}, {}
 for r in recs:
@@ -45,7 +76,7 @@ for r in recs:
 res = list(last.values())
 # failed in a Chrome that had already run a failing page, passed in a fresh one
 victims = sorted(t for t in last if first[t]["status"] != "pass" and last[t]["status"] == "pass")
-count = {k: sum(1 for r in res if r["status"] == k) for k in ("pass", "fail", "timeout", "hang")}
+count = {k: sum(1 for r in res if r["status"] == k) for k in ("pass", "fail", "timeout", "hang", "hostcrash")}
 retried = sum(1 for r in res if r.get("attempt") == 2)
 sub = {k: sum(r[k] for r in res) for k in ("pass", "fail", "skip")}
 summary = {"suite": "webgl-conformance", "suite_version": "conformance-suites/2.0.0", "webgl": version,
@@ -55,6 +86,7 @@ summary = {"suite": "webgl-conformance", "suite_version": "conformance-suites/2.
            "page_pass_rate": round(count["pass"] / len(res), 4) if res else None,
            "subtests": sub, "pages_retried_in_fresh_chrome": retried,
            "pages_passing_only_in_fresh_chrome": len(victims), "cascade_victims": victims,
+           "qemu_crashes": int(crashes),
            "subtest_pass_rate": round(sub["pass"] / (sub["pass"] + sub["fail"]), 4) if sub["pass"] + sub["fail"] else None,
            "failed_pages": [{"test": r["test"], "status": r["status"], "fail": r["fail"], "msgs": r["msgs"][:3]}
                             for r in res if r["status"] != "pass"]}
