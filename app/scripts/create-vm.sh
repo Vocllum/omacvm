@@ -2,7 +2,7 @@
 # Build a new OmacVM VM from nothing: Arch Linux ARM + Omarchy (omarchy-mac) on
 # one raw disk that boots through UEFI and GRUB. 30-60 minutes, mostly downloads.
 #
-#   create-vm.sh VM_DIR
+#   create-vm.sh VM_DIR        (OMACVM_CREATE_NO_MAC=1: without the Mac helpers)
 #
 # VM_DIR/vm.env must exist (the app writes it): NAME CPUS MEM_MB DISK_GB SSH_PORT
 #   VM_USER VM_FULLNAME VM_HOSTNAME VM_TZ VM_LANG KEYBOARD [FEATURES="bridge=on ..."]
@@ -82,8 +82,13 @@ touch "$VM_DIR/ready"   # the VM works from here on, Mac helpers or not
 
 # ---------- 6. OmacVM on the Mac ----------
 step 6 "Adding OmacVM's helpers on the Mac"
-run_logged "$LOG/omacvm-mac.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
-  echo "WARN: the Mac helpers did not install (log: $LOG/omacvm-mac.log); the VM works without them"
+# OMACVM_CREATE_NO_MAC=1 (test VMs): leave the Mac's helpers as they are.
+if [[ ${OMACVM_CREATE_NO_MAC:-} == 1 ]]; then
+  echo "==> Mac helpers skipped (OMACVM_CREATE_NO_MAC=1)"
+else
+  run_logged "$LOG/omacvm-mac.log" "$HERE/apply-vm.sh" "$VM_DIR" ||
+    echo "WARN: the Mac helpers did not install (log: $LOG/omacvm-mac.log); the VM works without them"
+fi
 
 # ---------- 7. done ----------
 step 7 "Shutting down"
