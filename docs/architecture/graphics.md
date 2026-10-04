@@ -486,7 +486,7 @@ bench lock and are indications only):
 | ffmpeg 4K nlmeans in the VM, OpenCL vs 8 vCPUs | - | 1.07 vs 0.33 fps |
 | WebGPU matmul f32 2048 on KosmicKrisp (Mac mini M4, unlocked), Chromium launcher / Firefox in the VM vs Chrome on the mini | - | 1148 / 167 vs 1614 GFLOPS |
 | Geekbench 7 GPU OpenCL on KosmicKrisp (Mac mini M4), VM vs the mini's OpenCL | - | 18973 vs 35240 (54 %), all workloads valid |
-| Compute soak (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL), M4 Max | - | 63 rounds in 36 min, 0 failures |
+| Compute soak (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL), M4 Max / mini on KosmicKrisp | - | 63 rounds in 36 min / 24 in 15 min, 0 failures |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks

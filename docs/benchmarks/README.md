@@ -286,7 +286,7 @@ Median of 3; the Mac's own number in brackets where the same batch has one.
 | WebGPU computeBoids, Firefox / Chromium (fps) | 59.9 / 60 (36.4 in the locked batch) | 59.9 / 60.0 |
 | Geekbench 7 GPU OpenCL (single run) | 42486 (Mac OpenCL 95380: 45 %) | 18973 (mini OpenCL 35240: 54 %, earlier that day) |
 | OpenCL saxpy, 16M floats (GB/s) | 387-444 | 101 |
-| ffmpeg 4K `nlmeans_opencl` vs 8 CPUs (fps) | 1.07 vs 0.33 | not measured |
+| ffmpeg 4K `nlmeans`, OpenCL vs the VM's CPUs (fps) | 1.07 vs 0.33 (8 CPUs) | 1.13 vs 0.37 (6 CPUs) |
 
 Each run, M4 Max batch:
 
@@ -314,5 +314,8 @@ Notes:
 - clpeak sizes its work by the number of compute units, and Zink reports one
   (Vulkan has no such query): fp32 1.5 TFLOPS as reported, 8.9 with the count
   forced to 40 (test only), Mac OpenCL 15.6-16.1.
-- Stability: 63 rounds over 36 minutes on the M4 Max (OpenCL, Firefox and
-  Chromium WebGPU, ffmpeg OpenCL), no failure.
+- ffmpeg's `nlmeans_opencl` runs many small kernels, so the VM's latency per
+  launch decides it, not the GPU: the mini and the M4 Max are about equal.
+- Stability: 63 rounds over 36 minutes on the M4 Max and 24 rounds over 15
+  minutes on the mini (OpenCL, Firefox and Chromium WebGPU, ffmpeg OpenCL),
+  no failure.
