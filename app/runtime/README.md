@@ -68,6 +68,13 @@ commit 82927e9. Changes here:
   does), whatever the guest asked for
 - `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
   server ended signals its fences, so the guest app ends instead of hanging
+- `patches/qemu-cocoa-gl-view-flush.patch`: QEMU's view context is flushed
+  after surface texture work. Apple's GL kept every large surface texture
+  made there until a flush that never came, so each guest mode change left a
+  screen texture in GPU memory. Checked by `Tests/display/test-gl-view-flush.c`
+  (software renderer; runs the patched `with_gl_view_ctx()` taken from
+  `ui/cocoa.m`); `Tests/display/view-texture-churn.c` measures the GPU memory
+  per switch by hand (GPU, capped, not run by the build)
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

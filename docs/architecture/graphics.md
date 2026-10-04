@@ -431,9 +431,22 @@ What crosses and who checks it:
   (finite `NSNumber` below 1e7, else the monitor is skipped), at most one
   update applied per second (`app-displays` round 2; tested with nulls,
   arrays, 1e300, 101 flips).
-- **no host pointers** reach the guest; no guest-controlled allocation
-  without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
-  IOSurfaces 3 per window).
+- **display mode changes**: every `set_scanout` with a new size makes QEMU a
+  new surface and, in the Cocoa view's GL context, a new surface texture.
+  That context was never flushed, and Apple's GL keeps the memory of large
+  textures (a 4K screen or more) made, deleted or uploaded on a context until
+  it is flushed: each guest mode change left a screen texture behind (about
+  1.1 GB per switch for two large modes, 20 GB after 18 switches, in 2.6.0
+  too). `with_gl_view_ctx()` now flushes (`qemu-cocoa-gl-view-flush.patch`;
+  build-time test `Tests/display/test-gl-view-flush.c` on the software
+  renderer; `Tests/display/view-texture-churn.c` measures the GPU memory per
+  switch by hand).
+- **no host pointers** reach the guest. Limited: hostmem 4 GiB, 2D resources
+  (QEMU's `max_hostmem`), outputs 5, retained pixel buffers 3, IOSurfaces 3
+  per window. Not limited: virgl 3D resources (textures, buffers) a guest
+  creates; each is bounded by the GL's maximum sizes, but their number is
+  not, so a guest can still fill the Mac's memory with them (open, needs a
+  per-VM GPU memory budget).
 
 ## 11. Test strategy
 
@@ -488,7 +501,11 @@ The tracks share one runtime. Order and overlaps known today:
    `virgl-uniform-buffer-alignment.patch`, `virgl-uniform-block-array.patch`,
    `virgl-draw-gl-error-check.patch`, `virgl-vertex-unused-first-input.patch`,
    `virgl-venus-robust-buffer-access.patch`, and the test-only
-   `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. The
+   `virgl-test-shader-fault.patch` behind `OMACVM_RUNTIME_TEST_HOOKS=1`. On
+   QEMU it adds `qemu-cocoa-gl-view-flush.patch` after the `omacvm-cocoa-*`
+   patches; it applies after the QEMU patches of `rel-2.7.0`, `gpu-2.9.0`,
+   `display-bugs`, `gpu-native`, `pacing-hdr`, `kosmickrisp`, `gl-compat`,
+   `video-encode` and `webgpu-compute` (checked 2026-10-04). The
    patches up to the Venus fence one passed the build-time tests on
    `gpu-venus`'s tree (branch `gpu-robust-venus`, c0988e2); the Venus fence
    patch is only exercised there, since `rc-2.6.0` has no Venus. The whole

@@ -16,6 +16,8 @@ qpid() { pgrep -f "qemu-system-aarch64 -name $VM -machine" | head -1; }
 case ${1:-} in
 start)
   [ -n "$(qpid)" ] && { echo "already running"; exit 0; }
+  # STANDARDS 18: no test VM on a Mac where the user is testing.
+  [ -e "$HOME/.omacvm-user-testing" ] && { echo "the user is testing on this Mac: not starting a VM"; exit 3; }
   FW=$(dirname "$RT")/firmware/edk2-aarch64-code.fd
   mkdir -p "$RUN" "$D/logs"
   [ -s "$D/logs/qemu-graphics.log" ] && mv "$D/logs/qemu-graphics.log" "$D/logs/qemu-graphics.prev.log"
