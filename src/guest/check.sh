@@ -350,6 +350,18 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
   elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
+  # The hidden NOTCH output sits on the built-in display, and the bar parked
+  # under the strip is that display's (else the MacBook shows two bars).
+  # OmacVM.app with external displays says which output that is.
+  b=$(cat "$RUN/omacvm/builtin" 2>/dev/null || echo Virtual-1)
+  mons=$(as_user hyprctl monitors all -j 2>/dev/null)
+  at() { jq -r --arg n "$1" '.[] | select(.name == $n) | "\(.x),\(.y),\(.width)"' <<<"$mons" 2>/dev/null; }
+  st=$(as_user omarchy-shell notchbar state 2>/dev/null)
+  parked=$(jq -r '.parked' <<<"$st" 2>/dev/null); pscreen=$(jq -r '.screen' <<<"$st" 2>/dev/null)
+  if [[ -z $(at NOTCH) || -z $(at "$b") ]]; then skip "notch display" "no NOTCH or $b output now"
+  elif [[ $(at NOTCH) != "$(at "$b")" ]]; then bad "notch display" "NOTCH is not on $b, the built-in display (journalctl --user -u notchcast)"
+  elif [[ $parked == true && $pscreen != "$b" ]]; then bad "notch display" "the bar on $pscreen is parked, not $b's: two bars on the MacBook"
+  else ok "notch display" "$b$([[ $parked == true ]] && echo ", its bar in the strip")"; fi
 else skip "Omanotch" "not installed (omacvm enable omanotch, on a MacBook with a notch)"; fi
 
 (( TSV )) && exit $(( fails ? 1 : 0 ))
