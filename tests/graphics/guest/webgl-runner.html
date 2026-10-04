@@ -1,0 +1,48 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>OmacVM WebGL conformance runner</title>
+<body style="margin:0">
+<pre id="s" style="position:fixed;top:0;right:0;margin:4px;font:12px monospace;background:#fff8"></pre>
+<iframe id="f" width="1024" height="768" style="border:0"></iframe>
+<script>
+// Loads each conformance page in the iframe; the suite's js-test-pre.js reports to
+// window.webglTestHarness. Results go to the guest server, one POST per page.
+const q = new URLSearchParams(location.search);
+const TIMEOUT_MS = +(q.get("timeout") || 180000);
+const post = (path, o) => fetch(path, {method: "POST", body: JSON.stringify(o)});
+let cur = null;
+window.webglTestHarness = {
+  reportResults(url, ok, msg, skipped) {
+    if (!cur) return;
+    if (skipped) cur.skip++; else if (ok) cur.pass++; else { cur.fail++; if (cur.msgs.length < 20) cur.msgs.push(msg); }
+  },
+  notifyFinished(url) { if (cur && cur.done) cur.done("finished"); },
+};
+function info() {
+  const gl = document.createElement("canvas").getContext("webgl");
+  const e = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  return {userAgent: navigator.userAgent,
+          renderer: e ? gl.getParameter(e.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : "no webgl"),
+          vendor: e ? gl.getParameter(e.UNMASKED_VENDOR_WEBGL) : ""};
+}
+(async () => {
+  const list = await (await fetch("/list.json")).json();
+  await post("/start", {count: list.length, ...info()});
+  const frame = document.getElementById("f"), s = document.getElementById("s");
+  for (let i = 0; i < list.length; i++) {
+    const t0 = performance.now();
+    cur = {test: list[i], pass: 0, fail: 0, skip: 0, msgs: []};
+    s.textContent = `${i + 1}/${list.length} ${list[i]}`;
+    const how = await new Promise(res => {
+      cur.done = res;
+      setTimeout(() => res("timeout"), TIMEOUT_MS);
+      frame.src = "/" + list[i] + (list[i].includes("?") ? "&" : "?") + "webglVersion=" + (q.get("v") || "1");
+    });
+    const r = cur; cur = null;
+    await post("/result", {test: r.test, status: how === "timeout" ? "timeout" : (r.fail ? "fail" : "pass"),
+                           pass: r.pass, fail: r.fail, skip: r.skip, ms: Math.round(performance.now() - t0), msgs: r.msgs});
+    frame.src = "about:blank";
+  }
+  await post("/done", {});
+})();
+</script>
