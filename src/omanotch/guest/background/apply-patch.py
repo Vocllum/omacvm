@@ -34,7 +34,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 4
+VERSION = 5
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
@@ -159,19 +159,22 @@ def main():
         anchors.fill: notchCanvas
 ''')
 
-    # 5. Decode the image at the size it is shown at (see the docstring); at
-    #    least 1x1, since 0x0 would mean the image's own size.
+    # 5. Decode the image at the size it is shown at (see the docstring); never
+    #    0x0, which would mean the image's own size.
     text = replace_once(text, "      property bool maskReady: false\n", """      property bool maskReady: false
       // omarchy-notch-bar: the wallpaper at the size it is shown at.
       readonly property real notchDpr: panel.modelData && panel.modelData.devicePixelRatio > 0
                                        ? panel.modelData.devicePixelRatio : 1
-      readonly property size notchImageSize: Qt.size(Math.max(1, Math.ceil(notchCanvas.width * notchDpr)),
-                                                     Math.max(1, Math.ceil(notchCanvas.height * notchDpr)))
+      // In 64 px steps, so small size changes do not decode the image again.
+      readonly property size notchImageSize: Qt.size(Math.max(64, Math.ceil(notchCanvas.width * notchDpr / 64) * 64),
+                                                     Math.max(64, Math.ceil(notchCanvas.height * notchDpr / 64) * 64))
 """)
+    # The shown image stays while a new size decodes (no grey flash).
     for image in ("base", "oldFrame"):
         text = replace_once(text, f"        id: {image}\n        anchors.fill: notchCanvas\n",
                             f"        id: {image}\n        anchors.fill: notchCanvas\n"
-                            "        sourceSize: panel.notchImageSize\n")
+                            "        sourceSize: panel.notchImageSize\n"
+                            "        retainWhileLoading: true\n")
     text = replace_once(text, "          id: incomingFrame\n          anchors.fill: parent\n",
                         "          id: incomingFrame\n          anchors.fill: parent\n"
                         "          sourceSize: panel.notchImageSize\n")

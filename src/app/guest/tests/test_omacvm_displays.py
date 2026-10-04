@@ -133,13 +133,19 @@ class Shown(unittest.TestCase):
 
     def test_wallpaper_is_drawn(self):
         img = ppm(20, 10, (17, 17, 17))
-        mixed = b"P6\n4 2\n255\n" + bytes((17, 17, 17)) * 4 + bytes((90, 140, 200)) * 4
+        mixed = b"P6\n4 20\n255\n" + bytes((17, 17, 17)) * 40 + bytes((90, 140, 200)) * 40
         self.assertFalse(od.undrawn(od.ppm_shown(mixed, od.HYPR_GREY)))
         self.assertTrue(od.undrawn(od.ppm_shown(img, od.HYPR_GREY)))
 
-    def test_flat_other_colour_is_undrawn_only_if_flat(self):
-        # A flat image of any colour has no spread: nothing drawn on it.
-        self.assertTrue(od.undrawn(od.ppm_shown(ppm(8, 8, (0, 0, 0)), od.HYPR_GREY)))
+    def test_flat_other_colour_is_not_undrawn(self):
+        # A plain wallpaper or a dark (DPMS off) output is not Hyprland's grey.
+        self.assertFalse(od.undrawn(od.ppm_shown(ppm(8, 8, (0, 0, 0)), od.HYPR_GREY)))
+        self.assertFalse(od.undrawn(od.ppm_shown(ppm(8, 8, (40, 90, 200)), od.HYPR_GREY)))
+
+    def test_bar_rows_do_not_count(self):
+        # A drawn bar at the top over a missing wallpaper is still undrawn.
+        img = b"P6\n10 20\n255\n" + bytes((30, 30, 46)) * 20 + bytes((17, 17, 17)) * 180
+        self.assertTrue(od.undrawn(od.ppm_shown(img, od.HYPR_GREY)))
 
     def test_not_ppm(self):
         for data in (b"", b"P5\n1 1\n255\n\0", b"P6\n2 2\n255\n\0", b"garbage"):
@@ -164,6 +170,7 @@ class Agent(unittest.TestCase):
         a.shell = None
         a.suspect = None
         a.repairs = 0
+        a.attempts = 0
         a.repaired_at = -od.REPAIR_EVERY
         a.repair = None
         a.repairing = []
@@ -254,13 +261,22 @@ class Agent(unittest.TestCase):
         self.run_for(a, 40)
         self.assertEqual(self.started, [["omarchy-restart-shell"]])
 
-    def test_failed_restart_not_counted(self):
+    def test_failed_restart_not_counted_but_rate_limited(self):
         a = self.make(["Virtual-2"], exit_code=1)
         a.look_in(1)
         self.run_for(a, 10)
         self.assertEqual(len(self.started), 1)
         self.assertEqual(a.repairs, 0)
         self.assertEqual(a.repaired_for, [])
+        for _ in range(20):                       # failing restarts: every 2 min, then stop
+            a.look_in(1)
+            self.run_for(a, 30)
+        self.assertLessEqual(len(self.started), 2 * od.REPAIR_MAX)
+        self.assertGreater(len(self.started), 1)
+
+    def test_dpms_off_not_judged(self):
+        mons = [dict(active(MONS[0], 1), dpmsStatus=False), dict(active(MONS[1], 11), dpmsStatus=True)]
+        self.assertEqual(od.desktop_outputs(mons, ws(w1=0, w11=0), DesktopOutputs.L), ["Virtual-2"])
 
     def test_same_after_restart_stops(self):
         a = self.make(["Virtual-2"])
