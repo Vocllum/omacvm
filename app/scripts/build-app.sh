@@ -33,9 +33,10 @@ if (( RELEASE )) && [[ -n $(git -C "$REPO" status --porcelain) ]]; then
   exit 1
 fi
 RT=$ROOT/runtime/.build
-# What the runtime was built from: its build scripts and patches, and which
-# UEFI firmware (OMACVM_FIRMWARE=qemu: QEMU's prebuilt one, TianoCore logo).
-INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/*
+# What the runtime was built from: its build scripts, patches and the tests
+# the build runs, and which UEFI firmware (OMACVM_FIRMWARE=qemu: QEMU's
+# prebuilt one, TianoCore logo).
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"; } | shasum -a 256 | cut -d' ' -f1)
 if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
       || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
