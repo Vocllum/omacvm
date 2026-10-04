@@ -121,12 +121,12 @@ one patch each, each with a build-time test that compiles or runs on the Mac's G
 
 | Gap on the Mac | Patch | Test (`app/runtime/Tests/virgl`) |
 |---|---|---|
-| floatBitsToInt() etc. need GLSL 3.30; `GL_ARB_draw_instanced` refused | `virgl-shader-core-glsl-version.patch` | `test-core-glsl-shaders.c` |
+| floatBitsToInt() etc. need GLSL 3.30; `GL_ARB_draw_instanced` refused (one table: extension → GLSL version where it is core) | `virgl-shader-core-glsl-version.patch` | `test-core-glsl-shaders.c` |
 | `GL_EXT_texture_shadow_lod` asked for core lookups (gradients, cube shadow bias, gather) | `virgl-shader-shadow-lod-extension.patch` | `test-core-glsl-shaders.c` |
-| results written to an integer output lost their bits or did not compile (upstream bug) | `virgl-shader-integer-outputs.patch` | `test-core-glsl-shaders.c` |
+| results written to an integer output lost their bits or did not compile (upstream bug) | `virgl-shader-integer-outputs.patch` (integer outputs written like a float temporary, stored once with their bits) | `test-core-glsl-shaders.c` |
 | blitter shaders were GLSL 1.30: every shader blit drew nothing | `virgl-blitter-core-glsl-version.patch` | `test-blitter-shaders.c` |
 | integer multisample blit used texture() on a MS sampler (upstream bug) | `virgl-blitter-integer-msaa.patch` | `test-blitter-shaders.c` |
-| framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` (depth stand-in as large as the viewports, depth test off while it is there) | `test-empty-framebuffer.c` |
+| framebuffer without attachments (all draw buffers GL_NONE): GL error on draw | `virgl-framebuffer-no-attachments.patch` (depth stand-in as large as the first viewport, at most 8192², kept between switches, freed when unused; depth test off while it is attached) | `test-empty-framebuffer.c` |
 | guest told 32 samplers per stage, the Mac has 16 | `virgl-caps-sampler-limit.patch` (smallest limit of all stages) | `test-sampler-limit.c` |
 
 The patches apply after gpu-native's and only touch `vrend_shader.c`,
@@ -150,9 +150,10 @@ branch. Correctness runs, no bench lock.
 | WebGL 1 pages (787) | 430 | 776 | 776 | 776 |
 | WebGL 2 pages (967 without TF) | 97 of 970 | 960 of 970 | 959 | 959 |
 | dEQP-GLES2, whole list (17165) | 16971 | | 16972 | 16972 |
-| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42832 + 104 QW | 42832 + 104 QW |
+| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42835 + 104 QW | 42834 + 104 QW |
 
-After the patches the one-process numbers equal the isolated ones, case by case. Against
+After the patches the one-process numbers equal the isolated ones, case by case (the
+three flush_finish cases pass or give a compatibility warning depending on timing). Against
 the isolated "before" no case got worse; 22 dEQP-GLES3 cases (stride) and WebGL 2
 `rendering/draw-buffers.html` pass now. The QEMU log of the one-process runs has no
 context error. What still fails fails in both modes: cube map filtering, one blit
