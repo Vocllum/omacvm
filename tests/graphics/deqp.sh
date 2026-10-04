@@ -22,7 +22,7 @@ case $API in
 esac
 "$V" ssh "cat > $C/deqp-run.py" < "$H/guest/deqp-run.py"
 # mustpass list (paths moved between CTS versions: find it), filter, stride
-"$V" ssh "set -e; L=\$(find $C/src/external/openglcts/data $C/src/external/vulkancts/mustpass -path '*main*' -name '$LIST' 2>/dev/null | head -1)
+"$V" ssh "set -e; L=\$(find $C/src/external/openglcts/data $C/src/external/vulkancts/mustpass -path '*/main/$LIST' 2>/dev/null | head -1)
   [ -n \"\$L\" ] || { echo 'no mustpass list $LIST'; exit 1; }
   D=\$(dirname \$L); : > $C/$API-cases.txt
   # vk-default.txt is a list of list files
@@ -30,6 +30,8 @@ esac
     | grep -E '$FILTER' | awk 'NR % $STRIDE == 1 || $STRIDE == 1' > $C/$API-cases.txt
   wc -l < $C/$API-cases.txt; rm -f $C/$API-out.jsonl"
 T0=$(date +%s)
+# dEQP surfaceless calls eglGetDisplay(NULL): without EGL_PLATFORM Mesa picks a window system
+[[ $API == gles* ]] && ENVS="EGL_PLATFORM=surfaceless $ENVS"
 "$V" ssh "cd $C; env $ENVS python3 $C/deqp-run.py $BIN $C/$API-cases.txt $C/$API-out.jsonl $ARGS"
 "$V" ssh "cat $C/$API-out.jsonl" > "$OUT.jsonl"
 COMMIT=$("$V" ssh "cat $C/commit")
