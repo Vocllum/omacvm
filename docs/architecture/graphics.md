@@ -490,6 +490,10 @@ of these cases. Measured in OmacVM T-gpu-robust (Chrome 154, M4 Max, macOS 15.7)
 | Vulkan app, fatal command (`vk-lost`) | hangs in `vkWaitForFences` (killed after 60 s) | ends with abort() after 2 s; the next Vulkan app runs normally |
 | Guest command stream fuzzing, 30 min, ~606,000 inputs | QEMU crash (NULL variant) in seconds, 4 GiB asks | no crash, no out-of-memory |
 
+Cost when nothing fails: glmark2 subset (build, texture, shading phong, terrain,
+5 s each, off-screen, median of 3, bench lock held, other test VMs paused):
+rc-2.6.0 628 (618-634), gpu-robust 625 (622-630), within run-to-run noise.
+
 Tests: `app/runtime/Tests/virgl/test-context-loss.c` (every runtime build),
 `tests/graphics/context-loss.sh`, `tests/graphics/venus-loss.sh`,
 `app/runtime/Tests/virgl/fuzz-cmd-stream.sh`.
