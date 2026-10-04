@@ -14,8 +14,12 @@ Finished frames now wait in a short queue (a jitter buffer, at most three)
 and once per refresh, 3 ms before the vsync, the oldest one is put on the
 layer. A display link on the window's screen (on a thread of its own: the
 main thread ran ticks milliseconds late now and then) times it; ProMotion
-is asked for the panel's full rate. A frame that comes less than half a
-refresh after the previous one replaces it. Once a second, if a frame was
+is asked for the panel's full rate. The link follows the window's
+screen; when the window moves, it asks for the new screen's full rate
+(60, 120, 144 Hz). While the guest draws clearly faster than the display
+(say 120 Hz frames on a 60 Hz screen), a frame that comes less than half a
+refresh after the previous one replaces it; at the display's own rate two
+close frames are jitter, both are shown. Once a second, if a frame was
 left over after every tick and none came late, one frame is skipped, so
 the queue never holds more delay than the guest's timing needs (the guest's
 EDID rate is a hair faster than the display's: 120.006 vs 120.000 Hz). The link pauses after 30
@@ -40,7 +44,6 @@ Upstream: not sent (depends on the IOSurface present, an OmacVM patch).
 Tests: scratchpad tools for now (pacing page + ScreenCaptureKit counter,
 see docs/architecture/graphics.md, frame pacing); glmark2 quick for
 throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
-
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -59,6 +59,7 @@
@@ -51,7 +54,25 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
  #endif
  #include "hw/core/cpu.h"
  
-@@ -2905,7 +2906,11 @@
+@@ -144,6 +145,7 @@ @interface QemuCGLLayer : CAOpenGLLayer
+ static bool gl_dirty;
+ static bool gl_present_pending;
+ static bool cocoa_gl_present_iosurface_wanted(void);
++static void cocoa_gl_present_screen_changed(void);
+ static uint32_t gl_scanout_id;
+ static DisplayGLTextureBorrower gl_scanout_borrow;
+ static QEMUGLContext gl_view_ctx;
+@@ -1930,6 +1932,9 @@ - (void)windowDidChangeScreen:(NSNotification *)notification
+ {
+     [cocoaView updateScale];
+     [cocoaView updateUIInfo];
++#ifdef CONFIG_OPENGL
++    cocoa_gl_present_screen_changed();
++#endif
+ }
+ 
+ - (void)windowDidChangeBackingProperties:(NSNotification *)notification
+@@ -2909,7 +2914,11 @@ static void cocoa_gl_render(void)
   * contents. A surface is reused only once Core Animation is done with it.
   * OMACVM_GL_PRESENT=layer goes back to the CAOpenGLLayer path.
   */
@@ -64,11 +85,10 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
  
  static int present_mode = -1;          /* 1: IOSurface, 0: CAOpenGLLayer */
  static CGLContextObj present_ctx;      /* QEMU thread: draws the surfaces */
-@@ -2920,7 +2925,62 @@
- static QEMUTimer *present_timer;
+@@ -2925,6 +2934,63 @@ static void cocoa_gl_render(void)
  static int64_t present_last_ns;
  static int64_t present_period_ns;
-+
+ 
 +/*
 + * Vsync present (default; OMACVM_GL_VSYNC=0 shows each frame as soon as the
 + * GPU is done, like before). The guest's vblank timer runs at the display's
@@ -90,7 +110,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 + * one retain each. Times are CACurrentMediaTime() seconds.
 + */
 +#define PRESENT_QUEUE 3
- 
++
 +@interface QemuPresentLink : NSObject
 +- (void)tick:(CADisplayLink *)link;
 +@end
@@ -110,6 +130,8 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +    int win_ticks;                      /* trim window: ticks so far, */
 +    int win_min;                        /* fewest frames left after a tick, */
 +    int win_late;                       /* refreshes that had no frame */
++    int win_arrivals;                   /* frames that came in the window */
++    bool merge;                         /* the guest draws faster than the display */
 +    unsigned ticks, shown, repeats, merged, dropped, busy;
 +    double wait_sum;
 +} present_sync;
@@ -127,7 +149,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
  static bool cocoa_gl_present_iosurface_wanted(void)
  {
      if (present_mode < 0) {
-@@ -2959,6 +3019,14 @@
+@@ -2963,6 +3029,14 @@ static bool cocoa_gl_present_init(void)
          hz = MAX(hz, [screen maximumFramesPerSecond]);
      }
      present_period_ns = NANOSECONDS_PER_SECOND / hz;
@@ -142,7 +164,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      return true;
  }
  
-@@ -3096,6 +3164,11 @@
+@@ -3100,6 +3174,11 @@ static bool cocoa_gl_present(void)
          /* All busy: try again after the next refresh. */
          CGLSetCurrentContext(prev);
          gl_dirty = true;
@@ -154,7 +176,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
          timer_mod(present_timer, qemu_clock_get_ns(QEMU_CLOCK_REALTIME) +
                                   present_period_ns);
          return true;
-@@ -3128,7 +3201,13 @@
+@@ -3132,7 +3211,13 @@ static bool cocoa_gl_present(void)
      gl_dirty = false;
  
      IOSurfaceRef surf = present_surf[n];
@@ -168,7 +190,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      /* Core Animation must not see the surface before the GPU wrote it. */
      IOSurfaceIncrementUseCount(surf);
      dispatch_async(present_queue, ^{
-@@ -3140,6 +3219,10 @@
+@@ -3144,6 +3229,10 @@ static bool cocoa_gl_present(void)
          }
          CGLSetCurrentContext(NULL);
          cocoa_gl_present_dump(surf);
@@ -179,7 +201,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
          dispatch_async(dispatch_get_main_queue(), ^{
              CALayer *layer = [cocoaView layer];
              [CATransaction begin];
-@@ -3168,6 +3251,20 @@
+@@ -3172,6 +3261,20 @@ static void cocoa_gl_present_request(void)
      int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
  
      gl_dirty = true;
@@ -200,7 +222,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
      if (now - present_last_ns >= present_period_ns) {
          timer_del(present_timer);
          cocoa_gl_present();
-@@ -3179,10 +3276,247 @@
+@@ -3183,10 +3286,271 @@ static void cocoa_gl_present_request(void)
  static void cocoa_gl_present_timer(void *opaque)
  {
      if (gl_dirty) {
@@ -227,19 +249,32 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +    CFRelease(surf);
 +}
 +
++/*
++ * Main thread: the window is on a new screen (or the link is new). The link
++ * follows the view's screen by itself; ask for that screen's full rate
++ * (ProMotion panels otherwise may tick slower; 60, 120, 144 Hz displays).
++ */
++static void cocoa_gl_present_screen_changed(void)
++{
++    if (!present_link) {
++        return;
++    }
++    NSInteger hz = [[[cocoaView window] screen] maximumFramesPerSecond];
++    if (hz <= 0) {
++        hz = 60;
+     }
++    [present_link setPreferredFrameRateRange:CAFrameRateRangeMake(hz, hz, hz)];
++    info_report("cocoa: frames paced to the window's display, %ld Hz", (long)hz);
+ }
+ 
 +/* Main thread: create the display link and its thread once, then run it. */
 +static void cocoa_gl_present_link_start(void)
 +{
 +    if (!present_link) {
-+        NSInteger hz = 60;
-+        for (NSScreen *screen in [NSScreen screens]) {
-+            hz = MAX(hz, [screen maximumFramesPerSecond]);
-+        }
 +        present_link_target = [[QemuPresentLink alloc] init];
 +        present_link = [[cocoaView displayLinkWithTarget:present_link_target
 +                                                selector:@selector(tick:)] retain];
-+        /* ProMotion: ask for the panel's full rate. */
-+        [present_link setPreferredFrameRateRange:CAFrameRateRangeMake(hz, hz, hz)];
++        cocoa_gl_present_screen_changed();
 +
 +        __block NSRunLoop *loop = nil;
 +        dispatch_semaphore_t started = dispatch_semaphore_create(0);
@@ -275,7 +310,9 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +    present_sync.inflight--;
 +    PresentFrame *last = present_sync.queued ?
 +                         &present_sync.queue[present_sync.queued - 1] : NULL;
-+    if (last && now - last->ready < present_sync.period / 2) {
++    present_sync.win_arrivals++;
++    if (present_sync.merge && last &&
++        now - last->ready < present_sync.period / 2) {
 +        drop = *last;
 +        present_sync.queued--;
 +        present_sync.merged++;
@@ -349,6 +386,15 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +                    sizeof(PresentFrame) * present_sync.queued);
 +            present_sync.dropped++;
 +        }
++        /*
++         * Merge close frames only while the guest draws clearly faster than
++         * the display (e.g. 120 Hz guest, window just moved to a 60 Hz
++         * screen). At the display's own rate two close frames are jitter:
++         * both are real frames, and merging them would skip one.
++         */
++        present_sync.merge =
++            present_sync.win_arrivals > present_sync.win_ticks * 5 / 4;
++        present_sync.win_arrivals = 0;
 +        present_sync.win_ticks = 0;
 +        present_sync.win_min = INT_MAX;
 +        present_sync.win_late = 0;
@@ -371,7 +417,7 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +        surface_put(show.surf);
 +        /* The guest may have drawn while the queue was full. */
 +        qemu_bh_schedule(present_bh);
-     }
++    }
 +
 +    static int fps_on = -1;
 +    static double since;
@@ -395,8 +441,8 @@ throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 +        since = now;
 +    }
 +    return !idle;
- }
- 
++}
++
 +@implementation QemuPresentLink
 +/*
 + * Display link thread, once per refresh of the window's screen. Core
