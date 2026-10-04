@@ -14,7 +14,9 @@ Test: on the Mac mini (macOS 27) QEMU's log shows "vulkan driver:
 not a Mach-O file it logs "does not load", then "kosmickrisp_mesa_icd.json
 unusable, trying MoltenVK_icd.json"; the guest's vulkaninfo shows the Venus
 device without nullDescriptor, robustBufferAccess2 and logicOp, as with
-MoltenVK (KosmicKrisp has all three).
+MoltenVK (KosmicKrisp has all three). The same with a driver that loads
+but has no device (docs/experiments/kosmickrisp/nodev-icd.c): "has no
+device", then the same fallback.
 
 --- a/src/venus/vkr_library.c
 +++ b/src/venus/vkr_library.c
