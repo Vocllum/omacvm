@@ -235,12 +235,13 @@ sync thread did not start)". Before, the guest's GPU waited forever while
 the log named the new path.
 
 Cost of async fences: Apple's `glClientWaitSync` spins (`gleTestSync`).
-`virgl-darwin-fence-wait.patch` tests the fence instead: busy for 100 us,
-then 50 us waits with `mach_wait_until` on a time-constraint thread (plain
+`virgl-darwin-fence-wait.patch` tests the fence instead: busy for up to
+100 us after the thread last slept, then 50 us waits with `mach_wait_until` on a time-constraint thread (plain
 `nanosleep` is stretched by timer coalescing: Aquarium fell to 7-15 fps
 with it). After 1 ms of waiting the wait doubles up to 1 ms, so a long or
 stuck GPU job wakes the thread about 1000 times a second, not 20,000. The
-thread's budget per wake (200 us) covers the spin. With the bench lock:
+thread's budget per wake (200 us) covers the spin, also when fences finish
+back to back (the spin counts from the last sleep, not per fence). With the bench lock:
 QEMU's CPU during glmark2 195% -> 165%, Aquarium 194% -> 176%, frame rates
 the same (ADR 0017).
 

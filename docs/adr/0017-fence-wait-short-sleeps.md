@@ -3,7 +3,10 @@
 Status: accepted. Built on `gpu-native` (`virgl-darwin-fence-wait.patch`),
 not merged. Builds on [0011](0011-async-fences.md). Corrected 2026-10-04
 after review: the first version gave the thread a 50 us budget while it
-spun for 100 us, and never looked at a long GPU job.
+spun for 100 us, and never looked at a long GPU job. Corrected again the
+same evening: the 100 us were counted per fence, so fences finishing back
+to back could chain spins without a sleep; they now count from the
+thread's last sleep.
 
 ## Context
 
@@ -29,9 +32,11 @@ poll. On a laptop that is battery and heat for nothing.
 
 Option 3, only on macOS:
 
-- spin 100 us, then 50 us naps; once a fence has taken 1 ms, each nap
-  doubles up to 1 ms. Short fences still report within about 50 us; a long
-  or stuck GPU job wakes the thread about 1000 times a second, not 20,000.
+- spin at most 100 us since the thread last slept (not per fence: fences
+  that finish back to back cannot chain spins), then 50 us naps; once a
+  fence has taken 1 ms, each nap doubles up to 1 ms. Short fences still
+  report within about 50 us; a long or stuck GPU job wakes the thread about
+  1000 times a second, not 20,000.
 - the time-constraint policy asks for 200 us of computation per wake
   (constraint 1 ms, preemptible). That covers the 100 us spin, so the
   thread never runs longer than it said it would; macOS may demote a
@@ -55,8 +60,8 @@ list as before.
   20 s: 2.8 J -> 1.5 J. The GPU work per draw was the same.
 - A fence that ends during a long nap is reported up to 1 ms late: about 1%
   on a 100 ms GPU job, nothing on short frames.
-- One time-constraint thread in QEMU. Per wake it runs at most the 100 us
-  spin plus one fence test, inside its 200 us budget; between wakes it
-  sleeps.
+- One time-constraint thread in QEMU. Between two sleeps it spins at most
+  100 us in all, however many fences finish meanwhile; the rest of its
+  200 us budget is the work of reporting them. Between wakes it sleeps.
 - Going back is a rebuild without the patch; the app's `gpuSafeMode`
   ([0018](0018-gpu-safe-mode.md)) does not use the sync thread at all.
