@@ -400,7 +400,8 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`); on Parallels the
   samples come but are all zero (`Capture` at 100 % and on). On Fusion the
   whole VM also stops for about four minutes when the recording starts (no
-  SSH, `vmware-vmx` at full CPU) until the refusal below is logged.
+  SSH, `vmware-vmx` at full CPU) until the refusal below is logged; on
+  OmacVM.app too (QEMU at full CPU), once per try.
 - **Cause:** macOS's microphone permission for the app that records on the
   Mac. Fusion's `vmware-vmx` and OmacVM.app's QEMU are helpers that cannot
   ask for it themselves: their `AudioQueueStart` fails with 268451843.
@@ -409,13 +410,20 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
   `SDL_OpenAudioDevice for recording failed: CoreAudio error
   (AudioQueueStart): 268451843`. Parallels hands the VM silence instead. UTM
   recorded the Mac's microphone on the same Mac because UTM had the
-  permission already.
+  permission already. Why the app's VM stops: QEMU opens the recording on a
+  vCPU thread that holds its global lock (`sample` shows `sdl_open` under
+  `intel_hda_set_st_ctl`), and `AudioQueueStart` waits for coreaudiod
+  (`_TellServerAboutStreamUsage`) until it gives up.
 - **Fix:** Parallels and Fusion: allow Parallels Desktop or VMware Fusion in
   System Settings › Privacy & Security › Microphone (a person's step), then
   restart the VM. OmacVM.app: the app now asks for the microphone when it
   starts a VM, and QEMU records under its grant; the Developer ID build has
-  the `audio-input` entitlement for that. The VM does not wait for the
-  answer: if QEMU tried to record before it, restart the VM once. `omacvm
-  check` reads the Fusion and app logs for the refusal (and says to restart).
+  the `audio-input` entitlement for that. Without the permission the app
+  starts QEMU without recording (`in.voices=0`, and a line in `qemu.log`), so
+  the VM never stops for it; allow it, then restart the VM. Still open: in
+  the 2.6.0 test the app was allowed and QEMU's recording still stopped the
+  VM for about four minutes and failed, so the app's grant does not seem to
+  cover QEMU. `omacvm check` reads the Fusion and app logs for the refusal
+  (and says to restart).
 - **Where:** `app/app/Sources/OmacVM/Runner.swift`, `app/app/OmacVM.entitlements`,
   `src/cmd/check.sh`.
