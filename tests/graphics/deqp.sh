@@ -70,7 +70,11 @@ for l in open(sys.argv[1]):
         if r["status"] != "Running": last[r["case"]] = r["status"]
 for c, s in last.items(): print(json.dumps({"case": c, "status": s}))' "$OUT.events" > "$OUT.jsonl"
 COMMIT=$("$V" ssh "cat $C/commit")
-RENDERER=$("$V" ssh "eglinfo -B 2>/dev/null | grep -m1 'OpenGL ES profile renderer' | cut -d: -f2-; vulkaninfo --summary 2>/dev/null | grep -m1 deviceName | cut -d= -f2" | tr '\n' ' ')
+if [ "$API" = vk ]; then
+  RENDERER=$("$V" ssh "env $ENVS vulkaninfo --summary 2>/dev/null | grep -E -m2 'deviceName|driverInfo' | cut -d= -f2" | tr '\n' ' ')
+else
+  RENDERER=$("$V" ssh "eglinfo -B -p surfaceless 2>/dev/null | grep -m1 'OpenGL ES profile renderer' | cut -d: -f2-" | tr '\n' ' ')
+fi
 python3 - "$OUT.jsonl" "$OUT" "$API" "$FILTER" "$STRIDE" "$COMMIT" "$RENDERER" "$(( $(date +%s) - T0 ))" <<'PY'
 import collections, json, sys
 src, out, api, filt, stride, commit, renderer, secs = sys.argv[1:9]
