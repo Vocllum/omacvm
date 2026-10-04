@@ -30,6 +30,10 @@ commit 82927e9. Changes here:
 - `patches/virgl-core-instance-id.patch`: shaders that read `gl_InstanceID`
   (instanced WebGL) asked for `GL_ARB_draw_instanced`, which Apple's core
   profile refuses; checked by `Tests/virgl/test-integer-sampler-shader.c`
+- `patches/virgl-transform-feedback-end.patch`: transform feedback ends with
+  the program it began with bound; with none bound Apple's GL crashed QEMU
+  (dEQP and WebGL 2 transform feedback tests); checked by
+  `Tests/virgl/test-transform-feedback.c`
 - `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
   server ended signals its fences, so the guest app ends instead of hanging
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
