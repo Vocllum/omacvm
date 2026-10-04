@@ -3,14 +3,14 @@
 # Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac),
 # Omanotch (the bar beside the notch, src/omanotch).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
-#   src/mac/install.sh [--no-bridge] [--skip-gestures | --no-gestures] [--skip-clip] [--omanotch] [--force] [--quiet]
+#   src/mac/install.sh [--no-bridge] [--skip-gestures | --keys-only] [--skip-clip] [--omanotch] [--force] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
 # --skip-clip leaves the clipboard helper out (only Parallels VMs use it;
 # likewise kept when already installed).
 # --omanotch installs Omanotch too (without it, one already installed stays as
 # it is).
-# --no-gestures installs it keys-only for every VM: macOS keeps its trackpad
+# --keys-only installs Gestures keys-only for every VM: macOS keeps its trackpad
 # gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
 # VM chooses for itself: gestures and scroll momentum are VM features.)
 # An app whose sources and options did not change since it was installed is
@@ -23,7 +23,7 @@ BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0
 for a in "$@"; do
   case $a in
     --no-bridge) BRIDGE=0 ;;
-    --no-gestures) GESTURES=0 ;;
+    --keys-only) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
     --skip-clip) CLIP=0 ;;
     --omanotch) NOTCH=1 ;;
