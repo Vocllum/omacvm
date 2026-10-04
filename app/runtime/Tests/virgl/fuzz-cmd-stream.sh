@@ -45,12 +45,18 @@ cp -n "$here"/fuzz-regressions/* corpus/ 2>/dev/null || true
 # Huge but valid draws (billions of vertices) run for minutes on the software renderer:
 # 20 s per input; a timeout (timeout-*) or the process outgrowing 4 GiB (oom-*, slow
 # leaks add up over millions of contexts) is kept and fuzzing goes on in a fresh process.
-# A crash or an oracle abort (crash-*) stops it. (Fork mode would lose DYLD_LIBRARY_PATH: SIP.)
+# A crash or an oracle abort (crash-*) stops it, and so does any other failure that leaves
+# no new timeout-* or oom-* file. (Fork mode would lose DYLD_LIBRARY_PATH: SIP.)
+kept() { find . -maxdepth 1 \( -name 'timeout-*' -o -name 'oom-*' \) | wc -l; }
 end=$((SECONDS + secs))
 while ((SECONDS < end)); do
-  rc=0
+  rc=0 before=$(kept)
   env DYLD_LIBRARY_PATH="$libs" ASAN_OPTIONS=detect_leaks=0 VIRGL_LOG_LEVEL=silent ./fuzz-cmd-stream \
     -max_total_time=$((end - SECONDS)) -max_len=4096 -rss_limit_mb=4096 -timeout=20 corpus || rc=$?
   ls crash-* >/dev/null 2>&1 && exit 1
   [ $rc = 0 ] && break
+  if (($(kept) == before)); then
+    echo "fuzz-cmd-stream.sh: the fuzzer failed (exit $rc) without a crash, timeout or oom" >&2
+    exit 1
+  fi
 done
