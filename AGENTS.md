@@ -108,8 +108,7 @@ A build is done when all of this holds:
 
 ## 3. Repository map
 
-The root holds only the entry points (`omacvm`, `install.sh`, and `build.sh`,
-`apply.sh`, `check.sh`, which forward to `omacvm` for one release), the docs and
+The root holds only the entry points (`omacvm`, `install.sh`), the docs and
 `docs/` (graphics, route pages, benchmarks, findings), and `app/` (OmacVM.app, its own
 build); everything else lives in `src/`: the commands in
 `src/cmd/`, one folder per feature, and the install plumbing (`guest/`, `mac/`,

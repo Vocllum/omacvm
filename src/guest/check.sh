@@ -39,7 +39,7 @@ user_active() { systemctl --user -M "$U@" is-active "$1" >/dev/null 2>&1; }
 connected_to() { ss -Htn state established "dst $1:$2" | grep -q .; }
 ev_device() { grep -q "^N: Name=\"$1\"" /proc/bus/input/devices; }
 
-[[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run apply.sh on the Mac)"; exit 1; }
+[[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run omacvm apply on the Mac)"; exit 1; }
 source /etc/omacvm/env
 HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
 # Features chosen at setup (VMs set up before the choices existed: the defaults
@@ -64,7 +64,7 @@ if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is
 section "The Mac in the bar (Bridge)"
 if [[ $BRIDGE == on ]]; then
   if [[ -s $H/.config/omacvm-bridge/token ]]; then ok "token" "~/.config/omacvm-bridge/token"
-  else bad "token" "missing: run apply.sh on the Mac"; fi
+  else bad "token" "missing: run omacvm apply on the Mac"; fi
   state=$(as_user omacvm-bridge state 2>/dev/null)
   if jq -e .power >/dev/null 2>&1 <<<"$state"; then
     if jq -e .location_authorized <<<"$state" >/dev/null; then
@@ -300,7 +300,7 @@ if [[ $k == *thp* && $THP_KERNEL == off ]]; then bad "kernel" "$k: the memory-op
 elif [[ $k == *thp* ]]; then ok "kernel" "$k (memory-optimized: THP + MGLRU)"
 elif [[ $THP_KERNEL == off ]]; then ok "kernel" "$k (Arch Linux ARM's own; memory-optimized kernel not chosen)"
 elif ! command -v grub-mkconfig >/dev/null; then skip "kernel" "$k (the memory-optimized kernel needs GRUB)"
-else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after apply.sh?)"; fi
+else bad "kernel" "$k: not the memory-optimized kernel yet (reboot after omacvm apply?)"; fi
 thp=$(sed -n 's/.*\[\(.*\)\].*/\1/p' /sys/kernel/mm/transparent_hugepage/enabled 2>/dev/null)
 if [[ $thp == always || $thp == madvise ]]; then ok "transparent huge pages" "$thp"
 elif [[ $k == *thp* ]]; then bad "transparent huge pages" "${thp:-unavailable}"
@@ -310,7 +310,7 @@ if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
 elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"
 else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kernel)"; fi
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
-[[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after apply.sh?)"
+[[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after omacvm apply?)"
 if command -v grub-mkconfig >/dev/null; then
   if ! systemctl is-active -q grub-btrfsd; then bad "bootable snapshots" "grub-btrfsd is not running"
   elif [[ ! -s /boot/grub/grub-btrfs.cfg ]] && btrfs subvolume list -s / 2>/dev/null | grep -q .; then

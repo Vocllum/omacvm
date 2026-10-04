@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- The 1.x commands `./build.sh`, `./apply.sh` and `./check.sh` in the
+  repository's root are gone: use `omacvm build`, `omacvm apply` and
+  `omacvm check`.
+
 ## 2.7.0
 
 - OmacVM.app: videos are decoded by the Mac's media engine instead of the
