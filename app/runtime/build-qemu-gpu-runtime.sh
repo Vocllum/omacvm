@@ -78,6 +78,9 @@ udp_patch="$native_dir/patches/libslirp-ipv4-udp-translation.patch"
 fence_poll_patch="$native_dir/patches/qemu-darwin-gpu-fence-poll.patch"
 virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
+virgl_skip_draws_patch="$native_dir/patches/virgl-shader-failure-skip-draws.patch"
+virgl_loss_report_patch="$native_dir/patches/virgl-context-loss-report.patch"
+virgl_test_fault_patch="$native_dir/patches/virgl-test-shader-fault.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -107,6 +110,9 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
+virgl_skip_draws_patch_sha256=0ff22295962331bc12649003ca892fe26c366541c4261140ba7d35e5cc6923a0
+virgl_loss_report_patch_sha256=c29640dfcca1b4658b5b05b431840781ab0e0d91857481795434c3f96b27b2d1
+virgl_test_fault_patch_sha256=4b09b62f5d1ac73ff056a93891ca4041cfe6ee0f93f7b6bbbcee0fb7b3c94728
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -638,6 +644,18 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-ext-t
 # GL context stopped for good (Chrome's GPU process hung in Basemark Web 3.0).
 verify_file_sha "Integer sampler shader patch" "$virgl_int_tex_patch" "$virgl_int_tex_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_int_tex_patch"
+# OmacVM: a shader the Mac's GL refuses skips its draws instead of stopping the guest's
+# whole context, and a context that does stop tells the guest (GL context reset).
+verify_file_sha "Refused shader patch" "$virgl_skip_draws_patch" "$virgl_skip_draws_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_skip_draws_patch"
+verify_file_sha "Context loss report patch" "$virgl_loss_report_patch" "$virgl_loss_report_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_loss_report_patch"
+# Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
+if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
+  log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
+  verify_file_sha "Shader fault test hook" "$virgl_test_fault_patch" "$virgl_test_fault_patch_sha256"
+  patch -d "$virgl_source" -p1 -f -i "$virgl_test_fault_patch"
+fi
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -793,5 +811,12 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-slirp "$slirp_root/lib/libslirp.0.dylib" \
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   --archive-dir "$archive_dir"
+
+# Mark a test runtime so build-app.sh never ships it.
+if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
+  : > "$native_dir/.build/qemu-gpu-runtime.test-hooks"
+else
+  rm -f "$native_dir/.build/qemu-gpu-runtime.test-hooks"
+fi
 
 log "Pinned patched runtime is ready; scratch source and archives will now be removed"
