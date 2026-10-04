@@ -41,9 +41,8 @@ OMACVM_GL_FPS=1 logs ticks, frames shown, repeats, merged and dropped
 frames and draws without a free surface once a second.
 
 Upstream: not sent (depends on the IOSurface present, an OmacVM patch).
-Tests: scratchpad tools for now (pacing page + ScreenCaptureKit counter,
-see docs/architecture/graphics.md, frame pacing); glmark2 quick for
-throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
+Tests: tests/graphics/pacing (pacing page + sckpace, testufo + ufopace,
+vdisplay for 144 Hz); glmark2 quick for throughput. Applies after qemu-cocoa-gl-present-iosurface.patch.
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -59,6 +59,7 @@
