@@ -81,6 +81,8 @@ virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
 virgl_skip_draws_patch="$native_dir/patches/virgl-shader-failure-skip-draws.patch"
 virgl_loss_report_patch="$native_dir/patches/virgl-context-loss-report.patch"
 virgl_test_fault_patch="$native_dir/patches/virgl-test-shader-fault.patch"
+virgl_null_variant_patch="$native_dir/patches/virgl-shader-variant-null-checks.patch"
+virgl_shader_limits_patch="$native_dir/patches/virgl-shader-size-limits.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -113,6 +115,8 @@ virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5
 virgl_skip_draws_patch_sha256=0ff22295962331bc12649003ca892fe26c366541c4261140ba7d35e5cc6923a0
 virgl_loss_report_patch_sha256=c29640dfcca1b4658b5b05b431840781ab0e0d91857481795434c3f96b27b2d1
 virgl_test_fault_patch_sha256=4b09b62f5d1ac73ff056a93891ca4041cfe6ee0f93f7b6bbbcee0fb7b3c94728
+virgl_null_variant_patch_sha256=305d6fffe723fa32ffe3576c0e33c68b7358e142d88612817a175489aaa16832
+virgl_shader_limits_patch_sha256=df6b333dbeb1fe43fd023551fac8ee2d75228f3866b5b1e456621614dc9c01c9
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -634,6 +638,11 @@ verify_file_sha "Refused shader patch" "$virgl_skip_draws_patch" "$virgl_skip_dr
 patch -d "$virgl_source" -p1 -f -i "$virgl_skip_draws_patch"
 verify_file_sha "Context loss report patch" "$virgl_loss_report_patch" "$virgl_loss_report_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_loss_report_patch"
+# OmacVM: two guest inputs the fuzzer found that crashed QEMU or asked for 4 GiB.
+verify_file_sha "Shader variant NULL checks" "$virgl_null_variant_patch" "$virgl_null_variant_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_null_variant_patch"
+verify_file_sha "Shader size limits" "$virgl_shader_limits_patch" "$virgl_shader_limits_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_limits_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
