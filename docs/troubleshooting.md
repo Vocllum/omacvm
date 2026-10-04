@@ -398,7 +398,9 @@ a commit). The try-omarchy image is pinned: `src/vm/live/build-live.sh`
 - **Symptom:** PipeWire lists the input, but a recording is empty: on Fusion
   and OmacVM.app `pw-record` gets no samples at all
   (`/proc/asound/card0/pcm0c/sub0/status`: `hw_ptr 0`); on Parallels the
-  samples come but are all zero (`Capture` at 100 % and on).
+  samples come but are all zero (`Capture` at 100 % and on). On Fusion the
+  whole VM also stops for about four minutes when the recording starts (no
+  SSH, `vmware-vmx` at full CPU) until the refusal below is logged.
 - **Cause:** macOS's microphone permission for the app that records on the
   Mac. Fusion's `vmware-vmx` and OmacVM.app's QEMU are helpers that cannot
   ask for it themselves: their `AudioQueueStart` fails with 268451843.
