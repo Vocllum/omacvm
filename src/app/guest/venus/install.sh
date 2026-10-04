@@ -1,0 +1,82 @@
+#!/bin/bash
+# Venus extras for OmacVM.app VMs: Vulkan (Venus), OpenCL (rusticl on Zink on
+# Venus) and WebGPU in Firefox. Run as root inside the VM: ./install.sh
+# Only does something when the VM runs with Venus (the app's hidden switch:
+# defaults write org.omacvm.app venus -bool true); --force builds anyway.
+#
+# Builds the pinned Mesa below with OmacVM's patches into /opt/omacvm-mesa
+# (Arch Linux ARM's Mesa stays the GL driver) and registers it:
+#   /etc/vulkan/icd.d/omacvm_venus_icd.json     Vulkan (Venus)
+#   /etc/OpenCL/vendors/omacvm-rusticl.icd      OpenCL (rusticl, Zink)
+#   /etc/environment.d/90-omacvm-venus.conf     RUSTICL_ENABLE=zink, distro venus off
+#   Firefox: omacvm-webgpu.js                   WebGPU on
+# ./install.sh --remove undoes all of it.
+set -euo pipefail
+cd "$(dirname "$0")"
+MESA_VERSION=26.2.4
+MESA_SHA256=bce5f7fbebb934373b86c999a064d52fb5065878dc57f287f95346648ec832e9
+PREFIX=/opt/omacvm-mesa
+ICD=/etc/vulkan/icd.d/omacvm_venus_icd.json
+CLICD=/etc/OpenCL/vendors/omacvm-rusticl.icd
+ENVF=/etc/environment.d/90-omacvm-venus.conf
+FFPREF=/usr/lib/firefox/defaults/pref/omacvm-webgpu.js
+
+remove() {
+  rm -rf "$PREFIX" "$ICD" "$CLICD" "$ENVF" "$FFPREF" /var/cache/omacvm/mesa-build
+  echo "OmacVM Venus extras removed"
+}
+
+# With Venus the host offers a third capset (virgl, virgl2, venus) and a host
+# visible region for blobs; debugfs shows both.
+venus_on() {
+  mountpoint -q /sys/kernel/debug || mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+  local f
+  for f in /sys/kernel/debug/dri/*/virtio-gpu-features; do
+    [[ -r $f ]] || continue
+    awk -F: '/cap sets/ { n = $2 + 0 } /host visible region/ { h = 1 } END { exit !(n >= 3 && h) }' "$f" && return 0
+  done
+  return 1
+}
+
+case ${1:-} in
+  --remove) remove; exit 0 ;;
+  --force) ;;
+  *) venus_on || { echo "OmacVM Venus extras: no Venus in this VM, skipped"; exit 0; } ;;
+esac
+
+STAMP="$MESA_VERSION $(cat patches/*.patch | sha256sum | cut -c1-16)"
+if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
+  pacman -S --needed --noconfirm meson ninja pkgconf python-mako python-yaml python-packaging \
+    glslang spirv-tools spirv-llvm-translator llvm clang libclc rust rust-bindgen cbindgen \
+    libdrm wayland wayland-protocols libx11 libxext libxrandr libxshmfence libxxf86vm \
+    ocl-icd zstd expat >/dev/null 2>&1
+  B=/var/cache/omacvm/mesa-build; rm -rf "$B"; mkdir -p "$B"
+  curl -fsSL -o "$B/mesa.tar.xz" "https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz"
+  echo "$MESA_SHA256  $B/mesa.tar.xz" | sha256sum -c --quiet
+  tar -C "$B" -xf "$B/mesa.tar.xz"
+  S=$B/mesa-$MESA_VERSION
+  for p in patches/*.patch; do patch -d "$S" -p1 --quiet < "$p"; done
+  # Venus + Zink + rusticl only; GL stays with the distro's virgl.
+  meson setup "$S/build" "$S" --prefix="$PREFIX" -Dbuildtype=release \
+    -Dvulkan-drivers=virtio -Dgallium-drivers=zink -Dgallium-rusticl=true -Dllvm=enabled \
+    -Dplatforms=wayland,x11 -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled \
+    -Dglx=disabled -Dgbm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled >/dev/null
+  ninja -C "$S/build" install >/dev/null
+  echo "$STAMP" > "$PREFIX/omacvm-mesa-version"
+  rm -rf "$B"
+fi
+
+mkdir -p /etc/vulkan/icd.d /etc/OpenCL/vendors /etc/environment.d
+sed "s#\"library_path\": \"[^\"]*\"#\"library_path\": \"$PREFIX/lib/libvulkan_virtio.so\"#" \
+  "$PREFIX/share/vulkan/icd.d/virtio_icd.aarch64.json" > "$ICD"
+echo "$PREFIX/lib/libRusticlOpenCL.so.1" > "$CLICD"
+# The distro's venus (Mesa < 26.2.4 cannot round blobs to the host's 16 KiB
+# pages) would add a second, broken device: the loader skips its manifest.
+cat > "$ENVF" <<CONF
+RUSTICL_ENABLE=zink
+VK_LOADER_DRIVERS_DISABLE=virtio_icd.json
+CONF
+if [[ -d /usr/lib/firefox ]]; then
+  install -Dm644 omacvm-webgpu.js "$FFPREF"
+fi
+echo "OmacVM Venus extras: Mesa $MESA_VERSION in $PREFIX (Vulkan, OpenCL); Firefox WebGPU"
