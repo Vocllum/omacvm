@@ -2,7 +2,8 @@
 
 In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 (the media engine) instead of the VM's CPU. YouTube in 4K at 60 frames per
-second plays without dropped frames and the VM's CPU stays nearly idle.
+second plays in Google Chrome with the VM's CPU nearly idle: 0.3 cores busy
+instead of 1.2 to 1.6.
 
 ## What works
 
@@ -22,7 +23,8 @@ Browsers in an OmacVM.app VM:
   `src/bench/install-chrome.sh` (Arch Linux ARM has no package).
 - **Firefox**: yes for H.264 and VP9 (AV1 stays on the CPU, see below; HEVC
   Firefox does not hand to VA-API at all here).
-- **Brave** (Linux ARM): yes, like Chrome (tested with VP9).
+- **Brave** (Linux ARM): VP9 yes, like Chrome (tested with a local 4K VP9
+  file; YouTube and AV1 not tried in Brave yet).
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): no. Arch Linux
   ARM builds it without VA-API, so it always decodes on the CPU.
 - **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`): H.264, VP9 and HEVC.
@@ -44,8 +46,13 @@ seconds, measured with `src/bench/video-bench.py` in an OmacVM.app VM (6 CPUs,
 | Mac's media engine, VP9 | 60 fps | 0.1 % | 0.33 | 0.45 |
 | Mac's media engine, AV1 | 60 fps | 0.5 % | 0.30 | 0.42 |
 
-The Mac was busy with other work during these runs. The Mac's power draw is
-not measured yet (it needs a quiet Mac, `src/bench/power.sh`).
+Each row is one run, and the Mac was busy with other work during them. The
+dropped frames depend on that load: a CPU-decoding run in a test VM (the
+try-omarchy live system, same CPUs and memory) had 60 fps and 0.0 % dropped,
+with the VM at 1.21 cores and QEMU at 1.71. So the media engine is not shown
+to drop fewer frames; what holds in every run is the CPU: about 0.3 cores
+instead of 1.2 to 1.6. The Mac's power draw is not measured yet (it needs a
+quiet Mac, `src/bench/power.sh`).
 
 ## How it works
 
