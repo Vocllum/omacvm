@@ -34,7 +34,8 @@ if (( RELEASE )) && [[ -n $(git -C "$REPO" status --porcelain) ]]; then
 fi
 RT=$ROOT/runtime/.build
 # What the runtime was built from: its build scripts and patches.
-INPUTS=$(cd "$ROOT/runtime" && shasum -a 256 ./*.sh runtime-files.txt patches/* | shasum -a 256 | cut -d' ' -f1)
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/*
+  echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}"; } | shasum -a 256 | cut -d' ' -f1)
 if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
       || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
   log "QEMU (from source)"
@@ -75,6 +76,12 @@ install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"
 install -m644 "$RT/firmware/edk2-licenses.txt" "$C/Resources/licenses/"
+# A runtime with KosmicKrisp must carry its licence notice.
+if [[ -e $RT/qemu-gpu-runtime/lib/libvulkan_kosmickrisp.dylib ]]; then
+  KK_NOTICE=$RT/qemu-gpu-runtime/share/licenses/LICENSE.mesa-kosmickrisp.txt
+  [[ -s $KK_NOTICE ]] || { echo "the runtime has KosmicKrisp but no $KK_NOTICE" >&2; exit 1; }
+  install -m644 "$KK_NOTICE" "$C/Resources/licenses/"
+fi
 
 # The app carries the version of the OmacVM it is part of.
 VERSION=$(cat "$REPO/src/VERSION")
