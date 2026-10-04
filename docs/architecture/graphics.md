@@ -95,8 +95,9 @@ on CGL, not on ANGLE.
 | Integer-sampler shader fix (Basemark hang) | shipped (2.6.0) | `virgl-texture-integer-samplers.patch` |
 | Async fences (vrend-sync thread on macOS) | built: `gpu-native` | `qemu-cocoa-gl-async-fence.patch`, `virgl-darwin-thread-sync.patch` |
 | Fence wait without a spinning core | built: `gpu-native` | `virgl-darwin-fence-wait.patch` |
+| Fences polled when the sync thread cannot start | built: `gpu-native` | `virgl-thread-sync-fallback.patch` |
 | Retire of other contexts' fences kept on context destroy | built: `gpu-native` (from `gpu-fence-hunt`) | `virgl-fence-waiting-ctx.patch` |
-| GPU safe mode (exact 2.6.0 path) | built: `gpu-native`, hidden | `gpuSafeMode` default |
+| GPU safe mode (the old fence and frame path) | built: `gpu-native`, hidden | `gpuSafeMode` default |
 | Present on each flush | built: `gpu-native` | `qemu-cocoa-gl-present-on-flush.patch` |
 | IOSurface present | built: `gpu-native` | `qemu-cocoa-gl-present-iosurface.patch` |
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
@@ -125,8 +126,8 @@ and no render server process on macOS (ADR 0012).
  |   VideoToolbox decode calls, scanout -> IOSurface blit (built)          |
  |                                                                         |
  | vrend-sync      [no BQL, own CGL context]            (built: gpu-native)|
- |   tests each fence (spin 100 us, then 50 us sleeps), wakes the main     |
- |   loop (fd); time-constraint thread so its sleeps are not stretched     |
+ |   tests each fence (spin 100 us, 50 us naps, 1 ms naps after 1 ms),     |
+ |   wakes the main loop (fd); time-constraint thread (200 us budget)      |
  |                                                                         |
  | venus render server thread + vkr ring threads   (built: gpu-venus)      |
  |   [no BQL] decode the Venus ring, call Vulkan (MoltenVK)                |
@@ -192,9 +193,12 @@ why the main thread and QEMU waited on each other every frame).
      a page still runs at 120, so testufo reports 120; what reaches the panel
      is measured on `pacing-hdr`.)
    - built: each flush asks for a redraw; QEMU's thread blits the scanout
-     into one of three IOSurfaces, the present queue waits for that blit,
-     the main thread sets `layer.contents`. At most one surface per display
-     refresh; a surface is reused only when `IOSurfaceIsInUse` is false.
+     into one of three IOSurfaces, the present queue waits for that blit
+     (testing its fence, not with Apple's spinning wait), the main thread
+     sets `layer.contents`. At most one surface per display refresh; a
+     surface is reused only when `IOSurfaceIsInUse` is false. The surfaces
+     are never larger than the largest display and are made again at most
+     twice a second (a larger or quickly changing scanout is drawn scaled).
 7. Core Animation composites the surface into the window.
 
 ## 4. Fences
@@ -223,12 +227,22 @@ of a fence of another context the sync thread was waiting on). Soaks since:
 runtime, and `conformance-runs`' 30 min glmark2 + WebGL + video soak, all
 without a stuck fence.
 
+If the sync thread cannot start (no shared CGL context, no FIFO in
+`$TMPDIR`, no thread), virglrenderer polls the fences on the render thread
+and has no poll fd (`virgl-thread-sync-fallback.patch`); QEMU's 1 ms timer
+then retires them, and `qemu.log` says "virgl fences polled every 1 ms (the
+sync thread did not start)". Before, the guest's GPU waited forever while
+the log named the new path.
+
 Cost of async fences: Apple's `glClientWaitSync` spins (`gleTestSync`).
 `virgl-darwin-fence-wait.patch` tests the fence instead: busy for 100 us,
 then 50 us waits with `mach_wait_until` on a time-constraint thread (plain
 `nanosleep` is stretched by timer coalescing: Aquarium fell to 7-15 fps
-with it). With the bench lock: QEMU's CPU during glmark2 195% -> 165%,
-Aquarium 194% -> 176%, frame rates the same (ADR 0017).
+with it). After 1 ms of waiting the wait doubles up to 1 ms, so a long or
+stuck GPU job wakes the thread about 1000 times a second, not 20,000. The
+thread's budget per wake (200 us) covers the spin. With the bench lock:
+QEMU's CPU during glmark2 195% -> 165%, Aquarium 194% -> 176%, frame rates
+the same (ADR 0017).
 
 ### Where the time goes
 
@@ -263,10 +277,13 @@ Rules:
   mapping inside QEMU's hostmem region, at an offset QEMU chooses.
 - HVF maps in 16 KiB pages and macOS 15 has no 4 KiB IPA granule
   (`hv_vm_config_set_ipa_granule` is macOS 26). QEMU offers
-  `VIRTIO_GPU_F_BLOB_ALIGNMENT` with the host page size, and rounds a blob's
-  host mapping up to whole pages (`qemu-virtio-gpu-blob-alignment.patch`).
-  Guest Mesa must round blob sizes too: Mesa 26.2.4 and later do, Arch Linux
-  ARM's 26.2.3 does not (Venus fails with `EINVAL`).
+  `VIRTIO_GPU_F_BLOB_ALIGNMENT` with the host page size and refuses a blob
+  that the renderer maps on part of a host page
+  (`qemu-virtio-gpu-blob-alignment.patch`): mapping the rest of that page
+  would hand the guest memory the renderer may not own. Venus allocates its
+  Metal-exported memory in whole host pages, so its blobs pass. Guest Mesa must
+  round blob sizes: Mesa 26.2.4 and later do, Arch Linux ARM's 26.2.3 does
+  not (Venus fails with `EINVAL`).
 - QEMU 11 mapped blobs with `mmap(MAP_FIXED)` into hostmem; HVF keeps the
   pages it got from `hv_vm_map`, so the guest saw stale memory.
   `qemu-hvf-virgl-blob-subregion.patch` maps a memory subregion instead.
@@ -294,6 +311,9 @@ Patches (all in `app/runtime/patches`, one per concern):
   crashed in `CFRetain`).
 - `virgl-darwin-venus-ext-table.patch`: a tap patch shifted the extension
   table by one entry.
+- `virgl-darwin-venus-host-pages.patch`: Metal-exported memory in whole host
+  pages (it was 4 KiB-aligned), so every blob the guest maps is the
+  allocation's own memory.
 - `qemu-hvf-virgl-blob-subregion.patch`, `qemu-virtio-gpu-blob-alignment.patch`.
 
 Switch: `defaults write org.omacvm.app venus -bool true` adds
@@ -361,12 +381,10 @@ falls back and logs once.
 
 | Setting | Default | Effect | Status |
 |---|---|---|---|
-| `defaults write org.omacvm.app gpuSafeMode -bool true` | false | the exact 2.6.0 GPU path: sets the three settings below (poll, tick, layer) | built (`gpu-native`) |
+| `defaults write org.omacvm.app gpuSafeMode -bool true` | false | the 2.6.0/2.8.0 fence and frame path: sets the three settings below (poll, tick, layer); video decoding and the virgl fixes stay | built (`gpu-native`) |
 | `OMACVM_VIRGL_POLL_FENCES=1` | off | back to the 1 ms fence poll | built (`gpu-native`) |
 | `OMACVM_GL_PRESENT_ON_TICK=1` | off | redraw on QEMU's 30 ms tick again | built |
 | `OMACVM_GL_PRESENT=layer` | iosurface | CAOpenGLLayer path; also taken by itself if the IOSurface contexts fail | built |
-| `OMACVM_GL_FPS=1` | off | log frames shown per second | built |
-| `OMACVM_GL_DUMP=FILE` | off | write a shown frame as PPM (orientation/colour check) | built |
 | `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
@@ -409,8 +427,13 @@ What crosses and who checks it:
   context only (Chrome then hangs, which is how the Basemark bug showed up);
   reporting a context loss instead is planned.
 - **resource and blob sizes**: QEMU checks sizes against guest RAM and the
-  hostmem window; blob sizes are rounded to the host page by QEMU, never
-  trusted.
+  hostmem window; a blob that is not whole host pages is refused, never
+  rounded up.
+- **scanout size**: the guest picks it; the present IOSurfaces are capped
+  at the largest display and made again at most twice a second.
+  Still open (found 2026-10-04, in 2.6.0 too, owner `gpu-robust`): switching
+  the scanout between two very large framebuffers (8000x6000 and 7000x5000)
+  grows QEMU's GPU memory by about 1 GB per switch and never frees it.
 - **Venus**: the ring and command decoding are upstream vkr; the render
   server runs in QEMU's process on macOS, so a Venus bug is a QEMU bug
   (no process boundary, ADR 0012). Mitigation: off by default, hardened
@@ -426,7 +449,7 @@ What crosses and who checks it:
   arrays, 1e300, 101 flips).
 - **no host pointers** reach the guest; no guest-controlled allocation
   without a limit (hostmem 4 GiB, outputs 5, retained pixel buffers 3,
-  IOSurfaces 3 per window).
+  IOSurfaces 3 per window, each at most the largest display).
 
 ## 11. Test strategy
 
@@ -435,7 +458,7 @@ What crosses and who checks it:
 | Build time | virglrenderer's own tests + ours, run in every runtime build (e.g. `Tests/virgl/test-integer-sampler-shader.c`: TGSI -> GLSL, compiled on the Mac's OpenGL) | `app/runtime` |
 | Host only | Venus init + context create without a VM; VT probe; JSON and pointer-math unit tests | track scratch, to move into `app/runtime/Tests` |
 | Conformance | dEQP GLES2/3 (virgl), Vulkan CTS smoke (Venus), WebGL 1 and 2 conformance in Chrome; `compare.py` diffs two runtimes case by case | `tests/graphics` (`conformance-runs`) |
-| Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs expectation, `OMACVM_GL_DUMP` frame upright with right colours | per track |
+| Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs a capture of the window (`screencapture -l`): upright, right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
@@ -452,9 +475,9 @@ bench lock and are indications only):
 | same, other VMs loading the Mac | Aquarium 23.4/24.0/23.1 | Aquarium 19.9/20.6/21.5 (the extra threads compete for CPU) |
 | Fence to reply, median | 1.56 ms | 0.20 ms |
 | Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
-| WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same) |
+| WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same on a quiet Mac; about 10% lower when other VMs load it, row above) |
 | QEMU CPU, glmark2 / Aquarium, bench lock | - | 165% / 176% (fence wait; spinning: 195% / 194%) |
-| vkmark headless 800x600 (Venus), bench lock | - | 5195 (fences polled: 732) |
+| vkmark headless 800x600 (Venus, never in a release), bench lock | - | 5195; the same build with polled fences: 732 |
 | dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 

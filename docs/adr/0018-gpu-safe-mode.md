@@ -1,4 +1,4 @@
-# 0018: A hidden GPU safe mode that is exactly the old path
+# 0018: A hidden GPU safe mode with the old fence and frame path
 
 Status: accepted. Built on `gpu-native` (OmacVM.app `Settings.gpuSafeMode`).
 
@@ -14,15 +14,17 @@ the next release.
 
 1. No switch: users downgrade the app. Loses every other fix.
 2. One visible setting per part. Three settings nobody can judge.
-3. One hidden switch that turns all three parts off together, so the VM runs
-   the exact 2.6.0 GPU path, and support can ask for it in one line.
+3. One hidden switch that turns all three parts off together, so the VM's
+   fences and frames take the 2.6.0 path again, and support can ask for it
+   in one line.
 
 ## Decision
 
 Option 3: `defaults write org.omacvm.app gpuSafeMode -bool true` makes the
 launcher start QEMU with `OMACVM_VIRGL_POLL_FENCES=1`,
 `OMACVM_GL_PRESENT_ON_TICK=1` and `OMACVM_GL_PRESENT=layer`. It is read when
-a VM starts.
+a VM starts. It is not the whole 2.6.0 GPU stack: what came later and has
+no switch here stays on (2.7.0's video decoding, the virglrenderer fixes).
 
 ## Consequences
 
