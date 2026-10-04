@@ -75,6 +75,9 @@ install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"
 install -m644 "$RT/firmware/edk2-licenses.txt" "$C/Resources/licenses/"
+if [[ -f $RT/kosmickrisp/mesa-license.rst ]]; then
+  install -m644 "$RT/kosmickrisp/mesa-license.rst" "$C/Resources/licenses/"
+fi
 
 # The app carries the version of the OmacVM it is part of.
 VERSION=$(cat "$REPO/src/VERSION")

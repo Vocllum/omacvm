@@ -4,7 +4,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: macos/prepare-qemu-gpu-runtime.sh --source-qemu PATH --source-slirp PATH --source-virgl PATH [--archive-dir DIR]
+Usage: macos/prepare-qemu-gpu-runtime.sh --source-qemu PATH --source-slirp PATH --source-virgl PATH [--source-kosmickrisp PATH] [--archive-dir DIR]
 
 Stage, relocate, validate, and ad-hoc sign the source-built QEMU runtime at:
   macos/.build/qemu-gpu-runtime
@@ -12,6 +12,8 @@ Stage, relocate, validate, and ad-hoc sign the source-built QEMU runtime at:
 QEMU, libslirp, and VirGL are source-built; the remaining runtime closure comes from
 checksum-pinned bottles compatible with macOS 15 or newer;
 it never reads or bundles libraries from the build machine's Homebrew prefix.
+With --source-kosmickrisp, the runtime also carries KosmicKrisp (Mesa's Vulkan on
+Metal 4, built by build-kosmickrisp.sh), which Venus uses on macOS 26 and newer.
 With --archive-dir, reuse pinned archives from DIR after verifying every hash.
 EOF
 }
@@ -19,6 +21,7 @@ EOF
 source_qemu=
 source_slirp=
 source_virgl=
+source_kosmickrisp=
 archive_cache=
 while (($#)); do
   case "$1" in
@@ -38,6 +41,12 @@ while (($#)); do
       (($# >= 2)) || { usage >&2; exit 64; }
       [[ -z $source_virgl ]] || { usage >&2; exit 64; }
       source_virgl=$2
+      shift 2
+      ;;
+    --source-kosmickrisp)
+      (($# >= 2)) || { usage >&2; exit 64; }
+      [[ -z $source_kosmickrisp ]] || { usage >&2; exit 64; }
+      source_kosmickrisp=$2
       shift 2
       ;;
     --archive-dir)
@@ -110,6 +119,10 @@ macos_major=$(sw_vers -productVersion | awk -F. '{ print $1 }')
 [[ $source_qemu == /* ]] || die "--source-qemu must be an absolute path"
 [[ -f $source_qemu && ! -L $source_qemu && -x $source_qemu ]] || \
   die "--source-qemu must name a regular executable: $source_qemu"
+if [[ -n $source_kosmickrisp ]]; then
+  [[ $source_kosmickrisp == /* && -f $source_kosmickrisp && ! -L $source_kosmickrisp ]] || \
+    die "--source-kosmickrisp must name an absolute regular library path"
+fi
 [[ -f $entitlements && ! -L $entitlements ]] || \
   die "missing QEMU signing entitlements: $entitlements"
 [[ -x $dependency_bundler && ! -L $dependency_bundler ]] || \
@@ -248,11 +261,12 @@ while IFS=$'\t' read -r archive_name member destination; do
   install -m 0755 "$extract_dir/$member" "$staged_runtime/$destination"
 done < <(pinned_runtime_member_manifest)
 
-# Venus: the Vulkan loader finds MoltenVK through this driver file (beside
-# lib/, as libvirglrenderer looks for it). KosmicKrisp needs macOS 26.
-vulkan_icd=share/vulkan/icd.d/MoltenVK_icd.json
+# Venus: the Vulkan loader finds its driver through these files (beside lib/,
+# as libvirglrenderer looks for them): MoltenVK, and KosmicKrisp when built
+# (it needs macOS 26; libvirglrenderer picks it there).
+vulkan_icds=(share/vulkan/icd.d/MoltenVK_icd.json)
 mkdir -p "$staged_runtime/share/vulkan/icd.d"
-cat > "$staged_runtime/$vulkan_icd" <<'JSON'
+cat > "$staged_runtime/share/vulkan/icd.d/MoltenVK_icd.json" <<'JSON'
 {
     "file_format_version" : "1.0.0",
     "ICD": {
@@ -262,7 +276,20 @@ cat > "$staged_runtime/$vulkan_icd" <<'JSON'
     }
 }
 JSON
-chmod 0644 "$staged_runtime/$vulkan_icd"
+if [[ -n $source_kosmickrisp ]]; then
+  install -m 0755 "$source_kosmickrisp" "$staged_runtime/lib/libvulkan_kosmickrisp.dylib"
+  vulkan_icds+=(share/vulkan/icd.d/kosmickrisp_mesa_icd.json)
+  cat > "$staged_runtime/share/vulkan/icd.d/kosmickrisp_mesa_icd.json" <<'JSON'
+{
+    "file_format_version" : "1.0.1",
+    "ICD": {
+        "library_path": "../../../lib/libvulkan_kosmickrisp.dylib",
+        "api_version" : "1.4.363"
+    }
+}
+JSON
+fi
+chmod 0644 "$staged_runtime"/share/vulkan/icd.d/*.json
 
 runtime_files=()
 runtime_file_count=0
@@ -277,6 +304,10 @@ while IFS= read -r relative || [[ -n $relative ]]; do
   ((runtime_file_count += 1))
 done < "$runtime_manifest"
 ((runtime_file_count > 0)) || die "runtime file manifest is empty"
+if [[ -n $source_kosmickrisp ]]; then
+  runtime_files[$runtime_file_count]=lib/libvulkan_kosmickrisp.dylib
+  ((runtime_file_count += 1))
+fi
 
 runtime_images=()
 for relative in "${runtime_files[@]}"; do
@@ -358,7 +389,7 @@ verify_runtime_tree() {
       [[ $relative == bin || $relative == lib || $relative == share || \
          $relative == share/vulkan || $relative == share/vulkan/icd.d ]] || \
         die "runtime contains an unexpected directory: $relative"
-    elif [[ -f $path && $relative == "$vulkan_icd" ]]; then
+    elif [[ -f $path && " ${vulkan_icds[*]} " == *" $relative "* ]]; then
       python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$path" || \
         die "invalid Vulkan driver file: $relative"
     elif [[ -f $path ]]; then

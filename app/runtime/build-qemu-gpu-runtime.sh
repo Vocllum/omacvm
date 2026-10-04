@@ -780,11 +780,20 @@ rm -rf "$firmware_dir"; mkdir -p "$firmware_dir"
 bunzip2 -c "$source_dir/pc-bios/edk2-aarch64-code.fd.bz2" > "$firmware_dir/edk2-aarch64-code.fd"
 install -m 0644 "$source_dir/pc-bios/edk2-licenses.txt" "$firmware_dir/edk2-licenses.txt"
 
+# KosmicKrisp (Venus on macOS 26+) from its pinned Mesa commit; it needs
+# LLVM at build time. OMACVM_RUNTIME_KOSMICKRISP=0 leaves it out (MoltenVK only).
+kosmickrisp_args=()
+if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-1} != 0 ]]; then
+  "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  kosmickrisp_args=(--source-kosmickrisp "$native_dir/.build/kosmickrisp/libvulkan_kosmickrisp.dylib")
+fi
+
 log "Relocating, capability-gating, signing, and publishing the runtime"
 "$prepare_runtime" \
   --source-qemu "$qemu_binary" \
   --source-slirp "$slirp_root/lib/libslirp.0.dylib" \
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
+  ${kosmickrisp_args[@]+"${kosmickrisp_args[@]}"} \
   --archive-dir "$archive_dir"
 
 log "Pinned patched runtime is ready; scratch source and archives will now be removed"
