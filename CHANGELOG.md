@@ -15,8 +15,9 @@ in more words.
   real size (1728x1080 points on a 14-inch MacBook Pro, was 1728x1085). The
   picture is no longer squeezed and the pointer lands where it is on the Mac
   (it was up to 5 points off at the bottom).
-- OmacVM.app: dragging a window with Cmd to another display moves it there.
-  Super was let go at the display edge, and Hyprland dropped the move.
+- Cmd-drag moves an Omarchy window from one Mac display to another; a held
+  modifier key is no longer let go when the pointer crosses to another
+  display's window.
 - Per-display workspaces handle more than two displays (Virtual-3 gets
   21..30, and so on), and several workspaces of an unplugged display all
   come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
