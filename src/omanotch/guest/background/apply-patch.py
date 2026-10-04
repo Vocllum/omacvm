@@ -15,6 +15,12 @@ The built-in display is the output that shares its top-left corner with the
 NOTCH output (both sit at the same position in Hyprland's layout). Without a
 NOTCH output every screen draws the wallpaper exactly as before.
 
+The patch also remaps the wallpaper when its output moves: Hyprland leaves a
+mapped layer surface at the output's old place (the display then shows only
+Hyprland's own dark grey), and Omarchy's ScreenMoveRemap, meant for that,
+waits for xChanged/yChanged, which Quickshell's screens do not have (only
+geometryChanged), so it never fires.
+
 The patch is versioned like the bar patch; an older version is restored from
 <Background.qml>.before-notchbar (kept by install.sh) and patched again.
 """
@@ -22,7 +28,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 2
+VERSION = 3
 VERSION_LINE = f"// omarchy-notch-bar background patch v{VERSION}"
 
 
@@ -78,7 +84,39 @@ def main():
     text = replace_once(text, "      WlrLayershell.layer: WlrLayer.Background\n",
                         "      WlrLayershell.layer: root.notchIsStrip(panel.modelData) ? WlrLayer.Overlay : WlrLayer.Background\n")
 
-    # 3. The shared canvas: the strip on top, the built-in display below it.
+    # 3. A remap that fires when the output moves (see the docstring).
+    text = replace_once(text, "      visible: !remapGuard.remapping\n", """      // omarchy-notch-bar: notchRemap, see below.
+      visible: !remapGuard.remapping && !notchRemap.remapping
+
+      // omarchy-notch-bar: remaps the wallpaper when its output really moved
+      // (Quickshell's screens only signal geometryChanged, so Omarchy's
+      // ScreenMoveRemap never fires). Without it the wallpaper stays at the
+      // output's old place and the display shows Hyprland's dark grey.
+      Item {
+        id: notchRemap
+        visible: false
+        property bool remapping: false
+        property real lastX: NaN
+        property real lastY: NaN
+        function note() {
+          var s = panel.screen
+          if (!s || (s.x === lastX && s.y === lastY)) return
+          var moved = !isNaN(lastX)
+          lastX = s.x
+          lastY = s.y
+          if (moved) notchRemapSettle.restart()
+        }
+        Component.onCompleted: note()
+        Connections {
+          target: panel.screen
+          function onGeometryChanged() { notchRemap.note() }
+        }
+        Timer { id: notchRemapSettle; interval: 200; onTriggered: notchRemap.remapping = true }
+        Timer { interval: 100; running: notchRemap.remapping; onTriggered: notchRemap.remapping = false }
+      }
+""")
+
+    # 4. The shared canvas: the strip on top, the built-in display below it.
     text = replace_once(text, '''      Image {
         id: base
         anchors.fill: parent

@@ -19,6 +19,9 @@ What the patch adds:
     parked copy, so panels open on the visible display under the strip.
   * IPC target "notchbar" for the helper, and a watchdog that unparks the bar
     when the helper stops sending heartbeats.
+  * The bar is remapped when its output moves (Omarchy's own remap never
+    fires on Quickshell; see notchRemap), so it does not stay behind at the
+    output's old place.
   * notchcast's last word on parking (~/.local/state/omanotch/park), read at
     startup and every few seconds: a shell that (re)starts while the strip
     shows parks at once, and a lost IPC call cannot leave two bars.
@@ -27,7 +30,7 @@ import os
 import sys
 
 MARK = "omarchy-notch-bar"
-VERSION = 14
+VERSION = 15
 VERSION_LINE = f"// omarchy-notch-bar patch v{VERSION}"
 
 
@@ -341,7 +344,8 @@ def main():
     # 3. Parking per window instead of only through the global bar-off flag.
     text = replace_once(text, '''    visible: !remapGuard.remapping
     exclusionMode: root.barHidden ? ExclusionMode.Ignore : ExclusionMode.Auto
-''', '''    visible: !remapGuard.remapping
+''', '''    // omarchy-notch-bar: notchRemap, see below.
+    visible: !remapGuard.remapping && !notchRemap.remapping
     // omarchy-notch-bar: role of this copy ("notch", "parked" or "").
     readonly property string notchRole: root.notchRoleFor(screen)
     // Over fullscreen the NOTCH copy stays mapped, even with the bar off, to
@@ -366,6 +370,37 @@ def main():
     readonly property int notchPadTop: notchRole === "notch" ? Math.floor((parkedSize - root.barSize) / 2) : 0
     readonly property int notchPadBottom: notchRole === "notch" ? parkedSize - root.barSize - notchPadTop : 0
     exclusionMode: barWindow.parked ? ExclusionMode.Ignore : ExclusionMode.Auto
+
+    // omarchy-notch-bar: Hyprland leaves a mapped layer surface at its old
+    // place when its output moves (the bar is then on no screen at all).
+    // Omarchy's ScreenMoveRemap is meant to remap it, but it waits for
+    // xChanged/yChanged, which Quickshell's screens do not have (they only
+    // have geometryChanged), so it never fires. This does the same on
+    // geometryChanged, when the output's position really changed.
+    Item {
+      id: notchRemap
+      visible: false
+      property bool remapping: false
+      property real lastX: NaN
+      property real lastY: NaN
+      function note() {
+        var s = barWindow.screen
+        if (!s || (s.x === lastX && s.y === lastY)) return
+        var moved = !isNaN(lastX)
+        lastX = s.x
+        lastY = s.y
+        if (moved) notchRemapSettle.restart()
+      }
+      Component.onCompleted: note()
+      Connections {
+        target: barWindow.screen
+        function onGeometryChanged() { notchRemap.note() }
+      }
+      // Let a layout change settle, then unmap for a moment (long enough
+      // that the compositor sees the unmap before the new map).
+      Timer { id: notchRemapSettle; interval: 200; onTriggered: notchRemap.remapping = true }
+      Timer { interval: 100; running: notchRemap.remapping; onTriggered: notchRemap.remapping = false }
+    }
 ''')
     text = replace_once(text, '''      top: root.barHidden && root.position === "top" ? -root.barSize : 0
       bottom: root.barHidden && root.position === "bottom" ? -root.barSize : 0
