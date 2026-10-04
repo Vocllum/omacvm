@@ -9,7 +9,8 @@
 # The same tiers and limits as omacvm build: 1 CPU up to this Mac's, 4 GB up
 # to its memory, within the Parallels licence. Parallels, UTM and VMware Fusion
 # change a stopped VM only (shut it down first); OmacVM.app's VM takes the
-# change at its next start. In a terminal without a change it asks.
+# change at its next start. In a terminal without a change it asks (not with
+# --yes or --json).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (shut the VM down).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -21,7 +22,7 @@ source "$R/src/lib/ui.sh"
 source "$R/src/vm/utm.sh"
 source "$R/src/vm/fusion.sh"
 source "$R/src/lib/resources.sh"
-VM=""; TYPE=""; RES=""; CPUS=""; MEM_GB=""; JSON=0
+VM=""; TYPE=""; RES=""; CPUS=""; MEM_GB=""; JSON=0; YES=0
 usage() { echo "omacvm resources: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
 while (( $# )); do
@@ -35,8 +36,8 @@ while (( $# )); do
     --cpus) CPUS=$2; shift 2 ;;
     --memory-gb) MEM_GB=$2; shift 2 ;;
     --json) JSON=1; shift ;;
-    --yes|-y) shift ;;   # never asks with a change given
-    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --yes|-y) YES=1; shift ;;
+    -h|--help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) usage "unknown option $1 (see --help)" ;;
   esac
 done
@@ -91,9 +92,9 @@ show_json() {   # CHANGED
 }
 cpus_text() { (( $1 )) && echo "$1 CPUs" || echo "UTM's default CPUs"; }
 
-# No change asked: in a terminal, ask; else say what it has.
+# No change asked: in a terminal, ask; else (or with --yes) say what it has.
 if [[ -z $RES$CPUS$MEM_GB ]]; then
-  if (( JSON )) || ! { : < "$TTY"; } 2>/dev/null; then
+  if (( JSON || YES )) || ! { : < "$TTY"; } 2>/dev/null; then
     if (( JSON )); then show_json false
     else
       echo "'$VM' ($(app_label "$TYPE"), $STATE): $(cpus_text "$OLD_CPUS"), $(( OLD_MB / 1024 )) GB memory"

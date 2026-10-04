@@ -175,6 +175,21 @@ if (( LIVE )); then
   PRLCTL=$REAL
   check "parallels pro: prlctl's error shown, nothing changed" eq "$rc $err $(res_get "$NAME" parallels) $(vm_state "$NAME")" "1 Parallels: only in Pro 2 6144 stopped"
 
+  # In a terminal (expect): --yes never asks.
+  cat > "$T/drive.exp" <<'EXP'
+set timeout 15
+spawn {*}[lrange $argv 1 end]
+foreach k [split [lindex $argv 0] ","] {
+  if {$k eq ""} continue
+  lassign [split $k "="] what answer
+  if {$what eq "menu"} { expect "should"; sleep 0.3; send -- $answer; sleep 0.3; send "\r" } else { expect $what; send -- "$answer\r" }
+}
+expect { timeout { puts "\nTIMEOUT"; exit 124 } eof }
+exit [lindex [wait] 3]
+EXP
+  drive() { expect -f "$T/drive.exp" "$1" "$O" resources --vm "$NAME" --vm-type app "${@:2}"; }
+  out=$(drive "" --yes 2>&1); rc=$?
+  check "app, in a terminal, --yes: says what it has, asks nothing" eq "$rc $(grep -c 'Change with' <<<"$out") $(grep -c 'How much' <<<"$out")" "0 1 0"
   # UTM with a saved state: refused while UTM runs ("paused") and while it is
   # closed (its registry; UTM "closed" through a pgrep that does not see it).
   if [[ -n $UTM_ID && ! -e $HOME/.omacvm-user-testing ]]; then
