@@ -216,5 +216,152 @@
     3614
    ]
   }
- ]
+ ],
+ "round2": {
+  "date": "2026-10-04 17:04-18:14",
+  "conditions": "Mac mini screen unlocked, no VM besides this one, mini VM lock held; load average 0.3-3.4 from other work on the mini; no benchmark lock exists there",
+  "chrome": {
+   "mac": "Google Chrome 154.0.8037.93",
+   "vm": "Google Chrome 154.0.8037.97"
+  },
+  "results": [
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, fullscreen",
+    "viewport": "2560x1322@2",
+    "runs": [
+     60.0,
+     60.0,
+     60.0
+    ],
+    "median": 60.0,
+    "note": "60 Hz vsync cap"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, fullscreen, --disable-gpu-vsync --disable-frame-rate-limit",
+    "viewport": "2560x1322@2",
+    "runs": [
+     103.0,
+     103.2,
+     98.0
+    ],
+    "median": 103.0
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, 1920x1080 window",
+    "viewport": "1920x993@2",
+    "runs": [
+     60.0,
+     60.0,
+     60.0
+    ],
+    "median": 60.0,
+    "note": "60 Hz vsync cap"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "Mac, native Chrome, 1920x1080 window, no vsync",
+    "viewport": "1920x993@2",
+    "runs": [
+     101.3,
+     101.8,
+     103.2
+    ],
+    "median": 101.8
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "Mac, native Chrome, fullscreen",
+    "runs": [
+     1925,
+     2013,
+     1948
+    ],
+    "median": 1948
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "VM, ANGLE on Vulkan, Venus on KosmicKrisp (x11, sw WSI, list restart off), runtime eebaf11",
+    "viewport": "3568x1847@1",
+    "runs": [
+     26.8,
+     26.9,
+     26.9
+    ],
+    "median": 26.9
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "VM, ANGLE on Vulkan, Venus on KosmicKrisp",
+    "runs": [
+     1511,
+     1558,
+     1466
+    ],
+    "median": 1511,
+    "webgl1": 3733.97,
+    "webgl2": 2225.02,
+    "draw_call_stress": 151.83,
+    "note": "subtests from run 2"
+   },
+   {
+    "test": "aquarium 30000 fish",
+    "path": "VM, virgl, OmacVM.app 2.6.0 runtime, Chrome default (Wayland)",
+    "viewport": "1784x880@2",
+    "runs": [
+     22.1,
+     21.6,
+     21.9
+    ],
+    "median": 21.9
+   },
+   {
+    "test": "basemark web 3.0",
+    "path": "VM, virgl, OmacVM.app 2.6.0 runtime",
+    "runs": [
+     1654,
+     1793,
+     1599
+    ],
+    "median": 1654,
+    "webgl1": [
+     5165.69,
+     5317.28,
+     5188.19
+    ],
+    "webgl2": [
+     3232.89,
+     2896.73,
+     3081.13
+    ],
+    "draw_call_stress": [
+     81.17,
+     177.07,
+     79.43
+    ]
+   },
+   {
+    "test": "glmark2-es2 --off-screen 800x600",
+    "path": "VM, Zink on Venus on KosmicKrisp, guest Mesa e5f0687",
+    "runs": [
+     558,
+     558,
+     561
+    ],
+    "median": 558
+   },
+   {
+    "test": "glmark2-es2 --off-screen 800x600",
+    "path": "VM, virgl, same guest Mesa e5f0687",
+    "runs": [
+     591,
+     592,
+     592
+    ],
+    "median": 592
+   }
+  ]
+ }
 }

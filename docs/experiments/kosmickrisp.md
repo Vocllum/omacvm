@@ -17,7 +17,7 @@ Host (OmacVM.app runtime, `app/runtime`):
 | `build-kosmickrisp.sh` | Builds KosmicKrisp from Mesa `e5f0687867f5` (sha256-pinned archive). First Mesa's OpenCL-C compiler `mesa_clc` with Homebrew LLVM, then the driver with `-Dmesa-clc=system -Dllvm=disabled -Dspirv-tools=disabled -Dzstd=disabled`: the dylib links only system libraries. About 3 minutes on the M4. |
 | `-Dplatforms=macos` | Without Mesa's macos platform `VK_USE_PLATFORM_METAL_EXT` is undefined: KosmicKrisp lists `VK_EXT_external_memory_metal` but returns NULL for `vkGetMemoryMetalHandleEXT`. Venus called it and QEMU crashed on the guest's first allocation. |
 | `virgl-darwin-venus-metal-entrypoints.patch` | Venus checks both Metal entry points before calling them: a driver without them fails the allocation with a log line, the VM keeps running (it was a guest-triggered host crash). |
-| `virgl-darwin-kosmickrisp-fallback.patch` | Before choosing KosmicKrisp, make a throwaway instance with it; when it does not load or has no device, log and use MoltenVK. |
+| `virgl-darwin-kosmickrisp-fallback.patch` | Before choosing KosmicKrisp, make a throwaway instance with it; when it does not load or has no device, log and use MoltenVK. Tested in the VM: with a broken dylib QEMU logs the fallback and the guest gets MoltenVK's feature set. `omacvm check` shows which driver an app VM uses. |
 | `prepare-qemu-gpu-runtime.sh`, `verify-macos-compatibility.sh` | `lib/libvulkan_kosmickrisp.dylib` + `share/vulkan/icd.d/kosmickrisp_mesa_icd.json` next to MoltenVK. The dylib is the one image allowed a macOS 26 minimum: only the Vulkan loader opens it, and only on 26+. |
 
 KosmicKrisp is opt-in at build time: `OMACVM_RUNTIME_KOSMICKRISP=1` adds it, and the runtime
@@ -66,15 +66,23 @@ lock exists on the mini; it held only this VM. All numbers: [results.json](kosmi
 |---|---|---|---|
 | vkmark, headless, 800x600 | **840** (840, 912, 805) | 650 (666, 647, 650) | - |
 | vkmark, headless, 1920x1080 | 676 (1 run) | 654 (1 run) | - |
-| glmark2-es2 --off-screen, 800x600 | **555** over Zink (560, 555, 429) | Zink does not start | 494 (494, 480, 494) |
+| glmark2-es2 --off-screen, 800x600 | 555 over Zink (560, 555, 429) | Zink does not start | 494 (494, 480, 494), Arch's Mesa 26.2.3 |
+| same, both on guest Mesa e5f0687 (round 2) | 558 over Zink (558, 558, 561) | - | **592** (591, 592, 592) |
 | Aquarium 30,000 fish, Chrome 154 | **25.9** fps ANGLE on Vulkan (25.9, 25.9, 25.1), see below | ANGLE cannot make ES 3.0 | 21.9 (X11), 22.4 (Wayland) |
 | Basemark Web 3.0 | **1620** (1 run; WebGL1 3189, WebGL2 1934) | - | no score after 625 s (the known virgl hang, fixed on gpu-hang) |
 | Geekbench 7 GPU OpenCL (rusticl on Zink) | **18886** (19080, 18580, 18886) | no OpenCL device | - |
 | clpeak, Vulkan backend, fp32 | **4.01 TFLOPS** | - | - |
 
+vkcube (`--wsi wayland`) runs: 600 frames in 12.4 s with the Mac's screen locked. Its
+picture is not checked yet: in this VM `grim` returns a one-colour image even of the plain
+desktop, QEMU's screendump of the OpenGL scanout is black, and screen capture over SSH on
+the Mac mini showed a stale window. Someone has to look at the window.
+
 Both Vulkan drivers are latency bound at these sizes (about 1.2 ms per frame for any
-scene); KosmicKrisp is 29 % faster there. glmark2 over Zink beats virgl by 12 % with the
-same fence polling.
+scene); KosmicKrisp is 29 % faster there at 800x600; the 1080p pair is one run each.
+glmark2 over Zink first scored 12 % above virgl, but the two ran on different guest Mesas
+(Zink: e5f0687 in `/opt/mesa-kk`; virgl: Arch's 26.2.3). Run again on the same Mesa,
+alternating, virgl is 6 % ahead (592 against 558): the gain came from the newer Mesa.
 
 clpeak, Vulkan backend: fp32 4.01 TFLOPS, fp16 4.01, int32 1.01 TOPS, int8 dot 766 GOPS,
 global memory 97.5 GB/s, local 1.79 TB/s, image 104 GB/s, host to device 44.5 GB/s,
@@ -89,7 +97,10 @@ Particle Physics 13531, Fluid Simulation 16788.
 
 The Mac mini itself, same Geekbench 7.0.0, no VM running: GPU Metal **56025** (56610,
 56025, 55883), GPU OpenCL **35240** (35307, 35240, 35169). The VM's OpenCL is 54 % of the
-Mac's OpenCL and 34 % of its Metal score.
+Mac's OpenCL and 34 % of its Metal score. The two were not measured side by side: the VM
+ran from 12:31 to 13:29 with the screen locked and other builds on the Mac mini, the Mac's
+own runs from 14:37 to 14:48 with no VM running. Geekbench uploads every result to
+browser.geekbench.com (public in the free version).
 
 Chrome with ANGLE on Vulkan needs three things today: X11 (`--ozone-platform=x11`;
 Chrome refuses Vulkan with Wayland), Venus with the incremental-present fix, and
@@ -106,8 +117,36 @@ Vulkan load pointed at the guest's Mesa through a `GPUENV` hook): vkmark over Ve
 KosmicKrisp in a loop, Chrome on a WebGL page and mpv playing 1080p60 (both virgl) at the
 same time. **Pass**: 1793 s, no missed heartbeat, no stuck fence, 13 vkmark loops with
 steady scores (637 to 643, windowed on Wayland), 108,220 WebGL frames, 1.77 million
-fences signalled, QEMU's memory 3614 MB at the start and 1672 MB at the end (no growth).
+fences signalled, QEMU's memory 3614 MB at the start and 1672 MB at the end (no growth;
+the harness's guest memory field always read 0, so guest memory was not checked). Only
+vkmark ran on KosmicKrisp: ANGLE on Vulkan, Zink and rusticl were not soaked.
 The Vulkan conformance suite (dEQP-VK) was not run: it is not built in this VM yet.
+
+## Chrome in the VM against Chrome on the Mac (round 2)
+
+Same Mac mini, Chrome 154 on the Mac and in the VM, median of 3, the Mac's screen
+unlocked, no other VM running (load average 0.3 to 3.4 from other work on the Mac mini;
+it has no benchmark lock). The VM's two paths ran on the same VM: ANGLE on Vulkan with
+Venus on KosmicKrisp (this branch's runtime, the flags below, X11), and virgl on the
+installed OmacVM.app 2.6.0 runtime (it has the Basemark fix this branch lacks) with
+Chrome's defaults on Wayland, as OmacVM ships it.
+
+| | Aquarium, 30,000 fish | Basemark Web 3.0 |
+|---|---|---|
+| The Mac, Chrome full screen (2560x1322 at 2x) | 60.0 fps (the 60 Hz display); **103.0** without vsync (103.0, 103.2, 98.0) | **1948** (1925, 2013, 1948) |
+| The Mac, a 1920x1080 window (1920x993 at 2x) | 60.0; **101.8** without vsync | - |
+| VM, ANGLE on Vulkan, Venus on KosmicKrisp | **26.9** (26.8, 26.9, 26.9), 3568x1847 | 1511 (1511, 1558, 1466) |
+| VM, virgl (OmacVM.app 2.6.0) | 21.9 (22.1, 21.6, 21.9), 1784x880 at 2x | **1654** (1654, 1793, 1599) |
+
+- Aquarium: KosmicKrisp draws 23 % more frames than virgl, a quarter of the Mac's own
+  Chrome without vsync. Both VM canvases have about the same pixels (3568x1847 and
+  3568x1760).
+- Basemark: virgl reaches 85 % of the Mac, ANGLE on KosmicKrisp 78 %. KosmicKrisp is lower
+  in the WebGL 1 and WebGL 2 parts (3734 and 2225 against about 5200 and 3000 on virgl)
+  and higher in the draw-call stress (152 against 79 to 177).
+- So for the browser, ANGLE on Vulkan is not a clear win yet: faster with many draws of one
+  kind (Aquarium), slower on Basemark's mix, and it needs X11 and flags.
+- Basemark uploads each result to powerboard.gpuscore.com.
 
 ## Blockers, precisely
 
