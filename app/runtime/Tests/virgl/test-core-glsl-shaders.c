@@ -236,7 +236,23 @@ int main(void)
                      "MOV OUT[0], TEMP[0]\nEND\n",
                      &key, "textureGather", "GL_EXT_texture_shadow_lod", have_gl);
 
-   /* Compute shaders are always "#version 330" (hosts with compute; the Mac
+   /* A vertex emitted in a loop before the text that writes gl_Layer still
+    * stores it: which components are written comes from a pass before the
+    * translation, not from the text order. */
+   memset(&key, 0, sizeof(key));
+   failed |= convert("gl_Layer written after EmitVertex in a loop",
+                     "GEOM\nPROPERTY GS_INPUT_PRIMITIVE TRIANGLES\n"
+                     "PROPERTY GS_OUTPUT_PRIMITIVE TRIANGLE_STRIP\n"
+                     "PROPERTY GS_MAX_OUTPUT_VERTICES 3\nPROPERTY GS_INVOCATIONS 1\n"
+                     "DCL IN[][0], POSITION\nDCL OUT[0], POSITION\nDCL OUT[1], LAYER\nDCL TEMP[0]\n"
+                     "IMM[0] UINT32 {1, 0, 3, 0}\nMOV TEMP[0].x, IMM[0].yyyy\nBGNLOOP\n"
+                     "USGE TEMP[0].y, TEMP[0].xxxx, IMM[0].zzzz\nUIF TEMP[0].yyyy\nBRK\nENDIF\n"
+                     "UIF TEMP[0].xxxx\nEMIT IMM[0].yyyy\nENDIF\nMOV OUT[0], IN[0][0]\n"
+                     "MOV OUT[1].x, TEMP[0].xxxx\nUADD TEMP[0].x, TEMP[0].xxxx, IMM[0].xxxx\n"
+                     "ENDLOOP\nEMIT IMM[0].yyyy\nEND\n",
+                     &key, "{\n\t\tgl_Layer = floatBitsToInt(int_out_tmp1.x);", NULL, have_gl);
+
+   /* Compute shaders are always "#version 330\" (hosts with compute; the Mac
     * has none): a shader that needs GLSL 4.30 for a vote still needs the
     * texture gather extension line. Text only. */
    memset(&key, 0, sizeof(key));
