@@ -1,7 +1,8 @@
 # A VM's CPUs and memory, read and changed from the Mac (sourced after mac.sh,
 # vm.sh, setup.sh and vm/fusion.sh; bash 3.2). Each app keeps them in its own
 # settings, read when the VM starts:
-#   Parallels   prlctl set (Standard refuses it: config.pvs while unregistered)
+#   Parallels   prlctl set (Standard has no prlctl set: config.pvs while
+#               unregistered)
 #   UTM         System.CPUCount / System.MemorySize of config.plist (through
 #               UTM's scripting while UTM runs: it keeps what it read)
 #   Fusion      numvcpus / memsize of the .vmx
@@ -88,14 +89,16 @@ utm_set_resources() {
   [[ $out == "$2 $3" ]] || { echo "UTM: $out" >&2; return 1; }
 }
 
-res_set() {   # NAME TYPE CPUS MB
-  local b d x
+res_set() {   # NAME TYPE CPUS MB (Parallels: P_EDITION from parallels_limits)
+  local b d x err
   RES_NOTE=""
   case $2 in
     parallels)
-      "$PRLCTL" set "$1" --cpus "$3" --memsize "$4" >/dev/null 2>&1 || {
+      err=$("$PRLCTL" set "$1" --cpus "$3" --memsize "$4" 2>&1 >/dev/null) || {
         # Parallels Desktop Standard has no prlctl set: the settings file,
-        # while Parallels does not hold the VM (as omacvm build does).
+        # while Parallels does not hold the VM (as omacvm build does). Other
+        # editions have it, so their error is the real one.
+        [[ ${P_EDITION:-} == standard ]] || { echo "Parallels: ${err:-prlctl set failed}" >&2; return 1; }
         b=$(vm_bundle "$1")
         [[ -f $b/config.pvs ]] || return 1
         "$PRLCTL" unregister "$1" >/dev/null || return 1

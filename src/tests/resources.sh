@@ -77,6 +77,13 @@ EOF
 res_pvs_set "$T/config.pvs" 6 12288
 check "config.pvs: CPUs, memory, automatic sizing off" eq "$(for p in Cpu/Number Cpu/AutoCountEnabled Memory/RAM Memory/RamAutoSizeEnabled; do python3 "$PVS" "$T/config.pvs" get "Hardware/$p"; done | paste -sd' ' -)" "6 0 12288 0"
 
+# Parallels Pro (and Business): a failing prlctl set is the real error, shown
+# as it is; only Standard edits config.pvs (a prlctl that logs its calls).
+printf '#!/bin/bash\necho "$*" >> "%s/prl.log"\n[[ $1 == set ]] && { echo "The VM is busy" >&2; exit 1; }\nexit 0\n' "$T" > "$T/prl-pro"; chmod +x "$T/prl-pro"
+err=$(PRLCTL=$T/prl-pro; P_EDITION=pro; res_set "Some VM" parallels 2 4096 2>&1); rc=$?
+check "parallels pro: prlctl set fails -> its error, exit 1" eq "$rc $err" "1 Parallels: The VM is busy"
+check "parallels pro: no unregister, no settings file edit" eq "$(cut -d' ' -f1 "$T/prl.log" | paste -sd' ' -)" "set"
+
 # Tiers as omacvm build gives them, for a few Macs (OmacVM.app's Mac.tier is the same rule).
 tiers() {   # CORES PERF EFF MEM_GB -> the four tiers, "cpus/gb" each
   local t out=""
@@ -134,11 +141,17 @@ if (( LIVE )); then
   # Parallels Desktop Standard: no prlctl set, the settings file instead.
   printf '#!/bin/bash\n[[ $1 == set ]] && { echo "only in Pro" >&2; exit 1; }\nexec /usr/local/bin/prlctl "$@"\n' > "$T/prlctl"; chmod +x "$T/prlctl"
   REAL=$PRLCTL; PRLCTL=$T/prlctl
-  res_set "$NAME" parallels 2 6144; rc=$?
+  P_EDITION=standard res_set "$NAME" parallels 2 6144; rc=$?
   PRLCTL=$REAL
   check "parallels without prlctl set: config.pvs while unregistered" eq "$rc $(res_get "$NAME" parallels)" "0 2 6144"
   check "parallels: registered again" eq "$(vm_state "$NAME")" stopped
   check "parallels: Parallels reads the new values" eq "$("$PRLCTL" list -i "$NAME" | awk '$1 == "cpu" { print $2 } $1 == "memory" { print $2 }' | paste -sd' ' -)" "cpus=2 size=6144Mb"
+
+  # Pro: the same refusal is shown, and the VM stays as it is and registered.
+  PRLCTL=$T/prlctl
+  err=$(P_EDITION=pro res_set "$NAME" parallels 3 8192 2>&1); rc=$?
+  PRLCTL=$REAL
+  check "parallels pro: prlctl's error shown, nothing changed" eq "$rc $err $(res_get "$NAME" parallels) $(vm_state "$NAME")" "1 Parallels: only in Pro 2 6144 stopped"
 
   # OmacVM.app while its VM runs: written, for the next start (a stand-in
   # process with the VM's disk on its command line, as QEMU has).
