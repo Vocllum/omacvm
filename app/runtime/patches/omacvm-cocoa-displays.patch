@@ -244,7 +244,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      }
  }
  
-@@ -2915,14 +3009,1120 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2915,14 +3009,1125 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -404,10 +404,15 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    return false;
 +}
 +
-+/* A window of ours that is shown on the current Space and under point p. */
++/*
++ * A window of ours that is on screen now and under point p. A full-screen
++ * window in a Space that is not shown is occluded, though its frame still
++ * covers its display.
++ */
 +static bool omacvm_window_under(NSWindow *w, NSPoint p)
 +{
-+    return w && [w isVisible] && [w isOnActiveSpace] &&
++    return w && [w isVisible] &&
++           ([w occlusionState] & NSWindowOcclusionStateVisible) &&
 +           NSPointInRect(p, [w frame]);
 +}
 +
@@ -1366,7 +1371,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  static void cocoa_display_early_init(DisplayOptions *o)
  {
      assert(o->type == DISPLAY_TYPE_COCOA);
-@@ -2967,10 +4167,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2967,10 +4172,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1384,7 +1389,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -2985,6 +4191,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2985,6 +4196,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1392,7 +1397,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3037,6 +4244,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -3037,6 +4249,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          dcl.ops = &dcl_ops;
      }
  
