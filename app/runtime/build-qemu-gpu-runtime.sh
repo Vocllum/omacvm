@@ -96,6 +96,7 @@ virgl_vertex_format_patch="$native_dir/patches/virgl-vertex-format-checks.patch"
 virgl_ubo_align_patch="$native_dir/patches/virgl-uniform-buffer-alignment.patch"
 virgl_block_array_patch="$native_dir/patches/virgl-uniform-block-array.patch"
 virgl_draw_error_patch="$native_dir/patches/virgl-draw-gl-error-check.patch"
+virgl_vertex_unused_patch="$native_dir/patches/virgl-vertex-unused-first-input.patch"
 virgl_venus_robust_patch="$native_dir/patches/virgl-venus-robust-buffer-access.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
@@ -143,6 +144,7 @@ virgl_vertex_format_patch_sha256=dd1ad464871635c753622037d5f188af821028ade109386
 virgl_ubo_align_patch_sha256=0087f49d9f64e497580bbb6174b92ef0990c85eea73afbc18ff34be2084a8f80
 virgl_block_array_patch_sha256=8b9fb4870fbd4ee629d2802d10672406c7ad43bdf54ae558bd6427e6f5a4011c
 virgl_draw_error_patch_sha256=9243046f78aa8eaa1c22591a3afeafe6a51ea092170ac8370d26ffa57e92c363
+virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5621236444aa1a2cc6
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
@@ -711,6 +713,8 @@ verify_file_sha "Uniform block arrays" "$virgl_block_array_patch" "$virgl_block_
 patch -d "$virgl_source" -p1 -f -i "$virgl_block_array_patch"
 verify_file_sha "Draw GL error check" "$virgl_draw_error_patch" "$virgl_draw_error_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_draw_error_patch"
+verify_file_sha "Unused first vertex input" "$virgl_vertex_unused_patch" "$virgl_vertex_unused_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
 # OmacVM: Venus devices always get robust buffer access where the host device has it.
 verify_file_sha "Venus robust buffer access" "$virgl_venus_robust_patch" "$virgl_venus_robust_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_venus_robust_patch"

@@ -9,7 +9,8 @@
  * Covers virgl-buffer-binding-checks.patch, virgl-draw-range-checks.patch and
  * virgl-uniform-buffer-checks.patch; case 29 virgl-shader-index-clamp.patch; cases 30-31
  * virgl-vertex-format-checks.patch, 32 virgl-uniform-buffer-alignment.patch, 33-34
- * virgl-uniform-block-array.patch (30-33 are the gpu-robust review's repros 1-3).
+ * virgl-uniform-block-array.patch (30-33 are the gpu-robust review's repros 1-3), 35
+ * virgl-vertex-unused-first-input.patch (the second review's repro 5).
  * gl-oracle.c also aborts on a GL error pending at a draw (virgl-draw-gl-error-check).
  * Usage: test-gpu-ranges [case] */
 #include <OpenGL/OpenGL.h>
@@ -311,6 +312,15 @@ static const char *vs_ubo32 =
    "DCL OUT[0], POSITION\n"
    "DCL CONST[1][0..1]\n"
    "  0: ADD OUT[0], IN[0], CONST[1][1]\n"
+   "  1: END\n";
+
+/* declares two inputs and reads only IN[1]: IN[0] gets no attribute location */
+static const char *vs_in1_only =
+   "VERT\n"
+   "DCL IN[0]\n"
+   "DCL IN[1]\n"
+   "DCL OUT[0], POSITION\n"
+   "  0: MOV OUT[0], IN[1]\n"
    "  1: END\n";
 
 /* Uniform blocks 1 and 3 (block 2 is a hole) picked at run time: block ADDR + 1. Case 33
@@ -827,6 +837,22 @@ static void run_case(int n)
       d.count = 3;
       break;
    }
+   case 35:
+      /* With IN[0] unused, vrend stopped setting attributes and the draw kept the
+       * pointers of the draw before: IN[1] fetched 4 vertices from a 1-vertex buffer. */
+      what = "a shader without its first input after a draw from smaller buffers";
+      emit_bind_shader(c, 3, TEST_SHADER_VERTEX);
+      emit_bind_vertex_elements(c, 11);
+      emit_vertex_buffers(c, 2, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_VB_SMALL) },
+                                                        { 16, 0, res_id(ctx, R_VB_SMALL) } });
+      emit_draw(c, &(struct draw){ .count = 1, .mode = TEST_PRIM_POINTS });
+      emit_shader(c, 52, TEST_SHADER_VERTEX, vs_in1_only);
+      emit_bind_shader(c, 52, TEST_SHADER_VERTEX);
+      emit_vertex_buffers(c, 2, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_VB) },
+                                                        { 16, 0, res_id(ctx, R_VB) } });
+      d.count = 4;
+      d.mode = TEST_PRIM_POINTS;
+      break;
    default:
       teardown(ctx);
       free(c);
@@ -834,7 +860,7 @@ static void run_case(int n)
    }
 
    unsigned long before = gl_oracle_draws();
-   unsigned long setup_draws = n == 18 || (n >= 30 && n <= 32) ? 1 : 0;
+   unsigned long setup_draws = n == 18 || (n >= 30 && n <= 32) || n == 35 ? 1 : 0;
    emit_draw(c, &d);
    int r = submit(ctx, c);
    unsigned long drawn = gl_oracle_draws() - before - setup_draws;
@@ -900,6 +926,8 @@ int main(int argc, char **argv)
       run_clamp_case();
    if (!only || only == 34)
       run_block_array_case();
+   if (!only || only == 35)
+      run_case(35);
 
    /* A buffer asking for persistent mapping gets no GL storage on a GL without
     * ARB_buffer_storage (macOS): creating it must fail, not leave an empty GL buffer. */
