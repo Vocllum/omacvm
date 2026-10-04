@@ -141,7 +141,7 @@ WebGL conformance 1.0.4 and 2.0.0, Chrome 154; transform feedback left out, see
 gpu-robust). "One process" = one dEQP process for the whole list, one Chrome for every
 page, as apps run; "isolated" = restarted after every failure. Before = gpu-native's
 runtime with gpu-hang's integer sampler fix (conformance-runs' gn-v4h); after = this
-branch. Correctness runs, no bench lock.
+branch at 6140dc5. Correctness runs, no bench lock.
 
 | Suite | before, one process | before, isolated | after, one process | after, isolated |
 |---|---|---|---|---|
@@ -150,7 +150,7 @@ branch. Correctness runs, no bench lock.
 | WebGL 1 pages (787) | 430 | 776 | 776 | 776 |
 | WebGL 2 pages (967 without TF) | 97 of 970 | 960 of 970 | 959 | 959 |
 | dEQP-GLES2, whole list (17165) | 16971 | | 16972 | 16972 |
-| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42835 + 104 QW | 42834 + 104 QW |
+| dEQP-GLES3, whole list (43448) | 21140 + 1116 QW | | 42837 + 104 QW | 42835 + 104 QW |
 
 After the patches the one-process numbers equal the isolated ones, case by case (the
 three flush_finish cases pass or give a compatibility warning depending on timing). Against
@@ -160,6 +160,10 @@ context error. What still fails fails in both modes: cube map filtering, one bli
 format conversion (rgb8 to rg32f), 11 WebGL 1 and 8 WebGL 2 pages, and the
 transform feedback crash that gpu-robust fixes
 (`lifetime.attach.deleted_output.buffer_transform_feedback`).
+
+A 30-minute soak on the same runtime (glmark2, Chrome on a WebGL page and mpv playing
+1080p at once) passed: no hang, no missed heartbeat, 6.1 million fences, no new QEMU
+log line, QEMU memory 5.5 GB at the start and 4.5 GB at the end (5.7 GB peak).
 
 ## Measuring
 
