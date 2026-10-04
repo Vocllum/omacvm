@@ -2,11 +2,17 @@
 
 <h3 align="center">Omarchy in a VM on your Mac, feeling native</h3>
 
-<p align="center">One command builds the VM, in Parallels Desktop, UTM or VMware Fusion. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
+<p align="center">One command builds the VM, in its own app OmacVM.app, UTM, VMware Fusion or Parallels Desktop. Then your Mac's Wi-Fi, Bluetooth, sound, keys, trackpad, displays, Night Shift and wallpaper all work in Omarchy.</p>
 
 <p align="center">
   <b>With <a href="src/omanotch/README.md">Omanotch</a></b>: Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip.
 </p>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash
+```
+
+<p align="center">Using a coding agent? <a href="docs/agents.md">Copy the prompt for it</a>.</p>
 
 <p align="center">
   <img src="docs/images/hero.svg" alt="Animated overview. A MacBook runs Omarchy full screen; the VM leaves a black strip beside the notch. The VM's invisible notch monitor appears above, Omanotch streams Omarchy's real bar into the strip piece by piece, the windows grow to full height, the pointer glides into the strip and a click on the clock opens Omarchy's calendar. Then, with the macOS host shown above the VM and OmacVM Bridge between them: the Mac's Wi-Fi and volume arrive in Omarchy's bar; volume and brightness keys drive the Mac while Omarchy shows the popup; three- and four-finger swipes and pinch arrive through OmacVM Gestures while macOS's Spaces swipe is off; Super+Ctrl+N switches the Mac's Night Shift; an external display joins in the macOS arrangement." width="100%">
@@ -108,20 +114,7 @@ what you want to do (build another VM, switch features, update, check).
 Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && ./install.sh`
 (or just `./omacvm`).
 
-Or let your coding agent (Claude Code, Codex, …) do it, with this prompt:
-
-```text
-Set up OmacVM on my Mac (github.com/gillesgoetsch/omacvm): Omarchy in a VM.
-Read https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/AGENTS.md
-first (section 0) and follow it. Install it with
-curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash -s -- --no-start
-then walk me through the build: ask me Parallels, UTM or VMware Fusion, how much of my Mac
-the VM gets and which features I want (explain each, scroll momentum is
-experimental), show me the plan, ask for my password, build it, and tell me
-the steps only I can do.
-```
-
-More in [With a coding agent](#with-a-coding-agent).
+Or let your coding agent do it: [the prompt and more](docs/agents.md).
 
 <p align="center">
   <img src="docs/images/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
@@ -453,24 +446,8 @@ OmacVM version.
 
 ## With a coding agent
 
-OmacVM is built to be driven by an agent as well as by hand. Point yours at
-this repository and ask, for example: *"Set up OmacVM on my Mac: a Parallels
-VM with the macOS-native scroll momentum on"* or *"Turn on the scroll momentum for my VM 'Omarchy'"*.
-
-- [AGENTS.md](AGENTS.md) is the manual for agents: recipes for building,
-  switching features, updating and fixing, plus everything that was tried and
-  does not work. Claude Code also picks up the skill in
-  [.claude/skills/omacvm](.claude/skills/omacvm/SKILL.md).
-- Machine-readable: `omacvm vms --json`, `omacvm features --json`,
-  `omacvm check --json`, `omacvm build --plan --json` (what would be built,
-  the steps only you can do as `needs_human`, and the exact command).
-- Nothing waits on a question without a terminal: `--yes` and options instead
-  (`omacvm build --help`), the password from `OMACVM_PASSWORD`. Exit codes:
-  0 done, 1 failed, 2 usage, 3 needs a person (installing Parallels, UTM or Fusion, a
-  macOS permission), and the message says what to do.
-
-The steps that need you (macOS permission prompts, one Parallels setting, your
-password) stay with you; the agent hands them over.
+OmacVM can be driven by a coding agent as well as by hand: the prompt, the agent manual and the
+machine-readable commands are in [docs/agents.md](docs/agents.md).
 
 ## How it works
 
