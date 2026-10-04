@@ -56,3 +56,6 @@ jobs:
 
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
+
+      - name: omacvm-netd offline tests
+        run: src/net/mac/test.sh
