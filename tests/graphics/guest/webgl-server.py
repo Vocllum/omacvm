@@ -18,7 +18,10 @@ def tests(listfile, base=""):
     """Walk 00_test_list.txt files like the official harness (min/max version options)."""
     found = []
     for line in open(os.path.join(suite, base, listfile)):
-        parts = line.split("#")[0].split()
+        line = line.strip()
+        if line.startswith("//") or line.startswith("#"):
+            continue
+        parts = line.split()
         if not parts:
             continue
         name, opts = parts[-1], parts[:-1]
