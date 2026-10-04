@@ -649,7 +649,7 @@ env DYLD_LIBRARY_PATH="$private_libraries" \
     "$virgl_build" "$work_dir/virgl-regressions" -- \
     "-L$epoxy_root/lib" -lepoxy \
     -framework Metal -framework CoreFoundation -lobjc \
-    -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+    -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework OpenGL -framework IOSurface \
     "-Wl,-rpath,$epoxy_root/lib" "-Wl,-rpath,$angle_root/lib"
 # Probe real format-selection code with controlled GL availability and failures.
 env DYLD_LIBRARY_PATH="$private_libraries" \
@@ -657,7 +657,7 @@ env DYLD_LIBRARY_PATH="$private_libraries" \
     "$virgl_build" "$work_dir/virgl-regressions" -- \
     "-L$epoxy_root/lib" -lepoxy \
     -framework Metal -framework CoreFoundation -lobjc \
-    -framework VideoToolbox -framework CoreMedia -framework CoreVideo \
+    -framework VideoToolbox -framework CoreMedia -framework CoreVideo -framework OpenGL -framework IOSurface \
     "-Wl,-rpath,$epoxy_root/lib" "-Wl,-rpath,$angle_root/lib"
 python3 "$meson" install -C "$virgl_build" --no-rebuild
 require_private_pkg_version virglrenderer 1.3.0
