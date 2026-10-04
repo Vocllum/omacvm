@@ -42,8 +42,8 @@ display's refresh rate everywhere: it is the draw calls, not the pixels).
 |---|---|---|---|---|---|
 | Parallels | 1280x960 | 27.0 | 8.4 | 60 | one host thread at 100 %: Apple's OpenGL |
 | VMware Fusion | 1280x800 | 39.3 | 26.6 (100 %) | 48 | the guest's GPU process: Mesa's svga driver |
-| OmacVM.app | 2880x1620 | 22.7 | 45 (100 %) | 73 | the GPU process, waiting in the virtio kick while QEMU decodes |
-| UTM | 3456x2160 | 12.0 | 80 | 172 | everything slow: UTM in the background (see below) |
+| OmacVM.app | 2880x1620 | 22.7 | 45 (100 %, a third of it waiting) | 73 | QEMU's main loop at 100 %: Apple's OpenGL |
+| UTM | 3456x2160 | 12.0 | 80 | 172 | UTM in the background: virtual CPUs waiting for QEMU's lock (see below) |
 
 ### Parallels
 
@@ -69,15 +69,19 @@ browser.
 
 ### OmacVM.app
 
-Chrome's GPU process is busy for the whole frame, but 36 % of that is
-`vp_notify`, the write that tells the virtual GPU there is work. QEMU has no
-ioeventfd with Hypervisor.framework, and its virtio-gpu-gl device processes
-the command queue in the notify handler, so the queue is processed right
-inside that write: virglrenderer decodes the whole submit and runs it through Apple's
-OpenGL before the guest gets its CPU back. Mesa (24 %) and Chrome/ANGLE (24 %)
-are the rest. The host decoding is on the guest's critical path; an
-asynchronous queue on the Mac side would let the guest prepare the next
-batch meanwhile (the gpu-native track's area). The command stream per draw is
+The same wall as Parallels, in QEMU: its main loop thread runs at about 100 %,
+88 % of it decoding Chrome's draws in virglrenderer and two thirds of the
+thread inside Apple's OpenGL (`glDrawElementsInstanced`). Chrome's GPU
+process in the guest is busy for the whole frame too, but 36 % of that is
+`vp_notify`, the write that tells the virtual GPU there is work: with
+Hypervisor.framework every exit of a virtual CPU takes QEMU's big lock first
+(`hvf.c`: `bql_lock()` after `hv_vcpu_run`), and the main loop holds it while
+it decodes. So the guest simply waits for the busy host thread; Mesa (24 %)
+and Chrome/ANGLE (24 %) are the rest. gpu-native's asynchronous fences don't
+change this (Aquarium 21.5 fps with its runtime v4 vs 22.5, same VM, bench
+lock): the host thread is the limit, not the fences.
+
+The command stream per draw (virglrenderer's `VREND_DEBUG=cmd`) is
 `DRAW_VBO`, `SET_CONSTANT_BUFFER` and `SET_INDEX_BUFFER` every time, plus
 sampler views, vertex buffers and sampler states every third draw.
 
@@ -85,8 +89,12 @@ sampler views, vertex buffers and sampler states every third draw.
 
 UTM was in the background during our runs (we may not take the focus), and
 a backgrounded UTM runs slower: even Chrome's renderer needed 64 ms per frame
-(8 ms on the other routes). Its numbers here only compare settings with each
-other. Last night's full-screen run gave 28.1 fps.
+(8 ms on the other routes). A `sample` of UTM's QEMU shows why: its main
+thread decodes the virgl commands (through ANGLE on Metal, not Apple's
+OpenGL) about a third of the time, and the eight virtual CPUs spend about
+60 % of theirs waiting for QEMU's big lock, which that thread holds. Its
+numbers here only compare settings with each other; last night's
+full-screen run gave 28.1 fps.
 
 ## What we tried
 
@@ -112,9 +120,10 @@ other. Last night's full-screen run gave 28.1 fps.
 
 ## What would help (outside the guest)
 
-- OmacVM.app: process the virtio-gpu queue asynchronously on the Mac, so the
-  guest's kick returns at once (gpu-native track).
-- All virgl routes: less work per draw on the host. Apple's OpenGL sets up
+- OmacVM.app: decoding outside QEMU's big lock would stop the guest's other
+  virtual CPUs from waiting on it, but the decoding thread would still be the
+  limit.
+- OmacVM.app and Parallels: less work per draw on the host. Apple's OpenGL sets up
   textures, samplers and the pipeline again for every draw; a Metal backend
   (or Venus with a Vulkan driver on Metal, gpu-venus track) avoids that layer.
 - Parallels: their renderer runs on one thread on top of Apple's OpenGL;
