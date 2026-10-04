@@ -6,6 +6,7 @@
 #   omacvm build             asks a few questions, shows a summary, then builds
 #   omacvm build --dry-run   asks the questions and shows the summary only
 #   omacvm build --plan --json   the summary as JSON, nothing built (agents)
+#   omacvm build --prebuilt  download a prebuilt VM instead (faster); --build: build it here
 #
 # Everything can also be given up front (--yes skips the questions; the
 # password then comes from OMACVM_PASSWORD):
@@ -35,6 +36,8 @@ source "$R/src/lib/vm.sh"
 source "$R/src/lib/features.sh"
 source "$R/src/lib/ui.sh"
 source "$R/src/lib/prereq.sh"
+source "$R/src/prebuilt/lib.sh"
+source "$R/src/prebuilt/vm.sh"
 features_load
 # Bash 3.2 gives the EXIT trap status 0 after a set -u abort: only DONE=1 (set
 # right before each successful exit) counts as success.
@@ -51,7 +54,7 @@ linux_name() {
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
 BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
-CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0
+CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
 feature_flag() {   # NAME on|off
@@ -94,6 +97,10 @@ while (( $# )); do
     --parallels-edition) P_PLAN=$2; shift 2
       [[ $P_PLAN == standard || $P_PLAN == pro ]] || usage "--parallels-edition standard or pro" ;;
     --channel) CHANNEL=$2; shift 2 ;;          # rc|stable|edge, for testing omarchy-mac
+    --image) IMAGE=1; YES=1; shift ;;
+    --no-mac) NO_MAC=1; shift ;;                # tests: leave this Mac's apps as they are           # a VM for a prebuilt image (src/prebuilt/make-image.sh)
+    --prebuilt) SOURCE=prebuilt; shift ;;
+    --build) SOURCE=build; shift ;;
     --yes|-y) YES=1; shift ;;
     --dry-run) DRY=1; shift ;;
     --plan) PLAN=1; DRY=1; shift ;;
@@ -198,6 +205,26 @@ elif (( BATTERY )) && ! feature_available "$i"; then (( JSON )) || info "${FTITL
 # Homebrew and its zstd, e2fsprogs and OpenSSL (installed after asking), for
 # the routes that build the disk here. OmacVM.app brings its own tools.
 (( DRY )) || [[ $TYPE == app ]] || ensure_brew_tools
+# ---------- build it here, or download a prebuilt VM ----------
+build_minutes() { [[ $TYPE == fusion ]] && echo "45 to 85" || echo "30 to 70"; }
+PB_OK=0
+# OmacVM.app has no prebuilt VMs: it builds its own.
+if [[ $SOURCE != build ]] && ! (( IMAGE )) && [[ $TYPE != app ]]; then
+  prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
+fi
+if [[ -z $SOURCE ]]; then
+  SOURCE=build
+  if (( PB_OK && ! YES )); then
+    ui_select how "How should OmacVM make the VM?" 1 \
+      "Build it yourself|about $(build_minutes) minutes, everything from Arch Linux ARM and omarchy-mac" \
+      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $(cat "$R/src/VERSION") on the way"
+    (( how == 1 )) && SOURCE=prebuilt
+  fi
+elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
+  # No image for this app and OmacVM version (or no connection): build it here.
+  (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
+  SOURCE=build
+fi
 # OmacVM.app also takes at most 64 characters and no '..' (VMConfig.validName).
 NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]*$'
 [[ $TYPE == app ]] && NAME_RE='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$'
@@ -389,6 +416,8 @@ case $lang in
   *) LANG_VM="${lang}_${region##*_}.UTF-8" ;;
 esac
 [[ -n $CHANNEL ]] || CHANNEL=$(omarchy_channel)
+# A prebuilt image carries nothing of this Mac: the first boot sets these.
+(( IMAGE )) && { KB=us; KB_NOTE=""; KB_SHOWN=us; TZ_MAC=UTC; LANG_VM=en_US.UTF-8; }
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
        mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
@@ -437,7 +466,7 @@ human_steps() {
   esac
 }
 if (( PLAN && JSON )); then
-  cmd="OMACVM_PASSWORD=… omacvm build --yes --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $(printf %q "$HOST")"
+  cmd="OMACVM_PASSWORD=… omacvm build --yes --$SOURCE --vm-type $TYPE --vm-name $(printf %q "$VM") --cpus $CPUS --memory-gb $MEM_GB --disk-gb $DISK_GB --user $U --full-name $(printf %q "$FULL") --hostname $(printf %q "$HOST")"
   # No licence yet: the edition the limits were planned for.
   [[ -n ${P_PLANNED:-} ]] && cmd+=" --parallels-edition $P_EDITION"
   [[ -n ${VM_DIR:-} && $VM_DIR != "$(default_dir)" ]] && cmd+=" --vm-dir $(printf %q "$VM_DIR")"
@@ -468,7 +497,15 @@ if (( PLAN && JSON )); then
     printf '%s"%s": %s' "$( ((k)) && echo ', ')" "${FEATS[$k]}" "$( ((FEATS[k+1])) && echo true || echo false)"
     cmd+=" --feature ${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)"
   done
-  printf '},\n  "minutes": "%s",\n  "needs_human": [' "$([[ $TYPE == fusion ]] && echo 45-85 || echo 30-70)"
+  printf '},\n  "source": "%s",\n' "$SOURCE"
+  if (( PB_OK )); then
+    printf '  "prebuilt": {"available": true, "release": %s, "download_gb": %s, "omarchy": %s, "omacvm": %s},\n' \
+      "$(json_str "$PB_TAG")" "$(pb_gb "$PB_SIZE")" "$(json_str "$PB_OMARCHY")" "$(json_str "$PB_VERSION")"
+  else
+    printf '  "prebuilt": {"available": false},\n'
+  fi
+  [[ $SOURCE == prebuilt ]] && mins="3-10 plus the download" || mins=$(build_minutes | sed 's/ to /-/')
+  printf '  "minutes": "%s",\n  "needs_human": [' "$mins"
   first=1
   while IFS= read -r step; do
     printf '%s\n    %s' "$( ((first)) || echo ,)" "$(json_str "$step")"; first=0
@@ -498,7 +535,7 @@ box=("OmacVM will build this VM" ""
      "user       $U ($FULL), hostname $HOST"
      "keyboard   $KB_SHOWN"
      "timezone   $TZ_MAC, language $LANG_VM"
-     "Omarchy    omarchy-mac, $CHANNEL packages" "")
+     "Omarchy    $( [[ $SOURCE == prebuilt ]] && echo "prebuilt VM: Omarchy $PB_OMARCHY ($(pb_gb "$PB_SIZE") GB download, release $PB_TAG)" || echo "omarchy-mac, $CHANNEL packages, built here")" "")
 while IFS= read -r l; do box+=("${l#    }"); done < <(explain_features)
 if (( UI_FANCY )) && ! (( YES )); then ui_box "${box[@]}"
 else printf '\n'; for l in "${box[@]}"; do printf '  %s\n' "$l"; done; fi
@@ -525,7 +562,7 @@ fi
 
 # Cmd as Super in Parallels: its Linux keyboard profile turns Cmd+C/V/X into
 # Ctrl. Emptying it needs Parallels Desktop closed: done now when no VM runs.
-if [[ $TYPE == parallels ]] && ! parallels_profile_emptied; then
+if [[ $TYPE == parallels ]] && ! (( IMAGE )) && ! parallels_profile_emptied; then
   if ! "$PRLCTL" list -o status 2>/dev/null | grep -q running; then
     if pgrep -xq prl_client_app; then
       osascript -e 'quit app "Parallels Desktop"' >/dev/null 2>&1 || true
@@ -538,7 +575,8 @@ if [[ $TYPE == parallels ]] && ! parallels_profile_emptied; then
 fi
 
 # From here on: numbered steps, and everything also into a log file.
-STEP=0; STEPS=$(case $TYPE in (parallels) echo 6 ;; (app) echo 2 ;; (*) echo 5 ;; esac)
+STEP=0; STEPS=$(case $TYPE in (parallels) (( IMAGE )) && echo 5 || echo 6 ;; (app) echo 2 ;; (*) echo 5 ;; esac)
+[[ $SOURCE == prebuilt ]] && STEPS=4
 step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
 BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
 mkdir -p "$HOME/Library/Logs"
@@ -588,6 +626,9 @@ vm_pin "$VM" app
 gssh "$IP" "systemctl reboot" 2>/dev/null || true
 else
 
+if [[ $SOURCE == prebuilt ]]; then
+  prebuilt_make_vm     # download, unpack, first boot with the seed: sets IP
+else
 # ---------- 2. temporary live installer + the real disk ----------
 step "Temporary live installer (try-omarchy, about 1.4 GB download)"
 if [[ $TYPE == parallels ]]; then
@@ -698,30 +739,35 @@ ui_spin "Waiting for SSH on $IP" wait_ssh "$IP" || die "no SSH on $IP"
 step "Omarchy from omarchy-mac (the longest step)"
 [[ $TYPE == fusion ]] && gssh "$IP" "bash -s" < "$R/src/fusion/guest/dns.sh"   # Fusion's own DNS fails the install
 gssh "$IP" "OMARCHY_MAC_CHANNEL=$CHANNEL bash -s" < "$R/src/vm/omarchy-install.sh" 2>&1 | ui_follow "Installing Omarchy (20-40 minutes)"
-if [[ $TYPE == parallels ]]; then
+# Parallels Tools come from this Mac's Parallels; never in a prebuilt image.
+if [[ $TYPE == parallels ]] && ! (( IMAGE )); then
   step "Parallels Tools"
-  gssh "$IP" "cat > /root/prl-tools-lin-arm.iso" < "/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
-  gssh "$IP" "set -e; mkdir -p /mnt/tools; mount -o loop,ro /root/prl-tools-lin-arm.iso /mnt/tools
-    /mnt/tools/installer/install-cli.sh --install >/dev/null 2>&1 || /mnt/tools/installer/install-cli.sh --install
-    umount /mnt/tools; rm -f /root/prl-tools-lin-arm.iso"
+  parallels_tools_install "$IP"
 fi
 gssh "$IP" "rm -f /root/omacvm.env"   # it holds the password hash
+fi
 
 # ---------- 5. OmacVM ----------
 step "OmacVM: the Mac side, then the VM side"
 args=(--vm "$VM" --vm-type "$TYPE" --ip "$IP" --user "$U" --keyboard "$KB")
+(( IMAGE )) && args+=(--no-mac --no-token --no-tools)   # nothing of this Mac in an image
+(( ${NO_MAC:-0} )) && args+=(--no-mac)
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do
   args+=(--feature "${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)")
 done
 "$R/src/cmd/apply.sh" "${args[@]}"
-gssh "$IP" "systemctl reboot" 2>/dev/null || true
+if [[ $SOURCE == prebuilt ]]; then
+  prebuilt_drop_seed
+else
+  gssh "$IP" "systemctl reboot" 2>/dev/null || true
+fi
 fi
 
 mac_steps=$(human_steps | sed 's/^/    * /')
 ssh_to="root@$IP"; [[ $IP == *:* ]] && ssh_to="-p ${IP##*:} root@${IP%:*}"   # OmacVM.app: 127.0.0.1:PORT
 cat <<EOF
 
-  Done in $(( ($(date +%s) - started) / 60 )) minutes. VM '$VM' ($TYPE) is rebooting into Omarchy.
+  Done in $(( ($(date +%s) - started) / 60 )) minutes${PB_TIMES:+ ($PB_TIMES)}. VM '$VM' ($TYPE) is rebooting into Omarchy.
 
   One-time steps on the Mac:
 $mac_steps

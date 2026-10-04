@@ -22,6 +22,20 @@ utm_create() {
   echo "$out"
 }
 
+# utm_import BUNDLE: add a .utm bundle to UTM's library (UTM copies it into
+# its own folder).
+utm_import() {
+  local out
+  out=$(utm_osa \
+    -e 'on run argv' \
+    -e '  tell application "UTM"' \
+    -e '    set vm to import new virtual machine from (POSIX file (item 1 of argv))' \
+    -e '    return id of vm' \
+    -e '  end tell' \
+    -e 'end run' "$1")
+  [[ $out =~ ^[0-9A-F-]{36}$ ]] || die "UTM could not import the VM: $out"
+}
+
 # utm_drop_live NAME: keep only the NVMe system disk (the VM must be stopped).
 utm_drop_live() {
   local out

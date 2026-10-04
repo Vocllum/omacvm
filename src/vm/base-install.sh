@@ -15,9 +15,6 @@ D=$(lsblk -dnpo NAME,TRAN | awk '$2 == "nvme" { print $1; exit }')
 [[ -b ${D:-} ]] || { echo "base-install: no NVMe disk found" >&2; exit 1; }
 P=${D}p
 
-log "tools for the install"
-pacman -Sy --noconfirm --needed arch-install-scripts dosfstools btrfs-progs gptfdisk >/dev/null
-
 log "fastest Arch Linux ARM mirrors from here"
 # The geo-DNS default can send you across the world and time out; rank a few
 # mirrors by how fast they serve the core database, keep the default last.
@@ -31,6 +28,9 @@ done | sort -n | head -4 | awk '{ print $2 }' || true)
   echo 'Server = http://mirror.archlinuxarm.org/$arch/$repo'
 } > /etc/pacman.d/mirrorlist
 cat /etc/pacman.d/mirrorlist
+
+log "tools for the install"
+pacman -Sy --noconfirm --needed arch-install-scripts dosfstools btrfs-progs gptfdisk >/dev/null
 
 log "partitions on $D"
 sgdisk --zap-all "$D" >/dev/null

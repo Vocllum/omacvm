@@ -24,7 +24,7 @@ else than the cause. Recipes and the general failure table are in
 | 12 | UTM | [Moving a UTM VM deletes it](#12-utm-moving-a-vm-and-changing-its-config) |
 | 13 | Fusion | [Security review of PR #1](#13-security-review-of-the-fusion-route-pr-1) |
 | 14 | UTM | [Chrome has no GPU, then WebGL comes out empty](#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty) |
-| 15 | UTM | [UTM uses 15 W while Omarchy sits idle](#15-utm-uses-15-w-while-omarchy-sits-idle) |
+| 15 | UTM | [UTM idle power is being measured again](#15-utm-idle-power-is-being-measured-again) |
 | 16 | All | [MotionMark gives no stable result](#16-motionmark-gives-no-stable-result) |
 | 17 | All | [Security review of the Mac and guest sides; "another SSH host key"](#17-security-review-of-the-mac-and-guest-sides) |
 | 18 | All | [No snapshots in GRUB with Arch Linux ARM's own kernel](#18-all-routes-no-snapshots-in-grub-with-arch-linux-arms-own-kernel) |
@@ -254,26 +254,19 @@ on the branch.
   profiles. Chrome's "Video Decode: Hardware accelerated" is only a flag.
 - **Where:** `src/utm/guest/install.sh`, `src/vm/utm.sh`, `src/cmd/apply.sh`.
 
-## 15. UTM uses 15 W while Omarchy sits idle
+## 15. UTM idle power is being measured again
 
-- **Symptom:** with an idle Omarchy desktop on UTM, the whole Mac draws about
-  15 W; Parallels, Fusion and OmacVM.app draw 5.5 to 6.2 W. One of UTM's QEMU
-  threads runs at 100 % on the Mac while every CPU in Linux is idle.
-- **Cause:** a bug in UTM's QEMU (`hvf_wfi()`): a virtual CPU only sleeps if
-  its next timer is more than 2 ms away. Linux ticks every millisecond
-  (HZ=1000) on a CPU that hasn't stopped its tick, so that CPU spins in and
-  out of the guest instead of sleeping: up to 170,000 idle calls a second.
-  Fixed in newer QEMU (OmacVM.app's runtime has it) and in
-  [qemu-utm#5](https://github.com/helixml/qemu-utm/pull/5); UTM 5.0.6 still
-  ships the old code.
-- **Check:** in the VM, `grep -E "^cpu: |idle_calls" /proc/timer_list` shows
-  millions of idle calls on some CPUs; on the Mac, `ps -M -p $(pgrep -x
-  QEMULauncher)` shows one thread near 100 %.
-- **Tried:** a guest kernel with HZ=250 (4 ms ticks, built like the
-  memory-optimized kernel) halves it: UTM's QEMU at 49 % instead of 102 % at
-  idle. Other short timers still make some CPUs spin.
-- **Fix:** it needs a UTM with the upstream QEMU fix. Until then, for battery
-  life use VMware Fusion, Parallels or OmacVM.app.
+- **Symptom:** the benchmark measured about 15 W for the whole Mac with an
+  idle Omarchy desktop on UTM, against 5.5 to 6.2 W on Parallels, Fusion and
+  OmacVM.app. A later check showed about 5 W on UTM at idle, also with an
+  app open.
+- **What we know:** UTM's QEMU only lets a virtual CPU sleep if its next timer
+  is more than 2 ms away (`hvf_wfi()`), so a CPU with a running 1 ms tick
+  wakes up more often. With nothing busy in the VM, Linux stops the tick and
+  this costs little. The benchmark's run most likely had something busy in
+  the VM.
+- **Next:** a fair re-run, same state on every route
+  ([#32](https://github.com/gillesgoetsch/omacvm/issues/32)).
 
 ## 16. MotionMark gives no stable result
 

@@ -161,12 +161,26 @@ vm_start() {   # <vm name> <pvm>: opening the bundle in Parallels Desktop starts
   # Full screen on every Mac display (VMs from before 2.2 lack it); Parallels
   # reads config.pvs when the VM starts.
   python3 "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/vm/pvs.py" "$2/config.pvs" displays 2>/dev/null || true
+  # OMACVM_HEADLESS=1 (image builds, tests): no window (Pro and trial editions).
+  if [[ ${OMACVM_HEADLESS:-} == 1 ]]; then
+    "$PRLCTL" set "$1" --startup-view headless >/dev/null 2>&1 && "$PRLCTL" start "$1" >/dev/null 2>&1 && return 0
+  fi
   open -a "Parallels Desktop" "$2"
   for ((i = 0; i < 60; i += 3)); do [[ $(vm_state "$1") == running ]] && return 0; sleep 3; done
   "$PRLCTL" start "$1" >/dev/null 2>&1 && return 0      # Pro/Business editions
   log "start the VM '$1' in Parallels Desktop (click the play button), waiting..."
   for ((i = 0; i < 600; i += 3)); do [[ $(vm_state "$1") == running ]] && return 0; sleep 3; done
   die "VM '$1' did not start"
+}
+
+# Parallels Tools from this Mac's Parallels Desktop into the VM at IP.
+parallels_tools_install() {
+  local iso="/Applications/Parallels Desktop.app/Contents/Resources/Tools/prl-tools-lin-arm.iso"
+  [[ -f $iso ]] || die "Parallels Tools not found: $iso"
+  gssh "$1" "cat > /root/prl-tools-lin-arm.iso" < "$iso"
+  gssh "$1" "set -e; mkdir -p /mnt/tools; mount -o loop,ro /root/prl-tools-lin-arm.iso /mnt/tools
+    /mnt/tools/installer/install-cli.sh --install >/dev/null 2>&1 || /mnt/tools/installer/install-cli.sh --install
+    umount /mnt/tools; rm -f /root/prl-tools-lin-arm.iso"
 }
 
 # ---- UTM ----
@@ -210,7 +224,7 @@ utm_start() {   # <vm name>: UTM must run in the foreground (open -g makes the V
   pgrep -xq UTM || { open -a UTM; sleep 3; }
   local try i
   for try in 1 2; do
-    [[ $(utm_state "$1") == started ]] || "$UTMCTL" start "$1" >/dev/null 2>&1 || true
+    [[ $(utm_state "$1") == started ]] || "$UTMCTL" start ${OMACVM_HEADLESS:+--hide} "$1" >/dev/null 2>&1 || true
     for ((i = 0; i < 60; i += 3)); do [[ $(utm_state "$1") == started ]] && return 0; sleep 3; done
     # After a long session UTM can stop answering start requests (they time out
     # with OSStatus -1712); restarting the app clears it. Never while another
@@ -328,7 +342,7 @@ fusion_start() {   # <vm name>
   x=$(fusion_vmx "$1") || die "no VMware Fusion VM named '$1'"
   for ((i = 0; i < 5; i++)); do
     [[ $(fusion_state "$1") == running ]] && return 0
-    "$VMRUN" -T fusion start "$x" gui >/dev/null 2>&1 || true
+    "$VMRUN" -T fusion start "$x" "$([[ ${OMACVM_HEADLESS:-} == 1 ]] && echo nogui || echo gui)" >/dev/null 2>&1 || true
     sleep 3
   done
   [[ $(fusion_state "$1") == running ]] || die "VMware Fusion did not start '$1'"

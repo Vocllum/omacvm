@@ -146,8 +146,8 @@ Free and open source, one display: UTM.
 | YouTube 4K at 60 fps | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
 | GPU compute (Vulkan, OpenCL) | ✗ | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
-| Idle desktop | 5.7 W · 18 h | 15.2 W · 6.6 h | **5.5 W · 18 h** | 6.2 W · 16 h |
-| Reading, scrolling a page | 7.3 W · 14 h | 19.3 W · 5.2 h | **5.9 W · 17 h** | 6.8 W · 15 h |
+| Idle desktop | 5.7 W · 18 h | being re-measured | **5.5 W · 18 h** | 6.2 W · 16 h |
+| Reading, scrolling a page | 7.3 W · 14 h | being re-measured | **5.9 W · 17 h** | 6.8 W · 15 h |
 | YouTube 4K | 24.2 W · 4.1 h | 39.2 W · 2.6 h | **20.4 W · 4.9 h** | 21.3 W · 4.7 h |
 | Every CPU core busy | 72 W · 1.4 h | 61 W · 1.6 h | 74 W · 1.4 h | 71 W · 1.4 h |
 | **Displays** | | | | |
@@ -184,10 +184,10 @@ single runs. Power is the whole Mac's draw from its battery telemetry, 3
 minutes per load; hours are 100 Wh over that draw, whole hours from 13 h up,
 one decimal below. Every step, so you can repeat it: [docs/benchmarks](docs/benchmarks/README.md).
 
-- **UTM's idle draw** is a bug in UTM's QEMU: a virtual CPU spins instead of
-  sleeping when the guest's timer ticks every millisecond
-  ([finding 15](docs/troubleshooting.md#15-utm-uses-15-w-while-omarchy-sits-idle)).
-  OmacVM.app runs a newer QEMU without it.
+- **UTM's idle and reading numbers** are being measured again. Our run gave
+  15 W at idle, but a later check showed about 5 W, so something was probably
+  still busy in the VM during our run
+  ([#32](https://github.com/gillesgoetsch/omacvm/issues/32)).
 - **MotionMark** needs steady frame timing. On the three virgl routes Chrome's
   frames come too unevenly, so every subtest stays at its minimum; on Fusion
   it measures normally.
@@ -258,7 +258,17 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    Homebrew, or tells you how (Fusion: a free download from Broadcom, after
    signing in). A fresh Parallels without a licence yet asks
    which edition you plan on (the trial is Pro).
-2. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
+2. **Build it yourself or download a prebuilt VM.** Building takes 30 to 70
+   minutes and fetches everything from Arch Linux ARM and omarchy-mac. The
+   prebuilt VM is the same build, made by OmacVM without any user in it
+   and brought to your OmacVM version on the way: a download of 3.5 to 6 GB, then a few minutes (6 minutes in
+   all for Parallels on a fast connection). Either way you
+   get your own user, password, features, keyboard and timezone. You can
+   also download a prebuilt VM by hand from the
+   [releases](https://github.com/gillesgoetsch/omacvm/releases) and open it
+   in its app: it asks for your user and password on its first boot. `--prebuilt` or `--build` for scripts; details, what is in the
+   images and how they are made: [docs/prebuilt.md](docs/prebuilt.md).
+3. **How much of the Mac the VM gets**: Low, Balanced, High or Best, shown as
    CPUs and memory, or Custom. Best leaves macOS and the GPU a buffer of a
    quarter of the memory, at least 8 GB. Parallels Standard allows 4 CPUs
    and 8 GB, and OmacVM stays within that.
@@ -267,7 +277,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    an external drive for example (APFS or Mac OS Extended; Parallels and
    Fusion; UTM keeps its VMs in its own library). With `--vm-dir PATH` for
    scripts.
-3. **Features**, one checklist with the recommended ones on:
+4. **Features**, one checklist with the recommended ones on:
 
    | | Default |
    |---|---|
@@ -282,7 +292,7 @@ few screens (↑/↓ to choose, space to switch, Return to confirm):
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
 
-4. **Your user name, full name and password.** Omarchy's own first-boot setup
+5. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
 
 Then it shows a summary and starts: 30 to 70 minutes in numbered steps
