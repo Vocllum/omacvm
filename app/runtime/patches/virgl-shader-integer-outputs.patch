@@ -12,7 +12,10 @@ results as their bits (floatBitsToUint/floatBitsToInt):
   floatBitsToUint(1.0 / x), or a vec4 assigned to a uvec4, which no compiler
   accepts;
 - SEQ/SNE/SLT/SGE... applied the bit cast to a bvec4 (does not compile); they
-  go through vec4() first.
+  go through vec4() first;
+- TXQ/TXQS used their own intBitsToFloat() (a vec assigned to a uvec);
+- gl_SampleMask, gl_TessLevel*: integer ops got floatBitsToInt(uint), which
+  does not compile.
 Float destinations and temporaries get the same GLSL as before.
 Why: dEQP-GLES3 builtin_functions.precision.sqrt/length read 315 for
 sqrt(99463) instead of its bits; the shaders that did not compile stopped the
@@ -20,10 +23,11 @@ guest's whole context. Same on Linux hosts.
 Upstream bug (same code upstream); upstreamable; not sent.
 Applies after virgl-shader-core-glsl-version.patch.
 Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
-(18 ops; 11 fail without this patch, the others without its first part).
+(18 ops, TXQ, an integer op into gl_SampleMask; each fails without this
+patch or without its first part).
 --- a/src/vrend/vrend_shader.c
 +++ b/src/vrend/vrend_shader.c
-@@ -408,6 +408,9 @@
+@@ -428,6 +428,9 @@
    enum vrend_type_qualifier dstconv;
    enum vrend_type_qualifier udstconv;
    enum vrend_type_qualifier idstconv;
@@ -33,7 +37,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
    bool dst_override_no_wm[TGSI_FULL_MAX_DST_REGISTERS];
    int32_t dest_index;
  };
-@@ -2550,9 +2553,12 @@
+@@ -2570,9 +2573,12 @@
  
  #define emit_arit_op2(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s((%s %s %s))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0], op, srcs[1], writemask)
  #define emit_op1(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s(%s))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), op, srcs[0], writemask)
@@ -48,11 +52,136 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
  
  static void handle_vertex_proc_exit(const struct dump_ctx *ctx,
                                      struct vrend_glsl_strbufs *glsl_strbufs,
-@@ -4510,20 +4516,21 @@
-                }
+@@ -2788,17 +2794,55 @@
+ // TODO Consider exposing non-const ctx-> members as args to make *ctx const
+ 
+ /* size queries are pretty much separate */
++/* The cast of an integer query result with components ints (int, ivec2,
++ * ivec3) to its destination: its bits as a float, or, for an integer output,
++ * the value as it is (converted to the unsigned type of the same size for a
++ * uint output). */
++static const char *txq_result_cast(const struct dest_info *dinfo, unsigned components)
++{
++   static const char *uint_types[] = { "uint", "uint", "uvec2", "uvec3" };
++   if (!dinfo->dst_is_int)
++      return get_string(INT_BITS_TO_FLOAT);
++   if (dinfo->dstconv != dinfo->udstconv)
++      return "";
++   return uint_types[MIN2(components, 3)];
++}
++
++/* Components of textureSize() for a target (GLES emulates 1D with 2D). */
++static unsigned txq_size_components(const struct dump_ctx *ctx, enum tgsi_texture_type target)
++{
++   switch (target) {
++   case TGSI_TEXTURE_BUFFER:
++      return 1;
++   case TGSI_TEXTURE_1D:
++   case TGSI_TEXTURE_SHADOW1D:
++      return ctx->cfg->use_gles ? 2 : 1;
++   case TGSI_TEXTURE_1D_ARRAY:
++   case TGSI_TEXTURE_SHADOW1D_ARRAY:
++      return ctx->cfg->use_gles ? 3 : 2;
++   case TGSI_TEXTURE_3D:
++   case TGSI_TEXTURE_2D_ARRAY:
++   case TGSI_TEXTURE_SHADOW2D_ARRAY:
++   case TGSI_TEXTURE_CUBE_ARRAY:
++   case TGSI_TEXTURE_SHADOWCUBE_ARRAY:
++   case TGSI_TEXTURE_2D_ARRAY_MSAA:
++      return 3;
++   default:
++      return 2;
++   }
++}
++
+ static void emit_txq(struct dump_ctx *ctx,
+                      const struct tgsi_full_instruction *inst,
+                      uint32_t sreg_index,
+                      const char *srcs[4],
+                      const char *dst,
+-                     const char *writemask)
++                     const char *writemask,
++                     const struct dest_info *dinfo)
+ {
+    unsigned twm = TGSI_WRITEMASK_NONE;
+    char bias[128] = "";
+    const int sampler_index = 1;
+-   enum vrend_type_qualifier dtypeprefix = INT_BITS_TO_FLOAT;
+ 
+    set_texture_reqs(ctx, inst, sreg_index);
+ 
+@@ -2833,7 +2877,7 @@
+ 
+          if (!ctx->cfg->use_gles) {
+             emit_buff(&ctx->glsl_strbufs, "%s%s = %s(textureQueryLevels(%s));\n", dst,
+-                      get_wm_string(twm), get_string(dtypeprefix),
++                      get_wm_string(twm), txq_result_cast(dinfo, 1),
+                       srcs[sampler_index]);
+          } else {
+             const struct tgsi_full_src_register *src = &inst->Src[1];
+@@ -2852,7 +2896,7 @@
+                snprintf(sampler_str, sizeof(sampler_str), "%d", gles_sampler_index);
+             }
+             emit_buff(&ctx->glsl_strbufs, "%s%s = %s(%s_texlod[%s]);\n", dst, get_wm_string(twm),
+-                      get_string(dtypeprefix), tgsi_proc_to_prefix(ctx->info.processor),
++                      txq_result_cast(dinfo, 1), tgsi_proc_to_prefix(ctx->info.processor),
+                       sampler_str);
+             ctx->gles_use_tex_query_level = true;
+          }
+@@ -2903,7 +2947,8 @@
+       }
+ 
+       emit_buff(&ctx->glsl_strbufs, "%s%s = %s(textureSize(%s%s))%s;\n", dst,
+-                get_wm_string(twm), get_string(dtypeprefix),
++                get_wm_string(twm),
++                txq_result_cast(dinfo, txq_size_components(ctx, inst->Texture.Texture)),
+                 srcs[sampler_index], bias, txq_returns_vec ? writemask : "");
+    }
+ }
+@@ -2914,10 +2959,10 @@
+                       const struct tgsi_full_instruction *inst,
+                       uint32_t sreg_index,
+                       const char *srcs[4],
+-                      const char *dst)
++                      const char *dst,
++                      const struct dest_info *dinfo)
+ {
+    const int sampler_index = 0;
+-   enum vrend_type_qualifier dtypeprefix = INT_BITS_TO_FLOAT;
+ 
+    ctx->shader_req_bits |= SHADER_REQ_TXQS;
+    set_texture_reqs(ctx, inst, sreg_index);
+@@ -2929,7 +2974,7 @@
+    }
+ 
+    emit_buff(&ctx->glsl_strbufs, "%s = %s(textureSamples(%s));\n", dst,
+-            get_string(dtypeprefix), srcs[sampler_index]);
++            txq_result_cast(dinfo, 1), srcs[sampler_index]);
+ }
+ 
+ static const char *get_tex_inst_ext(const struct tgsi_full_instruction *inst)
+@@ -4384,6 +4429,7 @@
+ 
+    if (dtype == TGSI_TYPE_SIGNED || dtype == TGSI_TYPE_UNSIGNED)
+       ctx->shader_req_bits |= SHADER_REQ_INTS;
++   bool int_result = dtype == TGSI_TYPE_SIGNED || dtype == TGSI_TYPE_UNSIGNED;
+ 
+    if (dtype == TGSI_TYPE_DOUBLE) {
+       /* we need the uvec2 conversion for doubles */
+@@ -4497,8 +4543,9 @@
+             }
+             strbuf_fmt(&dst_bufs[i], "%s[%d]", output->glsl_name, idx);
+             if (output->is_int) {
+-               dinfo->dtypeprefix = FLOAT_BITS_TO_INT;
++               dinfo->dtypeprefix = int_result ? TYPE_CONVERSION_NONE : FLOAT_BITS_TO_INT;
+                dinfo->dstconv = INT;
++               dinfo->dst_is_int = true;
+             }
+          } else {
+             if (output->glsl_gl_block) {
+@@ -4531,19 +4578,19 @@
                 dinfo->dst_override_no_wm[i] = output->override_no_wm;
              }
-+            bool int_result = dtype == TGSI_TYPE_SIGNED || dtype == TGSI_TYPE_UNSIGNED;
              if (output->is_int) {
 -               if (dinfo->dtypeprefix == TYPE_CONVERSION_NONE)
 -                  dinfo->dtypeprefix = FLOAT_BITS_TO_INT;
@@ -76,7 +205,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
              }
              if (output->name == TGSI_SEMANTIC_PSIZE) {
                 dinfo->dstconv = FLOAT;
-@@ -5633,22 +5640,22 @@
+@@ -5653,22 +5700,22 @@
     switch (inst->Instruction.Opcode) {
     case TGSI_OPCODE_SQRT:
     case TGSI_OPCODE_DSQRT:
@@ -105,7 +234,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_MAX:
     case TGSI_OPCODE_DMAX:
-@@ -5688,11 +5695,11 @@
+@@ -5708,11 +5755,11 @@
        emit_buff(&ctx->glsl_strbufs, "discard;\n");
        break;
     case TGSI_OPCODE_DST:
@@ -120,7 +249,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_EX2:
        emit_op1("exp2");
-@@ -5701,10 +5708,10 @@
+@@ -5721,10 +5768,10 @@
        emit_op1("log2");
        break;
     case TGSI_OPCODE_EXP:
@@ -133,7 +262,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_COS:
        emit_op1("cos");
-@@ -5713,7 +5720,7 @@
+@@ -5733,7 +5780,7 @@
        emit_op1("sin");
        break;
     case TGSI_OPCODE_SCS:
@@ -142,7 +271,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
                 srcs[0], srcs[0], writemask);
        break;
     case TGSI_OPCODE_DDX:
-@@ -5731,7 +5738,7 @@
+@@ -5751,7 +5798,7 @@
        emit_op1("dFdyFine");
        break;
     case TGSI_OPCODE_RCP:
@@ -151,7 +280,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_DRCP:
        emit_buff(&ctx->glsl_strbufs, "%s = %s(1.0LF/(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
-@@ -5786,7 +5793,7 @@
+@@ -5806,7 +5853,7 @@
        break;
     case TGSI_OPCODE_RSQ:
     case TGSI_OPCODE_DRSQ:
@@ -160,7 +289,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_FBFETCH:
     case TGSI_OPCODE_MOV:
-@@ -5831,7 +5838,7 @@
+@@ -5851,7 +5898,7 @@
        emit_arit_op2("<<");
        break;
     case TGSI_OPCODE_MAD:
@@ -169,8 +298,16 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_UMAD:
     case TGSI_OPCODE_DMAD:
-@@ -5871,7 +5878,7 @@
-       emit_txqs(ctx, inst, sinfo.sreg_index, srcs, dsts[0]);
+@@ -5885,13 +5932,13 @@
+       emit_lodq(ctx, inst, &sinfo, &dinfo, srcs, dsts[0], writemask);
+       break;
+    case TGSI_OPCODE_TXQ:
+-      emit_txq(ctx, inst, sinfo.sreg_index, srcs, dsts[0], writemask);
++      emit_txq(ctx, inst, sinfo.sreg_index, srcs, dsts[0], writemask, &dinfo);
+       break;
+    case TGSI_OPCODE_TXQS:
+-      emit_txqs(ctx, inst, sinfo.sreg_index, srcs, dsts[0]);
++      emit_txqs(ctx, inst, sinfo.sreg_index, srcs, dsts[0], &dinfo);
        break;
     case TGSI_OPCODE_I2F:
 -      emit_buff(&ctx->glsl_strbufs, "%s = %s(ivec4(%s)%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0], writemask);
@@ -178,7 +315,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_I2D:
        emit_buff(&ctx->glsl_strbufs, "%s = %s(ivec4(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
-@@ -5880,7 +5887,7 @@
+@@ -5900,7 +5947,7 @@
        emit_buff(&ctx->glsl_strbufs, "%s = %s(%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
        break;
     case TGSI_OPCODE_U2F:
@@ -187,7 +324,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_U2D:
        emit_buff(&ctx->glsl_strbufs, "%s = %s(uvec4(%s));\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
-@@ -5901,10 +5908,10 @@
+@@ -5921,10 +5968,10 @@
        emit_buff(&ctx->glsl_strbufs, "%s = %s(%s(%s));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), srcs[0]);
        break;
     case TGSI_OPCODE_NOT:
@@ -200,7 +337,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_DNEG:
        emit_buff(&ctx->glsl_strbufs, "%s = %s(-%s);\n", dsts[0], get_string(dinfo.dstconv), srcs[0]);
-@@ -5958,13 +5965,13 @@
+@@ -5978,13 +6025,13 @@
        emit_ucompare("greaterThanEqual");
        break;
     case TGSI_OPCODE_POW:
@@ -217,7 +354,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_END:
        if (iter->processor.Processor == TGSI_PROCESSOR_VERTEX) {
-@@ -5998,7 +6005,7 @@
+@@ -6018,7 +6065,7 @@
        emit_buff(&ctx->glsl_strbufs, "%s = int(%s);\n", dsts[0], srcs[0]);
        break;
     case TGSI_OPCODE_XPD:
@@ -226,7 +363,7 @@ Tests: Tests/virgl/test-core-glsl-shaders.c "... into an integer color output"
        break;
     case TGSI_OPCODE_BGNLOOP:
        emit_buf(&ctx->glsl_strbufs, "do {\n");
-@@ -6086,7 +6093,7 @@
+@@ -6106,7 +6153,7 @@
        ctx->shader_req_bits |= SHADER_REQ_GPU_SHADER5;
        break;
     case TGSI_OPCODE_BFI:

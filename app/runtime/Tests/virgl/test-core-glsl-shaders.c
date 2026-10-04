@@ -152,6 +152,22 @@ int main(void)
       failed |= convert(name, text, &key, int_out[i].must, int_out[i].must_not, have_gl);
    }
 
+   /* Query results (ints) into an integer output, and an integer op into
+    * gl_SampleMask: stored as they are, not through intBitsToFloat() or
+    * floatBitsToInt() (a vec assigned to a uvec, or floatBitsToInt(uint)). */
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("TXQ into an integer color output",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL SAMP[0]\n"
+                     "DCL SVIEW[0], 2D, FLOAT\nTXQ OUT[0].xy, IN[0].xxxx, SAMP[0], 2D\nEND\n",
+                     &key, "uvec2(textureSize", "BitsToFloat", have_gl);
+   memset(&key, 0, sizeof(key));
+   failed |= convert("AND into gl_SampleMask",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
+                     "DCL OUT[1], SAMPLEMASK\nMOV OUT[0], IN[0]\n"
+                     "AND OUT[1].x, IN[0].xxxx, IN[0].yyyy\nEND\n",
+                     &key, "gl_SampleMask[0] = int((", "BitsToFloat", have_gl);
+
    /* Instanced drawing (WebGL through ANGLE): gl_InstanceID is core GLSL;
     * Apple's core profile refuses "#extension GL_ARB_draw_instanced". */
    memset(&key, 0, sizeof(key));

@@ -17,7 +17,7 @@ sampler", "textureGrad on a shadow cube sampler", "texture() with a bias on a
 shadow cube sampler", "textureGather on a shadow cube sampler" (fail without).
 --- a/src/vrend/vrend_shader.c
 +++ b/src/vrend/vrend_shader.c
-@@ -3375,11 +3375,19 @@
+@@ -3395,11 +3395,19 @@
  
     bool has_bias = strbuf_get_len (&bias_buf) != 0;
     bool has_offset = strbuf_get_len (&offset_buf) != 0;
