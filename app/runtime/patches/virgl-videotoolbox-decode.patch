@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..af75a3b
+index 0000000..4375dcb
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2330 @@
+@@ -0,0 +1,2339 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -1201,10 +1201,11 @@ index 0000000..af75a3b
 +    r->pos = save;
 +}
 +
-+static unsigned ceil_log2(uint32_t v)
++/* Bits needed for values below v. The guest picks v: capped at 32. */
++static unsigned ceil_log2(uint64_t v)
 +{
 +    unsigned n = 0;
-+    while ((1u << n) < v)
++    while (n < 32 && ((uint64_t)1 << n) < v)
 +        n++;
 +    return n;
 +}
@@ -1449,19 +1450,21 @@ index 0000000..af75a3b
 +
 +    for (unsigned i = 0; i < 15; i++) {
 +        bool used = false;
-+        int delta;
++        int64_t delta;
 +        if (!d->ref[i] || d->IsLongTerm[i])
 +            continue;
 +        for (unsigned k = 0; k < d->NumPocStCurrBefore && k < 8; k++)
 +            used |= d->RefPicSetStCurrBefore[k] == i;
 +        for (unsigned k = 0; k < d->NumPocStCurrAfter && k < 8; k++)
 +            used |= d->RefPicSetStCurrAfter[k] == i;
-+        delta = d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
++        delta = (int64_t)d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
++        if (delta < -32768 || delta > 32767)   /* not a valid stream */
++            continue;
 +        if (delta < 0) {
-+            neg[nn] = delta;
++            neg[nn] = (int)delta;
 +            neg_used[nn++] = used;
 +        } else if (delta > 0) {
-+            pos[np] = delta;
++            pos[np] = (int)delta;
 +            pos_used[np++] = used;
 +        }
 +    }
@@ -1502,7 +1505,8 @@ index 0000000..af75a3b
 +        hb_ue(r);                       /* delta_idx_minus1 */
 +        hb_u(r, 1);                     /* delta_rps_sign */
 +        hb_ue(r);                       /* abs_delta_rps_minus1 */
-+        for (unsigned j = 0; j <= d->NumDeltaPocsOfRefRpsIdx; j++)
++        /* At most 16 pictures in a set; the count comes from the guest. */
++        for (unsigned j = 0; j <= d->NumDeltaPocsOfRefRpsIdx && j <= 16 && !r->error; j++)
 +            if (!hb_u(r, 1))            /* used_by_curr_pic_flag */
 +                hb_u(r, 1);             /* use_delta_flag */
 +    } else {
@@ -1537,10 +1541,13 @@ index 0000000..af75a3b
 +    bool deblock_disabled = p->pps_deblocking_filter_disabled_flag;
 +    unsigned ctb_log2 = s->log2_min_luma_coding_block_size_minus3 + 3 +
 +                        s->log2_diff_max_min_luma_coding_block_size;
-+    uint32_t ctbs = ((s->pic_width_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2) *
-+                    ((s->pic_height_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2);
++    uint64_t ctbs;
 +    unsigned chroma = s->separate_colour_plane_flag ? 0 : s->chroma_format_idc;
 +
++    if (ctb_log2 < 4 || ctb_log2 > 6)   /* CTBs are 16, 32 or 64 pixels */
++        return res;
++    ctbs = (((uint64_t)s->pic_width_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2) *
++           (((uint64_t)s->pic_height_in_luma_samples + (1u << ctb_log2) - 1) >> ctb_log2);
 +    rbsp = nal_to_rbsp(nal + 2, size - 2, &rbsp_size);
 +    if (!rbsp)
 +        return res;
@@ -1600,6 +1607,8 @@ index 0000000..af75a3b
 +                if (slice_type == 0)
 +                    l1 = hb_ue(&r);
 +            }
++            if (l0 > 14 || l1 > 14)     /* at most 15 references per list */
++                goto out;
 +            if (p->lists_modification_present_flag && d->NumPocTotalCurr > 1) {
 +                unsigned bits = ceil_log2(d->NumPocTotalCurr);
 +                if (hb_u(&r, 1))
