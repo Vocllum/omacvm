@@ -43,6 +43,12 @@ OmacVM's version.
   FFmpeg and GStreamer apps. Omarchy's Chromium (Arch Linux ARM) is built
   without VA-API and decodes on the CPU for now; a route for it (V4L2) is
   planned. [How it works](../video-decode.md).
+- The window shows every frame Omarchy draws, up to the display's refresh
+  (it showed at most 33 a second before), as IOSurfaces drawn off the main
+  thread. GPU fences come back in about 0.2 ms instead of 1.5 ms: glmark2
+  about 4000 instead of 1250 ([how](../architecture/graphics.md)). If the
+  GPU misbehaves on a Mac: `defaults write org.omacvm.app gpuSafeMode -bool
+  true` goes back to the 2.6.0 fence and frame path.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

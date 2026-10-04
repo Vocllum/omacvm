@@ -27,6 +27,13 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
   virglrenderer is built with OmacVM's VideoToolbox video backend
   (`runtime/patches/virgl-videotoolbox-decode.patch`, MIT like
   virglrenderer); it uses Apple's VideoToolbox, part of macOS.
+- **Vulkan for the VM (Venus)**: MoltenVK 1.4.2 (Apache-2.0, The Brenwill
+  Workshop / Khronos; with SPIRV-Cross and SPIRV-Tools, Apache-2.0, and
+  cereal, BSD-3-Clause, built in) and the Khronos Vulkan loader 1.4.357
+  (Apache-2.0, with cJSON, MIT), from Homebrew's arm64_sequoia bottles.
+  `LICENSE.vulkan.txt` in the licences folder has the Apache-2.0 text and
+  the cereal and cJSON notices. virglrenderer's macOS and Venus-on-Metal
+  patches come from github.com/startergo/homebrew-virglrenderer (MIT).
 - **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
