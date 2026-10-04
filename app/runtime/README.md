@@ -27,6 +27,11 @@ commit 82927e9. Changes here:
   `patches/virgl-shader-size-limits.patch`: a guest command stream could crash
   QEMU (NULL variant) or ask for 4 GiB per shader; found by
   `Tests/virgl/fuzz-cmd-stream.sh`
+- `patches/virgl-core-instance-id.patch`: shaders that read `gl_InstanceID`
+  (instanced WebGL) asked for `GL_ARB_draw_instanced`, which Apple's core
+  profile refuses; checked by `Tests/virgl/test-integer-sampler-shader.c`
+- `patches/virgl-venus-lost-context-fences.patch`: a Venus context the render
+  server ended signals its fences, so the guest app ends instead of hanging
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

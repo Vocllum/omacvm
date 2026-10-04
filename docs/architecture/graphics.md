@@ -93,6 +93,7 @@ on CGL, not on ANGLE.
 | virgl GL on Apple OpenGL 4.1 | shipped | `virgl-native-opengl.patch`, tap patches |
 | Scanout texture borrowing (no readback) | shipped | `qemu-texture-borrowing-11.1.patch` |
 | Integer-sampler shader fix (Basemark hang) | built: `gpu-hang` | `virgl-texture-integer-samplers.patch` |
+| gl_InstanceID shaders compile on Apple's core profile | built: `gpu-robust` | `virgl-core-instance-id.patch` |
 | Refused shader skips its draws (context lives) | built: `gpu-robust` | `virgl-shader-failure-skip-draws.patch`, section 13 |
 | Context loss reported to the guest (GL robustness) | built: `gpu-robust`; guest Mesa not installed by default | `virgl-context-loss-report.patch`, `src/app/guest/mesa/` |
 | Async fences (vrend-sync thread on macOS) | built: `gpu-native`, open hang | `qemu-cocoa-gl-async-fence.patch`, `virgl-darwin-thread-sync.patch` |
@@ -488,6 +489,7 @@ of these cases. Measured in OmacVM T-gpu-robust (Chrome 154, M4 Max, macOS 15.7)
 | Same, policy `lose`, guest Mesa patched | - | `webglcontextlost` at 5.05 s, restored 1.0 s later on the GPU (renderer still virgl), all frames right afterwards |
 | GLES app with a robust context (`gl-lost`) | reset status never set | `GL_GUILTY_CONTEXT_RESET` on the frame the context was lost |
 | Vulkan app, fatal command (`vk-lost`) | hangs in `vkWaitForFences` (killed after 60 s) | ends with abort() after 2 s; the next Vulkan app runs normally |
+| WebGL with instanced drawing (ANGLE reads gl_InstanceID) | every such shader refused: `#extension GL_ARB_draw_instanced` is not in Apple's core profile (found in the soak) | compiles (`virgl-core-instance-id.patch`, build-time test) |
 | Guest command stream fuzzing, 30 min, ~606,000 inputs | QEMU crash (NULL variant) in seconds, 4 GiB asks | no crash, no out-of-memory |
 
 Cost when nothing fails: glmark2 subset (build, texture, shading phong, terrain,
