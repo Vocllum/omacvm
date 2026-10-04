@@ -451,3 +451,45 @@ The tracks share one runtime. Order and overlaps known today:
    unchanged on `gpu-venus`'s tree (branch `gpu-robust-venus` builds and passes
    the build-time test). The Venus hunk only adds a log line in
    `vkr_context_on_ring_fatal`.
+
+## 13. Errors and context loss (built: `gpu-robust`)
+
+What happens when the Mac side cannot run a guest's GPU work. ADR 0016.
+
+```
+ guest app ----- shader the Mac's GL refuses -----> vrend: mark the shader failed,
+   |                                                skip the draws that need it,
+   |                                                log (3 lines max per context)
+   |                                                -> the app keeps running
+   |
+   +------------ any other fatal decoder error ---> vrend: context lost (in_error),
+                                                    log once, write GUILTY into the
+                                                    guest's reset status buffer
+                                                    (VIRGL_CCMD_SET_RESET_STATUS_BUFFER)
+       guest Mesa (src/app/guest/mesa/):
+         robust context  -> glGetGraphicsResetStatus = GL_GUILTY_CONTEXT_RESET
+         other contexts  -> abort() at the next flush, like Mesa's venus;
+                            Chrome restarts its GPU process, WebGL pages get
+                            webglcontextlost + webglcontextrestored
+       stock guest Mesa  -> cannot be told: the app draws nothing until restarted
+
+ Vulkan app ---- fatal venus command -----------> vkr: ring status FATAL, log once;
+                                                    the proxy signals the context's
+                                                    fences from now on (they hung
+                                                    before); guest venus aborts the app
+```
+
+Other contexts (the compositor, other apps) and the VM are not affected in any
+of these cases. Measured in OmacVM T-gpu-robust (Chrome 154, M4 Max, macOS 15.7):
+
+| Case | Before | After |
+|---|---|---|
+| WebGL page, one shader refused by the Mac's GL | page frozen: every readback wrong from then on (1559 of 1559 frames) | page keeps drawing: 1978 of 1978 frames read back right; no context loss |
+| Same, policy `lose`, guest Mesa patched | - | `webglcontextlost` at 5.05 s, restored 1.0 s later on the GPU (renderer still virgl), all frames right afterwards |
+| GLES app with a robust context (`gl-lost`) | reset status never set | `GL_GUILTY_CONTEXT_RESET` on the frame the context was lost |
+| Vulkan app, fatal command (`vk-lost`) | hangs in `vkWaitForFences` (killed after 60 s) | ends with abort() after 2 s; the next Vulkan app runs normally |
+| Guest command stream fuzzing, 30 min, ~606,000 inputs | QEMU crash (NULL variant) in seconds, 4 GiB asks | no crash, no out-of-memory |
+
+Tests: `app/runtime/Tests/virgl/test-context-loss.c` (every runtime build),
+`tests/graphics/context-loss.sh`, `tests/graphics/venus-loss.sh`,
+`app/runtime/Tests/virgl/fuzz-cmd-stream.sh`.

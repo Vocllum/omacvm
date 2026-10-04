@@ -43,24 +43,41 @@ upstream behaviour), and 3a for every loss that remains: the host side ships in
 the runtime (an unused buffer costs nothing), the guest side is a Mesa patch
 built into `/opt/omacvm-mesa`.
 
+Chrome's ANGLE creates its native GL context without reset notification, so
+the reset status alone never reaches it. For such contexts the guest Mesa ends
+the app at the next flush (abort, like Mesa's venus); Chrome restarts its GPU
+process and the WebGL page gets `webglcontextlost` and `webglcontextrestored`.
+`VIRGL_KEEP_LOST_CONTEXT=1` keeps an app running instead.
+
 Venus already has its channel: a fatal decoder error sets
 `VK_RING_STATUS_FATAL_BIT_MESA` in the ring's shared memory, and the guest's
-Mesa aborts the app on it (Mesa's choice, not `VK_ERROR_DEVICE_LOST`). The host
-only adds one log line per lost context.
+Mesa aborts the app on it (Mesa's choice, not `VK_ERROR_DEVICE_LOST`). But the
+proxy dropped the fences of a context the render server had ended, so the app
+hung in `vkWaitForFences` before it ever looked at the ring.
+`virgl-venus-lost-context-fences.patch` signals them; the app then ends within
+seconds. `VK_ERROR_DEVICE_LOST` instead of abort() would need a change in the
+guest's Mesa venus (not done: upstream chose abort).
 
 ## Consequences
 
 - A WebGL page with one bad shader keeps running; only that object is missing.
-  Chrome needs no help (proven: 1680 of 1680 frames read back right after the
-  refusal, `tests/graphics/context-loss.sh --expect contain`).
+  Chrome needs no help (1978 of 1978 frames read back right after the refusal,
+  `tests/graphics/context-loss.sh --expect contain`).
+- A lost context with the guest Mesa: Chrome's page gets its context back in
+  about 1 s, on the GPU (`--expect recover`). Without the guest Mesa: the app
+  draws nothing until it is restarted (`--expect dead`), as before.
 - Logging: at most three lines per context for refused shaders (the first with
   the GLSL), one "dropping rendering" line, one "context N is lost" line.
-- With the guest Mesa, a lost context answers `glGetGraphicsResetStatus` with
+- With the guest Mesa, a robust context answers `glGetGraphicsResetStatus` with
   `GL_GUILTY_CONTEXT_RESET` on the frame it was lost (`gl-lost`), and Mesa offers
   `EXT/KHR_robustness` and `EGL_EXT_create_context_robustness` on virgl. KHR
   robustness without robust buffer access (Apple's GL 4.1 lacks
   ARB_robust_buffer_access_behavior) is allowed by the spec; robust buffer access
   stays off, so ANGLE keeps its own bounds checks.
+- Ending a non-robust app is the price of recovery: if the compositor's own
+  context were lost, Hyprland would end too (before, the desktop froze). Losses
+  are rare now that refused shaders no longer lose the context; they mean a
+  guest driver bug or a hostile command stream.
 - Protocol: command `VIRGL_CCMD_SET_RESET_STATUS_BUFFER` (next free number) and
   capset bit `1 << 30`. A stock guest never sends the command; a newer upstream
   that assigns the same numbers would need a rebase of both sides.
