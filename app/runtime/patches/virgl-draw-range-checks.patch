@@ -17,9 +17,10 @@ glVertexAttrib*fv (QEMU crash).
 Why: Apple's GL has no robust buffer access; its GPU fetches what it is told. A
 fetch past a buffer reads memory other contexts own or makes the GPU fault; a
 fault resets the GPU and on 2026-10-04 that hung WindowServer and panicked macOS.
-A guest must not be able to do that. Reading the indices back costs nothing
-measurable on an M4 Max (glGetBufferSubData of 12 KB + scan before each of 1000
-draws: 1.01 vs 1.01-1.15 ms); mapping instead would cost 95 us per draw.
+A guest must not be able to do that. Reading the indices back grows with the
+index count: on an M4 Max (bench lock, median of 3) under 1 us per draw for
+12 KB, 0.03 ms for 1 MB, 0.11 ms for 4 MB of indices (ADR 0017); mapping instead
+would cost 95 us per draw.
 Depends on: virgl-buffer-binding-checks.patch (vrend_buffer_range_ok).
 Upstream: upstreamable hardening for hosts without robust buffer access; not sent.
 Tests: Tests/virgl/test-gpu-ranges.c (each refused draw and the accepted edge
