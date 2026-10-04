@@ -1,6 +1,7 @@
 # Changelog
 
-What's new in each OmacVM release. The release notes on GitHub say the same
+What's new in each OmacVM release, newest first. The
+[release notes](https://github.com/gillesgoetsch/omacvm/releases) say the same
 in more words.
 
 ## Unreleased
@@ -96,3 +97,127 @@ in more words.
   and WebGL Aquarium in Chrome). `bench.sh` runs Basemark too, and Geekbench's
   GPU test with Metal and OpenCL on the Mac. No VM can run Geekbench's GPU
   test: its Linux ARM preview has none, and no VM offers Vulkan or OpenCL.
+
+## 2.5.0
+
+- Prebuilt VMs for Parallels, UTM and VMware Fusion: `omacvm build` asks
+  whether to build the VM here or download one (`--prebuilt`). The VM is
+  ready in about 4 to 6 minutes instead of 30 to 70. See
+  [docs/prebuilt.md](docs/prebuilt.md).
+- The build picks the fastest Arch Linux ARM mirrors first, so a slow
+  default mirror no longer stops it (#24).
+
+## 2.4.1
+
+- With Omanotch, notifications sit right under the notch strip.
+- VMs on Arch Linux ARM's own kernel have their snapshots in GRUB again, and
+  `omacvm check` says when they go missing.
+- Two VMs in one app: Cmd shortcuts and swipes go only to the VM in front.
+- The memory-optimized kernel: turning it off really goes back to the stock
+  kernel; its build output goes to a log.
+
+## 2.4.0
+
+- Shift and the brightness keys set the Mac's keyboard light, with Omarchy's
+  own popup; Option takes small steps.
+- Longer battery life: the Gestures daemon, the Gestures helper, the
+  clipboard, the Parallels display sync and the Bridge no longer wake up for
+  nothing. `omacvm update` is much faster.
+- Safer: OmacVM remembers each VM's SSH host key (after a rebuild:
+  `omacvm apply --vm NAME --reset-host-key`); `omacvm update` sends the
+  Bridge's key only to VMs it set up; Gestures talks only to VMs that know
+  the Bridge's token; the clipboard from the VM follows no links; names are
+  checked or quoted everywhere.
+- Fixes: `omacvm update` goes on past a VM it can't reach; `--vm-dir` works
+  with spaces and relative paths; your own lines in `input.lua` survive an
+  update; UTM applies a new display mode at the next restart.
+
+## 2.3.1
+
+- New VMs get the Mac's clock (#11); builds no longer hang at "Waiting for
+  SSH" with several keys in ssh-agent (#10); Canadian English keyboards get
+  the English layout (#13).
+- The README compares all four ways: speed, browser graphics, YouTube 4K,
+  power and battery hours.
+
+## 2.3.0
+
+- The Mac's clock in Omarchy's bar, at the far right, in the Mac's format
+  (`omacvm disable mac-clock` puts it back).
+- Chromium, Chrome, Brave and Firefox draw on the GPU on every route.
+- Older Parallels VMs use every display in full screen.
+- Scroll momentum works in Brave; tools to measure power, battery life and
+  video decoding.
+
+## 2.2.2
+
+- UTM: WebGL reads back right; every buffer is drawn without multisampling
+  (no WebGL antialiasing on UTM).
+
+## 2.2.1
+
+- UTM: Chrome and the other Chromium browsers use the GPU. OmacVM sets UTM's
+  default renderer, and `omacvm check` tells you if it isn't set.
+
+## 2.2.0
+
+- VMware Fusion is the third way, next to Parallels and UTM: every display
+  in the macOS arrangement, the GPU, and all of OmacVM's features. OmacVM
+  builds Hyprland with a fix for Fusion's black screen and builds VMware
+  Tools. See [docs/routes/vmware-fusion.md](docs/routes/vmware-fusion.md).
+- Choose where the VM goes (`--vm-dir`, also on an external drive).
+- New Parallels VMs use every display in full screen; the slide between
+  workspaces is back after a three-finger swipe; Omanotch repairs itself if
+  its first build failed.
+
+## 2.1.1
+
+- The Mac's wallpaper keeps following Omarchy's theme after many theme
+  switches (systemd no longer stops the watcher).
+
+## 2.1.0
+
+- The Mac's Bluetooth in Omarchy's Bluetooth panel: paired devices with
+  battery levels, connect and disconnect, Bluetooth on and off, forget a
+  device. Pairing opens the Mac's Bluetooth settings.
+
+## 2.0.2
+
+- Builds with scroll momentum no longer stop in the last step.
+- macOS's permission prompts are explained when they appear; the Swift
+  compiler is checked before the build starts.
+- VM names are unique across Parallels and UTM.
+- `omacvm check` points out a menu bar that is always shown; the setup draws
+  right without a UTF-8 locale.
+
+## 2.0.1
+
+- Fresh Macs: Xcode's command line tools come through macOS's software
+  update; free space is measured like Finder does (30 GB to build); home
+  folders with spaces work; long build steps show a live status line.
+
+## 2.0.0
+
+- `omacvm`: one command to build, switch features, update and check, put on
+  your PATH by the one-line installer.
+- A setup that installs what is missing (Xcode's tools, Homebrew, Parallels
+  or UTM 5) and asks its questions as screens.
+- macOS-native scroll momentum (experimental).
+- Every feature can be switched on an existing VM; each VM tells Gestures
+  what it wants.
+- Night Shift and True Tone in the bar; `--json` and exit codes for coding
+  agents; Mac mini, iMac and Studio with a Magic Trackpad.
+
+## 1.1.0
+
+- `./build.sh` asks first: Parallels or UTM, resources, features, user, then
+  a summary. The VM remembers the choices; `./apply.sh` keeps them.
+- The memory-optimized kernel is opt-in.
+- OmacVM's own icon; everything but the entry points moved to `src/`.
+
+## 1.0.0
+
+- First release: one command builds an Omarchy VM in Parallels Desktop or
+  UTM, with the Mac's Wi-Fi, audio, media keys, Night Shift and True Tone,
+  trackpad gestures, Retina displays at 120 Hz, the clipboard both ways and
+  the keyboard layout from the Mac. `./check.sh` checks every feature.
