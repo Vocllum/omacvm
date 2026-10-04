@@ -333,6 +333,24 @@ verify_file_sha() {
     die "$label checksum mismatch: expected $expected, got $actual"
 }
 
+# Every patch file is pinned in patches/SHA256SUMS: a changed patch, or one
+# that is not listed, stops the build. After changing a patch on purpose:
+#   (cd patches && shasum -a 256 *.patch > SHA256SUMS)
+verify_patch_manifest() {
+  local manifest="$native_dir/patches/SHA256SUMS" expected name path
+  local listed=" "
+  [[ -f $manifest ]] || die "patches/SHA256SUMS is missing"
+  while read -r expected name; do
+    [[ -n $name ]] || continue
+    verify_file_sha "patch $name" "$native_dir/patches/$name" "$expected"
+    listed+="$name "
+  done < "$manifest"
+  for path in "$native_dir"/patches/*.patch; do
+    name=$(basename "$path")
+    [[ $listed == *" $name "* ]] || die "patch not pinned in patches/SHA256SUMS: $name"
+  done
+}
+
 validate_tar_root() {
   local label=$1
   local archive=$2
@@ -407,6 +425,7 @@ validate_tar_root "libslirp source" "$slirp_archive" "$slirp_source_root" "$list
 validate_tar_root "Meson" "$meson_archive" "$meson_root" "$listing_dir/meson.txt"
 tar -xzf "$slirp_archive" -C "$source_parent"
 tar -xzf "$meson_archive" -C "$tool_root"
+verify_patch_manifest
 verify_file_sha "Darwin ICMP reply matching patch" "$slirp_patch" "$slirp_patch_sha256"
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$slirp_patch"
 verify_file_sha "IPv4 UDP reply translation patch" "$udp_patch" "$udp_patch_sha256"
