@@ -106,6 +106,17 @@ if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
 log "$TYPE VM, the Mac is $HOST"
 log "features: $(for f in "${FEATURES[@]}"; do printf '%s=%s ' "$f" "${F[$f]}"; done)"
 
+# A VM from a prebuilt image of OmacVM 2.5 or 2.6: first boot left absolute
+# links into the image's placeholder home (Omarchy's wallpaper: a black desktop).
+OLD=$(sed -n 's/^OMACVM_PREBUILT_USER=//p' /var/lib/omacvm/prebuilt/image 2>/dev/null)
+if [[ $OLD =~ ^[a-z_][a-z0-9_-]*$ && $OLD != "$U" && ! -e /home/$OLD ]]; then
+  n=0
+  while IFS= read -r -d '' l; do
+    t=$(readlink "$l"); ln -sfn "$H${t#/home/$OLD}" "$l"; chown -h "$U:$U" "$l"; n=$((n + 1))
+  done < <(find "$H" -xdev -type l \( -lname "/home/$OLD" -o -lname "/home/$OLD/*" \) -print0 2>/dev/null)
+  if (( n )); then log "links from the prebuilt image: $n now point into $H (the wallpaper shows after the next login)"; fi
+fi
+
 log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
 # network) may still reach SSH.
