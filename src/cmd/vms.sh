@@ -44,7 +44,8 @@ while IFS=$'\t' read -r name type state; do
       "$( ((first)) || echo ,)" "$(json_str "$name")" "$type" "$state" "$( [[ -n $ip ]] && json_str "$ip" || echo null)" \
       "$( [[ -n $version ]] && json_str "$version" || echo null)" "$reach" "$( [[ -n $feats ]] && echo "{$feats}" || echo null)"
   else
-    if [[ $state != running ]]; then what="(start it to see)"
+    if [[ $state == unknown ]]; then what="($UTM_NO_ANSWER)"
+    elif [[ $state != running ]]; then what="(start it to see)"
     elif [[ $reach == false ]] && [[ -n $ip ]] && hostkey_changed "$ip" 2>/dev/null; then what="another SSH host key (rebuilt? omacvm apply --vm \"$name\" --reset-host-key)"
     elif [[ $reach == false ]]; then what="no SSH access (not built by OmacVM? omacvm apply --vm \"$name\" shows how)"
     elif [[ -z $version ]]; then what="not installed (omacvm apply --vm \"$name\")"

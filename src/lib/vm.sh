@@ -1,6 +1,7 @@
 # Finding and reaching VMs from the Mac (sourced after mac.sh; bash 3.2).
 #   vms_list                 one line per VM: NAME<TAB>parallels|utm|fusion|app<TAB>running|stopped|...
-#                            (Parallels' and UTM's other states as they name them)
+#                            (Parallels' and UTM's other states as they name them;
+#                            unknown: UTM runs but does not answer this terminal)
 #   vm_find_ip NAME TYPE [s] the VM's address (waits up to s seconds)
 #   vm_probe IP              what the VM says about itself, as KEY=value lines:
 #                            OMACVM_USER, OMACVM_VERSION (empty: no OmacVM yet),
@@ -10,16 +11,23 @@
 UTM_PREFS=$HOME/Library/Containers/com.utmapp.UTM/Data/Library/Preferences/com.utmapp.UTM.plist
 source "$(dirname "${BASH_SOURCE[0]}")/app.sh"
 
+# utm_ctl_list: utmctl list, given 15 seconds. utmctl talks to UTM through
+# AppleEvents: over SSH, or where this terminal may not control UTM, it fails;
+# while macOS still asks about it, it waits up to 10 minutes.
+utm_ctl_list() { perl -e 'alarm shift; exec @ARGV' 15 "$UTMCTL" list 2>/dev/null; }
+UTM_NO_ANSWER="UTM did not answer: run omacvm in Terminal on the Mac and allow it to control UTM"
+
 vms_list() {
+  local u=""
   if [[ -x $PRLCTL ]]; then
     "$PRLCTL" list -a -o status,name 2>/dev/null | awk 'NR > 1 { s = $1; $1 = ""; sub(/^ /, ""); print $0 "\tparallels\t" s }'
   fi
-  if [[ -x $UTMCTL ]] && pgrep -xq UTM; then
-    "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { s = $2; $1 = ""; $2 = ""; sub(/^  /, ""); print $0 "\tutm\t" (s == "started" ? "running" : s) }'
+  if [[ -x $UTMCTL ]] && pgrep -xq UTM && u=$(utm_ctl_list); then
+    awk 'NR > 1 { s = $2; $1 = ""; $2 = ""; sub(/^  /, ""); print $0 "\tutm\t" (s == "started" ? "running" : s) }' <<<"$u"
   elif [[ -f $UTM_PREFS ]]; then
-    # UTM not running (utmctl would start it): its VMs, wherever they are, from
-    # UTM's registry; all stopped.
-    python3 - "$UTM_PREFS" <<'PY' 2>/dev/null
+    # UTM not running (utmctl would start it), or not answering: its VMs,
+    # wherever they are, from UTM's registry; stopped, or unknown while UTM runs.
+    python3 - "$UTM_PREFS" "$(pgrep -xq UTM && echo unknown || echo stopped)" <<'PY' 2>/dev/null
 import os, plistlib, sys
 for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
     path = (entry.get("Package") or {}).get("Path", "")
@@ -29,7 +37,7 @@ for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values()
         name = plistlib.load(open(os.path.join(path, "config.plist"), "rb"))["Information"]["Name"]
     except Exception:
         name = os.path.basename(path)[:-4]
-    print(f"{name}\tutm\tstopped")
+    print(f"{name}\tutm\t{sys.argv[2]}")
 PY
   fi
   local n x
