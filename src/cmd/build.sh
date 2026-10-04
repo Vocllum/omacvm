@@ -97,8 +97,8 @@ while (( $# )); do
     --parallels-edition) P_PLAN=$2; shift 2
       [[ $P_PLAN == standard || $P_PLAN == pro ]] || usage "--parallels-edition standard or pro" ;;
     --channel) CHANNEL=$2; shift 2 ;;          # rc|stable|edge, for testing omarchy-mac
-    --image) IMAGE=1; YES=1; shift ;;
-    --no-mac) NO_MAC=1; shift ;;                # tests: leave this Mac's apps as they are           # a VM for a prebuilt image (src/prebuilt/make-image.sh)
+    --image) IMAGE=1; YES=1; shift ;;           # a VM for a prebuilt image (src/prebuilt/make-image.sh)
+    --no-mac) NO_MAC=1; shift ;;                # tests: leave this Mac's apps as they are
     --prebuilt) SOURCE=prebuilt; shift ;;
     --build) SOURCE=build; shift ;;
     --yes|-y) YES=1; shift ;;
