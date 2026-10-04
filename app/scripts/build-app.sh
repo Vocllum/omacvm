@@ -33,9 +33,14 @@ if (( RELEASE )) && [[ -n $(git -C "$REPO" status --porcelain) ]]; then
   exit 1
 fi
 RT=$ROOT/runtime/.build
-# What the runtime was built from: its build scripts and patches.
+# What the runtime was built from: its build scripts and patches, and with
+# KosmicKrisp its build tools (a new Homebrew LLVM rebuilds it).
+KK_STAMP=
+if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
+  KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+fi
 INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/*
-  echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}"; } | shasum -a 256 | cut -d' ' -f1)
+  echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}${KK_STAMP:+ $KK_STAMP}"; } | shasum -a 256 | cut -d' ' -f1)
 if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
       || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
   log "QEMU (from source)"

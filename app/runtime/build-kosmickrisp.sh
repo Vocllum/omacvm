@@ -1,12 +1,13 @@
 #!/bin/bash
 # Build KosmicKrisp, Mesa's Vulkan driver on Metal, from a pinned Mesa commit:
-#   app/runtime/build-kosmickrisp.sh [--archive-dir DIR] [--check]
+#   app/runtime/build-kosmickrisp.sh [--archive-dir DIR] [--check | --stamp]
 # Output in app/runtime/.build/kosmickrisp: libvulkan_kosmickrisp.dylib, its
 # ICD file, LICENSE.mesa-kosmickrisp.txt (the licences and copyright lines of
 # every Mesa file in the driver) and a stamp.
 # Venus uses it instead of MoltenVK on macOS 26 and newer (it needs Metal 4);
 # the runtime keeps MoltenVK for older macOS. --check only checks the build
-# machine and says what is missing.
+# machine and says what is missing; --stamp prints what the build depends on
+# (build-app.sh hashes it to know when to rebuild the runtime).
 #
 # Two Mesa builds: the first makes Mesa's OpenCL-C compiler (mesa_clc, with
 # LLVM) for the driver's built-in kernels; the second builds the driver with
@@ -53,12 +54,13 @@ die() { echo "kosmickrisp-build: $*" >&2; exit 1; }
 log() { echo "[kosmickrisp-build] $*"; }
 
 archive_cache=
-check_only=0
+mode=build
 while (($#)); do
   case $1 in
     --archive-dir) (($# >= 2)) || die "--archive-dir needs a directory"; archive_cache=$2; shift 2 ;;
-    --check) check_only=1; shift ;;
-    *) echo "usage: build-kosmickrisp.sh [--archive-dir DIR] [--check]" >&2; exit 64 ;;
+    --check) mode=check; shift ;;
+    --stamp) mode=stamp; shift ;;
+    *) echo "usage: build-kosmickrisp.sh [--archive-dir DIR] [--check | --stamp]" >&2; exit 64 ;;
   esac
 done
 
@@ -96,11 +98,14 @@ if ((${#missing[@]})); then
   echo "kosmickrisp-build: install these, or build the runtime without OMACVM_RUNTIME_KOSMICKRISP=1 (MoltenVK only)" >&2
   exit 1
 fi
-((check_only)) && { log "build machine OK (LLVM $("$llvm_bin/llvm-config" --version))"; exit 0; }
 
 # Rebuild when this script, the Mesa commit or the build-time LLVM changes.
 want_stamp="$mesa_commit $(shasum -a 256 "$0" | cut -d' ' -f1) llvm-$("$llvm_bin/llvm-config" --version)"
 want_stamp+=" spirv-llvm-translator-$("$pkg_config" --modversion LLVMSPIRVLib)"
+case $mode in
+  check) log "build machine OK (LLVM $("$llvm_bin/llvm-config" --version))"; exit 0 ;;
+  stamp) echo "$want_stamp"; exit 0 ;;
+esac
 if [[ -f $out_dir/libvulkan_kosmickrisp.dylib && -f $out_dir/LICENSE.mesa-kosmickrisp.txt &&
       $(cat "$stamp" 2>/dev/null) == "$want_stamp" ]]; then
   log "up to date ($out_dir)"
