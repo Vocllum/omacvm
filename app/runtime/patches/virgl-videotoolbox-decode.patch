@@ -75,7 +75,7 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..50ba20a
+index 0000000..6c95bf9
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
 @@ -0,0 +1,2365 @@
@@ -1458,7 +1458,7 @@ index 0000000..50ba20a
 +        for (unsigned k = 0; k < d->NumPocStCurrAfter && k < 8; k++)
 +            used |= d->RefPicSetStCurrAfter[k] == i;
 +        delta = (int64_t)d->PicOrderCntVal[i] - d->CurrPicOrderCntVal;
-+        if (delta < -32768 || delta > 32767)   /* not a valid stream */
++        if (delta < -32768 || delta > 32768)   /* not a valid stream */
 +            continue;
 +        if (delta < 0) {
 +            neg[nn] = (int)delta;
