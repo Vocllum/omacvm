@@ -51,7 +51,7 @@ enum Brightness {
     if let d = active.first(where: { CGDisplayIsBuiltin($0) != 0 }) { return d }
     guard let canFn else { return nil }
     let main = CGMainDisplayID()
-    return active.sorted { a, _ in a == main }.first { canFn($0) }
+    return (active.filter { $0 == main } + active.filter { $0 != main }).first { canFn($0) }
   }
 
   static func get() -> Float? {
