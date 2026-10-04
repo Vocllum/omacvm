@@ -39,3 +39,4 @@ def run_test(name, implementation):
 run_test("test-multisample-formats", "vrend_formats.c")
 run_test("test-native-shader-inputs", "vrend_renderer.c")
 run_test("test-darwin-eventfd", "virgl_util.c")
+run_test("test-integer-sampler-shader", "vrend_shader.c")
