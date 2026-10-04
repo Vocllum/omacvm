@@ -79,8 +79,8 @@ context).
   reports one compute unit (Vulkan has no such query), so tools that size
   work by CUs (clpeak) under-fill the GPU: 1.5 TFLOPS fp32 as reported,
   8.9 with 40 CUs forced (Mac OpenCL 15.6).
-- Each kernel launch crosses the Venus ring: launch-heavy work (ffmpeg's
-  `nlmeans_opencl`, ~1000 launches per frame) is slow.
+- Each kernel launch crosses the Venus ring: work made of many small
+  kernels (Geekbench's Super Resolution, Particle Physics) loses most.
 - Unbound descriptors are undefined on MoltenVK instead of zero; rusticl
   binds what kernels use. One Geekbench 7 workload (Feature Matching)
   fails its own validation: open.
