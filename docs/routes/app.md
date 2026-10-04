@@ -230,6 +230,10 @@ window per guest screen:
   surface left at its output's old place never fires (it waits for x/y
   signals Quickshell's screens do not have); Omanotch's patched bar and
   wallpaper remap themselves when their output moves.
+- In full screen the Dock and the menu bar stay hidden on every display, and
+  the Mac's cursor stays 3 points off the screen corners while the VM has
+  the pointer, so hot corners do not fire
+  (`omacvm-cocoa-fullscreen-edges.patch`; `immersive=off` turns both off).
 
 Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
 virtual Mac display (killing it is unplugging it). With
