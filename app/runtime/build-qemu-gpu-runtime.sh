@@ -81,6 +81,11 @@ virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
 virgl_skip_draws_patch="$native_dir/patches/virgl-shader-failure-skip-draws.patch"
 virgl_loss_report_patch="$native_dir/patches/virgl-context-loss-report.patch"
 virgl_test_fault_patch="$native_dir/patches/virgl-test-shader-fault.patch"
+virgl_null_variant_patch="$native_dir/patches/virgl-shader-variant-null-checks.patch"
+virgl_shader_limits_patch="$native_dir/patches/virgl-shader-size-limits.patch"
+virgl_venus_lost_patch="$native_dir/patches/virgl-venus-lost-context-fences.patch"
+virgl_instance_id_patch="$native_dir/patches/virgl-core-instance-id.patch"
+virgl_xfb_end_patch="$native_dir/patches/virgl-transform-feedback-end.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -110,8 +115,13 @@ mapped_sections_patch_sha256=2991378d565faeaf114bb5948bfa9ad05c39b078e4e1f4c2a67
 fence_poll_patch_sha256=1ac407bdb617dfc52d004d0ebd0d07641d920f7d3a9756223c6426a207fb1499
 virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e07d82fc60c
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
-virgl_skip_draws_patch_sha256=0ff22295962331bc12649003ca892fe26c366541c4261140ba7d35e5cc6923a0
-virgl_loss_report_patch_sha256=c29640dfcca1b4658b5b05b431840781ab0e0d91857481795434c3f96b27b2d1
+virgl_skip_draws_patch_sha256=7611495f5afd94b016c9cd7126a457bfdcb13f60df46b5a754cb3d584a4002f1
+virgl_loss_report_patch_sha256=cfef9d4417fabb60cc559f970598fa7f7da069ff747ff652baddb922ca29905a
+virgl_null_variant_patch_sha256=305d6fffe723fa32ffe3576c0e33c68b7358e142d88612817a175489aaa16832
+virgl_shader_limits_patch_sha256=df6b333dbeb1fe43fd023551fac8ee2d75228f3866b5b1e456621614dc9c01c9
+virgl_instance_id_patch_sha256=67de90babfec3f4abf2b1747f6637bd74e4cd5a2c2cdf0b44eaaeb0e33a6f0d6
+virgl_xfb_end_patch_sha256=d887f7ecf827e164ae05eed79eab089f5f076f93949776a1ac6d8f61700f7587
+virgl_venus_lost_patch_sha256=7c68192a607670b12cf46147e40a2603485b7f5d1941709b2df891e4f7e4f9ed
 virgl_test_fault_patch_sha256=4b09b62f5d1ac73ff056a93891ca4041cfe6ee0f93f7b6bbbcee0fb7b3c94728
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -650,6 +660,22 @@ verify_file_sha "Refused shader patch" "$virgl_skip_draws_patch" "$virgl_skip_dr
 patch -d "$virgl_source" -p1 -f -i "$virgl_skip_draws_patch"
 verify_file_sha "Context loss report patch" "$virgl_loss_report_patch" "$virgl_loss_report_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_loss_report_patch"
+# OmacVM: two guest inputs the fuzzer found that crashed QEMU or asked for 4 GiB.
+verify_file_sha "Shader variant NULL checks" "$virgl_null_variant_patch" "$virgl_null_variant_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_null_variant_patch"
+verify_file_sha "Shader size limits" "$virgl_shader_limits_patch" "$virgl_shader_limits_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_limits_patch"
+# OmacVM: a Venus context the render server ended no longer leaves the guest waiting
+# on fences forever.
+verify_file_sha "Venus lost context fences" "$virgl_venus_lost_patch" "$virgl_venus_lost_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_venus_lost_patch"
+# OmacVM: shaders reading gl_InstanceID (instanced WebGL) compile on Apple's core profile.
+verify_file_sha "Core gl_InstanceID patch" "$virgl_instance_id_patch" "$virgl_instance_id_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_instance_id_patch"
+# OmacVM: transform feedback ends with its own program bound (a guest could crash
+# QEMU in Apple's glEndTransformFeedback).
+verify_file_sha "Transform feedback end patch" "$virgl_xfb_end_patch" "$virgl_xfb_end_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_xfb_end_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
