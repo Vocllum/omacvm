@@ -73,10 +73,23 @@ and aborts on any range a GPU would read or write outside a buffer.
 
 ## Consequences
 
-- Conformance unchanged: dEQP GLES3 draw, instanced, vertex array, uniform
-  block, transform feedback, primitive restart, buffer and indexing groups
-  (9196 cases) give the same result per case before and after; no draw was
-  skipped by a check.
+- Conformance unchanged or better (test VM, M4 Max, 2026-10-04, runtime before
+  = the previous gpu-robust runtime, after = this series):
+  - dEQP GLES3 draw, instanced, vertex array, uniform block, transform
+    feedback, primitive restart, buffer and indexing groups: 9196 cases, the
+    same result per case; dEQP GLES3 every 50th case (896): the same per case.
+    No draw was skipped by a check.
+  - WebGL 2 conformance (transform_feedback, vertex_arrays, buffers, rendering,
+    uniforms, attribs; 33 pages): 30 pass after, 29 before (draw-buffers.html
+    now passes).
+  - Chrome WebGL with a shader the host refuses keeps drawing (context-loss
+    contain test, 2841/2841 frames right).
+- Speed: glmark2 subset with the bench lock, runtimes alternating (others'
+  VMs outside the pause rule kept running, so noisy): before 554, 477, 476 and
+  354, 313, 350; after 576, 521, 510 and 612, 600, 615. No slowdown
+  measurable.
+- 30-minute soak (glmark2 loop, Chrome WebGL page, mpv 1080p60): pass, 77675
+  WebGL frames, 0 dropped video frames, no GPU fault.
 - Apps that drew past their buffers (undefined in GL) now lose those draws
   instead of drawing garbage.
 - GL buffers get up to 15 bytes of slack (rounded to 16) so a block declared
