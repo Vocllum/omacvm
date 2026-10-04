@@ -29,7 +29,7 @@ the Mac's OpenGL; all fail without this patch.
     bool is_int : 1;
     bool fbfetch_used : 1;
     bool needs_override : 1;
-+   /* integer output written through int_out_tmp<index> (see emit_int_output_stores) */
++   /* integer output written through int_out_tmp<first> (see emit_int_output_stores) */
 +   bool int_temp : 1;
 +   unsigned int_temp_written : 4;
  };
@@ -54,14 +54,15 @@ the Mac's OpenGL; all fail without this patch.
  
        if (ctx->outputs[i].glsl_no_index)
           snprintf(ctx->outputs[i].glsl_name, 64, "%s", name_prefix);
-@@ -2604,11 +2619,48 @@
+@@ -2604,11 +2619,49 @@
  #define emit_compare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(%s((%s(%s(%s), %s(%s))))%s);\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.dtypeprefix), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask)
  
  #define emit_ucompare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(uintBitsToFloat(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.udstconv), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask, get_string(dinfo.udstconv))
 +
-+/* Store the integer outputs written through int_out_tmp<index> (see
++/* Store the integer outputs written through int_out_tmp<first> (see
 + * int_temp): the float temporary's bits, as int or uint. Before the shader
-+ * returns and before every vertex a geometry shader emits. */
++ * returns and before every vertex a geometry shader emits. Named after the
++ * TGSI register: ctx->outputs is sorted again after the body is written. */
 +static void emit_int_output_stores(const struct dump_ctx *ctx,
 +                                   struct vrend_glsl_strbufs *glsl_strbufs)
 +{
@@ -74,13 +75,13 @@ the Mac's OpenGL; all fail without this patch.
 +      const char *cast = is_uint ? "floatBitsToUint" : "floatBitsToInt";
 +      if (output->name == TGSI_SEMANTIC_COLOR) {
 +         /* fsout_c<n>, uvec4 or ivec4 like the guest's colour buffer */
-+         emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d);\n", output->glsl_name, cast, i);
++         emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d);\n", output->glsl_name, cast, output->first);
 +      } else if (output->name == TGSI_SEMANTIC_SAMPLEMASK) {
 +         /* gl_SampleMask[n] comes from component n */
 +         for (int c = 0; c < 4; c++) {
 +            if (output->int_temp_written & (1 << c))
 +               emit_buff(glsl_strbufs, "%s[%d] = %s(int_out_tmp%d.%c);\n",
-+                         output->glsl_name, c, cast, i, comps[c]);
++                         output->glsl_name, c, cast, output->first, comps[c]);
 +         }
 +      } else {
 +         /* gl_Layer, gl_ViewportIndex, gl_PrimitiveID, gl_FragStencilRefARB:
@@ -88,8 +89,8 @@ the Mac's OpenGL; all fail without this patch.
 +         int c = 0;
 +         while (!(output->int_temp_written & (1 << c)))
 +            c++;
-+         emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d.%c);\n", output->glsl_name, cast, i,
-+                   comps[c]);
++         emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d.%c);\n", output->glsl_name, cast,
++                   output->first, comps[c]);
 +      }
 +   }
 +}
@@ -103,7 +104,7 @@ the Mac's OpenGL; all fail without this patch.
      if (ctx->so && !ctx->key->gs_present && !ctx->key->tes_present)
         emit_so_movs(ctx, glsl_strbufs, has_clipvertex_so);
  
-@@ -2772,6 +2824,8 @@
+@@ -2772,6 +2825,8 @@
  static void handle_fragment_proc_exit(const struct dump_ctx *ctx,
                                        struct vrend_glsl_strbufs *glsl_strbufs)
  {
@@ -112,31 +113,32 @@ the Mac's OpenGL; all fail without this patch.
      if (ctx->key->pstipple_enabled)
         emit_pstipple_pass(glsl_strbufs);
  
-@@ -4498,6 +4552,13 @@
+@@ -4496,6 +4551,13 @@
+                output->precise = true;
+                ctx->shader_req_bits |= SHADER_REQ_GPU_SHADER5;
              }
-          }
- 
-+         if (output->int_temp && !dst_reg->Register.Indirect) {
-+            /* as a float temporary: no output-specific conversion */
-+            strbuf_fmt(&dst_bufs[i], "int_out_tmp%d%s", j, writemask);
-+            output->int_temp_written |= dst_reg->Register.WriteMask;
-+            break;
 +         }
 +
++         if (output->int_temp && !dst_reg->Register.Indirect) {
++            /* as a float temporary: no output-specific conversion */
++            strbuf_fmt(&dst_bufs[i], "int_out_tmp%d%s", output->first, writemask);
++            output->int_temp_written |= dst_reg->Register.WriteMask;
++            break;
+          }
+ 
           if (ctx->glsl_ver_required >= 140 && output->name == TGSI_SEMANTIC_CLIPVERTEX) {
-             if (ctx->prog_type == TGSI_PROCESSOR_TESS_CTRL) {
-                strbuf_fmt(&dst_bufs[i], "%s[gl_InvocationID]", output->glsl_name);
-@@ -4932,6 +4993,9 @@
+@@ -4932,6 +4994,10 @@
           if (inst->Instruction.Opcode == TGSI_OPCODE_FBFETCH) {
              output->fbfetch_used = true;
              ctx->shader_req_bits |= SHADER_REQ_FBFETCH;
 +         } else if (output->int_temp && !src->Register.Indirect) {
-+            strbuf_fmt(src_buf, "%s(vec4(%sint_out_tmp%d)%s)", get_string(stypeprefix), prefix, j, swizzle);
++            strbuf_fmt(src_buf, "%s(vec4(%sint_out_tmp%d)%s)", get_string(stypeprefix), prefix,
++                       output->first, swizzle);
 +            break;
           }
  
           enum vrend_type_qualifier srcstypeprefix = stypeprefix;
-@@ -6018,6 +6082,8 @@
+@@ -6018,6 +6084,8 @@
        emit_buff(&ctx->glsl_strbufs, "%s = mix(%s, %s, notEqual(floatBitsToUint(%s), uvec4(0.0)))%s;\n", dsts[0], srcs[2], srcs[1], srcs[0], writemask);
        break;
     case TGSI_OPCODE_END:
@@ -145,7 +147,7 @@ the Mac's OpenGL; all fail without this patch.
        if (iter->processor.Processor == TGSI_PROCESSOR_VERTEX) {
           handle_vertex_proc_exit(ctx, &ctx->glsl_strbufs, &ctx->has_clipvertex_so);
        } else if (iter->processor.Processor == TGSI_PROCESSOR_TESS_CTRL && ctx->cfg->has_cull_distance) {
-@@ -6065,6 +6131,7 @@
+@@ -6065,6 +6133,7 @@
     case TGSI_OPCODE_EMIT:
        if (likely((unsigned) inst->Src[0].Register.Index < MAX_IMMEDIATE)) {
           struct immed *imd = &ctx->imm[inst->Src[0].Register.Index];
@@ -153,14 +155,14 @@ the Mac's OpenGL; all fail without this patch.
           if (ctx->so && ctx->key->gs_present)
              emit_so_movs(ctx, &ctx->glsl_strbufs, &ctx->has_clipvertex_so);
           if (ctx->cfg->has_cull_distance && ctx->key->gs.emit_clip_distance)
-@@ -6754,6 +6821,11 @@
+@@ -6754,6 +6823,11 @@
  
     if (ctx->require_dummy_value)
        emit_hdr(glsl_strbufs, "vec4 dummy_value = vec4(0.0, 0.0, 0.0, 0.0);\n");
 +
 +   for (i = 0; i < ctx->num_outputs; i++) {
 +      if (ctx->outputs[i].int_temp)
-+         emit_hdrf(glsl_strbufs, "vec4 int_out_tmp%d;\n", i);
++         emit_hdrf(glsl_strbufs, "vec4 int_out_tmp%d;\n", ctx->outputs[i].first);
 +   }
  
     if (ctx->write_mul_utemp) {

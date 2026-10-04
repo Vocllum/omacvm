@@ -163,6 +163,19 @@ int main(void)
       }
    }
 
+   /* dEQP-GLES3.functional.draw_buffers_indexed.random.*: colour outputs
+    * declared in reverse order, mixed types. The outputs are sorted after the
+    * body is written; the temporaries must still be the ones declared. */
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   key.fs.cbufs_signed_int_bitmask = 0xa;
+   failed |= convert("integer colour outputs declared in reverse order",
+                     "FRAG\nDCL IN[0].xy, GENERIC[0], PERSPECTIVE\nDCL OUT[0], COLOR[3]\n"
+                     "DCL OUT[1], COLOR[2]\nDCL OUT[2], COLOR[1]\nDCL OUT[3], COLOR\nDCL TEMP[0]\n"
+                     "F2U TEMP[0], IN[0].xyxy\nMOV OUT[3], TEMP[0]\nF2I TEMP[0], IN[0].yxyx\n"
+                     "MOV OUT[2], TEMP[0]\nMOV OUT[1], IN[0].xyxy\nMOV OUT[0], TEMP[0]\nEND\n",
+                     &key, "fsout_c1 = floatBitsToInt(int_out_tmp2);", NULL, have_gl);
+
    /* The other integer outputs: gl_SampleMask from an integer op, gl_Layer
     * from a geometry shader (stored before each EmitVertex). */
    memset(&key, 0, sizeof(key));
