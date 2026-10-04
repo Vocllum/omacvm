@@ -3,6 +3,39 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
+  of 1.5 ms, so light 3D work runs two to three and a half times as fast
+  (glmark2's short set 2,800-3,700 instead of 1,000-1,500 in the same build,
+  benchmark lock held). A new frame goes to the window as soon as Omarchy
+  finishes it, drawn off the main thread as an IOSurface, not on QEMU's
+  30 ms timer.
+- WebGL-heavy pages are where they were on a quiet Mac (Aquarium 21-23 fps,
+  as before): there Apple's OpenGL is the limit. While other VMs use the Mac
+  they ran about 10% slower than with the old path (20-21 fps against
+  23-24); with the Mac's CPU busy otherwise, about 15% faster (12.0 against
+  10.4 fps).
+- The thread that waits for the GPU no longer keeps a core busy, also during
+  a long GPU job (about 2,100 wakeups a second instead of 19,900). If it
+  cannot start, the VM falls back to the old 1 ms polling and says so in
+  `qemu.log` and `omacvm check`, instead of hanging the guest's GPU.
+- The guest can no longer make QEMU allocate up to 3 GiB of window surfaces,
+  or new ones on every frame: they are at most the size of the largest Mac
+  display and made again at most twice a second.
+- If the picture or the GPU misbehaves on a Mac:
+  `defaults write org.omacvm.app gpuSafeMode -bool true` and a VM restart go
+  back to the fence and frame path of 2.8.0 (video decoding and the other
+  fixes stay). `omacvm check` shows which path a VM took.
+- Vulkan in the VM, hidden and experimental (Venus on MoltenVK):
+  `defaults write org.omacvm.app venus -bool true`. Needs Mesa 26.2.4 or newer
+  in the VM (`app/scripts/dev/guest-mesa-venus.sh` builds it while Arch Linux
+  ARM has 26.2.3). vkmark about 5,200; the same build with the old polled
+  fences gives about 730 (no release had Venus). Venus memory is mapped into
+  the VM only in whole 16 KiB pages that belong to it.
+- The app carries the licence texts of MoltenVK and the Vulkan loader
+  (Apache-2.0, with cereal and cJSON).
+
 ## 2.8.0
 
 - OmacVM.app uses every Mac display in full screen: a window (in its own
