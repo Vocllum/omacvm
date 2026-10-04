@@ -125,7 +125,9 @@ vm_state() {   # <vm name> -> running|stopped|...
 
 wait_stopped() {   # <vm name>
   local i
-  for ((i = 0; i < 180; i += 3)); do [[ $(vm_state "$1") == stopped ]] && return 0; sleep 3; done
+  # Parallels can take minutes to close a VM's sound devices when macOS's
+  # audio service is slow to answer it (seen: 7 minutes for the microphone).
+  for ((i = 0; i < 600; i += 3)); do [[ $(vm_state "$1") == stopped ]] && return 0; sleep 3; done
   die "VM '$1' did not stop"
 }
 
