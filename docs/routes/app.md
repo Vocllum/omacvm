@@ -43,12 +43,24 @@ OmacVM's version.
   FFmpeg and GStreamer apps. Omarchy's Chromium (Arch Linux ARM) is built
   without VA-API and decodes on the CPU for now; a route for it (V4L2) is
   planned. [How it works](../video-decode.md).
-- The window shows every frame Omarchy draws, up to the display's refresh
-  (it showed at most 33 a second before), as IOSurfaces drawn off the main
-  thread. GPU fences come back in about 0.2 ms instead of 1.5 ms: glmark2
-  about 4000 instead of 1250 ([how](../architecture/graphics.md)). If the
-  GPU misbehaves on a Mac: `defaults write org.omacvm.app gpuSafeMode -bool
-  true` goes back to the 2.6.0 fence and frame path.
+- A new frame goes to the window as soon as Omarchy finishes it, drawn off
+  the main thread as an IOSurface (before, QEMU redrew the window on a 30 ms
+  timer). GPU fences come back in about 0.2 ms instead of 1.5 ms, so light 3D
+  work runs two to three and a half times as fast (glmark2's short set
+  2,800-3,700 instead of 1,000-1,500). WebGL-heavy pages stay the same on a
+  quiet Mac (Aquarium 21-23 fps): there Apple's OpenGL is the limit. While
+  other VMs use the Mac they ran about 10% slower than with the old path;
+  with only the CPU busy, about 15% faster ([how](../architecture/graphics.md)).
+  If the picture or the GPU misbehaves on a Mac: `defaults write
+  org.omacvm.app gpuSafeMode -bool true` and restart the VM goes back to the
+  2.8.0 fence and frame path; `omacvm check` shows which path a VM took.
+- Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
+  `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
+  VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
+  newer; Arch Linux ARM has 26.2.3, so
+  [`app/scripts/dev/guest-mesa-venus.sh`](../../app/scripts/dev/guest-mesa-venus.sh)
+  builds the Venus driver into `/opt/mesa-venus`); otherwise Vulkan apps fail
+  to get memory. vkmark about 5,200. OpenGL stays on virgl.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

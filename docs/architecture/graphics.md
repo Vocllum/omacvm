@@ -474,12 +474,17 @@ bench lock and are indications only):
 | glmark2 short set, bench lock | 1096-1139 | 3310-3590 (final: + fence wait) |
 | 2.9.0 candidate, same build, safe mode vs new (bench lock, quiet Mac) | glmark2 short 932/1073, Aquarium 23.0/23.1/24.0 | glmark2 short 3748/3696, Aquarium 22.9/22.6/22.8 |
 | same, other VMs loading the Mac | Aquarium 23.4/24.0/23.1 | Aquarium 19.9/20.6/21.5 (the extra threads compete for CPU) |
+| RC after the review (c293), quiet Mac, bench lock | glmark2 short 1445/1539, Aquarium 20.8/21.2/21.4 | glmark2 short 3610/3583, Aquarium 21.9/22.1/22.2 (first candidate: 3538/3629, 22.0/22.2/22.8) |
+| same, 12 busy processes on the Mac (CPU load only) | Aquarium 10.4/10.4/10.5 | Aquarium 11.8/12.0/12.2 and 12.1/12.5/13.2 (first candidate: 12.2-12.8) |
+| Long guest GPU job (65-100 ms draws), QEMU wakeups/s and CPU energy in 20 s, one run each | - | 2,100/s, 1.5 J (with 50 us naps throughout: 19,900/s, 2.8 J) |
 | Fence to reply, median | 1.56 ms | 0.20 ms |
 | Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
 | WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same on a quiet Mac; about 10% lower when other VMs load it, row above) |
 | QEMU CPU, glmark2 / Aquarium, bench lock | - | 165% / 176% (fence wait; spinning: 195% / 194%) |
 | vkmark headless 800x600 (Venus, never in a release), bench lock | - | 5195; the same build with polled fences: 732 |
-| dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
+| dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate, also c293) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
+| Vulkan CTS smoke (Venus, 1958 cases), c293 | - | 546 pass, 1402 not supported, 5 fail, 5 timeout: the same cases as the combo runtime |
+| 30-minute soaks, c293 | - | GL + WebGL + VA-API video: pass, 3.2 million fences; Venus (vkmark + vkcube, 11 rounds): pass, no refused blob |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks
