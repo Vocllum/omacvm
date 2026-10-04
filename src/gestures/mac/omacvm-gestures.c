@@ -18,8 +18,7 @@
 // Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
 // Parallels becomes frontmost again. If this process dies, the event tap goes
 // with it and macOS gets its gestures back.
-// Each VM says on connect what it wants ("H <gestures> <glide>"); a VM's
-// daemon from before that message counts as gestures on, Glide off. Capture
+// Each VM says on connect what it wants (the handshake below). Capture
 // only covers a full-screen VM whose connected daemon wants the trackpad, so a
 // VM with gestures off (or not connected yet) leaves macOS its gestures.
 // Glide (experimental, per VM): two-finger scrolling goes to the guest too.
@@ -56,8 +55,9 @@
 //                                     holds: what this VM wants, its own proof (as above
 //                                     with "vm") and the VM's name in base64 (omacvm apply
 //                                     tells the VM). Only then do the lines above flow.
-// Daemons from before the handshake send "H <gestures> <glide> <token> [<name>]",
-// still let in until omacvm apply gives them the new one.
+// Daemons from before the handshake (OmacVM 2.4, 2.5) send "H <gestures> <glide>
+// <token> [<name>]", still let in until omacvm apply gives them the new one.
+// Daemons from before the token (2.3 and older) are refused: omacvm update.
 // Two VMs in one app share its network: F, K, A, W, P and S on/esc go only to
 // the VM whose name is in the title of the app's front window; without such a
 // match (VMs from before the name, a renamed VM) to every VM of that app.
@@ -72,9 +72,6 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 #include <math.h>
-#include <net/if_dl.h>
-#include <net/route.h>
-#include <netinet/if_ether.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
@@ -84,7 +81,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
-#include <sys/sysctl.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -710,47 +706,6 @@ static int bridgeTokenOK(const char *given) {
   return ok;
 }
 
-// The peer's MAC address from the Mac's ARP table, as 12 hex digits.
-#define SA_ROUNDUP(a) ((a) > 0 ? (1 + (((a) - 1) | (sizeof(uint32_t) - 1))) : sizeof(uint32_t))
-static int peerMac(struct in_addr a, char out[13]) {
-  int mib[6] = { CTL_NET, PF_ROUTE, 0, AF_INET, NET_RT_FLAGS, RTF_LLINFO };
-  size_t n = 0;
-  if (sysctl(mib, 6, NULL, &n, NULL, 0) < 0 || !n) return 0;
-  char *buf = malloc(n);
-  if (!buf || sysctl(mib, 6, buf, &n, NULL, 0) < 0) { free(buf); return 0; }
-  int found = 0;
-  for (char *p = buf; p + sizeof(struct rt_msghdr) <= buf + n && !found; ) {
-    struct rt_msghdr *rtm = (struct rt_msghdr *)p;
-    if (rtm->rtm_msglen == 0) break;
-    struct sockaddr_inarp *sin = (struct sockaddr_inarp *)(rtm + 1);
-    struct sockaddr_dl *sdl = (struct sockaddr_dl *)((char *)sin + SA_ROUNDUP(sin->sin_len));
-    if (sin->sin_addr.s_addr == a.s_addr && sdl->sdl_family == AF_LINK && sdl->sdl_alen == 6) {
-      const unsigned char *m = (const unsigned char *)LLADDR(sdl);
-      snprintf(out, 13, "%02x%02x%02x%02x%02x%02x", m[0], m[1], m[2], m[3], m[4], m[5]);
-      found = 1;
-    }
-    p += rtm->rtm_msglen;
-  }
-  free(buf);
-  return found;
-}
-
-// Daemons from before the token send none. Until omacvm update or apply gives
-// a VM the new one, it is let in by its MAC address: the VMs OmacVM had set up
-// when this version came (src/mac/install.sh writes the list once, apply
-// takes each VM off it).
-static int legacyOK(struct in_addr a) {
-  char mac[13], path[1024], line[64];
-  if (!peerMac(a, mac)) return 0;
-  snprintf(path, sizeof path, "%s/Library/Application Support/omacvm/gestures-legacy", getenv("HOME"));
-  FILE *f = fopen(path, "r");
-  if (!f) return 0;
-  int ok = 0;
-  while (!ok && fgets(line, sizeof line, f)) { line[strcspn(line, " \t\r\n")] = 0; ok = !strcmp(line, mac); }
-  fclose(f);
-  return ok;
-}
-
 // ---- server ----
 // One line from the guest, up to a few reads (SO_RCVTIMEO each): the newline
 // is cut off. -1: nothing came.
@@ -841,14 +796,10 @@ static void *greet(void *arg) {
     }
     memset(tok, 0, sizeof tok);
   } else if (n > 0 && line[0] == 'H') {
-    // Daemons from before the handshake: the token itself, or (from before
-    // the token) nothing and a VM on the legacy list.
+    // Daemons from before the handshake say the token itself.
     char given[160] = "";
     sscanf(line + 1, "%d %d %159s %359s", &gestures, &glide, given, name64);
-    if (given[0]) why = "wrong token";
-    ok = given[0] ? bridgeTokenOK(given) : legacyOK(g.addr);
-  } else {
-    ok = legacyOK(g.addr);   // daemons from before the hello say nothing (gestures on, Glide off)
+    if (given[0]) { why = "wrong token"; ok = bridgeTokenOK(given); }
   }
   if (ok) {
     base64Name(name64, name, sizeof name);

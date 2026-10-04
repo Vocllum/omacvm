@@ -19,7 +19,8 @@ set -euo pipefail
 
 # ---------- defaults ----------
 VM_NAME="Omarchy ARM"
-RELEASE="v0.4.1"
+source "$(dirname "${BASH_SOURCE[0]}")/release.sh"
+RELEASE=$LIVE_RELEASE
 REPO="omacom/try-omarchy"
 WORKDIR="${HOME}/Library/Caches/omacvm/live"
 ESP_SIZE_MIB=1024          # 1 GiB ESP (kernel + initramfs + bootloader)
@@ -125,14 +126,9 @@ mkdir -p "$WORKDIR"
 cd "$WORKDIR"
 
 # ---------- 1. fetch + verify try-omarchy artifacts ----------
-# TryOmarchy.dmg's SHA-256 per release (GitHub's digest of the release asset
-# when it was pinned): a download that changed since is refused. Another
-# --release, or your own --dmg, is only checked against its own manifest.
-dmg_sha256() {
-  case $1 in
-    v0.4.1) echo e2f172f67e5d8a99df8e46fa6f7814a061c0af249f100a6bdc7836b922f47674 ;;
-  esac
-}
+# The pinned release's DMG must match its pinned SHA-256 (release.sh): a
+# download that changed since is refused. Another --release, or your own
+# --dmg, is only checked against its own manifest.
 DMG="$WORKDIR/TryOmarchy-$RELEASE.dmg"
 SRC="${DMG_PATH:-$DMG}"
 if [[ ! -f "$SRC" ]]; then
@@ -144,7 +140,7 @@ if [[ ! -f "$SRC" ]]; then
 else
   log "using existing DMG: $SRC"
 fi
-want=$(dmg_sha256 "$RELEASE")
+want=""; [[ $RELEASE == "$LIVE_RELEASE" ]] && want=$LIVE_DMG_SHA256
 if [[ -z $DMG_PATH && -n $want ]]; then
   log "checking the DMG against its pinned SHA-256"
   got=$(shasum -a 256 "$SRC" | cut -d' ' -f1)
