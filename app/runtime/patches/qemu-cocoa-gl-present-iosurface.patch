@@ -8,21 +8,46 @@ main thread waited for QEMU's lock and QEMU waited for the main thread.
 Draw the scanout into one of three IOSurfaces instead, on QEMU's thread
 with a context of its own, and show that surface as the layer's contents.
 A serial queue waits for the GPU to finish a surface before Core Animation
-gets it; a surface is reused only once Core Animation no longer uses it
-(IOSurfaceIsInUse). The main thread no longer takes the BQL to draw.
-Core Animation composites the surface directly. At most one surface is
-drawn per display refresh (a timer catches up with the newest frame), so a
-guest that flushes thousands of times a second costs no more than that.
+gets it (testing the fence and napping 100 us, as Apple's
+glClientWaitSync would spin a core); a surface is reused only once Core
+Animation no longer uses it (IOSurfaceIsInUse). The main thread no longer
+takes the BQL to draw. Core Animation composites the surface directly. At
+most one surface is drawn per display refresh (a timer catches up with the
+newest frame), so a guest that flushes thousands of times a second costs
+no more than that.
 
-OMACVM_GL_PRESENT=layer goes back to the CAOpenGLLayer path; if the
-IOSurface contexts cannot be made, the window falls back to it as well.
-OMACVM_GL_DUMP=FILE writes a frame shown as a PPM whenever FILE is missing
-(checks orientation and colours). Applies after qemu-cocoa-gl-present-on-flush.
+The guest sets the scanout size, so it must not set the Mac's memory use:
+the surfaces are capped at the largest display's pixels (a larger scanout
+is drawn scaled down; no window can show more), and they are made again
+at most twice a second. A guest that switches between two sizes on every
+frame gets its frames scaled into the surfaces it has, instead of three
+new surfaces per frame. Before, the only cap was 16384x16384 (3 x 1 GiB).
+
+OMACVM_GL_PRESENT=layer goes back to the CAOpenGLLayer path (GPU safe mode
+sets it); if the IOSurface contexts cannot be made, the window falls back
+to it as well. The log says which path the window took.
+Applies after qemu-cocoa-gl-present-on-flush.
 
 Upstream: not sent (changes how QEMU's Cocoa display draws).
-Test: OMACVM_GL_DUMP frame and a capture of the window match the guest's
-grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
+Test: a capture of the window matches the guest's grim (upright, colours);
+a guest switching between two resolutions in a loop keeps QEMU's memory
+flat; 30-minute soaks; GPU safe mode A/B in the app.
 
+diff --git a/meson.build b/meson.build
+index aa10c44..c23b0c5 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1221,7 +1221,7 @@ if get_option('attr').allowed()
+ endif
+ 
+ cocoa = dependency('appleframeworks',
+-                   modules: ['Cocoa', 'Carbon', 'CoreVideo', 'OpenGL', 'QuartzCore'],
++                   modules: ['Cocoa', 'Carbon', 'CoreVideo', 'IOSurface', 'OpenGL', 'QuartzCore'],
+                    required: get_option('cocoa'))
+ 
+ vmnet = dependency('appleframeworks', modules: 'vmnet', required: get_option('vmnet'))
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 2be99eb..ed8fd14 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -56,6 +56,10 @@
@@ -36,7 +61,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  #include "hw/core/cpu.h"
  
  #ifdef CONFIG_EGL
-@@ -139,6 +143,7 @@
+@@ -139,6 +143,7 @@ @interface QemuCGLLayer : CAOpenGLLayer
  
  static bool gl_dirty;
  static bool gl_present_pending;
@@ -44,7 +69,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  static uint32_t gl_scanout_id;
  static DisplayGLTextureBorrower gl_scanout_borrow;
  static QEMUGLContext gl_view_ctx;
-@@ -447,6 +452,9 @@
+@@ -447,6 +452,9 @@ - (BOOL) isMouseGrabbed;
  - (BOOL) isKeyboardCaptured;
  - (void) reenableEventTap;
  - (void) raiseAllKeys;
@@ -54,7 +79,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  - (void) endPinchLocked;
  - (void) resetPinchLocked:(bool)running;
  - (bool) handlePinchLocked:(NSEvent *)event;
-@@ -539,7 +547,15 @@
+@@ -539,7 +547,15 @@ - (id)initWithFrame:(NSRect)frameRect
          [self setClipsToBounds:YES];
  #endif
          [self setWantsLayer:YES];
@@ -71,7 +96,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
              QemuCGLLayer *layer = [[QemuCGLLayer alloc] init];
              [self setLayer:layer];
              [layer release];
-@@ -577,6 +593,20 @@
+@@ -577,6 +593,20 @@ - (BOOL)wantsUpdateLayer
  {
      return display_opengl;
  }
@@ -92,47 +117,10 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  #endif
  
  - (void) viewDidMoveToWindow
-@@ -2750,6 +2780,27 @@
-     gl_dirty = true;
+@@ -2841,6 +2871,339 @@ static void cocoa_gl_render(void)
+     gl_dirty = false;
  }
  
-+/* OMACVM_GL_FPS=1: frames shown per second, on stderr. */
-+static void cocoa_gl_present_count(void)
-+{
-+    static int fps_on = -1, frames;
-+    static int64_t since;
-+
-+    if (fps_on < 0) {
-+        fps_on = getenv("OMACVM_GL_FPS") != NULL;
-+    }
-+    if (fps_on) {
-+        int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
-+        frames++;
-+        if (now - since >= 1000) {
-+            fprintf(stderr, "[cocoa-gl] %d frames/s\n",
-+                    (int)(frames * 1000 / (now - since)));
-+            frames = 0;
-+            since = now;
-+        }
-+    }
-+}
-+
- static void cocoa_gl_render(void)
- {
-     NSSize size = [cocoaView convertSizeToBacking:[cocoaView frame].size];
-@@ -2840,26 +2891,298 @@
-     /* Clear dirty flag after render completes to ensure clean handoff */
-     gl_dirty = false;
- 
--    /* OMACVM_GL_FPS=1: frames shown per second, on stderr. */
--    {
--        static int fps_on = -1, frames;
--        static int64_t since;
--        if (fps_on < 0) {
--            fps_on = getenv("OMACVM_GL_FPS") != NULL;
-+    cocoa_gl_present_count();
-+}
-+
 +/*
 + * IOSurface present: on QEMU's thread (BQL held) the guest's scanout is
 + * drawn into one of three IOSurfaces with a context of its own, and the
@@ -143,8 +131,15 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 + * the GPU to finish a surface, then the main queue sets it as the layer's
 + * contents. A surface is reused only once Core Animation is done with it.
 + * OMACVM_GL_PRESENT=layer goes back to the CAOpenGLLayer path.
++ *
++ * The guest picks the scanout size, so it must not pick the Mac's memory:
++ * the surfaces are never larger than the largest display (a bigger
++ * scanout is drawn scaled down; the window could not show more anyway),
++ * and they are made again at most twice a second. A guest that flips
++ * between two sizes gets its frames scaled into the surfaces it has.
 + */
 +#define PRESENT_SURFACES 3
++#define PRESENT_REALLOC_NS (500 * SCALE_MS)
 +
 +static int present_mode = -1;          /* 1: IOSurface, 0: CAOpenGLLayer */
 +static CGLContextObj present_ctx;      /* QEMU thread: draws the surfaces */
@@ -159,6 +154,9 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +static QEMUTimer *present_timer;
 +static int64_t present_last_ns;
 +static int64_t present_period_ns;
++static int64_t present_alloc_ns;       /* when the surfaces were made */
++static bool present_realloc_due;       /* surfaces of the wrong size */
++static uint64_t present_cap;           /* largest display: w << 32 | h */
 +
 +static bool cocoa_gl_present_iosurface_wanted(void)
 +{
@@ -170,6 +168,26 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +}
 +
 +static void cocoa_gl_present_timer(void *opaque);
++
++/*
++ * Main thread: the largest display in pixels caps the surfaces; the
++ * fastest one sets how often a frame is drawn. Again when displays change.
++ */
++static void cocoa_gl_present_screens(void)
++{
++    uint32_t w = 1, h = 1;
++    NSInteger hz = 60;
++
++    for (NSScreen *screen in [NSScreen screens]) {
++        NSSize size = [screen frame].size;
++        CGFloat scale = [screen backingScaleFactor];
++        w = MAX(w, (uint32_t)MIN(ceil(size.width * scale), 16384));
++        h = MAX(h, (uint32_t)MIN(ceil(size.height * scale), 16384));
++        hz = MAX(hz, [screen maximumFramesPerSecond]);
++    }
++    qatomic_set(&present_cap, (uint64_t)w << 32 | h);
++    qatomic_set(&present_period_ns, NANOSECONDS_PER_SECOND / hz);
++}
 +
 +static bool cocoa_gl_present_init(void)
 +{
@@ -189,15 +207,19 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    CGLSetCurrentContext(prev);
 +
 +    present_queue = dispatch_queue_create("org.omacvm.present",
-+                                          DISPATCH_QUEUE_SERIAL);
++        dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL,
++                                                QOS_CLASS_USER_INTERACTIVE, 0));
 +    present_timer = timer_new_ns(QEMU_CLOCK_REALTIME,
 +                                 cocoa_gl_present_timer, NULL);
 +    /* At most one frame per refresh of the fastest display. */
-+    NSInteger hz = 60;
-+    for (NSScreen *screen in [NSScreen screens]) {
-+        hz = MAX(hz, [screen maximumFramesPerSecond]);
-+    }
-+    present_period_ns = NANOSECONDS_PER_SECOND / hz;
++    cocoa_gl_present_screens();
++    [[NSNotificationCenter defaultCenter]
++        addObserverForName:NSApplicationDidChangeScreenParametersNotification
++                    object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        cocoa_gl_present_screens();
++    }];
 +    return true;
 +}
 +
@@ -207,16 +229,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +        if (present_tex[i]) {
 +            glDeleteTextures(1, &present_tex[i]);
 +            present_tex[i] = 0;
-         }
--        if (fps_on) {
--            int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
--            frames++;
--            if (now - since >= 1000) {
--                fprintf(stderr, "[cocoa-gl] %d frames/s\n",
--                        (int)(frames * 1000 / (now - since)));
--                frames = 0;
--                since = now;
--            }
++        }
 +        if (present_surf[i]) {
 +            CFRelease(present_surf[i]);
 +            present_surf[i] = NULL;
@@ -225,16 +238,39 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    present_w = present_h = 0;
 +}
 +
-+/* present_ctx is current. */
++/*
++ * present_ctx is current. Surfaces for a w x h frame, capped at the
++ * largest display. Made again at most every PRESENT_REALLOC_NS: until
++ * then the frame is drawn scaled into the surfaces there are, and the
++ * timer comes back to make the right ones.
++ */
 +static bool cocoa_gl_present_alloc(uint32_t w, uint32_t h)
 +{
-+    if (w == present_w && h == present_h && present_surf[0]) {
-+        return true;
-+    }
-+    cocoa_gl_present_free();
-+    if (!w || !h || w > 16384 || h > 16384) {
++    uint64_t cap = qatomic_read(&present_cap);
++    uint32_t cap_w = cap >> 32, cap_h = (uint32_t)cap;
++    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++
++    if (!w || !h) {
 +        return false;
 +    }
++    if (w > cap_w || h > cap_h) {
++        double scale = MIN((double)cap_w / w, (double)cap_h / h);
++        w = MAX(1, (uint32_t)(w * scale));
++        h = MAX(1, (uint32_t)(h * scale));
++    }
++    if (present_surf[0]) {
++        if (w == present_w && h == present_h) {
++            return true;
++        }
++        if (now - present_alloc_ns < PRESENT_REALLOC_NS) {
++            present_realloc_due = true;
++            timer_mod(present_timer, present_alloc_ns + PRESENT_REALLOC_NS);
++            return true;
++        }
++    }
++    cocoa_gl_present_free();
++    present_alloc_ns = now;
++    present_realloc_due = false;
 +
 +    NSDictionary *props = @{
 +        (id)kIOSurfaceWidth: @(w),
@@ -263,34 +299,6 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    present_h = h;
 +    present_next = 0;
 +    return true;
-+}
-+
-+/*
-+ * OMACVM_GL_DUMP=FILE: a frame shown as a PPM, to check orientation and
-+ * colours; written whenever FILE does not exist (delete it for a new one).
-+ */
-+static void cocoa_gl_present_dump(IOSurfaceRef surf)
-+{
-+    const char *path = getenv("OMACVM_GL_DUMP");
-+    FILE *f;
-+
-+    if (!path || access(path, F_OK) == 0 || !(f = fopen(path, "wb"))) {
-+        return;
-+    }
-+    IOSurfaceLock(surf, kIOSurfaceLockReadOnly, NULL);
-+    size_t w = IOSurfaceGetWidth(surf), h = IOSurfaceGetHeight(surf);
-+    size_t stride = IOSurfaceGetBytesPerRow(surf);
-+    const uint8_t *base = IOSurfaceGetBaseAddress(surf);
-+    fprintf(f, "P6\n%zu %zu\n255\n", w, h);
-+    for (size_t y = 0; y < h; y++) {
-+        for (size_t x = 0; x < w; x++) {
-+            const uint8_t *px = base + y * stride + x * 4;
-+            uint8_t rgb[3] = { px[2], px[1], px[0] };
-+            fwrite(rgb, 1, 3, f);
-+        }
-+    }
-+    IOSurfaceUnlock(surf, kIOSurfaceLockReadOnly, NULL);
-+    fclose(f);
 +}
 +
 +/* QEMU thread, BQL held. Returns false when nothing could be shown. */
@@ -345,7 +353,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +        CGLSetCurrentContext(prev);
 +        gl_dirty = true;
 +        timer_mod(present_timer, qemu_clock_get_ns(QEMU_CLOCK_REALTIME) +
-+                                 present_period_ns);
++                                 qatomic_read(&present_period_ns));
 +        return true;
 +    }
 +    unsigned n = (present_next + i) % PRESENT_SURFACES;
@@ -354,7 +362,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    glBindFramebuffer(GL_FRAMEBUFFER, present_fbo);
 +    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
 +                           GL_TEXTURE_RECTANGLE, present_tex[n], 0);
-+    glViewport(0, 0, w, h);
++    glViewport(0, 0, present_w, present_h);
 +    glDisable(GL_BLEND);
 +    glDisable(GL_SCISSOR_TEST);
 +    /* The guest's alpha means nothing here: the window is opaque. */
@@ -364,8 +372,11 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 +    glActiveTexture(GL_TEXTURE0);
 +    glBindTexture(GL_TEXTURE_2D, src);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    /* Pixel for pixel, unless the frame had to be scaled (see alloc). */
++    GLint blit_filter = (w == present_w && h == present_h) ? GL_NEAREST
++                                                           : GL_LINEAR;
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, blit_filter);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, blit_filter);
 +    qemu_gl_run_texture_blit(present_gls, flip);
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +    glBindTexture(GL_TEXTURE_2D, 0);
@@ -382,12 +393,21 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +    dispatch_async(present_queue, ^{
 +        CGLSetCurrentContext(present_wait_ctx);
 +        if (sync) {
-+            glClientWaitSync(sync, GL_SYNC_FLUSH_COMMANDS_BIT,
-+                             1000 * 1000 * 1000);
++            /*
++             * Apple's glClientWaitSync spins a core until the fence
++             * signals: test it, and nap 100 us between tests (the queue is
++             * user-interactive, so naps are not stretched). At most 1 s,
++             * as before.
++             */
++            for (int t = 0; t < 10000; t++) {
++                if (glClientWaitSync(sync, 0, 0) != GL_TIMEOUT_EXPIRED) {
++                    break;
++                }
++                g_usleep(100);
++            }
 +            glDeleteSync(sync);
-         }
++        }
 +        CGLSetCurrentContext(NULL);
-+        cocoa_gl_present_dump(surf);
 +        dispatch_async(dispatch_get_main_queue(), ^{
 +            CALayer *layer = [cocoaView layer];
 +            [CATransaction begin];
@@ -401,7 +421,6 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +            CFRelease(surf);
 +        });
 +    });
-+    cocoa_gl_present_count();
 +    present_last_ns = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
 +    return true;
 +}
@@ -414,19 +433,23 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
 +static void cocoa_gl_present_request(void)
 +{
 +    int64_t now = qemu_clock_get_ns(QEMU_CLOCK_REALTIME);
++    int64_t period = qatomic_read(&present_period_ns);
 +
 +    gl_dirty = true;
-+    if (now - present_last_ns >= present_period_ns) {
++    if (now - present_last_ns >= period) {
 +        timer_del(present_timer);
 +        cocoa_gl_present();
-+    } else if (!timer_pending(present_timer)) {
-+        timer_mod(present_timer, present_last_ns + present_period_ns);
-     }
- }
- 
++    } else if (!timer_pending(present_timer) ||
++               (int64_t)timer_expire_time_ns(present_timer) >
++                   present_last_ns + period) {
++        timer_mod(present_timer, present_last_ns + period);
++    }
++}
++
 +static void cocoa_gl_present_timer(void *opaque)
 +{
-+    if (gl_dirty) {
++    /* A new frame, or the last one drawn into surfaces of the wrong size. */
++    if (gl_dirty || present_realloc_due) {
 +        cocoa_gl_present();
 +    }
 +}
@@ -434,7 +457,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  static void cocoa_gl_refresh(DisplayChangeListener *dcl)
  {
      cocoa_refresh(dcl);
-@@ -2884,6 +3207,10 @@
+@@ -2865,6 +3228,10 @@ static void cocoa_gl_refresh(DisplayChangeListener *dcl)
          }
  #endif
  
@@ -445,7 +468,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
          dispatch_async(dispatch_get_main_queue(), ^{
              [[cocoaView layer] setNeedsDisplay];
          });
-@@ -2929,9 +3256,15 @@
+@@ -2910,9 +3277,15 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
          on_tick = getenv("OMACVM_GL_PRESENT_ON_TICK") != NULL;
      }
  #ifdef CONFIG_EGL
@@ -463,7 +486,7 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
          dispatch_async(dispatch_get_main_queue(), ^{
              qatomic_set(&gl_present_pending, false);
              [[cocoaView layer] setNeedsDisplay];
-@@ -3060,6 +3393,17 @@
+@@ -3041,6 +3414,17 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;
@@ -481,14 +504,3 @@ grim (upright, colours); 30-minute soaks; gpuSafeMode A/B in the app.
  
          for (unsigned int index = 0; ; index++) {
              QemuConsole *con = qemu_console_lookup_by_index(index);
---- a/meson.build
-+++ b/meson.build
-@@ -1221,7 +1221,7 @@
- endif
- 
- cocoa = dependency('appleframeworks',
--                   modules: ['Cocoa', 'Carbon', 'CoreVideo', 'OpenGL', 'QuartzCore'],
-+                   modules: ['Cocoa', 'Carbon', 'CoreVideo', 'IOSurface', 'OpenGL', 'QuartzCore'],
-                    required: get_option('cocoa'))
- 
- vmnet = dependency('appleframeworks', modules: 'vmnet', required: get_option('vmnet'))

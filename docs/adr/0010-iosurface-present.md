@@ -41,6 +41,13 @@ main thread gets the surface; at most one surface per display refresh.
   them on the display's refresh.
 - The main thread never waits for the BQL to draw.
 - One GPU copy per shown frame stays (cheap next to Apple's per-draw cost).
+- The guest sets the scanout size, so the surfaces are capped at the
+  largest display and made again at most twice a second; a guest switching
+  sizes on every frame gets its frames scaled into the surfaces it has.
+  Before (review of 2026-10-04) only 16384x16384 capped them: 3 x 1 GiB, and
+  three new surfaces per frame when the size alternated.
+- The present queue tests the blit's fence and naps 100 us between tests;
+  Apple's `glClientWaitSync` would spin a core for each frame.
 - `OMACVM_GL_PRESENT=layer` keeps the old layer; if the IOSurface contexts
   cannot be made the window falls back by itself.
 - The head windows of [0015](0015-one-window-per-display.md) still use

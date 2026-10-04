@@ -2,19 +2,20 @@ From: OmacVM
 Subject: [PATCH] cocoa: show each guest frame when it is flushed
 
 The GL scanout flush only marked the view dirty; the window redrew on
-QEMU's 30 ms GUI refresh tick, so it showed at most 33 frames a second
-while Omarchy rendered at 120. Ask Core Animation for a redraw as soon as
-the guest flushes (one request in flight at a time).
+QEMU's 30 ms GUI refresh tick, so by the code it could show at most 33
+frames a second while Omarchy rendered at 120. Ask Core Animation for a
+redraw as soon as the guest flushes (one request in flight at a time).
 
-OMACVM_GL_PRESENT_ON_TICK=1 restores the old behaviour, OMACVM_GL_FPS=1
-prints the frames shown per second on stderr. Applies after the
-texture-borrowing and GPU-resolution patches.
+OMACVM_GL_PRESENT_ON_TICK=1 restores the old behaviour (GPU safe mode
+sets it). Applies after the texture-borrowing and GPU-resolution patches.
 
 Upstream: not sent; small enough to offer.
-Test: OMACVM_GL_FPS=1 shows 60 frames/s on a 60 Hz display (was the 30 ms tick).
+Test: a frame counter (dev build only) showed 60 frames/s on a 60 Hz
+display, and up to 90 during workspace animations at 120 Hz; GPU safe
+mode A/B in the app.
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index abc53b5..8626546 100644
+index abc53b5..2be99eb 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -138,6 +138,7 @@ @interface QemuCGLLayer : CAOpenGLLayer
@@ -25,33 +26,7 @@ index abc53b5..8626546 100644
  static uint32_t gl_scanout_id;
  static DisplayGLTextureBorrower gl_scanout_borrow;
  static QEMUGLContext gl_view_ctx;
-@@ -2838,6 +2839,25 @@ static void cocoa_gl_render(void)
- 
-     /* Clear dirty flag after render completes to ensure clean handoff */
-     gl_dirty = false;
-+
-+    /* OMACVM_GL_FPS=1: frames shown per second, on stderr. */
-+    {
-+        static int fps_on = -1, frames;
-+        static int64_t since;
-+        if (fps_on < 0) {
-+            fps_on = getenv("OMACVM_GL_FPS") != NULL;
-+        }
-+        if (fps_on) {
-+            int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
-+            frames++;
-+            if (now - since >= 1000) {
-+                fprintf(stderr, "[cocoa-gl] %d frames/s\n",
-+                        (int)(frames * 1000 / (now - since)));
-+                frames = 0;
-+                since = now;
-+            }
-+        }
-+    }
- }
- 
- static void cocoa_gl_refresh(DisplayChangeListener *dcl)
-@@ -2898,6 +2918,26 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2898,6 +2899,26 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
  {
      gl_dirty = true;
  
