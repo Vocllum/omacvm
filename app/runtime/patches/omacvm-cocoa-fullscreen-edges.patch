@@ -1,0 +1,126 @@
+From: OmacVM
+Subject: [PATCH] cocoa: no Dock, menu bar or hot corner from inside full screen
+
+What: the other displays' full-screen windows ask macOS for the same
+presentation as the main window (Dock and menu bar hidden, not auto-hidden),
+and while the VM has the pointer in full screen the Mac's cursor is kept
+3 points off the corners of its display. Both follow the immersive option
+(on by default; immersive=off keeps macOS's behaviour).
+
+Why: in the user's 2.8.0/2.9.0 RC test the Dock came up at the edge of the
+external display (its full-screen Space used macOS's default auto-hide), and
+a hot corner set to "put display to sleep" fired from inside the full-screen
+VM. The guest's pointer is absolute, so it only stops 3 points short of a
+corner; it reaches every edge as before.
+
+Upstream: not applicable (OmacVM's display windows; QEMU has one window).
+Test: full screen on the MacBook and an external display: the pointer pushed
+into each corner and along each edge shows no Dock, no menu bar, no hot
+corner (notes: display-bugs track).
+
+diff --git a/ui/cocoa.m b/ui/cocoa.m
+index 646ffb6..f7425b9 100644
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -466,6 +466,7 @@ static bool omacvm_map_pointer(int output, double u, double v,
+ static int omacvm_active_outputs(void);
+ static bool omacvm_is_our_window(NSWindow *w);
+ static bool omacvm_pointer_over_ours(void);
++static void omacvm_guard_corners(void);
+ static bool omacvm_is_head_console(unsigned int index);
+ static bool omacvm_test_mode(void);
+ static void omacvm_displays_update(void);
+@@ -1535,6 +1536,9 @@ - (void) handleMouseEvent:(NSEvent *)event
+     if (!isMouseGrabbed) {
+         return;
+     }
++    if (isAbsoluteEnabled) {
++        omacvm_guard_corners();
++    }
+ 
+     with_bql(^{
+         if (isAbsoluteEnabled &&
+@@ -1783,6 +1787,9 @@ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+         }
+         [self grabMouse];
+     }
++    if (isAbsoluteEnabled) {
++        omacvm_guard_corners();
++    }
+     with_bql(^{
+         if (button >= 0) {
+             qemu_input_queue_btn(dcl.con, button, down);
+@@ -3277,6 +3284,50 @@ static bool omacvm_main_full_screen(void)
+            ([[cocoaView window] styleMask] & NSWindowStyleMaskFullScreen);
+ }
+ 
++/*
++ * While the VM has the pointer in full screen, the Mac's cursor stays off the
++ * very corners of its display: a corner is a macOS hot corner (one put the
++ * Mac's display to sleep from inside the VM). The guest's pointer is
++ * absolute, so it simply stops 3 points short of the corner. Off with
++ * immersive=off; leaving full screen or the VM gives the cursor back as before.
++ */
++static void omacvm_guard_corners(void)
++{
++    const CGFloat g = 3;
++    CGDirectDisplayID id;
++    uint32_t n = 0;
++    CGEventRef e;
++    CGPoint p, q;
++    CGRect r;
++    bool left, right, top, bottom;
++
++    if (!immersive_mode_enabled || !omacvm_main_full_screen()) {
++        return;
++    }
++    e = CGEventCreate(NULL);
++    if (!e) {
++        return;
++    }
++    p = CGEventGetLocation(e);
++    CFRelease(e);
++    if (CGGetDisplaysWithPoint(p, 1, &id, &n) != kCGErrorSuccess || n == 0) {
++        return;
++    }
++    r = CGDisplayBounds(id);
++    left = p.x < CGRectGetMinX(r) + g;
++    right = p.x > CGRectGetMaxX(r) - 1 - g;
++    top = p.y < CGRectGetMinY(r) + g;
++    bottom = p.y > CGRectGetMaxY(r) - 1 - g;
++    if (!((left || right) && (top || bottom))) {
++        return;
++    }
++    q.x = left ? CGRectGetMinX(r) + g : CGRectGetMaxX(r) - 1 - g;
++    q.y = top ? CGRectGetMinY(r) + g : CGRectGetMaxY(r) - 1 - g;
++    CGWarpMouseCursorPosition(q);
++    /* Without this the cursor freezes for a moment after a warp. */
++    CGAssociateMouseAndMouseCursorPosition(true);
++}
++
+ /* A display's rectangle in points, top-left origin (CoreGraphics' global space). */
+ static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
+ {
+@@ -3692,6 +3743,22 @@ - (BOOL)windowShouldClose:(id)sender
+     return NO;
+ }
+ 
++/*
++ * The other displays' full-screen Spaces hide the Dock and the menu bar like
++ * the main window's (macOS's default there auto-hides them: the Dock came up
++ * at the bottom edge of an external display).
++ */
++- (NSApplicationPresentationOptions)window:(NSWindow *)window
++      willUseFullScreenPresentationOptions:(NSApplicationPresentationOptions)proposedOptions
++{
++    if (!immersive_mode_enabled) {
++        return proposedOptions;
++    }
++    return (proposedOptions & ~(NSApplicationPresentationAutoHideDock |
++                                NSApplicationPresentationAutoHideMenuBar)) |
++           NSApplicationPresentationHideDock | NSApplicationPresentationHideMenuBar;
++}
++
+ /*
+  * A click on another display's window makes it key. The keyboard and the
+  * main window's pointer tracking belong to the main window: hand it back.

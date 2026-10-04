@@ -15,6 +15,9 @@ in more words.
   real size (1728x1080 points on a 14-inch MacBook Pro, was 1728x1085). The
   picture is no longer squeezed and the pointer lands where it is on the Mac
   (it was up to 5 points off at the bottom).
+- OmacVM.app in full screen: the Dock no longer comes up at the edge of an
+  external display, and macOS hot corners no longer fire from inside the VM
+  (the pointer stops 3 points short of a screen corner).
 - Cmd-drag moves an Omarchy window from one Mac display to another; a held
   modifier key is no longer let go when the pointer crosses to another
   display's window.
