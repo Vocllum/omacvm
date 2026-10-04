@@ -244,7 +244,7 @@ Notes:
   still busy in the VM during our run. They are being measured again
   ([#32](https://github.com/gillesgoetsch/omacvm/issues/32),
   [finding 15](../troubleshooting.md#15-utm-idle-power-is-being-measured-again)).
-- MotionMark: [finding 16](../troubleshooting.md#16-motionmark-gives-no-stable-result).
+- MotionMark: [finding 16](../notes/findings.md#16-motionmark-gives-no-stable-result).
 
 ### GPU (2026-10-04)
 
