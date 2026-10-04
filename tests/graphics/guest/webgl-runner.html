@@ -26,11 +26,14 @@ function info() {
           vendor: e ? gl.getParameter(e.UNMASKED_VENDOR_WEBGL) : ""};
 }
 (async () => {
+  // start, attempt, isolate: set by webgl-driver.py when it restarts Chrome (see there)
   const list = await (await fetch("/list.json")).json();
-  if (!+q.get("start")) await post("/start", {count: list.length, ...info()});
+  const first = +(q.get("start") || 0), isolate = q.get("isolate") === "1";
+  if (!first && q.get("attempt") !== "2") await post("/start", {count: list.length, ...info()});
   const frame = document.getElementById("f"), s = document.getElementById("s");
-  // webgl.sh restarts Chrome after a page that hangs the renderer, at the page after it
-  for (let i = +(q.get("start") || 0); i < list.length; i++) {
+  for (let i = first; i < list.length; i++) {
+    const attempt = i === first ? +(q.get("attempt") || 1) : 1;
+    await post("/begin", {test: list[i], index: i, attempt});
     const t0 = performance.now();
     cur = {test: list[i], pass: 0, fail: 0, skip: 0, msgs: []};
     s.textContent = `${i + 1}/${list.length} ${list[i]}`;
@@ -40,9 +43,11 @@ function info() {
       frame.src = "/" + list[i] + (list[i].includes("?") ? "&" : "?") + "webglVersion=" + (q.get("v") || "1");
     });
     const r = cur; cur = null;
-    await post("/result", {test: r.test, status: how === "timeout" ? "timeout" : (r.fail ? "fail" : "pass"),
-                           pass: r.pass, fail: r.fail, skip: r.skip, ms: Math.round(performance.now() - t0), msgs: r.msgs});
+    const status = how === "timeout" ? "timeout" : (r.fail ? "fail" : "pass");
+    await post("/result", {test: r.test, index: i, attempt, status, pass: r.pass, fail: r.fail, skip: r.skip,
+                           ms: Math.round(performance.now() - t0), msgs: r.msgs});
     frame.src = "about:blank";
+    if (isolate && status !== "pass") { await post("/stop", {index: i, attempt}); return; }
   }
   await post("/done", {});
 })();
