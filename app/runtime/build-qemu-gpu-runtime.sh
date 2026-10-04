@@ -87,6 +87,7 @@ virgl_venus_lost_patch="$native_dir/patches/virgl-venus-lost-context-fences.patc
 virgl_instance_id_patch="$native_dir/patches/virgl-core-instance-id.patch"
 virgl_xfb_end_patch="$native_dir/patches/virgl-transform-feedback-end.patch"
 virgl_so_checks_patch="$native_dir/patches/virgl-stream-output-checks.patch"
+virgl_gl_error_patch="$native_dir/patches/virgl-gl-error-skip-command.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -124,6 +125,7 @@ virgl_shader_limits_patch_sha256=df6b333dbeb1fe43fd023551fac8ee2d75228f3866b5b1e
 virgl_instance_id_patch_sha256=67de90babfec3f4abf2b1747f6637bd74e4cd5a2c2cdf0b44eaaeb0e33a6f0d6
 virgl_so_checks_patch_sha256=bf9c4f1eeeda2542fec37d225717a93299b165b5820b3d1936651fc8aea62d64
 virgl_xfb_end_patch_sha256=d887f7ecf827e164ae05eed79eab089f5f076f93949776a1ac6d8f61700f7587
+virgl_gl_error_patch_sha256=ac9835d10c49ebdf461b633ad4c70e77a9f227db9c623b839a6d4827e299182a
 virgl_venus_lost_patch_sha256=7c68192a607670b12cf46147e40a2603485b7f5d1941709b2df891e4f7e4f9ed
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -665,6 +667,9 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_xfb_end_patch"
 # OmacVM: stream output registers from the guest are checked (the fuzzer aborted QEMU).
 verify_file_sha "Stream output checks patch" "$virgl_so_checks_patch" "$virgl_so_checks_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_so_checks_patch"
+# OmacVM: a GL error after a guest command skips that command; the context lives.
+verify_file_sha "GL error skip patch" "$virgl_gl_error_patch" "$virgl_gl_error_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_gl_error_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"

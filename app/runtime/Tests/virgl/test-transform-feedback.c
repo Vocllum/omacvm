@@ -318,7 +318,7 @@ static void run_case(int n, int ctx_id)
       break;
    case 5:
       /* Mesa never sends this (it unbinds the targets to pause); GL refuses to record
-       * with a program that has no outputs to record: the context is lost, no crash. */
+       * with a program that has no outputs to record: that draw is skipped. */
       printf("case 5: program without outputs drawn while still bound, target destroyed\n");
       record(c, res, TEST_PRIM_POINTS);
       emit_shader(c, 12, TEST_SHADER_VERTEX, vs_plain);
@@ -416,12 +416,11 @@ static void run_case(int n, int ctx_id)
    }
    int r = submit(ctx_id, c);
    char what[80];
-   snprintf(what, sizeof(what), n == 5 ? "case %d: refused, nothing crashed" :
-            "case %d: commands accepted", n);
-   check(n == 5 ? r != 0 : r == 0, what);
+   snprintf(what, sizeof(what), "case %d: commands accepted", n);
+   check(r == 0, what);
 
    /* The context keeps working: record again from scratch and draw. */
-   if (n != 5 && n != 8 && n != 9 && n != 10) {
+   if (n != 8 && n != 9 && n != 10) {
       emit_set_targets(c, 0, NULL);
       emit_shader(c, 30, TEST_SHADER_VERTEX, vs_plain);
       emit_shader(c, 31, TEST_SHADER_FRAGMENT, fs_text);
