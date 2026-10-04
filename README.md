@@ -319,7 +319,8 @@ When it is done, once on the Mac:
 
 1. **Allow the prompts**: Location Services for *OmacVM Bridge* (Wi-Fi
    names), Bluetooth for *OmacVM Bridge*, Accessibility for *OmacVM Bridge*
-   and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures*. The camera
+   and *OmacVM Gestures*, Input Monitoring for *OmacVM Gestures* (Omanotch
+   needs none). The camera
    is asked for the first time a Linux app uses it: for *OmacVM Bridge* (UTM,
    Fusion), *OmacVM* (the app) or *Parallels Desktop*. The microphone belongs
    to the VM's app: UTM asks the first time, OmacVM.app when it starts the VM;

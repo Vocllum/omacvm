@@ -735,8 +735,8 @@ static int handshake(int fd, const char *tok) {
 
 // Tells the helper which hypervisor this guest runs in, so it only takes this
 // VM app's full-screen window for the strip ("hello qemu", "hello parallels"),
-// and the VM's name, so it can tell several VMs of one app apart by their
-// window titles ("vmname <base64>"; older helpers ignore it).
+// and the VM's name for its log and to spot a rebooted OmacVM.app VM
+// ("vmname <base64>"; older helpers ignore it).
 static void send_hello(void) {
     char vendor[64] = "", msg[96], name[400], namemsg[420];
 
