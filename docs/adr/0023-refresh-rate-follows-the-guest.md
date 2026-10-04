@@ -1,7 +1,7 @@
 # 0023: The refresh rate follows the guest (ProMotion)
 
 Status: accepted. Built on `pacing-hdr` (`qemu-cocoa-gl-present-vsync.patch`,
-on top of ADR 0020), not merged. Power on the real panel not measured yet.
+on top of ADR 0020), not merged. Power on a quiet Mac still to measure.
 
 ## Context
 
@@ -53,8 +53,13 @@ at 20 Hz instead of 40.
 - testufo (120 fps) unchanged: 119.6-119.9 new frames a second.
 - The first frames of an animation after single frames are shown when
   ready (as gpu-native did), the link takes over from the third.
-- The panel's own rate and the Mac's power are not measured yet: they need
-  the window visible on the MacBook panel with nobody using the Mac
-  (`power-matrix.sh`, waiting for the user's OK).
+- On the MacBook's ProMotion panel macOS grants the request: for a 24 fps
+  video the link ticked 24-26 times a second (fixed: 120.5), for a page
+  changing 5 times a second not at all (fixed: 120.6).
+- Power is not settled: a 10-minute check on the panel (brightness 50 %,
+  2 minutes per row) read 14.4-20.7 W with the VM and 26.9 W without it,
+  because other tracks' VMs (not paused by the bench lock) loaded the Mac
+  more than the difference being measured. The full matrix (adaptive vs
+  fixed, several rounds, a quiet Mac) is left for the end of the pipeline.
 - `OMACVM_GL_REFRESH=fixed` restores option 1. Trace events
   `cocoa_present_*` show the rate and counters.

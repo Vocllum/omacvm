@@ -646,8 +646,12 @@ CPU:
 | page at 120 fps | 120.5, 97 %, 46.4 % | 120.8, 91 %, 58.8 % |
 | mpv, 24 fps video | 23.7, -, 19.5 % | 120.7, -, 23.7 % |
 
-The panel's real rate and the Mac's power need the window on the MacBook
-panel with nobody at the Mac; not measured yet.
+On the MacBook panel itself (window on Space 1, nobody at the Mac):
+the link ticked 24-26 times a second for a 24 fps video (fixed: 120.5) and
+not at all for a page changing 5 times a second (fixed: 120.6), so macOS
+grants the lower rate. The Mac's power in that 10-minute check (14.4-20.7 W
+with the VM, 26.9 W without) was set by other tracks' VMs, not by this:
+the power comparison needs a quiet Mac (end of the pipeline).
 ## 13. Merging the tracks
 
 The tracks share one runtime. Order and overlaps known today:
