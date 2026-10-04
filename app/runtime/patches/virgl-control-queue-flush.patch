@@ -1,9 +1,9 @@
 virglrenderer: flush after resource and transfer commands from QEMU
 
-What: after creating or freeing a resource and after a transfer to the host
-(QEMU's resource create/unref and transfer-to-host commands), glFlush() on the
-context the work ran on: vrend's own context ctx0, or the guest context of a
-transfer with a context id.
+What: after creating or freeing a resource, after a transfer to the host and
+after destroying a context (QEMU's resource create/unref, transfer-to-host and
+context destroy commands), glFlush() on the context the work ran on: vrend's
+own context ctx0, or the guest context of a transfer with a context id.
 Why: nothing else flushes ctx0 (guest contexts are flushed by their fences),
 and Apple's GL keeps the memory of textures made, deleted or uploaded on a
 context until that context is flushed. Every guest mode change uploads the new
@@ -34,7 +34,16 @@ Tests: tests/graphics/scanout-churn.sh (test VM; IOAccelerator memory over
  }
  
  void virgl_renderer_fill_caps(uint32_t set, uint32_t version,
-@@ -361,20 +364,24 @@
+@@ -314,6 +317,8 @@
+ {
+    TRACE_FUNC();
+    virgl_context_remove(handle);
++   if (state.vrend_initialized)
++      vrend_renderer_flush_current();
+ }
+ 
+ int virgl_renderer_submit_cmd(void *buffer,
+@@ -361,20 +366,24 @@
     transfer_info.iovec_cnt = iovec_cnt;
     transfer_info.synchronized = false;
  
@@ -75,7 +84,7 @@ Tests: tests/graphics/scanout-churn.sh (test VM; IOAccelerator memory over
                               const struct iovec *iov, unsigned int num_iovs,
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -14529,6 +14529,21 @@
+@@ -14532,6 +14532,21 @@
  }
  
  

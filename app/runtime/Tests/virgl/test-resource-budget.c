@@ -18,6 +18,7 @@
 #include "soft-gl.h"
 #include "virglrenderer.h"
 #include "virgl_hw.h"
+#include "virgl_protocol.h"
 
 extern char **environ;
 
@@ -163,6 +164,26 @@ static int run_limit(void)
    expect_fit("512x512 RGBA cube (6 MB)", (struct spec){T_CUBE, rgba, sv, 512, 512, 1, 6, 1, 0}, 10);
    expect_fit("1024x1024 RGBA, 4 samples (16 MB)",
               (struct spec){T_2D, rgba, VIRGL_BIND_RENDER_TARGET, 1024, 1024, 1, 1, 1, 4}, 4);
+   /* a blob pipe resource (made in a context's command stream) that the guest never
+    * claims is freed with its context, and its bytes come back */
+   check(virgl_renderer_context_create(1, 4, "test") == 0, "context for a pipe resource");
+   uint32_t cmd[12] = { VIRGL_CMD0(VIRGL_CCMD_PIPE_RESOURCE_CREATE, 0, VIRGL_PIPE_RES_CREATE_SIZE) };
+   cmd[VIRGL_PIPE_RES_CREATE_TARGET] = T_BUFFER;
+   cmd[VIRGL_PIPE_RES_CREATE_FORMAT] = VIRGL_FORMAT_R8_UNORM;
+   cmd[VIRGL_PIPE_RES_CREATE_BIND] = VIRGL_BIND_VERTEX_BUFFER;
+   cmd[VIRGL_PIPE_RES_CREATE_WIDTH] = 48 * MB;
+   cmd[VIRGL_PIPE_RES_CREATE_HEIGHT] = cmd[VIRGL_PIPE_RES_CREATE_DEPTH] = 1;
+   cmd[VIRGL_PIPE_RES_CREATE_ARRAY_SIZE] = 1;
+   cmd[VIRGL_PIPE_RES_CREATE_BLOB_ID] = 7;
+   check(virgl_renderer_submit_cmd(cmd, 1, 12) == 0, "a 48 MB pipe resource is made");
+   check(make(T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_VERTEX_BUFFER, 32 * MB, 1, 1, 1, 0, 0) == 0,
+         "next to it a 32 MB buffer is refused");
+   virgl_renderer_context_destroy(1);
+   big = make(T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_VERTEX_BUFFER, 64 * MB, 1, 1, 1, 0, 0);
+   check(big != 0, "after its context is gone, a 64 MB buffer fits");
+   if (big)
+      virgl_renderer_resource_unref(big);
+
    /* staging buffers only use guest memory: 4 KB each */
    expect_fit("1 GB staging buffers", (struct spec){T_BUFFER, VIRGL_FORMAT_R8_UNORM, VIRGL_BIND_STAGING,
               1u << 30, 1, 1, 1, 1, 0}, 64);

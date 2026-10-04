@@ -7,7 +7,9 @@ allocation (resource create fails, the guest's later use of it is refused);
 freeing a resource gives its bytes back. OMACVM_GPU_MEMORY_MB sets the budget,
 0 turns it off; the default is a quarter of the Mac's memory. The QEMU log says
 the budget at start ("guest GPU memory budget: N MB") and logs refusals at the
-1st, 2nd, 4th, 8th ... one.
+1st, 2nd, 4th, 8th ... one. Blob pipe resources a guest made but never
+claimed are now freed with their context including their GL storage (upstream
+freed only the struct and kept the texture or buffer).
 Why: nothing limited the host memory a guest can take with virgl resources
 (QEMU's max_hostmem only covers 2D resources without virgl). A guest making
 max-size textures in a loop could fill the Mac's memory (standards section 4:
@@ -15,7 +17,8 @@ no guest-controlled allocation without a limit).
 Upstream: not sent; upstream has no host memory limit for vrend resources.
 Tests: Tests/virgl/test-resource-budget.c (build time, Apple's software
 renderer): exact fit and refusal at the budget, mip chains, arrays, 3D, MSAA,
-staging buffers, giving bytes back on unref, budget off with 0.
+staging buffers, giving bytes back on unref and on context destroy (unclaimed
+pipe resource), budget off with 0.
 --- a/src/vrend/vrend_renderer.h
 +++ b/src/vrend/vrend_renderer.h
 @@ -121,6 +121,8 @@
@@ -59,12 +62,23 @@ staging buffers, giving bytes back on unref, budget off with 0.
  
     /* Give some defaults to be able to run the tests */
     vrend_state.max_texture_2d_size =
-@@ -9865,6 +9874,112 @@
-    gt->cur_base = -1;
-    gt->cur_max = 10000;
+@@ -8912,8 +8921,11 @@
+    vrend_video_destroy_context(ctx->video);
+ #endif
+ 
++   /* OmacVM: blob pipe resources the guest never claimed; free their GL storage
++    * too and give their bytes back to the budget (upstream freed only the struct) */
+    list_for_each_entry_safe(struct vrend_resource, res, &ctx->vrend_resources, head) {
+-      free(res);
++      list_del(&res->head);
++      vrend_renderer_resource_destroy(res);
+    }
+ 
+    list_for_each_entry_safe(struct vrend_untyped_resource, untyped_res, &ctx->untyped_resources, head)
+@@ -9867,6 +9879,112 @@
     return 0;
-+}
-+
+ }
+ 
 +/*
 + * OmacVM: a memory budget for guest resources. Without it a guest can make
 + * textures and buffers until the Mac runs out of memory (QEMU's max_hostmem only
@@ -169,10 +183,12 @@ staging buffers, giving bytes back on unref, budget off with 0.
 +{
 +   vrend_state.resource_bytes -= MIN2(gr->budget_bytes, vrend_state.resource_bytes);
 +   gr->budget_bytes = 0;
- }
- 
++}
++
  static struct vrend_resource *
-@@ -9906,6 +10021,11 @@
+ vrend_resource_create(const struct vrend_renderer_resource_create_args *args)
+ {
+@@ -9906,6 +10024,11 @@
     if (!gr)
        return NULL;
  
@@ -184,7 +200,7 @@ staging buffers, giving bytes back on unref, budget off with 0.
     if (args->target == PIPE_BUFFER) {
        ret = vrend_resource_alloc_buffer(gr, args->flags);
     } else {
-@@ -9914,6 +10034,7 @@
+@@ -9914,6 +10037,7 @@
     }
  
     if (ret) {
@@ -192,7 +208,7 @@ staging buffers, giving bytes back on unref, budget off with 0.
        FREE(gr);
        return NULL;
     }
-@@ -9923,6 +10044,7 @@
+@@ -9923,6 +10047,7 @@
  
  void vrend_renderer_resource_destroy(struct vrend_resource *res)
  {
