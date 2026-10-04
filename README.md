@@ -34,6 +34,10 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 
 **[See the full compatibility list per app below.](#which-app)**
 
+<p align="center">
+  <img src="docs/images/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
+</p>
+
 ### Which app?
 
 **OmacVM.app** is the recommended way: free, open source, and the only one with hardware video and the full GPU. **UTM** is the free classic. **VMware Fusion** is free and supports external monitors. **Parallels** is the most polished, but paid.
@@ -62,7 +66,6 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
 ¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in about 12 minutes
-
 
 You run [Omarchy](https://omarchy.org) on an Apple Silicon Mac, in a VM. It is
 fast, but out of the box it feels like a guest:
@@ -116,9 +119,6 @@ Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && .
 
 Or let your coding agent do it: [the prompt and more](docs/agents.md).
 
-<p align="center">
-  <img src="docs/images/demo.webp" alt="Filmed on a MacBook Pro: a swipe from macOS into the full-screen Omarchy VM, Omarchy's bar beside the notch, and the Mac's Wi-Fi, sound and battery in Omarchy's bar, then a swipe to the next workspace." width="100%">
-</p>
 
 ## What you get
 
