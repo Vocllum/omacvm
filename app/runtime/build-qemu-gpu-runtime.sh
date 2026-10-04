@@ -112,7 +112,7 @@ virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
 virgl_videotoolbox_patch_sha256=12c0863d818a1b26da3be9c59220ee22ce55a037887297cd6dac53e62dbc37c3
 virgl_row_size_patch_sha256=5858714fd4f7bcfaa1c9e10fc9ea706df30e59a37be62ad4c20003e049e347e9
-hidden_window_patch_sha256=286aa59317d16f21cb0fe1dd42b6636995d24f1c65312175e40f36b14272dc93
+hidden_window_patch_sha256=21e1d8bf7c26c748266f9c4d6a3c1784bbc62f91d4cc189c2a04b9deb9b508b3
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -515,10 +515,11 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-size.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input-only.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
-verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
-patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
+# Test runs without a window (OMACVM_COCOA_HIDDEN=1); on top of the displays patch.
+verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 # OmacVM: outputs switched on or off together reach the guest (virtio-gpu).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-event-race.patch"
 
