@@ -7,6 +7,7 @@ measure what reaches the Mac's screen, not what the guest thinks it drew.
 |---|---|---|
 | `pacing.html`, `srv.py`, `stats.py` | guest (`/opt/pacing`, `python3 srv.py` serves on 127.0.0.1:8765) | rAF loop that draws its frame number as 16 cells, a key-toggled marker; posts rAF intervals (`stats.py` summarises them) |
 | `colors.html` | guest | six colour bars (red, green, blue, white, grey, black) |
+| `hdrcss.html` | guest | CSS `color(rec2100-pq ...)` bars at 100/203/400/600/1000 nits and SDR white (Chrome HDR check; Chrome 154 still clips them at SDR white) |
 | `sckpace.swift` | Mac | ScreenCaptureKit capture of the VM window; counts how far the frame number moved per WindowServer frame; with `QMP=` also key -> screen latency |
 | `snapcolor.swift` | Mac | the colour bars as seen on screen, converted to Display P3 and sRGB |
 | `snaphdr.swift` | Mac | one frame in extended linear Display P3 (1.0 = SDR white; `pq` as 2nd argument: in PQ), plus each screen's EDR headroom |
