@@ -34,7 +34,8 @@ built and tested on a macOS 26 Mac.
 
 ## Consequences
 
-- Vulkan in the VM works now on macOS 15 (vkmark ~800, latency bound).
+- Vulkan in the VM works now on macOS 15 (vkmark ~800 with polled fences;
+  about 5,200 with the sync thread's fences, ADR 0011).
 - Zink (GL 4.6 on Vulkan), OpenCL through rusticl, and Chrome's ANGLE on
   Vulkan wait for KosmicKrisp: with MoltenVK, Zink gives GL 2.1 and crashes,
   ANGLE cannot make an ES 3.0 context.

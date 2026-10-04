@@ -53,3 +53,4 @@ read end cannot be written. A kqueue user event is not an fd that
 - `conformance-runs`: dEQP GLES2/3, WebGL 1/2 and the Venus CTS smoke give the
   same results case by case with and without this path.
 - The spinning wait is replaced by [0017](0017-fence-wait-short-sleeps.md).
+- Venus gains most: vkmark headless 732 -> 5195 (bench lock, median of 3).

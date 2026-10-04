@@ -188,7 +188,9 @@ why the main thread and QEMU waited on each other every frame).
    readback).
 6. Present:
    - shipped: the view is marked dirty; Cocoa redraws on QEMU's GUI refresh
-     tick (30 ms), so the window shows at most 33 frames/s.
+     tick (30 ms): by the code at most 33 redraws a second. (Inside the guest
+     a page still runs at 120, so testufo reports 120; what reaches the panel
+     is measured on `pacing-hdr`.)
    - built: each flush asks for a redraw; QEMU's thread blits the scanout
      into one of three IOSurfaces, the present queue waits for that blit,
      the main thread sets `layer.contents`. At most one surface per display
@@ -301,8 +303,10 @@ guest needs Mesa with blob rounding.
 Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
 no float64. So Zink (GL on Vulkan) and ANGLE-on-Vulkan in Chrome do not
 work; they wait for KosmicKrisp, which needs Metal 4 (macOS 26). See
-ADR 0013. Frame latency is Venus's ring polling (guest `vn_relax`, host
-`vkr_ring_relax`), about 1.3 ms per frame: vkmark ~800 is latency, not GPU.
+ADR 0013. With fences polled every 1 ms each vkmark frame waited about
+1.3 ms: vkmark ~730-800 was latency, not GPU. With the sync thread's fences
+(`gpu-native`) the same runtime gives about 5,200 (bench lock, 800x600
+headless, median of 3: 5195 vs 732 polled).
 
 ## 7. Video decode (built: `video-decode`)
 
@@ -444,11 +448,14 @@ bench lock and are indications only):
 |---|---|---|
 | glmark2, window 1440x810 pt, 60 Hz | 1259 | 4006 (async fences + present on flush) |
 | glmark2 short set, bench lock | 1096-1139 | 3310-3590 (final: + fence wait) |
+| 2.9.0 candidate, same build, safe mode vs new (bench lock, quiet Mac) | glmark2 short 932/1073, Aquarium 23.0/23.1/24.0 | glmark2 short 3748/3696, Aquarium 22.9/22.6/22.8 |
+| same, other VMs loading the Mac | Aquarium 23.4/24.0/23.1 | Aquarium 19.9/20.6/21.5 (the extra threads compete for CPU) |
 | Fence to reply, median | 1.56 ms | 0.20 ms |
-| Window frames/s | <= 33 | 60 (display refresh); desktop animation at 120 Hz: mean 58, max 90 |
+| Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
 | WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same) |
 | QEMU CPU, glmark2 / Aquarium, bench lock | - | 165% / 176% (fence wait; spinning: 195% / 194%) |
-| vkmark headless 800x600 (Venus) | - | ~800 |
+| vkmark headless 800x600 (Venus), bench lock | - | 5195 (fences polled: 732) |
+| dEQP GLES2/GLES3, WebGL 1/2 (`tests/graphics`, 2.9.0 candidate) | 853/859, 812/869, 776/787, 959/970 | same cases; one flaky GLES3 case; the transform-feedback crash of 2.6.0 remains |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks
@@ -460,9 +467,11 @@ The tracks share one runtime. Order and overlaps known today:
 2. Done: `gpu-venus` is merged into `gpu-native` (each shared patch applied
    once; gpu-venus's other patches after the fence and present patches).
    Venus fences use `gpu-native`'s FIFO thread-sync.
-3. `gpu-native` and `app-displays` both patch `ui/cocoa.m` heavily: the
-   IOSurface present must cover the head windows too.
-4. `video-decode` and `gpu-native` both add a "hidden window for tests" patch
-   (`qemu-cocoa-hidden-for-tests.patch`, `omacvm-cocoa-background.patch`):
-   keep one.
+3. `gpu-native` and `app-displays` both patch `ui/cocoa.m` heavily. On
+   `gpu-2.9.0` the present patches apply after the display patch and leave
+   the head windows on their `CAOpenGLLayer` (QEMU's 30 ms tick); moving the
+   heads to the IOSurface present is still open (with `pacing-hdr`'s pacing).
+4. Done on `gpu-2.9.0`: one test-window patch (`qemu-cocoa-hidden-for-tests.patch`:
+   `OMACVM_COCOA_HIDDEN`, `OMACVM_BACKGROUND`), applied after the display
+   patch, which has its own test mode at the same two places.
 5. Done: this version replaced `gpu-native`'s earlier draft.
