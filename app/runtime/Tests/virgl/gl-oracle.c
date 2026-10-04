@@ -13,7 +13,10 @@
  *    from its start covers the block's data size;
  *  - while transform feedback is active, every bound range lies inside its buffer;
  *  - indirect draws: the command lies inside the indirect buffer, and the draw it
- *    describes passes the same checks.
+ *    describes passes the same checks;
+ *  - no GL error is pending: a call the GL refused while the draw was set up (an
+ *    attribute format, a buffer range) keeps older state that the checks above would
+ *    judge by the wrong buffer, so vrend must have skipped the draw.
  * It also refuses to run unless the context is Apple's software renderer (soft-gl.h).
  * Test-only; never shipped. */
 #define GL_SILENCE_DEPRECATION 1
@@ -198,6 +201,9 @@ static void check_common(void)
 {
    require_software();
    draws_checked++;
+   GLenum err = glGetError();
+   if (err != GL_NO_ERROR)
+      fail("GL error 0x%x pending at a draw: a refused call left older state in place", err);
    check_uniform_blocks();
    check_transform_feedback();
 }

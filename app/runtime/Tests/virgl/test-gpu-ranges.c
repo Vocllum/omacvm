@@ -7,9 +7,13 @@
  *  SKIPPED - the draw is dropped, the context keeps drawing,
  *  LOST    - the guest's command is refused and its context is lost.
  * Covers virgl-buffer-binding-checks.patch, virgl-draw-range-checks.patch and
- * virgl-uniform-buffer-checks.patch; case 29 virgl-shader-index-clamp.patch.
+ * virgl-uniform-buffer-checks.patch; case 29 virgl-shader-index-clamp.patch; cases 30-31
+ * virgl-vertex-format-checks.patch, 32 virgl-uniform-buffer-alignment.patch, 33-34
+ * virgl-uniform-block-array.patch (30-33 are the gpu-robust review's repros 1-3).
+ * gl-oracle.c also aborts on a GL error pending at a draw (virgl-draw-gl-error-check).
  * Usage: test-gpu-ranges [case] */
 #include <OpenGL/OpenGL.h>
+#include <OpenGL/gl3.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +32,8 @@ enum expect { DRAWN, SKIPPED, LOST };
 
 static CGLContextObj main_ctx;
 static int failures;
+/* GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT of the renderer (256 on Apple's software renderer) */
+static int ubo_align;
 
 static void check(int ok, const char *what)
 {
@@ -168,15 +174,33 @@ static void emit_index_buffer(struct cmds *c, uint32_t handle, uint32_t size, ui
    emit(c, offset);
 }
 
-static void emit_uniform_buffer(struct cmds *c, uint32_t index, uint32_t offset,
-                                uint32_t length, uint32_t handle)
+static void emit_stage_uniform_buffer(struct cmds *c, uint32_t stage, uint32_t index,
+                                      uint32_t offset, uint32_t length, uint32_t handle)
 {
    emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_UNIFORM_BUFFER, 0, VIRGL_SET_UNIFORM_BUFFER_SIZE));
-   emit(c, TEST_SHADER_VERTEX);
+   emit(c, stage);
    emit(c, index);
    emit(c, offset);
    emit(c, length);
    emit(c, handle);
+}
+
+static void emit_uniform_buffer(struct cmds *c, uint32_t index, uint32_t offset,
+                                uint32_t length, uint32_t handle)
+{
+   emit_stage_uniform_buffer(c, TEST_SHADER_VERTEX, index, offset, length, handle);
+}
+
+/* one vertex element at offset 0 of vertex buffer 0, in the given format */
+static void emit_vertex_element_format(struct cmds *c, uint32_t handle, uint32_t format)
+{
+   emit(c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_VERTEX_ELEMENTS,
+                      VIRGL_OBJ_VERTEX_ELEMENTS_SIZE(1)));
+   emit(c, handle);
+   emit(c, 0);
+   emit(c, 0);
+   emit(c, 0);
+   emit(c, format);
 }
 
 static void emit_write(struct cmds *c, uint32_t handle, uint32_t offset, const void *data,
@@ -280,9 +304,31 @@ static const char *fs =
    "  0: MOV OUT[0], IMM[0]\n"
    "  1: END\n";
 
+/* reads a 32-byte uniform block (gallium buffer 1) */
+static const char *vs_ubo32 =
+   "VERT\n"
+   "DCL IN[0]\n"
+   "DCL OUT[0], POSITION\n"
+   "DCL CONST[1][0..1]\n"
+   "  0: ADD OUT[0], IN[0], CONST[1][1]\n"
+   "  1: END\n";
+
+/* Uniform blocks 1 and 3 (block 2 is a hole) picked at run time: block ADDR + 1. Case 33
+ * picks block 2, case 34 block 3. */
+static const char *fs_block_holes =
+   "FRAG\n"
+   "DCL OUT[0], COLOR\n"
+   "DCL CONST[1][0..3]\n"
+   "DCL CONST[3][0..3]\n"
+   "DCL ADDR[0]\n"
+   "IMM[0] FLT32 { 1.0, 2.0, 0.0, 0.0 }\n"
+   "  0: ARL ADDR[0].x, IMM[0].%s\n"
+   "  1: MOV OUT[0], CONST[ADDR[0].x+1][3]\n"
+   "  2: END\n";
+
 /* Resources (per context id: handle + 1000 * ctx). */
 enum { R_RT = 1, R_VB = 2, R_VB_SMALL = 3, R_IB = 4, R_UBO64 = 5, R_UBO32 = 6, R_UBO52 = 7,
-       R_ARGS = 8, R_SO = 9, R_EMPTY = 10, R_COUNT };
+       R_ARGS = 8, R_SO = 9, R_EMPTY = 10, R_UBO_ALIGNED = 11, R_UBO_COLOR = 12, R_COUNT };
 
 static uint32_t res_id(int ctx, int r)
 {
@@ -323,6 +369,8 @@ static void setup(struct cmds *c, int ctx)
    make_buffer(ctx, R_UBO64, VIRGL_BIND_CONSTANT_BUFFER, 64);
    make_buffer(ctx, R_UBO32, VIRGL_BIND_CONSTANT_BUFFER, 32);
    make_buffer(ctx, R_UBO52, VIRGL_BIND_CONSTANT_BUFFER, 52);
+   make_buffer(ctx, R_UBO_ALIGNED, VIRGL_BIND_CONSTANT_BUFFER, ubo_align + 32);
+   make_buffer(ctx, R_UBO_COLOR, VIRGL_BIND_CONSTANT_BUFFER, 64);
    make_buffer(ctx, R_ARGS, VIRGL_BIND_COMMAND_ARGS, 32);
    make_buffer(ctx, R_SO, VIRGL_BIND_STREAM_OUTPUT, 4096);
    make_buffer(ctx, R_EMPTY, VIRGL_BIND_VERTEX_BUFFER, 0);
@@ -391,18 +439,12 @@ static const char *fs_varying =
    "  0: MOV OUT[0], IN[0]\n"
    "  1: END\n";
 
-/* A shader indexes its 4-element uniform block at 1000: the translator clamps the index
- * to the last element, so the colour drawn is element 3, not memory past the buffer. */
-static void run_clamp_case(void)
+/* A full-screen triangle with a viewport, blend and rasterizer state, so the colour the
+ * fragment shader writes lands in the colour buffer. */
+static void emit_pixel_draw_state(struct cmds *c, int ctx)
 {
-   struct cmds *c = calloc(1, sizeof(*c));
-   const int ctx = 29;
-
-   setup(c, ctx);
    const float tri[12] = { -1, -1, 0, 1, 3, -1, 0, 1, -1, 3, 0, 1 };
    emit_write(c, res_id(ctx, R_VB), 0, tri, sizeof(tri));
-   const float ubo[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25f, 0.5f, 0.75f, 1 };
-   emit_write(c, res_id(ctx, R_UBO64), 0, ubo, sizeof(ubo));
    emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_VIEWPORT_STATE, 0, VIRGL_SET_VIEWPORT_STATE_SIZE(1)));
    emit(c, 0);
    const float vp[6] = { 32, 32, 0.5f, 32, 32, 0.5f };
@@ -427,6 +469,34 @@ static void run_clamp_case(void)
       emit(c, 0);
    emit(c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_RASTERIZER, 1));
    emit(c, 41);
+}
+
+/* the first pixel of the colour buffer, BGRA */
+static void read_pixel(int ctx, uint8_t px[4])
+{
+   struct iovec iov = { px, 4 };
+   struct virgl_box box = { 0, 0, 0, 1, 1, 1 };
+   memset(px, 0, 4);
+   virgl_renderer_transfer_read_iov(res_id(ctx, R_RT), ctx, 0, 0, 0, &box, 0, &iov, 1);
+}
+
+/* the colour 0.25, 0.5, 0.75, 1 as BGRA bytes */
+static int is_test_colour(const uint8_t px[4])
+{
+   return px[0] > 180 && px[1] > 120 && px[1] < 136 && px[2] > 56 && px[2] < 72;
+}
+
+/* A shader indexes its 4-element uniform block at 1000: the translator clamps the index
+ * to the last element, so the colour drawn is element 3, not memory past the buffer. */
+static void run_clamp_case(void)
+{
+   struct cmds *c = calloc(1, sizeof(*c));
+   const int ctx = 29;
+
+   setup(c, ctx);
+   const float ubo[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25f, 0.5f, 0.75f, 1 };
+   emit_write(c, res_id(ctx, R_UBO64), 0, ubo, sizeof(ubo));
+   emit_pixel_draw_state(c, ctx);
    emit_shader(c, 6, TEST_SHADER_VERTEX, vs_ubo_indirect);
    emit_shader(c, 7, TEST_SHADER_FRAGMENT, fs_varying);
    emit_bind_shader(c, 6, TEST_SHADER_VERTEX);
@@ -438,14 +508,47 @@ static void run_clamp_case(void)
    check(r == 0 && gl_oracle_draws() - before == 1,
          "case 29: a uniform block indexed at 1000 by an address register: drawn");
 
-   uint8_t px[4] = { 0 };
-   struct iovec iov = { px, sizeof(px) };
-   struct virgl_box box = { 0, 0, 0, 1, 1, 1 };
-   virgl_renderer_transfer_read_iov(res_id(ctx, R_RT), ctx, 0, 0, 0, &box, 0, &iov, 1);
+   uint8_t px[4];
+   read_pixel(ctx, px);
    char line[128];
    snprintf(line, sizeof(line), "case 29: it read the block's last element (BGRA %u %u %u %u)",
             px[0], px[1], px[2], px[3]);
-   check(px[0] > 180 && px[1] > 120 && px[1] < 136 && px[2] > 56 && px[2] < 72, line);
+   check(is_test_colour(px), line);
+
+   teardown(ctx);
+   free(c);
+}
+
+/* Blocks 1 and 3 indexed at run time, every block of the array bound: the index picks
+ * block 3 and the pixel shows its colour (block 1 and the hole, block 2, hold zeros). */
+static void run_block_array_case(void)
+{
+   struct cmds *c = calloc(1, sizeof(*c));
+   const int ctx = 34;
+   char text[512];
+
+   setup(c, ctx);
+   const float colour[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25f, 0.5f, 0.75f, 1 };
+   emit_write(c, res_id(ctx, R_UBO_COLOR), 0, colour, sizeof(colour));
+   emit_pixel_draw_state(c, ctx);
+   snprintf(text, sizeof(text), fs_block_holes, "yyyy");
+   emit_shader(c, 51, TEST_SHADER_FRAGMENT, text);
+   emit_bind_shader(c, 51, TEST_SHADER_FRAGMENT);
+   emit_stage_uniform_buffer(c, TEST_SHADER_FRAGMENT, 1, 0, 64, res_id(ctx, R_UBO64));
+   emit_stage_uniform_buffer(c, TEST_SHADER_FRAGMENT, 2, 0, 64, res_id(ctx, R_UBO64));
+   emit_stage_uniform_buffer(c, TEST_SHADER_FRAGMENT, 3, 0, 64, res_id(ctx, R_UBO_COLOR));
+   unsigned long before = gl_oracle_draws();
+   emit_draw(c, &plain3);
+   int r = submit(ctx, c);
+   check(r == 0 && gl_oracle_draws() - before == 1,
+         "case 34: a uniform block array with a hole, all bound: drawn");
+
+   uint8_t px[4];
+   read_pixel(ctx, px);
+   char line[128];
+   snprintf(line, sizeof(line), "case 34: it read block 3 (BGRA %u %u %u %u)",
+            px[0], px[1], px[2], px[3]);
+   check(is_test_colour(px), line);
 
    teardown(ctx);
    free(c);
@@ -624,10 +727,10 @@ static void run_case(int n)
       d.count = 3;
       break;
    case 23:
-      what = "a uniform block at offset 32 of a 64-byte buffer";
+      what = "a 64-byte uniform block 32 bytes before the end of its buffer";
       expect = SKIPPED;
       emit_bind_shader(c, 4, TEST_SHADER_VERTEX);
-      emit_uniform_buffer(c, 1, 32, 64, res_id(ctx, R_UBO64));
+      emit_uniform_buffer(c, 1, ubo_align, 64, res_id(ctx, R_UBO_ALIGNED));
       d.count = 3;
       break;
    case 24:
@@ -679,6 +782,51 @@ static void run_case(int n)
       emit(c, 64);
       d.count = 3;
       break;
+   case 30:
+   case 31:
+      /* the GL refuses GL_BGRA for integer and unnormalized attributes; a refused
+       * attribute pointer kept fetching the 16-byte buffer of the draw before */
+      what = n == 30 ? "vertex format B8G8R8A8_UINT after a draw from a smaller buffer" :
+                       "vertex format B8G8R8A8_USCALED after a draw from a smaller buffer";
+      expect = LOST;
+      emit_vertex_buffers(c, 1, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_VB_SMALL) } });
+      emit_draw(c, &(struct draw){ .count = 1, .mode = TEST_PRIM_POINTS });
+      emit_vertex_element_format(c, 20, n == 30 ? VIRGL_FORMAT_B8G8R8A8_UINT :
+                                                  VIRGL_FORMAT_B8G8R8A8_USCALED);
+      emit_bind_vertex_elements(c, 20);
+      emit_vertex_buffers(c, 1, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_VB) } });
+      d.count = 4;
+      d.mode = TEST_PRIM_POINTS;
+      break;
+   case 32:
+      /* the GL refuses an unaligned range and kept the 32-byte buffer of the draw before */
+      what = "a uniform block at offset 4 after one in a 32-byte buffer";
+      expect = LOST;
+      emit_shader(c, 50, TEST_SHADER_VERTEX, vs_ubo32);
+      emit_bind_shader(c, 50, TEST_SHADER_VERTEX);
+      emit_uniform_buffer(c, 1, 0, 32, res_id(ctx, R_UBO32));
+      emit_draw(c, &plain3);
+      emit_bind_shader(c, 4, TEST_SHADER_VERTEX);
+      emit_uniform_buffer(c, 1, 4, 64, res_id(ctx, R_SO));
+      d.count = 3;
+      break;
+   case 33: {
+      /* block 2 is a hole without a buffer; it used to read binding 0, the vertex
+       * shader's 32-byte block */
+      char text[512];
+      snprintf(text, sizeof(text), fs_block_holes, "xxxx");
+      what = "a uniform block array with a hole that has no buffer";
+      expect = SKIPPED;
+      emit_shader(c, 50, TEST_SHADER_VERTEX, vs_ubo32);
+      emit_shader(c, 51, TEST_SHADER_FRAGMENT, text);
+      emit_bind_shader(c, 50, TEST_SHADER_VERTEX);
+      emit_bind_shader(c, 51, TEST_SHADER_FRAGMENT);
+      emit_uniform_buffer(c, 1, 0, 32, res_id(ctx, R_UBO32));
+      emit_stage_uniform_buffer(c, TEST_SHADER_FRAGMENT, 1, 0, 64, res_id(ctx, R_UBO64));
+      emit_stage_uniform_buffer(c, TEST_SHADER_FRAGMENT, 3, 0, 64, res_id(ctx, R_UBO64));
+      d.count = 3;
+      break;
+   }
    default:
       teardown(ctx);
       free(c);
@@ -686,7 +834,7 @@ static void run_case(int n)
    }
 
    unsigned long before = gl_oracle_draws();
-   unsigned long setup_draws = n == 18 ? 1 : 0;
+   unsigned long setup_draws = n == 18 || (n >= 30 && n <= 32) ? 1 : 0;
    emit_draw(c, &d);
    int r = submit(ctx, c);
    unsigned long drawn = gl_oracle_draws() - before - setup_draws;
@@ -706,6 +854,7 @@ static void run_case(int n)
 
    /* afterwards: a skipped draw leaves a working context, a lost one draws nothing */
    emit_bind_shader(c, 1, TEST_SHADER_VERTEX);
+   emit_bind_shader(c, 2, TEST_SHADER_FRAGMENT);
    emit_bind_vertex_elements(c, 10);
    emit_vertex_buffers(c, 1, (const uint32_t[][3]){ { 16, 0, res_id(ctx, R_VB) } });
    emit(c, VIRGL_CMD0(VIRGL_CCMD_SET_STREAMOUT_TARGETS, 0, 1));
@@ -733,17 +882,24 @@ int main(int argc, char **argv)
       return 0;
    }
    soft_gl_require();
+   glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
+   if (ubo_align <= 4) {
+      printf("FAIL: uniform buffer offset alignment %d; case 32 needs more than 4\n", ubo_align);
+      return 1;
+   }
    static int cookie;
    if (virgl_renderer_init(&cookie, 0, &callbacks)) {
       printf("FAIL: virgl_renderer_init\n");
       return 1;
    }
 
-   for (int n = 1; n <= 28; n++)
-      if (!only || only == n)
+   for (int n = 1; n <= 33; n++)
+      if (n != 29 && (!only || only == n))
          run_case(n);
    if (!only || only == 29)
       run_clamp_case();
+   if (!only || only == 34)
+      run_block_array_case();
 
    /* A buffer asking for persistent mapping gets no GL storage on a GL without
     * ARB_buffer_storage (macOS): creating it must fail, not leave an empty GL buffer. */
