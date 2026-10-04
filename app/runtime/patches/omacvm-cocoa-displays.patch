@@ -210,7 +210,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
          (omacvm_notch_mode() && !([w styleMask] & NSWindowStyleMaskFullScreen) &&
           [[w screen] safeAreaInsets].top > 0)) {
          omacvm_toggle_notch_full_screen();
-@@ -2915,13 +2999,1002 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2915,13 +2999,1020 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -612,9 +612,9 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +                           NSMakeSize(size.width * scale, size.height * scale));
 +    }
 +    [super drawInCGLContext:ctx pixelFormat:pf forLayerTime:t displayTime:ts];
-+}
+ }
 +@end
-+
+ 
 +#endif /* CONFIG_OPENGL */
 +
 +/* The view of an extra output: the pointer goes to the guest through the main view. */
@@ -645,7 +645,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        layer->output = index;
 +        [self setLayer:layer];
 +        [layer release];
-+#endif
+ #endif
 +    }
 +    return self;
 +}
@@ -701,7 +701,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    return NULL;
 +}
 +
-+static void omacvm_head_ui_info(OmacVMHead *hd);
++static void omacvm_heads_ui_info(void);
 +
 +@interface OmacVMHeadDelegate : NSObject <NSWindowDelegate>
 +@end
@@ -714,7 +714,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        hd->full = true;
 +        hd->want_full = false;
 +        [[hd->view layer] setContentsScale:[[note object] backingScaleFactor]];
-+        omacvm_head_ui_info(hd);
++        omacvm_heads_ui_info();
 +    }
 +    omacvm_full_busy = false;
 +    omacvm_full_next();
@@ -740,7 +740,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    OmacVMHead *hd = omacvm_head_for_window([note object]);
 +    if (hd) {
 +        [[hd->view layer] setContentsScale:[[note object] backingScaleFactor]];
-+        omacvm_head_ui_info(hd);
++        omacvm_heads_ui_info();
 +    }
 +}
 +
@@ -755,14 +755,28 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +#pragma clang diagnostic push
 +#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 +
-+/* Tells the guest this output's size, scale and refresh rate, or that it is off. */
-+static void omacvm_head_ui_info(OmacVMHead *hd)
++/*
++ * Tells the guest each output's size, scale and refresh rate, or that it is
++ * off: all in one go. The guest reads all outputs on one display event, and
++ * clears that event when done; a second event during its read would be lost.
++ */
++static void omacvm_heads_ui_info(void)
 +{
-+    __block QemuUIInfo info = { 0 };
-+    NSScreen *s = hd->display ? omacvm_screen_with_id(hd->display) : nil;
-+    uint32_t refresh = 0;
++    QemuUIInfo infos[OMACVM_MAX_OUTPUTS];
++    uint32_t refresh[OMACVM_MAX_OUTPUTS];
++    QemuUIInfo *pinfos = infos;       /* blocks cannot capture arrays */
++    uint32_t *prefresh = refresh;     /* (with_bql runs the block right away) */
 +
-+    if (s) {
++    memset(infos, 0, sizeof(infos));
++    memset(refresh, 0, sizeof(refresh));
++    for (int i = 1; i < omacvm_outputs; i++) {
++        OmacVMHead *hd = &omacvm_heads[i];
++        NSScreen *s = hd->display ? omacvm_screen_with_id(hd->display) : nil;
++        QemuUIInfo *info = &infos[i];
++
++        if (!s) {
++            continue;
++        }
 +        OmacVMBox b = omacvm_display_box(s, true);
 +        CGFloat k = [s backingScaleFactor];
 +        CVDisplayLinkRef link;
@@ -773,24 +787,27 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +            CVDisplayLinkRelease(link);
 +            if (!(period.flags & kCVTimeIsIndefinite) &&
 +                period.timeValue > 0 && period.timeScale > 0) {
-+                refresh = (int64_t)1000 * period.timeScale / period.timeValue;
++                refresh[i] = (int64_t)1000 * period.timeScale / period.timeValue;
 +            }
 +        }
-+        if (!refresh && [s maximumFramesPerSecond] > 0) {
-+            refresh = (uint32_t)[s maximumFramesPerSecond] * 1000;
++        if (!refresh[i] && [s maximumFramesPerSecond] > 0) {
++            refresh[i] = (uint32_t)[s maximumFramesPerSecond] * 1000;
 +        }
-+        info.refresh_rate = refresh;
++        info->refresh_rate = refresh[i];
 +        /* Same density rule as the main window: 110 points per inch. */
-+        info.width_mm = 10 * MIN(255, MAX(1, (int)lround(b.w * 2.54 / 110.0)));
-+        info.height_mm = 10 * MIN(255, MAX(1, (int)lround(b.h * 2.54 / 110.0)));
-+        info.width = MAX(div, (uint32_t)(b.w * k) / div * div);
-+        info.height = MAX(div, (uint32_t)(b.h * k) / div * div);
++        info->width_mm = 10 * MIN(255, MAX(1, (int)lround(b.w * 2.54 / 110.0)));
++        info->height_mm = 10 * MIN(255, MAX(1, (int)lround(b.h * 2.54 / 110.0)));
++        info->width = MAX(div, (uint32_t)(b.w * k) / div * div);
++        info->height = MAX(div, (uint32_t)(b.h * k) / div * div);
 +    }
 +    with_bql(^{
-+        if (refresh) {
-+            qemu_console_listener_set_refresh(&hd->dcl, MAX(1u, 1000000u / refresh));
++        for (int i = 1; i < omacvm_outputs; i++) {
++            if (prefresh[i]) {
++                qemu_console_listener_set_refresh(&omacvm_heads[i].dcl,
++                                                  MAX(1u, 1000000u / prefresh[i]));
++            }
++            qemu_console_set_ui_info(omacvm_heads[i].dcl.con, &pinfos[i], false);
 +        }
-+        qemu_console_set_ui_info(hd->dcl.con, &info, false);
 +    });
 +}
 +
@@ -836,7 +853,6 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        hd->full_tries = 0;
 +    }
 +    [[hd->view layer] setContentsScale:[s backingScaleFactor]];
-+    omacvm_head_ui_info(hd);
 +    hd->dirty = true;
 +}
 +
@@ -854,7 +870,6 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        [hd->view release];
 +        hd->view = nil;
 +    }
-+    omacvm_head_ui_info(hd);
 +}
 +
 +/* macOS full screen, one window at a time: it ignores a second while one is moving. */
@@ -890,8 +905,8 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        });
 +        return;
 +    }
- }
- 
++}
++
 +/*
 + * Which Mac displays get a window: in full screen, with the guest's consent,
 + * every display but the main window's. Outputs keep their display while it
@@ -952,6 +967,9 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    if (changed) {
 +        /* The guest moves its outputs now; until it says where, use the Mac's layout. */
 +        omacvm_guest_known = false;
++    }
++    if (changed) {
++        omacvm_heads_ui_info();
 +    }
 +    omacvm_update_mac_layout();
 +    omacvm_send_layout();
@@ -1185,7 +1203,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +            omacvm_outputs = i + 1;
 +        }
 +    }
- #endif
++#endif
 +    omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
 +    [[NSNotificationCenter defaultCenter]
 +        addObserverForName:NSApplicationDidChangeScreenParametersNotification
@@ -1214,7 +1232,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
  static void cocoa_display_early_init(DisplayOptions *o)
  {
-@@ -2967,10 +4040,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2967,10 +4058,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1232,7 +1250,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -2985,6 +4064,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2985,6 +4082,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1240,7 +1258,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3037,6 +4117,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -3037,6 +4135,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          dcl.ops = &dcl_ops;
      }
  
