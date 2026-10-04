@@ -163,6 +163,22 @@ if [[ -n $miclog && -f $miclog ]]; then
     bad "microphone" "macOS does not let $micapp record: System Settings > Privacy & Security > Microphone, then restart the VM" human
   else ok "microphone" "no refusal in $micapp's log"; fi
 fi
+# The GPU path an app VM took this run (qemu.log starts fresh with each run):
+# fences from the sync thread or polled, frames as IOSurfaces or with a
+# CAOpenGLLayer. GPU safe mode takes the old path on purpose; without it the
+# old path is a fallback (still works, slower), and qemu.log says why.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  fences=$(grep -o 'virgl fences .*' "$miclog" | tail -1)
+  frames=$(grep -o 'GL frames shown .*' "$miclog" | tail -1)
+  if [[ -n $fences$frames ]]; then
+    g="fences ${fences#virgl fences }, frames ${frames#GL frames shown }"
+    if [[ $fences == *"did not start"* ]] || grep -q 'IOSurface present failed' "$miclog"; then
+      bad "GPU path" "$g: a fallback (logs/qemu.log says why)"
+    elif [[ $(defaults read org.omacvm.app gpuSafeMode 2>/dev/null) == 1 ]]; then
+      ok "GPU path" "$g (GPU safe mode)"
+    else ok "GPU path" "$g"; fi
+  fi
+fi
 # Gestures runs keys-only when trackpad gestures were turned off; on UTM it
 # also types Cmd as Super, so it is needed there either way.
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
