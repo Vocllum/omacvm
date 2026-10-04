@@ -248,6 +248,13 @@ app)
   elif user_active omacvm-displays.service; then
     n=$(as_user hyprctl monitors -j 2>/dev/null | jq '[.[] | select(.name | test("^Virtual-"))] | length' 2>/dev/null || echo "?")
     ok "every Mac display" "external displays $(as_user omacvm-displays state 2>/dev/null || echo "?"), $n output(s) now"
+    # A wallpaper left at its output's old place: that display shows only dark grey.
+    lay=$(as_user omacvm-displays layers 2>/dev/null)
+    off=$(jq -r '.misplaced // [] | join("; ")' <<<"$lay" 2>/dev/null)
+    fixes=$(jq -r '.repairs.count // 0' <<<"$lay" 2>/dev/null)
+    if [[ -n $off ]]; then bad "wallpaper" "not on its display: $off (omarchy-restart-shell; journalctl --user -u omacvm-displays)"
+    elif [[ -z $lay ]]; then skip "wallpaper" "omacvm-displays layers gave nothing"
+    else ok "wallpaper" "on every display$([[ ${fixes:-0} != 0 ]] && echo " (shell restarted $fixes time(s) to put it back)")"; fi
   else bad "every Mac display" "omacvm-displays.service not running: omacvm apply"; fi
   if as_user pactl list short sinks 2>/dev/null | grep -q .; then ok "sound" "$(as_user pactl list short sinks 2>/dev/null | head -1 | cut -f2)"
   else bad "sound" "no PipeWire sink: omacvm apply"; fi
