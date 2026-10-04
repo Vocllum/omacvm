@@ -75,6 +75,10 @@ install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
 install -m644 "$ROOT/THIRD_PARTY_NOTICES.md" "$C/Resources/licenses/"
 install -m644 "$ROOT/runtime/LICENSE.try-omarchy" "$C/Resources/licenses/"
 install -m644 "$RT/firmware/edk2-licenses.txt" "$C/Resources/licenses/"
+# MoltenVK and the Vulkan loader (Apache-2.0) need their licence texts.
+if [[ -e $RT/qemu-gpu-runtime/lib/libMoltenVK.dylib || -e $RT/qemu-gpu-runtime/lib/libvulkan.1.dylib ]]; then
+  install -m644 "$ROOT/runtime/LICENSE.vulkan.txt" "$C/Resources/licenses/"
+fi
 
 # The app carries the version of the OmacVM it is part of.
 VERSION=$(cat "$REPO/src/VERSION")
