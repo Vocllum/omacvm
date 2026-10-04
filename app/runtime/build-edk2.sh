@@ -23,7 +23,7 @@ Toolchain: LLVM 18.1.8 (clang, lld; the official macOS arm64 release),
 acpica's iasl 20240827 and edk2's BaseTools, built with the Command Line
 Tools. Every download is pinned by checksum and kept in .build/edk2/archives;
 a finished build is kept in .build/edk2/out-<inputs> and reused while this
-script and the patch stay the same. About 2 minutes, 800 MB of downloads the
+script and the patches stay the same. About 2 minutes, 800 MB of downloads the
 first time.
 EOF
 }
@@ -107,7 +107,7 @@ archives="$cache/archives"
 mkdir -p "$archives"
 inputs=$(cat "$0" "$logo_patch" "$nvme_patch" | shasum -a 256 | cut -c1-16)
 built="$cache/out-$inputs"
-if [[ -f $built/edk2-aarch64-code.fd && -f $built/edk2-aarch64-code.fd.sha256 &&
+if [[ -f $built/edk2-aarch64-code.fd && -f $built/Logo.bmp && -f $built/edk2-aarch64-code.fd.sha256 &&
       $(sha_of "$built/edk2-aarch64-code.fd") == $(cat "$built/edk2-aarch64-code.fd.sha256") ]]; then
   log "Using the firmware built before ($built)"
   install -m 0644 "$built/edk2-aarch64-code.fd" "$built/Logo.bmp" "$out_dir/"
