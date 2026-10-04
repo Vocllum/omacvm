@@ -8,7 +8,10 @@ Why: a guest Vulkan app chooses its buffer ranges; without robust buffer access
 an out-of-range vertex, index, uniform or storage access reaches the GPU as
 told. On Apple's GPUs a fault resets the GPU (on 2026-10-04 that hung
 WindowServer and panicked macOS). The GL path checks ranges itself (ADR 0017);
-Vulkan has the driver feature for it. Costs some shader bounds checks.
+Vulkan has a driver feature for it, so it is asked for. Not shown to protect
+anything: MoltenVK reports the feature on every Apple GPU, and no test has made
+an out-of-range Vulkan access to see it contained (that would have to run on the
+real GPU, STANDARDS 14). The cost was not measured either.
 Upstream: OmacVM policy (a host may rather trust its guests); not sent.
 Tests: tests/graphics venus runs (vkmark, deqp.sh vk) on a Venus runtime; the
 log line tells when a host device lacks the feature.

@@ -8,7 +8,10 @@ once instead of after 100 stalled polls, and further SUBMIT_CMDs are dropped
 without a log line each. On macOS poll() reports POLLHUP for a closed peer of a
 stream socket only when POLLIN is asked for: proxy_socket_is_connected asks for it.
 (An earlier version also peeked at the socket with recv(MSG_PEEK); with it the
-guest hung in Venus soaks within 6-10 minutes, without it the soak passes.)
+guest hung in Venus soaks within 6-10 minutes, without it the soak passed twice.
+Why the peek hung the guest is not known: it consumes nothing, and a test showed
+that it does not drop file descriptors passed with the next message. The removal
+is an empirical fix; the hang may have been timing and could come back.)
 Why: the proxy dropped the fence of every submit that failed, so the guest's
 vkWaitForFences (and anything waiting on that syncobj) blocked forever: the app
 hung (tests/graphics/venus-loss.sh: 60 s timeout). Now the app runs on, and the

@@ -1,9 +1,12 @@
-virglrenderer: a GL error after a guest command skips that command, keeps the context
+virglrenderer: a GL error after a guest command no longer stops the context
 
 What: after each guest command vrend checks glGetError (check-gl-errors, on by
-default). Any error stopped the whole guest context for good. Now an error means
-the host GL ignored that one call: the context goes on, logged three times per
-context at most. GL_OUT_OF_MEMORY and GL_CONTEXT_LOST still stop it, and so does
+default). Any error stopped the whole guest context for good. Now the context goes
+on, logged three times per context at most. The error only says that the GL
+ignored one of its calls; the rest of the command, a draw included, has already
+run. A GL error while a draw is set up is caught before the draw
+(virgl-draw-gl-error-check.patch), so a refused call cannot leave older state
+for the draw to use. GL_OUT_OF_MEMORY and GL_CONTEXT_LOST still stop it, and so does
 every error with OMACVM_VIRGL_SHADER_FAILURES=lose (the upstream behaviour).
 Errors inside object creation and transfers keep their own checks (fatal).
 Why: the guest's Mesa accepted the command; the Mac's GL refused it (seen:
