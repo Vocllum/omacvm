@@ -269,9 +269,10 @@ hdr_fields() {
   local OMACVM_HDR=""
   [[ -r /run/omacvm/host.env ]] && source /run/omacvm/host.env
   [[ $OMACVM_HDR == 1 ]] || return 0
-  # The running driver must be the 10-bit one (installed and booted).
+  # The running driver must be the 10-bit one (installed and booted): the
+  # stock one is in tree, ours is out of tree (taint O).
   [[ $(modinfo -F filename virtio-gpu 2>/dev/null) == */updates/* ]] || return 0
-  [[ $(cat /sys/module/virtio_gpu/srcversion 2>/dev/null) == "$(modinfo -F srcversion virtio-gpu)" ]] || return 0
+  [[ $(cat /sys/module/virtio_gpu/taint 2>/dev/null) == *O* ]] || return 0
   printf ', bitdepth = 10, cm = "hdr", supports_wide_color = 1, supports_hdr = 1, max_luminance = %s, min_luminance = 0.0005, sdr_max_luminance = 203' \
     "${OMACVM_HDRNITS:-1600}"
 }
