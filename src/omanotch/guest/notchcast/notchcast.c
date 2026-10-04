@@ -223,16 +223,19 @@ static int query_session_locked(void) {
 }
 
 // Runs `qs ipc call -- notchbar <fn> <args...>`; returns its stdout (malloc'd)
-// when want_output is set.
+// when want_output is set. A call that fails is logged with qs's own words (at
+// most every 30 s), so a bar that does not park says why in the journal.
 static char *ipc_call(int want_output, const char *fn, const char *a1, const char *a2, const char *a3) {
     int pfd[2] = {-1, -1};
     if (want_output && pipe2(pfd, O_CLOEXEC)) return NULL;
+    // qs's stderr goes to a memory file: it can never block the call.
+    int efd = memfd_create("notchcast-ipc", MFD_CLOEXEC);
     pid_t pid = fork();
     if (pid == 0) {
         int devnull = open("/dev/null", O_RDWR);
         dup2(devnull, 0);
         dup2(want_output ? pfd[1] : devnull, 1);
-        dup2(devnull, 2);
+        dup2(efd >= 0 ? efd : devnull, 2);
         const char *argv[12];
         int n = 0;
         argv[n++] = "qs";
@@ -267,7 +270,24 @@ static char *ipc_call(int want_output, const char *fn, const char *a1, const cha
         }
         close(pfd[0]);
     }
-    if (pid > 0) waitpid(pid, NULL, 0);
+    int status = 0;
+    if (pid > 0 && waitpid(pid, &status, 0) == pid &&
+        !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) {
+        static time_t last_said;
+        time_t now = time(NULL);
+        if (now - last_said >= 30) {
+            char why[240] = "";
+            ssize_t n = efd >= 0 ? pread(efd, why, sizeof why - 1, 0) : 0;
+            why[n > 0 ? n : 0] = 0;
+            why[strcspn(why, "\n")] = 0;
+            LOG("ipc %s failed (%s %d)%s%s", fn, WIFEXITED(status) ? "exit" : "signal",
+                  WIFEXITED(status) ? WEXITSTATUS(status) : WTERMSIG(status), *why ? ": " : "", why);
+            last_said = now;
+        }
+    } else if (pid < 0) {
+        LOG("ipc %s: fork failed: %s", fn, strerror(errno));
+    }
+    if (efd >= 0) close(efd);
     return out;
 }
 
