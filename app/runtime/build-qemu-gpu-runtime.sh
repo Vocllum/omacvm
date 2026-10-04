@@ -80,6 +80,9 @@ virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
 virgl_videotoolbox_patch="$native_dir/patches/virgl-videotoolbox-decode.patch"
 virgl_row_size_patch="$native_dir/patches/virgl-transfer-row-size.patch"
+virgl_xfb_end_patch="$native_dir/patches/virgl-transform-feedback-end.patch"
+virgl_memory_budget_patch="$native_dir/patches/virgl-resource-memory-budget.patch"
+virgl_queue_flush_patch="$native_dir/patches/virgl-control-queue-flush.patch"
 hidden_window_patch="$native_dir/patches/qemu-cocoa-hidden-for-tests.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
@@ -112,6 +115,9 @@ virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
 virgl_videotoolbox_patch_sha256=12c0863d818a1b26da3be9c59220ee22ce55a037887297cd6dac53e62dbc37c3
 virgl_row_size_patch_sha256=5858714fd4f7bcfaa1c9e10fc9ea706df30e59a37be62ad4c20003e049e347e9
+virgl_xfb_end_patch_sha256=ebb035a13cf275be1809856ed79b68da12adebe232d88dadc59e8ccb371e2932
+virgl_memory_budget_patch_sha256=24bd54d3eb2a1ee4a552828844235fdbd58db74af761e0e853ac5d449a037933
+virgl_queue_flush_patch_sha256=e44f5549e4d414f2f13192ca63abe4a97b8e824ade30dee0b29b320bcdad1c50
 hidden_window_patch_sha256=286aa59317d16f21cb0fe1dd42b6636995d24f1c65312175e40f36b14272dc93
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -514,6 +520,24 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-window-size.p
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
 verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
+# OmacVM: QEMU's view context is flushed after surface texture work; guest mode
+# changes left whole screen textures in GPU memory. Tested on Apple's software
+# renderer with the patched with_gl_view_ctx(), no VM needed.
+cocoa_view_flush_patch="$native_dir/patches/qemu-cocoa-gl-view-flush.patch"
+cocoa_view_flush_patch_sha256=cf979033b462b39ed264c4899d2711f63674ae61ad091a3933832439fd3c285c
+verify_file_sha "QEMU Cocoa view-context flush" \
+  "$cocoa_view_flush_patch" "$cocoa_view_flush_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$cocoa_view_flush_patch"
+display_tests="$work_dir/display-tests"
+mkdir -p "$display_tests"
+awk '/^static void with_gl_view_ctx\(CodeBlock block\)$/,/^}$/' "$source_dir/ui/cocoa.m" \
+  > "$display_tests/with-gl-view-ctx.inc"
+grep -q 'glFlush();' "$display_tests/with-gl-view-ctx.inc" || \
+  die "with_gl_view_ctx() in ui/cocoa.m has no glFlush (view-context flush patch)"
+cc -fblocks -Wall -Werror -Wno-deprecated-declarations -I"$display_tests" \
+  "$native_dir/Tests/display/test-gl-view-flush.c" -framework OpenGL \
+  -o "$display_tests/test-gl-view-flush"
+"$display_tests/test-gl-view-flush"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -642,6 +666,16 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_videotoolbox_patch"
 # No texture transfer moves more bytes per row in GL than the guest's buffers hold.
 verify_file_sha "Transfer row size patch" "$virgl_row_size_patch" "$virgl_row_size_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_row_size_patch"
+# OmacVM: transform feedback is ended before its objects go (Apple's GL crashed in
+# glEndTransformFeedback); guest resources have a memory budget (OMACVM_GPU_MEMORY_MB,
+# default a quarter of the Mac's memory); QEMU's resource and transfer commands are
+# flushed (Apple's GL keeps unflushed texture memory).
+verify_file_sha "Transform feedback end patch" "$virgl_xfb_end_patch" "$virgl_xfb_end_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_xfb_end_patch"
+verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
+verify_file_sha "Control queue flush" "$virgl_queue_flush_patch" "$virgl_queue_flush_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_queue_flush_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
