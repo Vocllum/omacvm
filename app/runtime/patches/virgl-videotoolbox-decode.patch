@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..2fbca89
+index 0000000..cf84e91
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,1614 @@
+@@ -0,0 +1,1621 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -1045,6 +1045,13 @@ index 0000000..2fbca89
 +            if (au.last.type == 1)
 +                codec->l1_default = d->num_ref_idx_l1_active_minus1;
 +        }
++
++        /* Not learned yet: keep the first value, so the PPS (and the
++         * format description) does not change with every frame. */
++        if (codec->l0_default < 0)
++            codec->l0_default = d->num_ref_idx_l0_active_minus1;
++        if (codec->l1_default < 0)
++            codec->l1_default = d->num_ref_idx_l1_active_minus1;
 +
 +        memcpy(old_sps, codec->sps, old_sps_size);
 +        memcpy(old_pps, codec->pps, old_pps_size);
