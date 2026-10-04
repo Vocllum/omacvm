@@ -770,8 +770,14 @@ static ssize_t recvLine(int fd, char *buf, size_t cap) {
 static void addClient(int c, int net, const char *ip, int gestures, int glide, const char *name) {
   pthread_mutex_lock(&sendLock);
   int slot = -1;
-  for (int i = 0; i < MAX_CLIENTS; i++)    // the same VM reconnecting replaces its old connection
-    if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip)) { close(clients[i].fd); slot = i; break; }
+  // The same VM reconnecting replaces its old connection. OmacVM.app's VMs
+  // all come from 127.0.0.1 (QEMU's user network): there the name tells them
+  // apart, or two running VMs would keep pushing each other out.
+  int loopback = !strncmp(ip, "127.", 4);
+  for (int i = 0; i < MAX_CLIENTS; i++)
+    if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip) && (!loopback || !strcmp(clients[i].name, name))) {
+      close(clients[i].fd); slot = i; break;
+    }
   for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
   if (slot < 0) { close(clients[0].fd); slot = 0; }   // full: drop the oldest slot
   clients[slot].fd = c; clients[slot].net = net;
