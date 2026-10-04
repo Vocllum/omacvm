@@ -51,6 +51,7 @@ Return to confirm):
    | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
    | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
+   | The Mac's battery: its charge and charging state in Omarchy's bar (Parallels shows it itself) | on with a battery, not on Parallels |
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
    | The Mac's camera as *Mac Camera*, on only while a Linux app uses it (UTM and Fusion: through OmacVM Bridge, also with the Bridge off) | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
@@ -61,9 +62,8 @@ Return to confirm):
    is not used.
 
 Then it shows a summary and starts: 30 to 70 minutes in numbered steps
-(OmacVM.app about 12 minutes; VMware Fusion about 15 minutes more: it builds
-Hyprland with a fix), mostly
-downloads and Omarchy's install, with the whole log in
+(OmacVM.app 10 to 30 minutes; VMware Fusion about 15 minutes more: it builds
+Hyprland with a fix), mostly downloads and Omarchy's install, with the whole log in
 `~/Library/Logs/omacvm-build-*.log`. A VM window opens on the way: that is the
 temporary installer, leave it alone. Parallels Desktop may also show its own
 windows on the way (sign in, continue the trial): click through them, the

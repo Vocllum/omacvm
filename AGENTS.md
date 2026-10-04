@@ -46,7 +46,7 @@ UTM, or choose their password: hand those over, never work around them.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
      (same major version, up to this one; never for OmacVM.app); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
      minutes) or a build here (`--build`, the default with `--yes`).
-  3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, Fusion 45-85:
+  3. Run `command` with `OMACVM_PASSWORD` set (30-70 minutes, OmacVM.app 10-30, Fusion 45-85:
      `minutes` in the plan; run it in the background and follow its output). Exit 3 = something to install first.
   4. Hand over the `needs_human` steps, then `omacvm check --vm NAME --json`
      until `ok` (the person must be logged in to Omarchy; `needs_human: true`

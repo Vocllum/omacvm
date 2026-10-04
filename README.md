@@ -67,47 +67,35 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Prebuilt VM (5 min) | 🔜 ³ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in about 12 minutes
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes
+
+<p align="center">
+  <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 22, 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
+</p>
 
 Full comparison with benchmarks: [docs/compare.md](docs/compare.md).
 
 ## Get started
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.sh | bash
-```
-
-This puts OmacVM in `~/.omacvm`, adds the `omacvm` command and starts it. Run
-`omacvm` any time after that: with no VM yet it builds one; otherwise it asks
-what you want to do (build another VM, switch features, update, check).
-
-Prefer git? `git clone https://github.com/gillesgoetsch/omacvm && cd omacvm && ./install.sh`
-(or just `./omacvm`).
-
-Or let your coding agent do it: [the prompt and more](docs/agents.md).
+The command at the top puts OmacVM in `~/.omacvm`, adds the `omacvm` command
+and starts it. Run `omacvm` any time after that: with no VM yet it builds one;
+otherwise it asks what you want to do (build another VM, switch features,
+update, check). Prefer git? `git clone https://github.com/gillesgoetsch/omacvm`
+and run `./install.sh` in it. Using a coding agent? [Copy the prompt](docs/agents.md).
 
 ## Requirements
 
-- An Apple Silicon Mac, M1 or newer. On an M1 or M2 you can also run Omarchy
-  natively with [Asahi Linux](https://asahilinux.org); OmacVM is for M3 and
-  newer, which Asahi does not support yet, and for anyone who wants macOS and
-  Omarchy side by side.
-- macOS 15 or newer for OmacVM.app, macOS 14 or newer for the other apps.
-- About 30 GB of free disk space for the build (a finished VM takes 10–12 GB
-  and grows as you use it), and a decent connection.
-- One of the apps:
-  - **OmacVM.app**: nothing to install, `omacvm` downloads it
-    ([details](docs/routes/app.md)).
-  - **UTM 5** (a beta): `brew install --cask utm@beta`. UTM 4.7 does not work
-    ([details](docs/routes/utm.md)).
-  - **VMware Fusion** 13 or newer: a free download after a Broadcom sign-in
-    ([details](docs/routes/vmware-fusion.md)).
-  - **Parallels Desktop** 19 or newer ([details](docs/routes/parallels.md)).
-- Xcode Command Line Tools (`xcode-select --install`). For UTM, Fusion and
-  Parallels also [Homebrew](https://brew.sh) with `brew install zstd e2fsprogs`.
+- An Apple Silicon Mac, M1 or newer, with macOS 15 for OmacVM.app or macOS 14
+  for the others. (On an M1 or M2, [Asahi Linux](https://asahilinux.org) can
+  also run Omarchy natively.)
+- About 30 GB of free disk space and a decent connection.
+- One of the apps: OmacVM.app (`omacvm` downloads it), UTM 5 (beta), VMware
+  Fusion 13 or Parallels Desktop 19, or newer. How to get each:
+  [docs/routes/](docs/routes/).
+- Xcode Command Line Tools. For UTM, Fusion and Parallels also
+  [Homebrew](https://brew.sh) with `zstd` and `e2fsprogs`.
 
-`omacvm` tells you about anything missing before it starts, and installs it
-or waits while you do.
+`omacvm` checks all of this first, and installs what is missing or waits for you.
 
 ## Build a VM
 
@@ -115,24 +103,15 @@ or waits while you do.
 omacvm            # or: omacvm build
 ```
 
-It asks a few questions (the app, build or download, how much of the Mac the
-VM gets, where it goes, features, your user and password), shows a summary
-and builds. That takes 30 to 70 minutes (OmacVM.app about 12, VMware Fusion
-about 15 more), or a few minutes after a 3.5 to 6 GB download with a prebuilt VM. A VM window
-opens on the way: that is the temporary installer, leave it alone.
+It asks a few questions (the app, build or download, CPUs and memory,
+features, your user and password), shows a summary and builds. A build takes
+30 to 70 minutes: OmacVM.app 10 to 30, VMware Fusion about 15 more. A prebuilt
+VM is ready a few minutes after a 3.5 to 6 GB download. A VM window opens on
+the way: that is the temporary installer, leave it alone.
 
-Main options:
-
-- `--vm-type app|utm|fusion|parallels`: the app
-- `--prebuilt` or `--build`: download a prebuilt VM, or build it here
-- `--resources low|balanced|high|best`, or `--cpus N --memory-gb N`
-- `--vm-dir PATH`: where the VM goes, an external drive too
-- `--FEATURE` / `--no-FEATURE`, for example `--scroll-momentum` or `--no-wallpaper`
-- `--dry-run`: ask everything, stop at the summary
-- `--yes`: no questions; the password comes from `OMACVM_PASSWORD`
-
-`omacvm build --help` lists them all. Every step in detail:
-[docs/guide.md](docs/guide.md).
+For scripts: `--vm-type app|utm|fusion|parallels`, `--prebuilt`, `--vm-dir PATH`
+(Parallels and Fusion), `--FEATURE` or `--no-FEATURE`, `--yes`. `omacvm build --help` lists
+them all; every step in detail: [docs/guide.md](docs/guide.md).
 
 When it is done, allow the macOS prompts for *OmacVM Bridge* and *OmacVM
 Gestures* ([which ones](docs/guide.md#after-the-build)). On Parallels, change
@@ -143,34 +122,29 @@ so Cmd reaches Omarchy.
 
 ```bash
 omacvm features                 # switch features on or off
-omacvm enable scroll-momentum   # or straight away (disable works the same)
 omacvm update                   # the newest OmacVM, on the Mac and in every running VM
 omacvm check                    # what works and what to fix; it changes nothing
 omacvm vms                      # your VMs and their OmacVM version
 ```
 
-Add `--vm NAME` for a VM other than the default. Your feature choices survive
-updates. Already have an Omarchy VM from omarchy-mac? `omacvm apply --vm NAME`
-adds OmacVM to it. More: [docs/guide.md](docs/guide.md).
+Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
+omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.
 
-Put the VM in full screen for the trackpad gestures, the scroll momentum and
-the media keys. **⌃⌥⌘ Esc** (Control + Option + Command + Escape) gives the
-trackpad back to macOS, for example to swipe to your other Spaces; press it
-again to hand it back to Omarchy ([more](docs/features.md#full-screen-and-the-escape-keys)).
+Put the VM in full screen for the gestures and media keys. **⌃⌥⌘ Esc** gives
+the trackpad back to macOS, for example to swipe to your other Spaces; press it
+again to hand it back ([more](docs/features.md#full-screen-and-the-escape-keys)).
+Everything else: [docs/guide.md](docs/guide.md).
 
 ## How it works
 
 OmacVM installs [omarchy-mac](https://github.com/omacom/omarchy-mac), the Arch
-Linux ARM port of Omarchy, onto the VM's own disk: a full Omarchy with your
-user and `omarchy update`, not a demo. Small helpers on the Mac pass the Mac's
-hardware to the VM over the VM's private network, with a secret token:
-**OmacVM Bridge** (Wi-Fi, Bluetooth, audio, displays, media keys, wallpaper),
-**OmacVM Gestures** (trackpad and ⌘ keys) and **Omanotch** (the bar beside
-the notch). In the VM, small services feed Omarchy's own bar and popups.
+Linux ARM port of Omarchy, onto the VM's own disk: a full Omarchy with
+`omarchy update`, not a demo. Small helpers on the Mac pass its hardware to the
+VM over the VM's private network, with a secret token: **OmacVM Bridge**,
+**OmacVM Gestures** and **Omanotch**.
 
-Each piece in detail: [docs/how-it-works.md](docs/how-it-works.md). The whole
-build, every VM setting and the dead ends: [AGENTS.md](AGENTS.md). Everything
-else: [docs/](docs/README.md).
+More: [docs/how-it-works.md](docs/how-it-works.md), the whole build in
+[AGENTS.md](AGENTS.md), everything else in [docs/](docs/README.md).
 
 ## Troubleshooting
 
@@ -178,13 +152,12 @@ Start with `omacvm check`: it names what is wrong and what to do.
 
 - **The Mac's menu bar stays over the full-screen VM**: System Settings › Menu
   Bar › Automatically hide and show the menu bar: **In Full Screen Only**.
-- **Gestures do nothing**: the VM must be full screen and in front, and
-  ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
-  Accessibility and Input Monitoring permissions of *OmacVM Gestures*.
-- **"answers with another SSH host key"** after rebuilding a VM:
+- **Gestures do nothing**: the VM must be full screen and in front; ⌃⌥⌘ Esc
+  may have handed the trackpad to macOS (press it again).
+- **"answers with another SSH host key"** after a rebuild:
   `omacvm apply --vm NAME --reset-host-key`.
 
-More problems and their fixes: [docs/troubleshooting.md](docs/troubleshooting.md).
+More: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Uninstall
 
@@ -192,25 +165,25 @@ More problems and their fixes: [docs/troubleshooting.md](docs/troubleshooting.md
 omacvm uninstall            # --purge also removes the bridge token and settings
 ```
 
-Then delete the VM in OmacVM.app, UTM, VMware Fusion or Parallels Desktop. In
-System Settings › Privacy & Security, remove the OmacVM apps from Location
-Services if still listed.
+Then delete the VM in its app, and remove the OmacVM apps from System Settings
+› Privacy & Security › Location Services if still listed.
 
 ## Credits
 
 [Omarchy](https://omarchy.org) (MIT), [omarchy-mac](https://github.com/omacom/omarchy-mac)
-and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team
-(try-omarchy, MIT, gives the camera bridge, the Mac's battery in the VM:
-kernel module, agent and the Mac's side, and OmacVM.app's pieces), [Arch Linux ARM](https://archlinuxarm.org),
+and [try-omarchy](https://github.com/omacom/try-omarchy) by the Omarchy team.
+try-omarchy (MIT) gives the camera bridge, the Mac's battery in the VM and
+OmacVM.app's pieces. Also [Arch Linux ARM](https://archlinuxarm.org);
 [omarchy-parallels](https://github.com/vincenzopalazzo/omarchy-parallels) by
-Vincenzo Palazzo (MIT), whose image builder is the temporary installer here, and
+Vincenzo Palazzo (MIT), whose image builder is the temporary installer; and
 [omarchy-arm-utm](https://github.com/ggalancs/omarchy-arm-utm), whose UTM
-findings (virtio-gpu settings, UTM's scripting) shaped the UTM route and
-whose Wayland SPICE agent (MIT) OmacVM's `omacvm-vdagent` is based on. The bar
-widgets are clones of Omarchy's own. OmacVM is a community project, not
-affiliated with the Omarchy team, Parallels, UTM, VMware (Broadcom) or Apple.
+findings shaped the UTM route and whose Wayland SPICE agent (MIT) is the base
+of `omacvm-vdagent`. The bar widgets are clones of Omarchy's own.
+
+OmacVM is a community project, not affiliated with the Omarchy team,
+Parallels, UTM, VMware (Broadcom) or Apple.
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The code OmacVM reuses from others is listed in
+MIT, see [LICENSE](LICENSE). Code reused from others:
 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

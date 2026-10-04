@@ -15,7 +15,7 @@ breaks. The plan and test log from when the route was built is in
 - Speedometer 3.1 in Chrome reached 71 % of the Mac, the best of the four ways
   ([comparison](../compare.md),
   [benchmarks](../benchmarks/README.md)).
-- The newest of the three VM apps OmacVM builds for.
+- The newest route, next to OmacVM.app, UTM and Parallels.
 
 ## What you need
 

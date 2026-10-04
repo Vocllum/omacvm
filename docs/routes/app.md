@@ -29,8 +29,8 @@ OmacVM's version.
   disk goes (any APFS or Mac OS Extended drive).
 - The build: the same steps as the other routes (try-omarchy as a temporary
   live system, Arch Linux ARM on btrfs with GRUB, Omarchy from omarchy-mac,
-  OmacVM's VM side). About 8 minutes on an M4 Max, plus a 1.4 GB download the
-  first time.
+  OmacVM's VM side). 10 to 30 minutes (8 on an M4 Max), plus a 1.4 GB
+  download the first time.
 - A normal install: boots through UEFI and GRUB, so `omarchy update` and
   snapshots work.
 - The window: Omarchy follows its size and the display's refresh rate

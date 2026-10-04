@@ -14,16 +14,17 @@ end. The tools are in [`src/bench/`](../../src/bench).
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
 | Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
-| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | ✗ see below |
+| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | OmacVM.app only, see below |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
 
-**GPU compute is not possible in any of the VMs.** Geekbench's GPU test
-needs Vulkan or OpenCL, and none of Parallels, UTM, VMware Fusion or
-OmacVM.app offers either to a Linux guest: Geekbench 7's Linux ARM preview
-lists no GPU in any of them. `bench.sh` records that as "not available in this
-VM".
+**GPU compute runs only in OmacVM.app, and not released yet.** Geekbench's
+GPU test needs Vulkan or OpenCL. Parallels, UTM and VMware Fusion offer
+neither to a Linux guest, so `bench.sh` records "not available in this VM"
+there. OmacVM.app's coming Vulkan path (Venus on MoltenVK, OpenCL through
+rusticl) runs it: 45 % of the Mac, see the chart notes below.
+
 The browser tests (MotionMark, WebGL Aquarium, Basemark Web 3.0) and glmark2
-measure graphics instead, not raw compute. glmark2 has no Mac version, so it has no Mac
+measure graphics, not compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
 
 ## The setup
@@ -173,9 +174,10 @@ cd ~/bench
 - `report.py` prints a Markdown table: the median of each test, and each route
   as a share of the first file (the Mac).
 - `chart.py` draws the bar chart for the README and
-  [compare.md](../compare.md): OmacVM.app first, then UTM, VMware Fusion and Parallels, each as a share of the Mac (the dashed line at
-  100 %). Five rows: Geekbench 7 multi-core, Speedometer 3.1, WebGL Aquarium,
-  Basemark Web 3.0 and Geekbench 7 GPU (OpenCL). Tests without a Mac value
+  [compare.md](../compare.md): OmacVM.app first, then UTM, VMware Fusion and
+  Parallels, each as a share of the Mac (the dashed line at 100 %). Five
+  rows: Geekbench 7 multi-core, Speedometer 3.1, WebGL Aquarium, Basemark Web
+  3.0 and Geekbench 7 GPU (OpenCL). Tests without a Mac value
   (glmark2, vkmark) and MotionMark (no stable result) are left out.
 - The chart's input is [`chart.json`](chart.json): the medians from
   `results.json` with the GPU rounds added. CPU and Speedometer come from the
