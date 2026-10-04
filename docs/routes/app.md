@@ -48,6 +48,17 @@ OmacVM's version.
   the VM's clock is set to the Mac's.
 - Full screen in its own Space, below the notch, like Parallels; Omanotch puts
   Omarchy's bar into the strip beside the notch, as on the other routes.
+- Every Mac display in full screen: with an external display connected, full
+  screen opens a window on each Mac display (each in its own Space) and
+  Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
+  ...), each at that display's resolution, scale and refresh rate, placed as
+  in macOS's arrangement. Plugging a display in or out works live: its
+  workspaces move to the main display and come back with it, as on a
+  laptop. Leaving full screen closes the other windows; in a window Omarchy
+  has one screen. Omarchy's display panel (the monitor icon in the bar) has
+  **Use external displays**: off, full screen stays on one display. The VM
+  keeps the setting (`~/.config/omacvm/displays.conf`; also
+  `omacvm-displays external on|off`).
 - ⌘ shortcuts (⌘Space too) go to Omarchy as Super in full screen, through
   OmacVM Gestures, as on UTM: the app needs no Accessibility of its own.
 - Optional notch-strip mode (a switch in the app): the window covers the
@@ -113,8 +124,10 @@ one VM at a time: the build stops at the start while another one runs.
   trackpad gestures: the build installs Bridge and Gestures on the Mac and
   they accept the VM on 127.0.0.1 (below), but these are not confirmed on
   this route yet.
-- One display at a time. The window can go to an external display and be full
-  screen there, but Omarchy gets one screen, not one per Mac display.
+- Every Mac display is tested on virtual displays (macOS's CGVirtualDisplay,
+  `app/scripts/dev/virtual-display.m`) with the windows over the displays;
+  real full screen (a Space per display) on a real monitor is not confirmed
+  yet. Up to five displays (the window and four more).
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
 
@@ -130,7 +143,8 @@ the VM's SSH on `127.0.0.1:<port>`.
   (`OMACVM_SLIRP_HOST_PORTS`).
 - The clipboard and the Mac's battery do not use the network: each has its
   own virtio port (`org.omacvm.clipboard`, `org.omacvm.battery`) on a socket
-  only the app's user can open. The battery goes one way; the VM can only ask
+  only the app's user can open. So do the displays (`org.omacvm.display`,
+  below). The battery goes one way; the VM can only ask
   for a fresh reading.
 - Gestures and Bridge also listen on the Mac's 127.0.0.1, where any Mac
   program could connect, or listen in their place while they are not
@@ -153,17 +167,35 @@ the VM's SSH on `127.0.0.1:<port>`.
   draws Omarchy's own pointer; VMs set up before that still need the Mac's
   pointer (QEMU's `show-cursor=on`).
 
-## Why one display
+## Every Mac display
 
-QEMU's macOS window (its "cocoa" display) shows one guest screen at a time:
-it has a single window and a single display listener, and its View menu
-switches between screens. Parallels and VMware Fusion open a window per
-display; QEMU on the Mac does not. Two ways to get there, neither done:
+QEMU's macOS window (its "cocoa" display) showed one guest screen. OmacVM's
+QEMU patch (`app/runtime/patches/omacvm-cocoa-displays.patch`) gives it a
+window per guest screen:
 
-- Teach the cocoa display one window per guest screen. Most of its code
-  assumes one window (global view, one GL context, mouse coordinates for one
-  screen), so this is a larger patch, plus routing the pointer to the right
-  screen in Hyprland. Several days.
-- QEMU's SDL display opens a window per screen, but it lacks everything the
-  cocoa patches add here: the window size the VM follows, the notch strip,
-  ⌘ as Super, pinch and smooth scrolling.
+- The VM has a virtio-gpu with five outputs. In full screen, each other Mac
+  display gets a window of its own, full screen in its own Space, showing
+  the next output; QEMU tells the VM that output's size, scale (as the EDID's
+  pixel density) and refresh rate, as for the main window. Outputs without a
+  window are disconnected.
+- Linux's virtio-gpu driver has no place for an output's position, so the
+  arrangement goes over a virtio port, `org.omacvm.display`, from QEMU's
+  window code to `omacvm-displays` in the VM (a user service), which writes
+  it for `omacvm-display-sync`; that places each output as the Mac's
+  displays are. A display with its own rule in `monitors.lua` keeps it.
+- QEMU opens the other windows only after `omacvm-displays` said hello on
+  that port (a VM without it keeps one screen) and while the switch is on.
+- The pointer: the VM has one tablet, and Hyprland spreads it over the box
+  around all its outputs. `omacvm-displays` reports where Hyprland put each
+  output, and QEMU points the tablet at the matching spot of that box, so
+  the pointer lands where it is on the Mac, also with Omarchy's zoom.
+- Two outputs switched at once could leave Linux with an old list (it
+  clears the display event after reading); a small virtio-gpu patch
+  (`qemu-virtio-gpu-display-event-race.patch`) raises the event again.
+
+Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
+virtual Mac display (killing it is unplugging it). With
+`OMACVM_TEST_SKIP_DISPLAYS=<the real displays' ids>` (and
+`OMACVM_TEST_MAIN_DISPLAY=<id>` for the main window), QEMU uses only the
+other displays, "full screen" is a plain window over each display (no
+Space, no menu bar change) and QEMU never takes the focus.

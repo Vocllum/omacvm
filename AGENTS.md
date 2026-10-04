@@ -36,7 +36,7 @@ UTM, or choose their password: hand those over, never work around them.
      display, paid: Standard 4 CPUs / 8 GB per VM), UTM (free, one display,
      slower) or VMware Fusion (free, every display, GPU in Chrome, about 71 %
      of the Mac in the browser, about 15 more build minutes, Broadcom sign-in to
-     download) or OmacVM.app (free, one display; `--vm-type app` installs the
+     download) or OmacVM.app (free, every display in full screen; `--vm-type app` installs the
      app if it is missing, after asking, and runs its own create script); the resource tiers; each feature (`omacvm features --json` has
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
@@ -82,6 +82,9 @@ A build is done when all of this holds:
    the mode from `src/display/mac-display.swift` (e.g. 3456x2160@120).
    Fusion: in full screen one monitor per Mac display, placed as in macOS
    (`omacvm-fusion-displays` user unit; `omacvm check` counts the outputs).
+   OmacVM.app: the same in full screen (Virtual-2, ... at each display's size
+   and scale) while "Use external displays" is on; `omacvm-displays status`
+   in the VM shows the switch, the Mac's arrangement and Hyprland's outputs.
 5. On the Mac: `lsof -nP -iTCP -sTCP:LISTEN` shows 47830 (Gestures) and 47831
    (Bridge) on 10.211.55.2, 192.168.64.1 and/or the `.1` of Fusion's vmnet8
    (see "VMware Fusion settings" below); `launchctl list | grep omacvm`
@@ -148,7 +151,8 @@ GitHub.
 | `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap; also hides the Mac's pointer over the full-screen VM), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
-| `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua`, bindings, `plugins/omacvm.workspaces` |
+| `src/app/guest/` | OmacVM.app's VM side: `omacvm-display-sync` (each output follows its Mac window or display: mode, scale by EDID, position from the Mac's arrangement; Omarchy's zoom only for Virtual-1), `omacvm-displays` (user service on virtio port `org.omacvm.display`: hello and the switch to QEMU, the arrangement from it, Hyprland's outputs back for the pointer; `external on\|off\|toggle`, `status`), `monitor-widget/` (bar widget `omacvm.monitor` = Omarchy's display panel built from the installed Omarchy plus MAC DISPLAYS "Use external displays"; rebuilt by the agent after an Omarchy update), clipboard, guest agent, notch strip |
+| `src/workspaces/` | Per-display workspaces: `monitor_workspaces.lua` (Virtual-1 IDs 1..10, Virtual-N (N-1)\*10+1..; an unplugged display's workspaces park on Virtual-1 and go back on replug), bindings, `plugins/omacvm.workspaces` |
 | `src/clipboard/` | Parallels only: VM → Mac copy (guest `parallels-clip-out`, Mac `omacvm-clip-in`) |
 | `src/battery/` | The Mac's battery (feature `battery`; UTM, Fusion, OmacVM.app; Parallels has its own): DKMS module `omacvm_battery` (BAT0, ADP0; from try-omarchy, GPL-2.0-only), root agent `omacvm-battery` (OmacVM.app: virtio port `org.omacvm.battery`; UTM/Fusion: the Bridge's `battery` events through `bridge/guest/omacvm-bridge`), UPower never suspends for it. Mac side: `bridge/mac/battery.swift`, OmacVM.app's `NativeBatteryBridge.swift`. Its README |
 | `src/wallpaper/` | Guest `omacvm-wallpaper` (path unit) → `POST /wallpaper` on the bridge |
@@ -176,6 +180,8 @@ VM bundle (.pvm)   ──▶ share "vmlog" (ro) ───────▶ paralle
 Omanotch.app (src/omanotch) :47811     ◀────────── notchcast
 OmacVMBridge.app /battery, events ──────────────▶ omacvm-battery (root) → module → BAT0 → UPower (UTM, Fusion)
 OmacVM.app: virtio port org.omacvm.battery ─────▶ omacvm-battery (root) → module → BAT0 → UPower
+OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (user) → omacvm-display-sync → Hyprland
+  org.omacvm.display: arrangement out; hello, "Use external displays", Hyprland's outputs back
 ```
 
 - The Mac is **10.211.55.2** on Parallels' shared network (not .1), the
