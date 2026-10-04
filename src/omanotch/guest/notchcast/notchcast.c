@@ -92,6 +92,9 @@ static const char *screen_name(char out[64]) {
     pthread_mutex_unlock(&screen_lock);
     return out;
 }
+// Set by the keeper: close the capture session, then remove and create the
+// hidden output again (see keeper_thread).
+static _Atomic int remake_output;
 // Height of the Mac's black strip in points (`strip H`); 0 until reported.
 // The hidden output is made this tall so the strip needs no padding.
 static _Atomic int strip_height;
@@ -1255,6 +1258,15 @@ static int monitor_field(const char *json, const char *name, const char *field, 
     return -1;
 }
 
+// Whether output A comes before output B in Hyprland's list (creation order).
+static int listed_before(const char *json, const char *a, const char *b) {
+    char pa[96], pb[96];
+    snprintf(pa, sizeof pa, "\"name\": \"%s\"", a);
+    snprintf(pb, sizeof pb, "\"name\": \"%s\"", b);
+    const char *x = strstr(json, pa), *y = strstr(json, pb);
+    return x && y && x < y;
+}
+
 static void run_quiet(const char *const argv[]) {
     pid_t pid = fork();
     if (pid == 0) {
@@ -1419,6 +1431,7 @@ static void *keeper_thread(void *unused) {
     char last_applied[256] = "";
     double last_apply_ms = -1e9;
     int created_attempts = 0;
+    double last_recreate_ms = -1e9;
     for (;;) {
         if (update_screen()) enqueue_command("screen");
         char *j = hypr_request("j/monitors all"), scr[64];
@@ -1430,12 +1443,24 @@ static void *keeper_thread(void *unused) {
             int have_notch = !monitor_field(j, cfg_output, "x", &nx) && !monitor_field(j, cfg_output, "y", &ny) &&
                              !monitor_field(j, cfg_output, "width", &nw) && !monitor_field(j, cfg_output, "height", &nh) &&
                              !monitor_field(j, cfg_output, "scale", &ns);
-            if (!have_notch && have_screen && created_attempts < 5) {
+            if (!have_notch && have_screen && created_attempts < 5 && !atomic_load(&remake_output)) {
                 LOG("creating headless output %s", cfg_output);
                 const char *argv[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
                 run_quiet(argv);
                 created_attempts++;
-            } else if (have_notch && have_screen) {
+            } else if (have_notch && have_screen && listed_before(j, cfg_output, scr) &&
+                       now_ms() - last_recreate_ms > 10000) {
+                // Hyprland gives a point that two outputs cover to the one made
+                // first. A display that came later (OmacVM.app's external
+                // displays) would lose its top edge to the hidden output, so it
+                // is made again, after the display: by the capture loop, once
+                // its session is closed (removing an output that is being
+                // captured crashes Hyprland 0.56). A repaint wakes the loop.
+                LOG("%s came before %s: making it again", cfg_output, scr);
+                atomic_store(&remake_output, 1);
+                free(ipc_call(0, "poke", NULL, NULL, NULL));
+                last_recreate_ms = now_ms();
+            } else if (have_notch && have_screen && !atomic_load(&remake_output)) {
                 created_attempts = 0;
                 static double last_lw;
                 if (ss > 0 && fabs(sw / ss - last_lw) > 0.5) {
@@ -1699,7 +1724,7 @@ static void capture_session(struct wl_output *out) {
     if (!have_frame) free(ipc_call(0, "poke", NULL, NULL, NULL));
 
     double pcx = -1e9, pcy = -1e9;  // cursor position at the previous frame
-    while (!sess_stopped && !outputs_changed) {
+    while (!sess_stopped && !outputs_changed && !atomic_load(&remake_output)) {
         frame_ready = frame_failed = 0;
         struct ext_image_copy_capture_frame_v1 *f = ext_image_copy_capture_session_v1_create_frame(ses);
         ext_image_copy_capture_frame_v1_add_listener(f, &frame_listener, NULL);
@@ -1859,6 +1884,16 @@ int main(int argc, char **argv) {
                 continue;
             }
             capture_session(out);
+            if (atomic_load(&remake_output)) {
+                const char *rm[] = {"hyprctl", "output", "remove", cfg_output, NULL};
+                const char *mk[] = {"hyprctl", "output", "create", "headless", cfg_output, NULL};
+                run_quiet(rm);
+                wl_display_roundtrip(dpy);  // forget the old output before the new one
+                run_quiet(mk);
+                wl_display_roundtrip(dpy);
+                atomic_store(&remake_output, 0);
+                continue;
+            }
             if (!outputs_changed) usleep(200000);  // stopped session: brief pause before retrying
         }
         LOG("Wayland connection lost, reconnecting");
