@@ -18,8 +18,11 @@ what can the guest change?
 Own test VMs per route (prebuilt 2.4.0 updated to 2.6.0, 8 CPUs, 16 GB,
 in a window, not full screen; OmacVM.app: a copy of a test VM started like
 the app starts it), Google Chrome 154, Chrome full screen inside Hyprland.
-Every number below was taken holding the benchmark lock with the other test
-VMs paused. Same flags, alternating runs (A B A B ...), median.
+The fps in the results table and in the comparisons of settings were taken
+holding the benchmark lock with the other test VMs paused: alternating runs
+(A B A B ...), median. The profiles, Firefox, Parallels' Basemark and
+MotionMark runs were not (other test VMs ran): they show where time goes and
+how much results spread, not exact speeds.
 
 - Aquarium fps: `g_fpsTimer.averageFPS`, mean over 15 s after 10 s warm-up.
 - CPU per frame: `utime + stime` of Chrome's GPU process and of the busiest
