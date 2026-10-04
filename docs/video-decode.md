@@ -12,7 +12,7 @@ instead of 1.2 to 1.6.
 | H.264 | yes | patch tested, see below | no | no |
 | VP9 (YouTube) | yes | patch tested, see below | no | no |
 | AV1 (YouTube) | yes, Chromium-based browsers | – | no | no |
-| HEVC | yes: mpv, FFmpeg | – | no | no |
+| HEVC | yes: mpv, FFmpeg, GStreamer, Chrome | – | no | no |
 | 10-bit (VP9 profile 2, HEVC Main 10, AV1) | yes | – | no | no |
 
 Browsers in an OmacVM.app VM:
@@ -27,9 +27,13 @@ Browsers in an OmacVM.app VM:
   file; YouTube and AV1 not tried in Brave yet).
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): no. Arch Linux
   ARM builds it without VA-API, so it always decodes on the CPU.
-- **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`): H.264, VP9 and HEVC.
-  Chrome does not play HEVC through it yet: importing its own frame buffers
-  for HEVC fails in Chrome (*Plane 0 is out of bounds*), H.264 and VP9 work.
+- **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`) and **GStreamer**
+  (`vah264dec`, `vah265dec`, `vavp9dec`; Celluloid and other GStreamer
+  players): H.264, VP9 and HEVC. FFmpeg decodes a 4K HEVC clip at about 200
+  frames per second.
+- **HEVC in Google Chrome** (154): in hardware, smooth at 1080p60; a 4K HEVC
+  clip showed only 10 to 20 frames per second (the decoding is not the limit,
+  see FFmpeg above). YouTube does not send HEVC.
 
 Check in the VM: `vainfo` lists `VAProfileH264*` and `VAProfileVP9Profile0`
 with `VAEntrypointVLD`.
@@ -98,6 +102,12 @@ put the shim in: the VM folder's `video-decode` file).
   whole frame. So AV1 is offered to Chromium-based browsers only.
 - **HEVC**: Main and Main 10; long-term reference pictures from the SPS are
   not supported (rare).
+- **YUYV surfaces**: not offered. virglrenderer stored their plane format
+  (R8G8_R8B8) at twice its size, and reading one back overflowed QEMU's heap
+  (mpv's VA-API check did it, before 2.7.0's release);
+  `app/runtime/patches/virgl-transfer-row-size.patch` removes the format and
+  refuses any texture transfer that would move more bytes per row in GL than
+  the guest's buffer holds.
 - **HDR**: 10-bit video decodes (P010, bit-exact); how HDR looks is up to the
   browser and Hyprland in the VM.
 - **Guests with Mesa older than 26.0** number the video profiles differently;

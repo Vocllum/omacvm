@@ -3,13 +3,37 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 2.7.0
 
-- OmacVM.app: videos are decoded by the Mac's media engine. YouTube in 4K at
-  60 fps plays in Google Chrome (H.264, VP9, AV1) with the VM's CPU nearly
-  idle; Brave decodes VP9 the same way (YouTube not tried in Brave yet);
-  Firefox gets H.264 and VP9, mpv H.264, VP9 and HEVC.
-  Arch Linux ARM's Chromium cannot (built without VA-API). See [docs/video-decode.md](docs/video-decode.md).
+- OmacVM.app: videos are decoded by the Mac's media engine instead of the
+  VM's CPU. Google Chrome, Brave and Firefox (H.264 and VP9; AV1 in Chrome,
+  not yet in Firefox), mpv, FFmpeg and GStreamer apps use it: YouTube in 4K
+  at 60 fps plays with the VM's CPU nearly idle. HEVC and 10-bit video work
+  too (mpv, FFmpeg, GStreamer; in Chrome smoothly up to 1080p). Omarchy's own Chromium
+  (Arch Linux ARM) is built without VA-API and still decodes on the CPU; a
+  route for it (V4L2) is planned. OmacVM installs no browser for this; Google
+  Chrome for Linux ARM comes from `src/bench/install-chrome.sh`. See
+  [docs/video-decode.md](docs/video-decode.md).
+- OmacVM.app: a Linux app could stop the VM by reading back a texture in the
+  YUYV plane format (mpv's VA-API check did): QEMU's heap overflowed. Fixed in
+  the app's virglrenderer, with a build-time test for every texture format.
+- Mac mini, iMac and Studio: a Studio Display or LG UltraFine's brightness
+  follows the brightness keys; no keyboard light, notch or trackpad is a skip
+  in `omacvm check`, not a failure; a Parallels VM on a Mac without a battery
+  says so; Gestures finds VMware Fusion VMs when Fusion started after it; the
+  Bridge picks the main display first.
+- The menu says a suspended VM is suspended, not stopped.
+- UTM and VMware Fusion: right after the first boot, the battery agent waits
+  for the Bridge instead of failing (`omacvm check` reported it, and the
+  Wi-Fi QR card, until a minute later).
+- VMs from the 2.5 and 2.6 prebuilt images: the desktop background was black
+  (links into the image's placeholder home). First boot now fixes the links;
+  `omacvm apply` or `omacvm update` repairs older VMs.
+- OmacVM.app: building a VM under the name of a deleted one no longer stops
+  at step 5 (the old SSH host key), and a build works again after macOS
+  cleared the live system's cache.
+- Gestures: with two OmacVM.app VMs running, each keeps its connection (they
+  all come from 127.0.0.1 and pushed each other out every second).
 
 ## 2.6.0
 
