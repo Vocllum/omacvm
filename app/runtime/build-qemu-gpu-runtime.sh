@@ -16,6 +16,9 @@ The build is Apple-Silicon/HVF-only. It enables Cocoa+VirGL, SLIRP user
 networking, SDL duplex audio, and virtio-9p folder sharing. All downloaded source archives and wheels are
 immutable and checksum-pinned; scratch sources are removed on every exit.
 
+It also builds the UEFI firmware with Omarchy's boot logo (build-edk2.sh);
+OMACVM_FIRMWARE=qemu keeps QEMU's prebuilt firmware instead.
+
 Set OMARCHY_RUNTIME_BUILD_JOBS to a positive integer to bound compilation.
 With --archive-dir, reuse already-downloaded pinned archives from DIR. Every
 archive is copied into private scratch space and checksum-verified before use.
@@ -786,12 +789,21 @@ description=$(file -b "$qemu_binary")
 [[ $description == *Mach-O* && $description == *arm64* ]] || \
   die "source build did not produce an arm64 Mach-O QEMU binary"
 
-# OmacVM: QEMU's own UEFI firmware (edk2) and its licence notes, for booting
-# an installed system through GRUB.
+# OmacVM: the UEFI firmware (edk2) and its licence notes, for booting an
+# installed system through GRUB. Our own build of the edk2 QEMU ships, with
+# QEMU's flags and Omarchy's boot logo (build-edk2.sh); QEMU's prebuilt one
+# (TianoCore logo) with OMACVM_FIRMWARE=qemu, or when our build or its boot
+# test fails. .build/firmware/firmware-source says which one it is.
 firmware_dir="$native_dir/.build/firmware"
 rm -rf "$firmware_dir"; mkdir -p "$firmware_dir"
-bunzip2 -c "$source_dir/pc-bios/edk2-aarch64-code.fd.bz2" > "$firmware_dir/edk2-aarch64-code.fd"
 install -m 0644 "$source_dir/pc-bios/edk2-licenses.txt" "$firmware_dir/edk2-licenses.txt"
+firmware=${OMACVM_FIRMWARE:-omacvm}
+[[ $firmware == omacvm || $firmware == qemu ]] || die "OMACVM_FIRMWARE must be omacvm or qemu"
+edk2_out="$work_dir/edk2"
+if [[ $firmware == omacvm ]] && ! "$native_dir/build-edk2.sh" --qemu-source "$source_dir" --out "$edk2_out"; then
+  log "The edk2 build failed: using QEMU's prebuilt firmware (TianoCore logo)"
+  firmware=qemu
+fi
 
 log "Relocating, capability-gating, signing, and publishing the runtime"
 "$prepare_runtime" \
@@ -799,5 +811,23 @@ log "Relocating, capability-gating, signing, and publishing the runtime"
   --source-slirp "$slirp_root/lib/libslirp.0.dylib" \
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
   --archive-dir "$archive_dir"
+
+# The firmware must show the logo with the QEMU it ships with (HVF, no disk).
+if [[ $firmware == omacvm ]]; then
+  if python3 "$native_dir/Tests/firmware/test-boot-logo.py" \
+      "$native_dir/.build/qemu-gpu-runtime/bin/qemu-system-aarch64" \
+      "$edk2_out/edk2-aarch64-code.fd" "$edk2_out/Logo.bmp"; then
+    install -m 0644 "$edk2_out/edk2-aarch64-code.fd" "$firmware_dir/"
+    echo "omacvm edk2-stable202408-omacvm (Omarchy boot logo, build-edk2.sh)" > "$firmware_dir/firmware-source"
+  else
+    log "The edk2 build's boot test failed: using QEMU's prebuilt firmware (TianoCore logo)"
+    firmware=qemu
+  fi
+fi
+if [[ $firmware == qemu ]]; then
+  bunzip2 -c "$source_dir/pc-bios/edk2-aarch64-code.fd.bz2" > "$firmware_dir/edk2-aarch64-code.fd"
+  echo "qemu edk2-stable202408-prebuilt.qemu.org (QEMU's prebuilt, TianoCore logo)" > "$firmware_dir/firmware-source"
+fi
+log "Firmware: $(cat "$firmware_dir/firmware-source")"
 
 log "Pinned patched runtime is ready; scratch source and archives will now be removed"
