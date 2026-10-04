@@ -11,14 +11,16 @@ written like a float temporary (vec4 int_out_tmp<n>, same GLSL as for a TEMP
 register, for every opcode, named after the TGSI register) and stored once
 with its bits (floatBitsToUint/Int) at every return and before every vertex a
 geometry shader emits. Which components a shader writes comes from tgsi_scan
-(new: output_writemask, output_written_indirect), so a store before the write
-in the text (a loop) is not missed. gl_FragStencilRefARB comes from .y, the
-others from .x; gl_SampleMask only [0] (hosts refuse [1..3] for 32 samples or
-fewer). Precise results keep precise on their temporary. Reads of the output
+(new: output_writemask), so a store before the write in the text (a loop) is
+not missed, and only those are stored to a colour output (with framebuffer
+fetch the others keep the fetched value). gl_FragStencilRefARB comes from .y,
+the others from .x; gl_SampleMask only [0] (hosts refuse [1..3] for 32 samples
+or fewer). Precise results keep precise on their temporary. Reads of the output
 read the temporary (not FBFETCH). Float outputs and temporaries get the same
 GLSL as before.
 Not covered (they keep upstream's per-instruction GLSL): integer outputs
-declared as an array range or written with an indirect index anywhere, and
+declared as an array range, every output of a shader that reads or writes any
+output with an indirect index (the index could reach past a temporary), and
 integer colour outputs with logic ops (they have their own temporaries); no
 guest driver we know sends these to integer outputs.
 Why: dEQP-GLES3 builtin_functions.precision.sqrt/length read 315 for
@@ -31,33 +33,29 @@ compares, conversions, integer ops, TEX, TXF, TXQ, and image/buffer LOAD, RESQ,
 atomics as text only: the Mac has no images) into uint and int colour outputs,
 an integer op into gl_SampleMask, gl_Layer from a geometry shader (also written
 after an EmitVertex in a loop), colour outputs declared in reverse order, a
-full-writemask gl_SampleMask, the stencil value, an output also written
-indirectly, a precise write; compiled by the Mac's OpenGL where it has the
-feature; all fail without this patch.
+full-writemask gl_SampleMask, the stencil value, an output also written or
+read indirectly, partial writes (also after a framebuffer fetch), a precise
+write; compiled by the Mac's OpenGL where it has the feature; all fail without
+this patch.
 --- a/src/gallium/auxiliary/tgsi/tgsi_scan.h
 +++ b/src/gallium/auxiliary/tgsi/tgsi_scan.h
-@@ -54,6 +54,8 @@
+@@ -54,6 +54,7 @@
     uint8_t input_cylindrical_wrap[PIPE_MAX_SHADER_INPUTS];
     uint8_t output_semantic_name[PIPE_MAX_SHADER_OUTPUTS]; /**< TGSI_SEMANTIC_x */
     uint8_t output_semantic_index[PIPE_MAX_SHADER_OUTPUTS];
 +   uint8_t output_writemask[PIPE_MAX_SHADER_OUTPUTS]; /**< components written (direct index) */
-+   bool output_written_indirect[PIPE_MAX_SHADER_OUTPUTS]; /**< written relative to this register */
  
     uint8_t num_system_values;
     uint8_t system_value_semantic_name[PIPE_MAX_SHADER_INPUTS];
 --- a/src/gallium/auxiliary/tgsi/tgsi_scan.c
 +++ b/src/gallium/auxiliary/tgsi/tgsi_scan.c
-@@ -244,6 +244,13 @@
+@@ -244,6 +244,9 @@
                    info->indirect_files |= (1u << dst->Register.File);
                    info->indirect_files_written |= (1u << dst->Register.File);
                 }
-+               if (dst->Register.File == TGSI_FILE_OUTPUT &&
-+                   (unsigned)dst->Register.Index < PIPE_MAX_SHADER_OUTPUTS) {
-+                  if (dst->Register.Indirect)
-+                     info->output_written_indirect[dst->Register.Index] = true;
-+                  else
-+                     info->output_writemask[dst->Register.Index] |= dst->Register.WriteMask;
-+               }
++               if (dst->Register.File == TGSI_FILE_OUTPUT && !dst->Register.Indirect &&
++                   (unsigned)dst->Register.Index < PIPE_MAX_SHADER_OUTPUTS)
++                  info->output_writemask[dst->Register.Index] |= dst->Register.WriteMask;
                 if (dst->Register.Dimension && dst->Dimension.Indirect)
                    info->dimension_indirect_files |= (1u << dst->Register.File);
              }
@@ -73,19 +71,20 @@ feature; all fail without this patch.
  };
  
  struct vrend_io_range {
-@@ -1927,6 +1930,24 @@
-          virgl_warn("Unhandled output semantic: %x\n", ctx->outputs[i].name);
+@@ -1928,6 +1931,26 @@
           break;
        }
-+
+ 
 +      /* Integer outputs (gl_SampleMask, gl_Layer, integer colour buffers...)
 +       * are written like a float temporary, and stored once with their bits
 +       * (emit_int_output_stores()): every instruction's result then has the
 +       * same GLSL as for a temporary, whatever type it computes. Not with
-+       * logic ops, which have their own temporaries. */
++       * logic ops, which have their own temporaries, and not in shaders that
++       * read or write any output with an indirect index (it could reach this
++       * one past the temporary). */
 +      ctx->outputs[i].int_temp = ctx->outputs[i].first == ctx->outputs[i].last &&
 +         ctx->outputs[i].first < PIPE_MAX_SHADER_OUTPUTS &&
-+         !ctx->info.output_written_indirect[ctx->outputs[i].first] &&
++         !(ctx->info.indirect_files & (1u << TGSI_FILE_OUTPUT)) &&
 +         (ctx->outputs[i].is_int ||
 +          (ctx->outputs[i].name == TGSI_SEMANTIC_COLOR &&
 +           iter->processor.Processor == TGSI_PROCESSOR_FRAGMENT &&
@@ -95,10 +94,11 @@ feature; all fail without this patch.
 +       * stores also come before writes later in the text (loops) */
 +      if (ctx->outputs[i].int_temp)
 +         ctx->outputs[i].int_temp_written = ctx->info.output_writemask[ctx->outputs[i].first];
- 
++
        if (ctx->outputs[i].glsl_no_index)
           snprintf(ctx->outputs[i].glsl_name, 64, "%s", name_prefix);
-@@ -2605,10 +2626,46 @@
+       else {
+@@ -2605,10 +2628,58 @@
  
  #define emit_ucompare(op) emit_buff(&ctx->glsl_strbufs, "%s = %s(uintBitsToFloat(%s(%s(%s(%s), %s(%s))%s) * %s(0xffffffff)));\n", dsts[0], get_string(dinfo.dstconv), get_string(dinfo.udstconv), op, get_string(sinfo.svec4), srcs[0], get_string(sinfo.svec4), srcs[1], writemask, get_string(dinfo.udstconv))
  
@@ -117,8 +117,20 @@ feature; all fail without this patch.
 +      bool is_uint = output->type == VEC_UINT;
 +      const char *cast = is_uint ? "floatBitsToUint" : "floatBitsToInt";
 +      if (output->name == TGSI_SEMANTIC_COLOR) {
-+         /* fsout_c<n>, uvec4 or ivec4 like the guest's colour buffer */
-+         emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d);\n", output->glsl_name, cast, output->first);
++         /* fsout_c<n>, uvec4 or ivec4 like the guest's colour buffer; only
++          * the written components (with framebuffer fetch the others keep
++          * the fetched value) */
++         if (output->int_temp_written == 0xf) {
++            emit_buff(glsl_strbufs, "%s = %s(int_out_tmp%d);\n", output->glsl_name, cast,
++                      output->first);
++         } else {
++            char mask[5] = "";
++            for (int c = 0, n = 0; c < 4; c++)
++               if (output->int_temp_written & (1 << c))
++                  mask[n++] = comps[c];
++            emit_buff(glsl_strbufs, "%s.%s = %s(int_out_tmp%d.%s);\n", output->glsl_name, mask,
++                      cast, output->first, mask);
++         }
 +      } else {
 +         /* gl_SampleMask[0] (the hosts' sample counts fit in one int; [1..3]
 +          * are refused), gl_Layer, gl_ViewportIndex, gl_PrimitiveID: x;
@@ -145,7 +157,7 @@ feature; all fail without this patch.
      if (ctx->so && !ctx->key->gs_present && !ctx->key->tes_present)
         emit_so_movs(ctx, glsl_strbufs, has_clipvertex_so);
  
-@@ -2772,6 +2829,8 @@
+@@ -2772,6 +2843,8 @@
  static void handle_fragment_proc_exit(const struct dump_ctx *ctx,
                                        struct vrend_glsl_strbufs *glsl_strbufs)
  {
@@ -154,11 +166,11 @@ feature; all fail without this patch.
      if (ctx->key->pstipple_enabled)
         emit_pstipple_pass(glsl_strbufs);
  
-@@ -4498,6 +4557,12 @@
+@@ -4498,6 +4571,12 @@
              }
           }
  
-+         if (output->int_temp && !dst_reg->Register.Indirect) {
++         if (output->int_temp) {
 +            /* as a float temporary: no output-specific conversion */
 +            strbuf_fmt(&dst_bufs[i], "int_out_tmp%d%s", output->first, writemask);
 +            break;
@@ -167,18 +179,18 @@ feature; all fail without this patch.
           if (ctx->glsl_ver_required >= 140 && output->name == TGSI_SEMANTIC_CLIPVERTEX) {
              if (ctx->prog_type == TGSI_PROCESSOR_TESS_CTRL) {
                 strbuf_fmt(&dst_bufs[i], "%s[gl_InvocationID]", output->glsl_name);
-@@ -4932,6 +4997,10 @@
+@@ -4932,6 +5011,10 @@
           if (inst->Instruction.Opcode == TGSI_OPCODE_FBFETCH) {
              output->fbfetch_used = true;
              ctx->shader_req_bits |= SHADER_REQ_FBFETCH;
-+         } else if (output->int_temp && !src->Register.Indirect) {
++         } else if (output->int_temp) {
 +            strbuf_fmt(src_buf, "%s(vec4(%sint_out_tmp%d)%s)", get_string(stypeprefix), prefix,
 +                       output->first, swizzle);
 +            break;
           }
  
           enum vrend_type_qualifier srcstypeprefix = stypeprefix;
-@@ -6065,6 +6134,7 @@
+@@ -6065,6 +6148,7 @@
     case TGSI_OPCODE_EMIT:
        if (likely((unsigned) inst->Src[0].Register.Index < MAX_IMMEDIATE)) {
           struct immed *imd = &ctx->imm[inst->Src[0].Register.Index];
@@ -186,7 +198,7 @@ feature; all fail without this patch.
           if (ctx->so && ctx->key->gs_present)
              emit_so_movs(ctx, &ctx->glsl_strbufs, &ctx->has_clipvertex_so);
           if (ctx->cfg->has_cull_distance && ctx->key->gs.emit_clip_distance)
-@@ -6755,6 +6825,12 @@
+@@ -6755,6 +6839,12 @@
  
     if (ctx->require_dummy_value)
        emit_hdr(glsl_strbufs, "vec4 dummy_value = vec4(0.0, 0.0, 0.0, 0.0);\n");
@@ -199,7 +211,7 @@ feature; all fail without this patch.
  
     if (ctx->write_mul_utemp) {
        emit_hdr(glsl_strbufs, "uvec4 mul_utemp;\n");
-@@ -8247,6 +8323,7 @@
+@@ -8247,6 +8337,7 @@
     if (!tgsi_scan_shader(tokens, &ctx.info))
        goto fail;
  

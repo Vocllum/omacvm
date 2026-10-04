@@ -156,10 +156,14 @@ int main(void)
             key.fs.cbufs_signed_int_bitmask = 0x1;
          else
             key.fs.cbufs_unsigned_int_bitmask = 0x1;
-         failed |= convert(name, text, &key,
-                           sign ? "fsout_c0 = floatBitsToInt(int_out_tmp0);"
-                                : "fsout_c0 = floatBitsToUint(int_out_tmp0);",
-                           NULL, have_gl && int_out[i].mac_has_it);
+         /* one store of the written components */
+         char store[96], mask[5] = "";
+         const char *dst = strstr(int_out[i].op, "OUT[0]") + 6;
+         if (*dst == '.')
+            snprintf(mask, sizeof(mask), "%.*s", (int)strcspn(dst + 1, ","), dst + 1);
+         snprintf(store, sizeof(store), "fsout_c0%s%s = %s(int_out_tmp0%s%s);", *mask ? "." : "",
+                  mask, sign ? "floatBitsToInt" : "floatBitsToUint", *mask ? "." : "", mask);
+         failed |= convert(name, text, &key, store, NULL, have_gl && int_out[i].mac_has_it);
       }
    }
 
@@ -250,15 +254,39 @@ int main(void)
                      "MOV OUT[0], IN[0]\nMOV OUT[1].x, IN[0].yyyy\nMOV OUT[1].y, IN[0].xxxx\nEND\n",
                      &key, "gl_FragStencilRefARB = floatBitsToInt(int_out_tmp1.y);", NULL,
                      false /* the Mac has no ARB_shader_stencil_export */);
-   /* An output also written with an indirect index keeps upstream's direct
-    * writes: a temporary would hide the indirect write. */
+   /* A shader that reads or writes an output with an indirect index keeps
+    * upstream's direct outputs: the index could reach an output past its
+    * temporary. */
    memset(&key, 0, sizeof(key));
    key.fs.cbufs_unsigned_int_bitmask = 0x1;
    failed |= convert("integer colour output also written indirectly",
                      "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL ADDR[0]\n"
                      "IMM[0] INT32 {0, 0, 0, 0}\nUARL ADDR[0].x, IMM[0].xxxx\n"
                      "MOV OUT[ADDR[0].x], IN[0]\nMOV OUT[0], IN[0]\nEND\n",
-                     &key, "fsout_c0", "int_out_tmp", false);
+                     &key, "fsout_c0 = ", "int_out_tmp", have_gl);
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("integer colour output read indirectly",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL TEMP[0]\nDCL ADDR[0]\n"
+                     "IMM[0] INT32 {0, 0, 0, 0}\nUARL ADDR[0].x, IMM[0].xxxx\n"
+                     "MOV OUT[0], IN[0]\nMOV TEMP[0], OUT[ADDR[0].x]\nUADD OUT[0], TEMP[0], IN[0]\nEND\n",
+                     &key, "fsout_c0 = ", "int_out_tmp", have_gl);
+
+   /* Only the written components are stored: with framebuffer fetch the
+    * others keep the fetched value (the Mac has no framebuffer fetch: text
+    * only there). */
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("partial write into an integer colour output",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\n"
+                     "UADD OUT[0].xz, IN[0], IN[0]\nEND\n",
+                     &key, "fsout_c0.xz = floatBitsToUint(int_out_tmp0.xz);", "fsout_c0 = ", have_gl);
+   memset(&key, 0, sizeof(key));
+   key.fs.cbufs_unsigned_int_bitmask = 0x1;
+   failed |= convert("partial write after framebuffer fetch",
+                     "FRAG\nDCL IN[0], GENERIC[0], CONSTANT\nDCL OUT[0], COLOR\nDCL TEMP[0]\n"
+                     "FBFETCH TEMP[0], OUT[0]\nUADD OUT[0].y, TEMP[0].xxxx, IN[0].xxxx\nEND\n",
+                     &key, "fsout_c0.y = floatBitsToUint(int_out_tmp0.y);", "fsout_c0 = ", false);
    /* A precise result keeps precise in its temporary. */
    memset(&key, 0, sizeof(key));
    key.fs.cbufs_unsigned_int_bitmask = 0x1;

@@ -38,8 +38,9 @@ process, one Chrome):
   written like a float temporary and stored once with their bits, so no
   instruction needs to know the output's type (upstream bug that also hits
   Linux hosts; fixing it opcode by opcode kept missing cases). Not covered:
-  integer outputs declared as an array range, written with an indirect index,
-  or with logic ops; they keep upstream's GLSL;
+  integer outputs declared as an array range or with logic ops, and every
+  output of a shader that reads or writes an output with an indirect index;
+  they keep upstream's GLSL;
 - a guest framebuffer without attachments gets a depth stand-in on hosts without
   `ARB_framebuffer_no_attachments`, as large as the first viewport, kept between
   framebuffer switches and freed when unused, with the depth test off while it
