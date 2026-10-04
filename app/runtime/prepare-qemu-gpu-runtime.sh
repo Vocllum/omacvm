@@ -248,6 +248,22 @@ while IFS=$'\t' read -r archive_name member destination; do
   install -m 0755 "$extract_dir/$member" "$staged_runtime/$destination"
 done < <(pinned_runtime_member_manifest)
 
+# Venus: the Vulkan loader finds MoltenVK through this driver file (beside
+# lib/, as libvirglrenderer looks for it). KosmicKrisp needs macOS 26.
+vulkan_icd=share/vulkan/icd.d/MoltenVK_icd.json
+mkdir -p "$staged_runtime/share/vulkan/icd.d"
+cat > "$staged_runtime/$vulkan_icd" <<'JSON'
+{
+    "file_format_version" : "1.0.0",
+    "ICD": {
+        "library_path": "../../../lib/libMoltenVK.dylib",
+        "api_version" : "1.4.0",
+        "is_portability_driver" : true
+    }
+}
+JSON
+chmod 0644 "$staged_runtime/$vulkan_icd"
+
 runtime_files=()
 runtime_file_count=0
 while IFS= read -r relative || [[ -n $relative ]]; do
@@ -339,8 +355,12 @@ verify_runtime_tree() {
     if [[ -L $path ]]; then
       die "runtime contains an unsafe symlink: $relative"
     elif [[ -d $path ]]; then
-      [[ $relative == bin || $relative == lib ]] || \
+      [[ $relative == bin || $relative == lib || $relative == share || \
+         $relative == share/vulkan || $relative == share/vulkan/icd.d ]] || \
         die "runtime contains an unexpected directory: $relative"
+    elif [[ -f $path && $relative == "$vulkan_icd" ]]; then
+      python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$path" || \
+        die "invalid Vulkan driver file: $relative"
     elif [[ -f $path ]]; then
       is_expected_runtime_file "$relative" || \
         die "runtime contains an unexpected file: $relative"
