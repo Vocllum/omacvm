@@ -2,7 +2,8 @@
 # fuzz-cmd-stream.sh VIRGL_SOURCE DEPS_DIR [SECONDS]: build virglrenderer with ASan and
 # libFuzzer coverage from a patched source tree (a kept runtime build:
 # .build/tmp/omarchy-qemu-source-build.*/source/virglrenderer-1.3.0 and .../dependencies),
-# then fuzz guest command streams (fuzz-cmd-stream.c) for SECONDS (default 600).
+# replay fuzz-regressions/, then fuzz guest command streams (fuzz-cmd-stream.c) for SECONDS
+# (default 600).
 # Needs Homebrew llvm@22. Crashes land in ./fuzz-out/crash-*.
 set -euo pipefail
 src=$(cd "$1" && pwd); deps=$(cd "$2" && pwd); secs=${3:-600}
@@ -29,5 +30,9 @@ env PATH="$ninja_dir:$PATH" PYTHONPATH="$pyyaml" ninja -C "$build" >/dev/null
   "$here/fuzz-cmd-stream.c" -L"$build/src" -lvirglrenderer -Wl,-rpath,"$build/src" \
   -framework OpenGL -Wno-deprecated-declarations -o "$out/fuzz-cmd-stream"
 cd "$out"
+# Known inputs first (each crashed or asked for 4 GiB before its fix), then fuzz.
+env DYLD_LIBRARY_PATH="$libs" ASAN_OPTIONS=detect_leaks=0 VIRGL_LOG_LEVEL=silent ./fuzz-cmd-stream \
+  -rss_limit_mb=4096 "$here"/fuzz-regressions/*
+cp -n "$here"/fuzz-regressions/* corpus/ 2>/dev/null || true
 env DYLD_LIBRARY_PATH="$libs" ASAN_OPTIONS=detect_leaks=0 VIRGL_LOG_LEVEL=silent ./fuzz-cmd-stream -max_total_time="$secs" \
   -max_len=4096 -rss_limit_mb=4096 corpus
