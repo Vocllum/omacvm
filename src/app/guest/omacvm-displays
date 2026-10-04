@@ -25,7 +25,12 @@ The switch "Use external displays" is ~/.config/omacvm/displays.conf
 
   omacvm-displays                   run the agent (the user service)
   omacvm-displays external on|off|toggle
+  omacvm-displays state             "on" or "off" (nothing without the port)
   omacvm-displays status            the switch and the outputs, as JSON
+
+The switch also sits in Omarchy's display panel (the bar widget
+omacvm.monitor, built from Omarchy's own by monitor-widget/build.py; rebuilt
+here when Omarchy's panel changes with an update).
 """
 
 from __future__ import annotations
@@ -45,6 +50,9 @@ CONFIG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "oma
 RUNTIME = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
 STATE = RUNTIME / "omacvm/displays.json"
 SYNC = "/usr/local/bin/omacvm-display-sync"
+WIDGET = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "omarchy/plugins/omacvm.monitor"
+WIDGET_BUILD = Path("/usr/local/share/omacvm/app/guest/monitor-widget/build.py")
+OMARCHY_PANEL = Path("/usr/share/omarchy/shell/plugins/panels/monitor/Panel.qml")
 
 
 def log(message: str) -> None:
@@ -136,6 +144,23 @@ def run_sync() -> None:
                        stdout=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired) as error:
         log(f"display sync failed: {error}")
+
+
+def refresh_widget() -> None:
+    """Rebuild omacvm.monitor when an Omarchy update changed its display panel."""
+    stamp = WIDGET / ".source-sha256"
+    if not stamp.exists() or not WIDGET_BUILD.exists() or not OMARCHY_PANEL.exists():
+        return
+    import hashlib
+    digest = hashlib.sha256(OMARCHY_PANEL.read_bytes()).hexdigest()
+    if stamp.read_text().strip() == digest:
+        return
+    try:
+        subprocess.run([sys.executable, str(WIDGET_BUILD), str(WIDGET)], timeout=30, check=True)
+        subprocess.run(["omarchy-shell", "-q", "shell", "rescanPlugins"], timeout=30, check=False)
+        log("display widget rebuilt for the updated Omarchy")
+    except (OSError, subprocess.SubprocessError) as error:
+        log(f"display widget not rebuilt: {error}")
 
 
 def write_state(message: dict) -> None:
@@ -279,6 +304,10 @@ def main(argv: list[str]) -> int:
         set_external(on)
         notify("External displays: " + ("on (in full screen)" if on else "off"))
         return 0
+    if len(argv) >= 2 and argv[1] == "state":
+        if PORT.exists():
+            print("on" if external_on() else "off")
+        return 0
     if len(argv) >= 2 and argv[1] == "status":
         layout = None
         try:
@@ -294,6 +323,7 @@ def main(argv: list[str]) -> int:
     if not PORT.exists():
         log(f"{PORT} is missing (an OmacVM.app without external displays)")
         return 0
+    refresh_widget()
     Agent().run()
     return 0
 
