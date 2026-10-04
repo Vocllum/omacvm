@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- OmacVM.app: a VM starts with Omarchy's logo instead of TianoCore's. The app
+  builds its UEFI firmware itself: the same edk2 as QEMU's, with QEMU's build
+  flags, only the logo is new. If that build fails, the app keeps QEMU's
+  firmware and says so.
+
 ## 2.7.0
 
 - OmacVM.app: videos are decoded by the Mac's media engine instead of the

@@ -29,7 +29,8 @@ each file taken from them:
 - **Omarchy** (github.com/basecamp/omarchy), MIT, (c) David Heinemeier Hansson:
   the bar widgets in `src/bridge/plugins` and `src/workspaces/plugins` are
   derived from Omarchy's own, each with its `LICENSE`; the icon
-  (`src/icon/omacvm.svg`) uses Omarchy's mark.
+  (`src/icon/omacvm.svg`) uses Omarchy's mark; OmacVM.app's boot logo is
+  Omarchy's `logo.svg`.
 - **Omanotch** (`src/omanotch/`) has its own README and licence.
 - In the VM, nothing else is bundled: Arch Linux ARM and Omarchy
   (omarchy-mac) come from their own servers, v4l2loopback too (built in the
