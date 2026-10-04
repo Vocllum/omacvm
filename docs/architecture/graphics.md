@@ -303,14 +303,24 @@ with two patches: next section, ADR 0016. Frame latency is Venus's ring polling 
   zink's typed bo arrays only in argument buffers, which MoltenVK never
   uses for push sets: every kernel failed) and
   `mesa-zink-moltenvk-null-descriptor.patch` (start without
-  `nullDescriptor`; unbound slots are undefined on MoltenVK).
+  `nullDescriptor`; unbound slots are undefined on MoltenVK) and
+  `mesa-venus-incremental-present.patch` (from the `kosmickrisp` track:
+  ANGLE on Vulkan enables incremental present without a swapchain).
+- Host (`app/runtime/patches`): `virgl-darwin-venus-moltenvk-zero-init.patch`
+  reports `shaderZeroInitializeWorkgroupMemory` off on MoltenVK: its
+  SPIRV-Cross cannot compile zero-initialized workgroup memory, and wgpu
+  zero-initializes every workgroup variable, so each such WebGPU shader lost
+  Firefox's Vulkan context.
 - GL stays on virgl. Zink as a GL driver is not installed (GL 2.1 only on
   MoltenVK).
 - Chrome's WebGPU stays on SwiftShader: Chrome on Linux needs either a
   Vulkan compositor (ANGLE on Vulkan: ES 2.0 only, MoltenVK lacks
   `VK_EXT_provoking_vertex`) or GL<->Vulkan memory sharing
   (`GL_EXT_memory_object_fd` + `GL_EXT_semaphore_fd`), and virgl and Venus
-  cannot share memory on the Mac yet. ADR 0016 has the route to fix it.
+  cannot share memory on the Mac yet. Even with ANGLE on Vulkan
+  (KosmicKrisp, `kosmickrisp` track) Dawn refuses the adapter: it wants
+  OPAQUE_FD semaphores and exportable optimal images, Venus has neither.
+  ADR 0016 lists what it would take.
 - Kernel launches cross the Venus ring like draw calls: launch-heavy
   OpenCL work pays Venus's latency (see vkmark above).
 
@@ -457,6 +467,11 @@ bench lock and are indications only):
 | Fence to reply, median | 1.56 ms | 0.20 ms |
 | Window frames/s | <= 33 | 60 (display refresh) |
 | vkmark headless 800x600 (Venus) | - | ~800 |
+| WebGPU matmul f32 2048, Firefox (VM vs Mac, same batch) | - | 678 vs 223 GFLOPS |
+| WebGPU matmul f32 2048, Chrome on the Mac | - | 3885 GFLOPS (VM Chrome: SwiftShader only) |
+| OpenCL clpeak fp32 (VM, 40-CU shim / as reported) vs Mac OpenCL | - | 8.9 / 1.5 vs 15.6-16.1 TFLOPS |
+| Geekbench 7 GPU OpenCL, VM vs Mac | - | 10673 vs 111530 |
+| ffmpeg 4K nlmeans in the VM, OpenCL vs 8 vCPUs | - | 1.07 vs 0.33 fps |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
 ## 12. Merging the tracks
