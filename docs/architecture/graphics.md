@@ -99,7 +99,8 @@ on CGL, not on ANGLE.
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | planned | ICD choice already in `virgl-darwin-vulkan-beside.patch` |
-| Zink, rusticl, ANGLE-on-Vulkan in Chrome | planned, blocked on MoltenVK (no `nullDescriptor`) | - |
+| OpenCL (rusticl on Zink), WebGPU in Firefox and Chromium | built: `webgpu-compute`, Venus VMs | section 6, ADR 0022 |
+| Zink as GL driver, ANGLE-on-Vulkan in Chrome | blocked on MoltenVK (GL 2.1, no `VK_EXT_provoking_vertex`) | - |
 | VideoToolbox decode | built: `video-decode` | `virgl-videotoolbox-decode.patch` |
 | One window per display | built: `app-displays` | `omacvm-cocoa-displays.patch` |
 | Async ctrl queue (guest keeps encoding while the host runs) | planned | finding from `browser-gpu` |
@@ -272,21 +273,21 @@ Limits: MoltenVK has no `nullDescriptor`, no geometry shaders, no logicOp,
 no float64, no `VK_EXT_provoking_vertex`. So Zink as a GL driver and
 ANGLE-on-Vulkan in Chrome do not work; they wait for KosmicKrisp, which
 needs Metal 4 (macOS 26). See ADR 0013. Zink for compute (rusticl) works
-with two patches: next section, ADR 0016. Frame latency is Venus's ring polling (guest `vn_relax`, host
+with patches: next section, ADR 0022. Frame latency is Venus's ring polling (guest `vn_relax`, host
 `vkr_ring_relax`), about 1.3 ms per frame: vkmark ~800 is latency, not GPU.
 
 ### WebGPU and OpenCL on Venus (built: `webgpu-compute`)
 
 ```
- Firefox (WebGPU, wgpu)      OpenCL app (Geekbench, ffmpeg, clpeak)
-        |                         |
-        |                    rusticl (Mesa OpenCL 3.0) -> Zink (Gallium on Vulkan)
-        |                         |
- /opt/omacvm-mesa: Mesa 26.2.4 venus (+2 Zink patches), built in the guest
-        \________________________/
-                  |  Venus ring, as in the chain above
-                  v
-            vkr -> MoltenVK -> Metal
+ Firefox (WebGPU, wgpu)   Chromium (WebGPU, Dawn)     OpenCL app (Geekbench, ffmpeg, clpeak)
+        |                 launcher: Skia Graphite          |
+        |                 on Dawn-Vulkan, X11         rusticl (Mesa OpenCL 3.0) -> Zink
+        |                        |                         |
+ /opt/omacvm-mesa: Mesa 26.2.4 venus + zink + rusticl with OmacVM's patches, built in the guest
+        \________________________|_________________________/
+                                 |  Venus ring, as in the chain above
+                                 v
+                    vkr -> MoltenVK -> Metal
 ```
 
 - `src/app/guest/venus/install.sh`, called by the app's guest install,
@@ -297,30 +298,37 @@ with two patches: next section, ADR 0016. Frame latency is Venus's ring polling 
   `/etc/OpenCL/vendors/omacvm-rusticl.icd`, writes
   `/etc/environment.d/90-omacvm-venus.conf` (`RUSTICL_ENABLE=zink`,
   `VK_LOADER_DRIVERS_DISABLE=virtio_icd.json`: the distro's venus, Mesa
-  26.2.3, fails on 16 KiB blob pages) and Firefox's `dom.webgpu.enabled`.
+  26.2.3, fails on 16 KiB blob pages), Firefox's `dom.webgpu.enabled`, and
+  the `omacvm-chromium-webgpu` launcher with a "Chromium (WebGPU)" menu entry.
 - Patches (guest Mesa, `src/app/guest/venus/patches`):
-  `mesa-zink-moltenvk-no-push-descriptors.patch` (SPIRV-Cross can alias
-  zink's typed bo arrays only in argument buffers, which MoltenVK never
-  uses for push sets: every kernel failed) and
-  `mesa-zink-moltenvk-null-descriptor.patch` (start without
-  `nullDescriptor`; unbound slots are undefined on MoltenVK) and
-  `mesa-venus-incremental-present.patch` (from the `kosmickrisp` track:
-  ANGLE on Vulkan enables incremental present without a swapchain).
+  - `mesa-zink-moltenvk-no-push-descriptors.patch`: SPIRV-Cross can alias
+    zink's typed bo arrays only in argument buffers, which MoltenVK never
+    uses for push sets (every kernel failed);
+  - `mesa-zink-moltenvk-null-descriptor.patch`: start without
+    `nullDescriptor`; unbound slots are undefined on MoltenVK;
+  - `mesa-zink-moltenvk-global-loads.patch`: MoltenVK 1.4.2's SPIRV-Cross
+    forwards loads through buffer addresses past stores to the same memory,
+    so swaps lost elements (Geekbench's Feature Matching failed); zink reads
+    each global address back from a variable, which keeps the load in place;
+  - `mesa-venus-opaque-fd-semaphores.patch`: OPAQUE_FD binary semaphores on
+    the DRM syncobj Venus already has, the one thing Dawn was missing;
+  - `mesa-venus-incremental-present.patch` (from the `kosmickrisp` track).
 - Host (`app/runtime/patches`): `virgl-darwin-venus-moltenvk-zero-init.patch`
-  reports `shaderZeroInitializeWorkgroupMemory` off on MoltenVK: its
-  SPIRV-Cross cannot compile zero-initialized workgroup memory, and wgpu
-  zero-initializes every workgroup variable, so each such WebGPU shader lost
-  Firefox's Vulkan context.
+  reports `shaderZeroInitializeWorkgroupMemory` off on MoltenVK, for every
+  guest instance version (Dawn uses 1.1): MoltenVK's SPIRV-Cross cannot
+  compile zero-initialized workgroup memory, and such a WebGPU shader lost
+  the whole Vulkan context.
 - GL stays on virgl. Zink as a GL driver is not installed (GL 2.1 only on
   MoltenVK).
-- Chrome's WebGPU stays on SwiftShader: Chrome on Linux needs either a
-  Vulkan compositor (ANGLE on Vulkan: ES 2.0 only, MoltenVK lacks
-  `VK_EXT_provoking_vertex`) or GL<->Vulkan memory sharing
-  (`GL_EXT_memory_object_fd` + `GL_EXT_semaphore_fd`), and virgl and Venus
-  cannot share memory on the Mac yet. Even with ANGLE on Vulkan
-  (KosmicKrisp, `kosmickrisp` track) Dawn refuses the adapter: it wants
-  OPAQUE_FD semaphores and exportable optimal images, Venus has neither.
-  ADR 0016 lists what it would take.
+- Chrome's two gates (ADR 0022): a Vulkan compositor, and Dawn's
+  `SupportsExternalImages()` (OPAQUE_FD semaphores). The launcher passes
+  `--ozone-platform=x11 --enable-skia-graphite
+  --skia-graphite-dawn-backend=vulkan` with `MESA_VK_WSI_DEBUG=sw`: Chrome
+  refuses Vulkan on Wayland, and Venus' DRI3 present to Xwayland is half as
+  fast as its software path. WebGL stays on virgl and is copied into the
+  compositor (about a fifth slower), so the default Chromium is unchanged.
+- Copying a WebGPU canvas into a 2D canvas returns zeros in every Chrome
+  mode in the VM (also the default): open.
 - Kernel launches cross the Venus ring like draw calls: launch-heavy
   OpenCL work pays Venus's latency (see vkmark above).
 
@@ -453,7 +461,7 @@ What crosses and who checks it:
 | Conformance | dEQP GLES2/3 subset (virgl), Vulkan CTS subset (Venus), WebGL conformance in Chrome | planned |
 | Smoke | Hyprland up, `chrome://gpu` green, guest `grim` vs expectation, `OMACVM_GL_DUMP` frame upright with right colours | per track |
 | Video | `ffmpeg -hwaccel vaapi` framemd5 equal to software (H.264, VP9, real content) | `video-decode` |
-| Compute | `src/app/guest/venus/cltest.c` (saxpy + reduction vs CPU), Geekbench 7 GPU OpenCL validation, WebGPU matmul vs CPU sample (`webgpu-compute` scratch tools) | `webgpu-compute` |
+| Compute | `src/app/guest/venus/cltest.c` (saxpy, reduction, atomics, in-place sort vs CPU), `semtest.c` (OPAQUE_FD semaphores shared by two devices; prints Dawn's adapter check), Geekbench 7 GPU OpenCL validation, WebGPU matmul vs CPU sample (`webgpu-compute` tools) | `webgpu-compute` |
 | GPU check | `app/scripts/gpu-check.sh VM_DIR 3`: Aquarium + Basemark finish, no refused shaders in `qemu.log` | `gpu-hang` |
 | Performance | glmark2, vkmark, Aquarium, Basemark, video-bench.py; same window size, median of 3, JSON, with `~/.omacvm-bench.lock` and other test VMs paused | `src/bench`, `docs/benchmarks` |
 | Stability | 30 min soak per path (browser + video + glmark2 loop), sleep/wake, display plug/unplug | per track |
@@ -467,10 +475,10 @@ bench lock and are indications only):
 | Fence to reply, median | 1.56 ms | 0.20 ms |
 | Window frames/s | <= 33 | 60 (display refresh) |
 | vkmark headless 800x600 (Venus) | - | ~800 |
-| WebGPU matmul f32 2048, Firefox (VM vs Mac, same batch) | - | 678 vs 223 GFLOPS |
-| WebGPU matmul f32 2048, Chrome on the Mac | - | 3885 GFLOPS (VM Chrome: SwiftShader only) |
+| WebGPU matmul f32 2048, Chromium in the VM (launcher) vs Chrome on the Mac, same locked batch | - | 5071 vs 6038 GFLOPS (84 %) |
+| WebGPU matmul f32 2048, Firefox, VM vs Mac, same locked batch | - | 665 vs 319 GFLOPS |
 | OpenCL clpeak fp32 (VM, 40-CU shim / as reported) vs Mac OpenCL | - | 8.9 / 1.5 vs 15.6-16.1 TFLOPS |
-| Geekbench 7 GPU OpenCL, VM vs Mac | - | 10673 vs 111530 |
+| Geekbench 7 GPU OpenCL, VM vs Mac, same locked batch | - | 42486 vs 95380 (45 %); before the global-loads fix 10673, Feature Matching failed |
 | ffmpeg 4K nlmeans in the VM, OpenCL vs 8 vCPUs | - | 1.07 vs 0.33 fps |
 | YouTube 4K60 VP9, guest cores / QEMU cores | 1.21 / 1.71 (software) | 0.34 / 0.45 (VideoToolbox) |
 
