@@ -112,6 +112,11 @@ the GPU's own recovery, not a memory fault.
   measurable.
 - 30-minute soak (glmark2 loop, Chrome WebGL page, mpv 1080p60): pass, 77675
   WebGL frames, 0 dropped video frames, no GPU fault.
+- Venus (gpu-venus's tree with this whole series, robust buffer access on,
+  MoltenVK): 30-minute soak with vkmark, Chrome WebGL and mpv passes (twice);
+  the Venus context-loss test passes. (The soak first hung the guest after
+  6-10 minutes; the cause was a socket peek in the round-1 Venus fence patch,
+  removed.)
 - Apps that drew past their buffers (undefined in GL) now lose those draws
   instead of drawing garbage.
 - GL buffers get up to 15 bytes of slack (rounded to 16) so a block declared
