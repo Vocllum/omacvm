@@ -624,7 +624,13 @@ testufo on a virtual 120 Hz display, bench lock, 3 x 12 s:
 |---|---|---|
 | `pacing-hdr`, rate follows the guest (default) | 119.6, 119.9, 119.9 | 35, 8, 3 |
 | `pacing-hdr`, `OMACVM_GL_REFRESH=fixed` | 119.6, 119.8, 109.5 | 25, 8, 11 |
+| `pacing-hdr` final build (clean runtime build), 3 sessions | 117.7-119.8 in 8 of 9 runs (one 114.8) | 3-26 |
 | gpu-native (frames when drawn) | 92.0, 98.2, 100.5 | 220-251 |
+
+One more final-build run gave 90.2: WindowServer itself composited only 90
+frames a second then (other tracks' VMs loaded the Mac; the bench lock does
+not pause QEMUs outside `~/omacvm-*`); the earlier build next to it gave
+119.3-119.7.
 
 Refresh rate following the guest, virtual 120 Hz display with the screen's
 slowest rate faked at 24 Hz (dev build; the MacBook panel's floor), bench
