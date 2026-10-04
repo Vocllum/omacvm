@@ -324,11 +324,15 @@ func handle(_ fd: Int32, peer: String) {
   guard let wanted = Int(headers["content-length"] ?? "0"), wanted >= 0 else {
     respond(fd, 400, ["error": "bad Content-Length"]); return
   }
-  let limit = path == "/wallpaper" ? 48 << 20 : 65536
+  let limit = path == "/wallpaper" ? 48 << 20 : path.hasPrefix("/omacvm/") ? controlBodyMax : 65536
   guard wanted <= limit else { respond(fd, 413, ["error": "body too large"]); return }
   deadline = Date().addingTimeInterval(path == "/wallpaper" ? 120 : 5)
   while buf.count - headEnd.upperBound < wanted, readMore() {}
   let body = buf[headEnd.upperBound...].prefix(wanted)
+  if path.hasPrefix("/omacvm/") {   // the control centre's fixed list (control.swift)
+    control.handle(fd: fd, peer: peer, method: method, path: path, headers: headers, body: Data(body))
+    return
+  }
   switch (method, path) {
   case ("GET", "/state"):
     respond(fd, 200, hub.current("wifi"))

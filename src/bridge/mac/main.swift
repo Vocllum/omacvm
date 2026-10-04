@@ -32,6 +32,8 @@
 //                          while started (macOS asks for the camera permission the first time)
 //   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
 //                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
+//   /omacvm/...            the control centre's requests (control.swift, docs/adr/0031): hello, status,
+//                          updates, updates/check, settings/update-checks, jobs, jobs/<id>
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
@@ -148,6 +150,7 @@ audio.start()
 location.start()
 bluetooth.start()
 hub.start()
+control.start()
 osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
 mediaKeys.start()
