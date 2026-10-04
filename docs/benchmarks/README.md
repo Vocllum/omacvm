@@ -14,14 +14,19 @@ end. The tools are in [`src/bench/`](../../src/bench).
 | MotionMark 1.3.1 | 2D graphics drawn through the browser | ✓ | ✓ |
 | WebGL Aquarium, 30,000 fish | 3D in the browser, frames per second | ✓ | ✓ |
 | Basemark Web 3.0 | the GPU in the browser: WebGL, canvas, SVG, plus some JavaScript and page tests | ✓ | ✓ |
-| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | ✗ see below |
+| Geekbench 7 GPU | GPU compute | ✓ (Metal, OpenCL) | only OmacVM.app with Venus, see below |
+| WebGPU matmul (`browser-bench.py webgpu`) | GPU compute in the browser, GFLOPS | ✓ | only OmacVM.app with Venus |
 | glmark2 | OpenGL ES in the VM, absolute score | ✗ no macOS build | ✓ |
 
-**GPU compute is not possible in any of the VMs.** Geekbench's GPU test
-needs Vulkan or OpenCL, and none of Parallels, UTM, VMware Fusion or
-OmacVM.app offers either to a Linux guest: Geekbench 7's Linux ARM preview
-lists no GPU in any of them. `bench.sh` records that as "not available in this
-VM".
+**GPU compute needs Vulkan or OpenCL in the VM.** Parallels, UTM and VMware
+Fusion offer neither to a Linux guest: Geekbench 7's Linux ARM preview lists
+no GPU there, and `bench.sh` records that as "not available in this VM".
+OmacVM.app with Venus (still a hidden switch) has both: OpenCL through
+rusticl and WebGPU in Firefox and in the "Chromium (WebGPU)" launcher (ADR
+0022). One locked batch on the M4 Max: Geekbench 7 GPU OpenCL 42486 in the
+VM vs 95380 for the Mac's own OpenCL; WebGPU matmul 5071 GFLOPS in the VM's
+Chromium vs 6038 in Chrome on the Mac. Geekbench 7 for Linux has no Vulkan
+backend, so the VM has no Metal-like score.
 The browser tests (MotionMark, WebGL Aquarium, Basemark Web 3.0) and glmark2
 measure graphics instead, not raw compute. glmark2 has no Mac version, so it has no Mac
 baseline: compare its score between the routes only.
