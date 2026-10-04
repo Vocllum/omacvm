@@ -281,10 +281,15 @@ FUSION_DIR=${OMACVM_FUSION_DIR:-$HOME/Virtual Machines.localized}   # where omac
 fusion_bundle() { echo "$FUSION_DIR/$1.vmwarevm"; }   # <vm name> -> the folder omacvm build gives it
 fusion_version() { defaults read "/Applications/VMware Fusion.app/Contents/Info" CFBundleShortVersionString 2>/dev/null; }
 
-fusion_list() {   # one line per VM in Fusion's library: NAME<TAB>VMX
+fusion_list() {   # one line per VM: NAME<TAB>VMX
   local x n
-  [[ -f $FUSION_INVENTORY ]] || return 0
-  sed -n 's/^vmlist[0-9]*\.config = "\(.*\.vmx\)"$/\1/p' "$FUSION_INVENTORY" | while IFS= read -r x; do
+  # Fusion's library, the running VMs and the VMs in $FUSION_DIR: a VM started
+  # without a window (OMACVM_HEADLESS=1) never gets into the library.
+  {
+    [[ -f $FUSION_INVENTORY ]] && sed -n 's/^vmlist[0-9]*\.config = "\(.*\.vmx\)"$/\1/p' "$FUSION_INVENTORY"
+    [[ -x $VMRUN ]] && "$VMRUN" list 2>/dev/null | grep '\.vmx$'
+    for x in "$FUSION_DIR"/*.vmwarevm/*.vmx; do [[ -f $x ]] && echo "$x"; done
+  } | awk '!seen[$0]++' | while IFS= read -r x; do
     [[ -f $x ]] || continue
     n=$(sed -n 's/^displayName = "\(.*\)"$/\1/p' "$x" | head -1)
     printf '%s\t%s\n' "${n:-$(basename "$x" .vmx)}" "$x"
