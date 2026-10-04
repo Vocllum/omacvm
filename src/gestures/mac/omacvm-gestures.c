@@ -123,7 +123,8 @@ static char listenAddrs[4][16] = { "10.211.55.2", "192.168.64.1", "", "127.0.0.1
 #define NET_APP 3
 
 // The first VNET_8_HOSTONLY_SUBNET line, and only a private address (as
-// fusion_host in src/lib/mac.sh and the Bridge read it).
+// fusion_host in src/lib/mac.sh and the Bridge read it). Fusion installed
+// after this helper started: the Fusion listener reads it again until found.
 static void readFusionHost(void) {
   FILE *f = fopen("/Library/Preferences/VMware Fusion/networking", "r");
   char line[256], net[32];
@@ -136,8 +137,12 @@ static void readFusionHost(void) {
       int priv = (h >> 24) == 10 || (h >> 20) == 0xAC1 || (h >> 16) == 0xC0A8;
       char host[16];
       snprintf(host, sizeof host, "%u.%u.%u.1", h >> 24, (h >> 16) & 255, (h >> 8) & 255);
-      if (priv && strcmp(host, listenAddrs[0]) && strcmp(host, listenAddrs[NET_UTM]))
-        snprintf(listenAddrs[NET_FUSION], sizeof listenAddrs[NET_FUSION], "%s", host);
+      if (priv && strcmp(host, listenAddrs[0]) && strcmp(host, listenAddrs[NET_UTM])) {
+        // Other threads test the first byte: set it last.
+        memcpy(listenAddrs[NET_FUSION] + 1, host + 1, sizeof host - 1);
+        __sync_synchronize();
+        listenAddrs[NET_FUSION][0] = host[0];
+      }
     }
     break;
   }
@@ -859,6 +864,7 @@ static void *greet(void *arg) {
 static void *serverThread(void *arg) {
   int net = (int)(intptr_t)arg, inUse = 0;
   const char *addr = listenAddrs[net];
+  while (net == NET_FUSION && !addr[0]) { sleep(10); readFusionHost(); }
   for (;;) {
     int s = socket(AF_INET, SOCK_STREAM, 0), one = 1;
     setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -992,7 +998,7 @@ int main(int argc, char **argv) {
   initKeymap();
   readFusionHost();
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
-    if (!listenAddrs[i][0]) continue;
+    if (!listenAddrs[i][0] && i != NET_FUSION) continue;
     pthread_t th; pthread_create(&th, NULL, serverThread, (void *)(intptr_t)i);
   }
   logf_(trackpad ? "running (escape: Ctrl+Option+Cmd+Esc)" : "running, keys only: trackpad gestures stay with macOS");
