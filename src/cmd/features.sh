@@ -9,7 +9,8 @@
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM. A stopped VM is started.
 # --json (features): {"vm", "type", "omacvm", "features": [{"name", "on",
-# "default", "experimental", "available", "needs", "title", "summary"}]}.
+# "default", "experimental", "available", "reason", "needs", "title", "summary"}]};
+# reason: why this Mac or VM cannot have it ("" when available).
 # Without --vm it starts nothing: the state of the VM it would pick if that
 # one runs, else the defaults ("vm": null).
 # Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person.
@@ -75,10 +76,10 @@ if (( JSON )); then
     "$( [[ -n $version ]] && json_str "$version" || echo null)"
   for ((i = 0; i < ${#FN[@]}; i++)); do
     available "$i" && av=true || av=false
-    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "needs": %s, "title": %s, "summary": %s}' \
+    printf '%s\n  {"name": "%s", "on": %s, "default": %s, "experimental": %s, "available": %s, "reason": %s, "needs": %s, "title": %s, "summary": %s}' \
       "$( ((i)) && echo ,)" "${FN[$i]}" "$( [[ ${FV[$i]} == on ]] && echo true || echo false)" \
       "$( [[ $(feature_default "$i") == on ]] && echo true || echo false)" \
-      "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" \
+      "$(feature_has_tag "$i" experimental && echo true || echo false)" "$av" "$(json_str "$REASON")" \
       "$( [[ ${FNEEDS[$i]} == - ]] && echo null || json_str "${FNEEDS[$i]}")" \
       "$(json_str "${FTITLE[$i]}")" "$(json_str "${FSUM[$i]}")"
   done

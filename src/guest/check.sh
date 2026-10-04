@@ -4,8 +4,10 @@
 # the Mac does that over SSH):
 #   guest/check.sh --user NAME [--tsv]
 # One line per feature (ok / FAIL / skip); exits 1 if anything failed. --tsv:
-# "status<TAB>name<TAB>detail<TAB>human" lines (human = 1: only a person can fix
-# it) and "section<TAB>title", for omacvm check --json.
+# "status<TAB>name<TAB>detail<TAB>human<TAB>feature" lines (human = 1: only a
+# person can fix it; feature = the features.tsv name the line belongs to, empty
+# for the VM in general) and "section<TAB>title", for omacvm check --json and
+# the control centre.
 set -uo pipefail
 U=""; TSV=0
 while (( $# )); do
@@ -17,9 +19,9 @@ while (( $# )); do
 done
 id "$U" >/dev/null 2>&1 || { echo "guest/check.sh: --user must be the desktop user" >&2; exit 2; }
 H=$(getent passwd "$U" | cut -d: -f6); RUN=/run/user/$(id -u "$U")
-fails=0
+fails=0; FEATURE=""   # the feature the next lines belong to
 line() {   # STATUS LABEL NAME DETAIL [human]
-  if (( TSV )); then printf '%s\t%s\t%s\t%s\n' "$1" "$3" "$4" "${5:+1}"
+  if (( TSV )); then printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$3" "$4" "${5:+1}" "$FEATURE"
   else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
 }
 ok()   { line ok ok "$1" "${2:-}"; }
@@ -62,6 +64,7 @@ bg=$H/.local/state/omarchy/current/background
 if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is missing: omacvm apply, then log in again"; fi
 
 section "The Mac in the bar (Bridge)"
+FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if [[ -s $H/.config/omacvm-bridge/token ]]; then ok "token" "~/.config/omacvm-bridge/token"
   else bad "token" "missing: run omacvm apply on the Mac"; fi
@@ -116,6 +119,7 @@ if [[ $BRIDGE == on ]]; then
   if jq -e '[.bar.layout[]?[]? | select(.id == "omarchy.indicators") | (.items // ["NightLight"]) | index("NightLight")] | all(. == null)' "$H/.config/omarchy/shell.json" >/dev/null 2>&1 && ! pgrep -x hyprsunset >/dev/null; then
     ok "one night light" "the Mac's Night Shift; Omarchy's own is off"
   else bad "one night light" "Omarchy's night light (hyprsunset) is still reachable or running: omacvm apply"; fi
+  FEATURE=wallpaper
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
@@ -123,6 +127,7 @@ if [[ $BRIDGE == on ]]; then
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Camera and microphone"
+FEATURE=camera
 if [[ $CAMERA == on && $TYPE == parallels ]]; then
   # Parallels' own camera sharing: a USB camera in the VM.
   cams=$(cat /sys/class/video4linux/video*/name 2>/dev/null | sort -u | paste -sd, -)
@@ -146,11 +151,13 @@ elif [[ $CAMERA == on ]]; then
     esac
   fi
 else skip "camera" "off (chosen at setup)"; fi
+FEATURE=""
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
 else bad "microphone" "PipeWire has no input: no sound card in the VM? (UTM, Fusion: shut it down, then omacvm apply --vm NAME starts it with one)"; fi
 
 section "The Mac's battery"
+FEATURE=battery
 if [[ $TYPE == parallels ]]; then
   if compgen -G '/sys/class/power_supply/BAT*' >/dev/null; then skip "battery" "Parallels gives the VM the Mac's battery itself"
   else skip "battery" "none: this Mac has no battery (on a MacBook Parallels passes it itself)"; fi
@@ -182,17 +189,20 @@ elif [[ $BATTERY == on ]]; then
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
+[[ $GESTURES == on ]] && FEATURE=gestures || FEATURE=""   # on UTM, Fusion and OmacVM.app the daemon runs also without it
 if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
   else bad "gestures" "omacvm-gestures.service not running"; fi
 fi
+FEATURE=gestures
 if [[ $GESTURES == on ]]; then
   check "virtual trackpad" "Magic Trackpad (OmacVM)" ev_device "Apple Inc. Magic Trackpad (OmacVM)"
   if grep -rqs '^hl.gesture({ fingers = 3' "$H/.config/hypr/"; then ok "workspace swipes" "3/4-finger gestures configured"
   else bad "workspace swipes" "no hl.gesture lines in ~/.config/hypr"; fi
 else skip "trackpad gestures" "off (chosen at setup): macOS keeps its swipes"; fi
+FEATURE=scroll-momentum
 if [[ $GLIDE == on && $GESTURES == on ]]; then
   pid=$(systemctl show -p MainPID --value omacvm-gestures 2>/dev/null)
   if [[ -n $pid && $pid != 0 ]] && tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null | grep -qx 'OMACVM_FEATURE_scroll_momentum=on'; then
@@ -202,6 +212,7 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
     ok "scroll settings" "omacvm_glide.lua"
   else bad "scroll settings" "omacvm_glide.lua missing or not loaded from hyprland.lua (omacvm enable scroll-momentum)"; fi
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
+FEATURE=""
 if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
   check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
 fi
@@ -294,6 +305,7 @@ fusion)
 esac
 
 section "Speed and safety"
+FEATURE=thp-kernel
 k=$(uname -r)
 [[ -n $THP_KERNEL ]] || { [[ $k == *thp* ]] && THP_KERNEL=on || THP_KERNEL=off; }
 if [[ $k == *thp* && $THP_KERNEL == off ]]; then bad "kernel" "$k: the memory-optimized kernel is off but still running (reboot)"
@@ -309,6 +321,7 @@ lru=$(cat /sys/kernel/mm/lru_gen/enabled 2>/dev/null)
 if [[ -n $lru && $lru != 0x0000 ]]; then ok "MGLRU" "$lru"
 elif [[ $k == *thp* ]]; then bad "MGLRU" "${lru:-unavailable}"
 else skip "MGLRU" "${lru:-not in this kernel} (part of the memory-optimized kernel)"; fi
+FEATURE=""
 z=$(swapon --show=NAME,SIZE --noheadings 2>/dev/null | awk '/zram/ { print $2; exit }')
 [[ -n $z ]] && ok "zram swap" "$z" || bad "zram swap" "none (reboot after omacvm apply?)"
 if command -v grub-mkconfig >/dev/null; then
@@ -321,11 +334,14 @@ if ufw status 2>/dev/null | grep -q "omacvm: ssh from the Mac"; then ok "SSH fro
 else bad "SSH from the Mac" "no OmacVM firewall rule"; fi
 
 section "Choices"
+FEATURE=idle-lock
 if [[ $IDLE_LOCK == off ]]; then
   if [[ -f $H/.local/state/omarchy/indicators/stay-awake ]]; then ok "screensaver and lock" "off: the Mac's lock protects the VM"
   else bad "screensaver and lock" "chosen off, but Omarchy's Stay Awake is not set"; fi
 else ok "screensaver and lock" "Omarchy's own, after idle"; fi
+FEATURE=autologin
 [[ -f /etc/sddm.conf.d/20-omacvm-autologin.conf ]] && ok "autologin" "on" || ok "autologin" "off"
+FEATURE=mac-clock
 if [[ $MAC_CLOCK == on ]]; then
   f=$(jq -r '.bar.layout.right[-1] | select(.id == "omarchy.clock") | .format' "$H/.config/omarchy/shell.json" 2>/dev/null)
   if [[ -n $f ]]; then ok "the Mac's clock" "far right, $f"
@@ -334,6 +350,7 @@ if [[ $MAC_CLOCK == on ]]; then
 fi
 
 section "Omanotch"
+FEATURE=omanotch
 if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
