@@ -158,7 +158,7 @@ elif [[ $BATTERY == on ]]; then
   if [[ -w /sys/devices/platform/omacvm-battery/state ]]; then ok "battery module" "omacvm_battery loaded"
   else bad "battery module" "not loaded on $(uname -r) (reboot after omacvm apply; log /var/lib/omacvm/battery-build.log)"; fi
   # Every kernel that boots must have it (DKMS builds it with each kernel's headers).
-  for k in $(ls /usr/lib/modules 2>/dev/null); do
+  for k in /usr/lib/modules/*; do k=${k##*/}
     [[ -d /usr/lib/modules/$k/kernel ]] || continue
     if dkms status -k "$k" omacvm-battery 2>/dev/null | grep -q installed; then ok "battery: kernel $k" "module built (DKMS)"
     elif [[ ! -f /usr/lib/modules/$k/build/Makefile ]]; then bad "battery: kernel $k" "no headers to build the module with: omarchy update, reboot, omacvm apply"
