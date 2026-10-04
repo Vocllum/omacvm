@@ -175,6 +175,14 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
     fi
+    # A Mac mini, iMac or Studio may have no trackpad yet: the helper waits for one.
+    if [[ $GESTURES == on && $keysonly == 0 ]]; then
+      t=$(last_line "$L/omacvm-gestures.log" 'no trackpad found|trackpad: ')
+      case $t in
+        "no trackpad"*) skip "trackpad" "none connected: the swipes start when a Magic Trackpad connects" ;;
+        trackpad:*) ok "trackpad" "${t#trackpad: }" ;;
+      esac
+    fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
       g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
