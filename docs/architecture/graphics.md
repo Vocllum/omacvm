@@ -188,7 +188,9 @@ why the main thread and QEMU waited on each other every frame).
    readback).
 6. Present:
    - shipped: the view is marked dirty; Cocoa redraws on QEMU's GUI refresh
-     tick (30 ms), so the window shows at most 33 frames/s.
+     tick (30 ms): by the code at most 33 redraws a second. (Inside the guest
+     a page still runs at 120, so testufo reports 120; what reaches the panel
+     is measured on `pacing-hdr`.)
    - built: each flush asks for a redraw; QEMU's thread blits the scanout
      into one of three IOSurfaces, the present queue waits for that blit,
      the main thread sets `layer.contents`. At most one surface per display
@@ -445,7 +447,7 @@ bench lock and are indications only):
 | glmark2, window 1440x810 pt, 60 Hz | 1259 | 4006 (async fences + present on flush) |
 | glmark2 short set, bench lock | 1096-1139 | 3310-3590 (final: + fence wait) |
 | Fence to reply, median | 1.56 ms | 0.20 ms |
-| Window frames/s | <= 33 | 60 (display refresh); desktop animation at 120 Hz: mean 58, max 90 |
+| Window frames/s (QEMU side) | <= 33 by the code (30 ms timer) | 60 on a 60 Hz display; at 120 Hz about 108 of 120 reach the panel (`pacing-hdr`) |
 | WebGL Aquarium 30k, bench lock | 21.2-21.6 fps | 19.6-22.9 fps (same) |
 | QEMU CPU, glmark2 / Aquarium, bench lock | - | 165% / 176% (fence wait; spinning: 195% / 194%) |
 | vkmark headless 800x600 (Venus) | - | ~800 |

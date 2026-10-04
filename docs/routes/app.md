@@ -43,12 +43,18 @@ OmacVM's version.
   HEVC in mpv. Not in Arch Linux ARM's
   Chromium (built without VA-API).
   [How it works](../video-decode.md).
-- The window shows every frame Omarchy draws, up to the display's refresh
-  (it showed at most 33 a second before), as IOSurfaces drawn off the main
-  thread. GPU fences come back in about 0.2 ms instead of 1.5 ms: glmark2
-  about 4000 instead of 1250 ([how](../architecture/graphics.md)). If the
-  GPU misbehaves on a Mac: `defaults write org.omacvm.app gpuSafeMode -bool
-  true` goes back to the 2.6.0 path.
+- A new frame goes to the window as soon as Omarchy finishes it, drawn off
+  the main thread as an IOSurface (before, QEMU redrew the window on a 30 ms
+  timer). GPU fences come back in about 0.2 ms instead of 1.5 ms, so light 3D
+  work runs about three times as fast (glmark2's short set about 3,300
+  instead of 1,070). WebGL-heavy pages stay the same: there Apple's OpenGL is
+  the limit ([how](../architecture/graphics.md)). If the picture or the GPU
+  misbehaves on a Mac: `defaults write org.omacvm.app gpuSafeMode -bool true`
+  and restart the VM goes back to the 2.8.0 path.
+- Vulkan in the VM (Venus on MoltenVK), hidden and experimental:
+  `defaults write org.omacvm.app venus -bool true`, then restart the VM. The
+  VM's Mesa must round GPU memory to the Mac's 16 KiB pages (Mesa 26.2.4 or
+  newer); otherwise Vulkan apps fail to get memory. OpenGL stays on virgl.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.

@@ -3,6 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased
+
+- OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
+  of 1.5 ms, so light 3D work runs about three times as fast (glmark2's short
+  set about 3,300 instead of 1,070, same build, benchmark lock held). A new
+  frame goes to the window as soon as Omarchy finishes it, drawn off the main
+  thread as an IOSurface, not on QEMU's 30 ms timer. WebGL-heavy pages stay
+  where they were (Aquarium about 21 fps): there Apple's OpenGL is the limit.
+- The thread that waits for the GPU no longer keeps a core busy.
+- If the picture or the GPU misbehaves on a Mac:
+  `defaults write org.omacvm.app gpuSafeMode -bool true` and a VM restart go
+  back to the 2.8.0 GPU path.
+- Vulkan in the VM, hidden and experimental (Venus on MoltenVK):
+  `defaults write org.omacvm.app venus -bool true`. Needs Mesa 26.2.4 or newer
+  in the VM.
+
 ## 2.8.0
 
 - OmacVM.app uses every Mac display in full screen: a window (in its own

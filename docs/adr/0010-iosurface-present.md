@@ -35,7 +35,10 @@ main thread gets the surface; at most one surface per display refresh.
 ## Consequences
 
 - The window follows the guest's frame rate up to the display's refresh
-  (60/s measured on a 60 Hz display, was at most 33).
+  (60/s measured on a 60 Hz display; the old path redrew at most 33 times a
+  second by the code). On a 120 Hz panel about 108 of 120 frames reach the
+  screen, because frames arrive at a free-running phase; `pacing-hdr` paces
+  them on the display's refresh.
 - The main thread never waits for the BQL to draw.
 - One GPU copy per shown frame stays (cheap next to Apple's per-draw cost).
 - `OMACVM_GL_PRESENT=layer` keeps the old layer; if the IOSurface contexts
