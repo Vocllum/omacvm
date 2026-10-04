@@ -70,7 +70,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  }
  
  /*
-@@ -1665,6 +1684,53 @@ - (void) raiseAllButtons
+@@ -1665,6 +1684,58 @@ - (void) raiseAllButtons
          qemu_input_queue_btn(dcl.con, INPUT_BUTTON_MIDDLE, false);
      });
  }
@@ -103,7 +103,12 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +                  button:(int)button down:(bool)down
 +{
 +    if (!isMouseGrabbed) {
-+        if (!isAbsoluteEnabled && button < 0) {
++        /*
++         * The pointer just passing over this display while another app is
++         * in front must not take the pointer and keyboard from that app.
++         * Only a click does (it also brings OmacVM.app to the front).
++         */
++        if (button < 0 && (!isAbsoluteEnabled || ![NSApp isActive])) {
 +            return;
 +        }
 +        [self grabMouse];
@@ -124,7 +129,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  @end
  
  
-@@ -1724,23 +1790,33 @@ static void omacvm_toggle_notch_full_screen(void)
+@@ -1724,23 +1795,33 @@ static void omacvm_toggle_notch_full_screen(void)
          notchSavedFrame = [w frame];
          notchSavedMask = [w styleMask];
          [w setStyleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskResizable];
@@ -163,7 +168,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      }
  }
  
-@@ -1801,7 +1877,11 @@ - (id) init
+@@ -1801,7 +1882,11 @@ - (id) init
              ? [NSString stringWithUTF8String:qemu_name]
              : @"QEMU"];
          [window setContentView:cocoaView];
@@ -176,7 +181,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
          [window center];
          [window setDelegate: self];
  
-@@ -1895,6 +1975,7 @@ - (void)windowDidChangeScreen:(NSNotification *)notification
+@@ -1895,6 +1980,7 @@ - (void)windowDidChangeScreen:(NSNotification *)notification
  {
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
@@ -184,7 +189,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  }
  
  - (void)windowDidChangeBackingProperties:(NSNotification *)notification
-@@ -1909,6 +1990,7 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
+@@ -1909,6 +1995,7 @@ - (void)windowDidEnterFullScreen:(NSNotification *)notification
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
      [cocoaView grabMouse];
@@ -192,7 +197,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  }
  
  - (void)windowDidExitFullScreen:(NSNotification *)notification
-@@ -1918,6 +2000,7 @@ - (void)windowDidExitFullScreen:(NSNotification *)notification
+@@ -1918,6 +2005,7 @@ - (void)windowDidExitFullScreen:(NSNotification *)notification
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
      [cocoaView ungrabMouse];
@@ -200,7 +205,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  }
  
  - (void)windowDidResize:(NSNotification *)notification
-@@ -1972,7 +2055,8 @@ - (void) doToggleFullScreen:(id)sender
+@@ -1972,7 +2060,8 @@ - (void) doToggleFullScreen:(id)sender
  {
      NSWindow *w = [cocoaView window];
      /* Notch full screen only on a display with a notch; elsewhere macOS's own. */
@@ -210,7 +215,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
          (omacvm_notch_mode() && !([w styleMask] & NSWindowStyleMaskFullScreen) &&
           [[w screen] safeAreaInsets].top > 0)) {
          omacvm_toggle_notch_full_screen();
-@@ -2915,14 +2999,1062 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+@@ -2915,14 +3004,1085 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
      .dpy_gl_update          = cocoa_gl_scanout_flush,
  };
  
@@ -364,16 +369,25 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +    return false;
 +}
 +
++/* A window of ours that is shown on the current Space and under point p. */
++static bool omacvm_window_under(NSWindow *w, NSPoint p)
++{
++    return w && [w isVisible] && [w isOnActiveSpace] &&
++           NSPointInRect(p, [w frame]);
++}
++
 +static bool omacvm_pointer_over_ours(void)
 +{
 +    NSPoint p = [NSEvent mouseLocation];
 +
-+    if (NSPointInRect(p, [[cocoaView window] frame])) {
++    if (![NSApp isActive]) {
++        return false;
++    }
++    if (omacvm_window_under([cocoaView window], p)) {
 +        return true;
 +    }
 +    for (int i = 1; i < omacvm_outputs; i++) {
-+        if (omacvm_heads[i].window &&
-+            NSPointInRect(p, [omacvm_heads[i].window frame])) {
++        if (omacvm_window_under(omacvm_heads[i].window, p)) {
 +            return true;
 +        }
 +    }
@@ -1255,6 +1269,20 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
 +        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2),
 +                       dispatch_get_main_queue(), ^{ omacvm_displays_update(); });
 +    }];
++    /*
++     * Another app came to the front: let go of the pointer and keyboard even
++     * when the main window was not the key one (windowDidResignKey: covers
++     * that case only).
++     */
++    [[NSNotificationCenter defaultCenter]
++        addObserverForName:NSApplicationDidResignActiveNotification
++                    object:nil
++                     queue:[NSOperationQueue mainQueue]
++                usingBlock:^(NSNotification *note) {
++        if ([cocoaView isMouseGrabbed]) {
++            [cocoaView ungrabMouse];
++        }
++    }];
 +    omacvm_update_mac_layout();
 +    omacvm_chan_connect();
 +}
@@ -1274,7 +1302,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  static void cocoa_display_early_init(DisplayOptions *o)
  {
      assert(o->type == DISPLAY_TYPE_COCOA);
-@@ -2967,10 +4099,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2967,10 +4127,16 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      // Pull this console process up to being a fully-fledged graphical
      // app with a menubar and Dock icon
      ProcessSerialNumber psn = { 0, kCurrentProcess };
@@ -1292,7 +1320,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
      cocoa_set_product_icon();
  
      dcl.con = qemu_console_lookup_default();
-@@ -2985,6 +4123,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -2985,6 +4151,7 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
      controller = [[QemuCocoaAppController alloc] init];
  #endif
      [NSApp setDelegate:controller];
@@ -1300,7 +1328,7 @@ or focus. Applies after omacvm-cocoa-window-size.patch.
  
      if (display_opengl) {
  #ifdef CONFIG_OPENGL
-@@ -3037,6 +4176,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
+@@ -3037,6 +4204,8 @@ static void cocoa_display_init(DisplayState *ds, DisplayOptions *opts)
          dcl.ops = &dcl_ops;
      }
  
