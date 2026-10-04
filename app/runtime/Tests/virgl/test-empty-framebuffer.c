@@ -183,13 +183,14 @@ int main(void)
    virgl_renderer_ctx_attach_resource(1, 5);
 
    /* where the occlusion query results go: guest memory, no GL object */
-   struct virgl_host_query_state query_result[2];
+   struct virgl_host_query_state query_result[3];
    memset(query_result, 0, sizeof(query_result));
-   struct iovec query_iov[2] = {
+   struct iovec query_iov[3] = {
       { &query_result[0], sizeof(query_result[0]) },
       { &query_result[1], sizeof(query_result[1]) },
+      { &query_result[2], sizeof(query_result[2]) },
    };
-   for (uint32_t i = 0; i < 2; i++) {
+   for (uint32_t i = 0; i < 3; i++) {
       struct virgl_renderer_resource_create_args qargs = {
          .handle = 7 + i, .target = TEST_BUFFER, .format = VIRGL_FORMAT_R8_UNORM,
          .bind = VIRGL_BIND_CUSTOM, .width = sizeof(query_result[0]), .height = 1,
@@ -248,7 +249,7 @@ int main(void)
    emit(&c, 0);
    emit(&c, VIRGL_CMD0(VIRGL_CCMD_BIND_OBJECT, VIRGL_OBJECT_DSA, 1));
    emit(&c, 20);
-   for (uint32_t i = 0; i < 2; i++) {
+   for (uint32_t i = 0; i < 3; i++) {
       emit(&c, VIRGL_CMD0(VIRGL_CCMD_CREATE_OBJECT, VIRGL_OBJECT_QUERY, VIRGL_OBJ_QUERY_SIZE));
       emit(&c, 30 + i);
       emit(&c, TEST_QUERY_OCCLUSION_COUNTER);
@@ -283,7 +284,25 @@ int main(void)
    emit_draw(&c);
    check(submit(1, &c) == 0, "the colour buffer works again after the queries");
 
-   for (uint32_t i = 0; i < 2; i++) {
+   /* The stand-in is freed with the colour buffer back and made again, at the
+    * new viewport's size, for the next draw without attachments. */
+   emit_framebuffer(&c, 0, 0);
+   emit_viewport(&c, 32, 16);
+   emit_query(&c, VIRGL_CCMD_BEGIN_QUERY, 32);
+   emit_draw(&c);
+   emit_query(&c, VIRGL_CCMD_END_QUERY, 32);
+   emit(&c, VIRGL_CMD0(VIRGL_CCMD_GET_QUERY_RESULT, 0, 2));
+   emit(&c, 32);
+   emit(&c, 1);
+   emit_framebuffer(&c, 1, 6);
+   check(submit(1, &c) == 0, "no attachments again, then the colour buffer again");
+   wait_for_query(&query_result[2]);
+   snprintf(what, sizeof(what), "a new stand-in counts every sample of the 32x16 viewport: %llu",
+            (unsigned long long)query_result[2].result);
+   check(query_result[2].query_state == VIRGL_QUERY_STATE_DONE && query_result[2].result == 32 * 16,
+         what);
+
+   for (uint32_t i = 0; i < 3; i++) {
       virgl_renderer_ctx_detach_resource(1, 7 + i);
       virgl_renderer_resource_unref(7 + i);
    }
