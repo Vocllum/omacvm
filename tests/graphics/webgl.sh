@@ -19,8 +19,10 @@ WV=1; [[ $VERSION == 2* ]] && WV=2
 sleep 1
 "$V" session bash -c "rm -rf /tmp/webgl-prof; nohup google-chrome-stable --user-data-dir=/tmp/webgl-prof --no-first-run --no-default-browser-check --ozone-platform=wayland --disable-background-timer-throttling --disable-renderer-backgrounding 'http://127.0.0.1:8765/omacvm-runner.html?v=$WV' >/tmp/webgl-chrome.log 2>&1 &"
 end=$(( $(date +%s) + MIN*60 )); status=complete
-while ! "$V" ssh "grep -q '\"kind\": \"done\"' $G/out.jsonl" 2>/dev/null; do
+while ! "$V" ssh -o ConnectTimeout=20 "grep -q '\"kind\": \"done\"' $G/out.jsonl" 2>/dev/null; do
   [ "$(date +%s)" -ge $end ] && { status=time-limit; break; }
+  # paused by another track's benchmark (kill -STOP): the time limit waits too
+  [[ $(ps -o stat= -p "$("$V" pid)") == T* ]] && end=$((end + 10))
   sleep 10
 done
 "$V" ssh "pkill -f '/tmp/[w]ebgl-prof'; pkill -f '$G/[s]erver.py'; cat $G/commit" > "$OUT.commit" || true
