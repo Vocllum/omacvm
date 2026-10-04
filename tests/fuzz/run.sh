@@ -20,7 +20,10 @@ run battery_lines -max_len=20000
 wait || true
 # Lines that are not JSON used to leave an autoreleased NSError each on a
 # thread that never drains its pool: memory grew without end (over 1 GB after 400k runs, ~430 MB fixed).
-mkdir -p out/regression-corpus
-out/battery_lines -runs=400000 -rss_limit_mb=768 -max_len=64 out/regression-corpus regressions/battery_lines > out/regression.log 2>&1
-grep -h 'SUMMARY\|DONE' out/*.log
+# The camera port had the same growth.
+for t in battery_lines camera_requests; do
+  mkdir -p "out/regression-$t"
+  "out/$t" -runs=400000 -rss_limit_mb=768 -max_len=64 "out/regression-$t" "regressions/$t" > "out/regression-$t.log" 2>&1
+done
+grep -h 'SUMMARY\|DONE\|^Done' out/*.log
 ls crashes
