@@ -232,6 +232,7 @@ app)
   if [[ -f /etc/vulkan/icd.d/omacvm_venus_icd.json ]]; then
     check "Vulkan (Venus)" "OmacVM's Mesa venus" bash -c 'VK_LOADER_DRIVERS_DISABLE=virtio_icd.json vulkaninfo --summary 2>/dev/null | grep -q "driverName *= venus"'
     check "OpenCL (rusticl on Zink)" "a zink device" bash -c 'RUSTICL_ENABLE=zink clinfo -l 2>/dev/null | grep -q zink'
+    check "WebGPU in Chromium" "\"Chromium (WebGPU)\" in the menu (omacvm-chromium-webgpu)" test -x /usr/local/bin/omacvm-chromium-webgpu
   fi
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
