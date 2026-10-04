@@ -6,8 +6,10 @@
 #                                   a disk (prlctl create), a UTM VM without
 #                                   drives (UTM's scripting; UTM opens if it is
 #                                   not running), a Fusion .vmx and an OmacVM.app
-#                                   folder (fixtures). None of them is started;
-#                                   all are deleted at the end.
+#                                   folder (fixtures). Only the UTM VM is
+#                                   started, without a display (it has no
+#                                   disk), to suspend it; all are deleted at
+#                                   the end.
 # Exit 0 when every test passes.
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -84,6 +86,19 @@ err=$(PRLCTL=$T/prl-pro; P_EDITION=pro; res_set "Some VM" parallels 2 4096 2>&1)
 check "parallels pro: prlctl set fails -> its error, exit 1" eq "$rc $err" "1 Parallels: The VM is busy"
 check "parallels pro: no unregister, no settings file edit" eq "$(cut -d' ' -f1 "$T/prl.log" | paste -sd' ' -)" "set"
 
+# UTM closed: its registry says which VMs it suspended (saved state).
+mkdir -p "$T/utm/A.utm" "$T/utm/B.utm"
+for v in A B; do plutil -create xml1 "$T/utm/$v.utm/config.plist"; plutil -insert Information -dictionary "$T/utm/$v.utm/config.plist"; plutil -insert Information.Name -string "Fixture $v" "$T/utm/$v.utm/config.plist"; done
+python3 - "$T" <<'PY'
+import plistlib, sys
+t = sys.argv[1]
+reg = {"1": {"Package": {"Path": f"{t}/utm/A.utm"}, "Suspended": True},
+       "2": {"Package": {"Path": f"{t}/utm/B.utm"}, "Suspended": False}}
+plistlib.dump({"Registry": reg}, open(f"{t}/utm.plist", "wb"))
+PY
+got=$(UTMCTL=/nonexistent; UTM_PREFS=$T/utm.plist; vms_list 2>/dev/null | awk -F'\t' '$2 == "utm" && $1 ~ /^Fixture/ { print $1 "=" $3 }' | sort | paste -sd' ' -)
+check "UTM closed: a suspended VM is listed suspended, not stopped" eq "$got" "Fixture A=suspended Fixture B=stopped"
+
 # Tiers as omacvm build gives them, for a few Macs (OmacVM.app's Mac.tier is the same rule).
 tiers() {   # CORES PERF EFF MEM_GB -> the four tiers, "cpus/gb" each
   local t out=""
@@ -103,9 +118,16 @@ if (( LIVE )); then
   export OMACVM_FUSION_DIR=$T/fusion
   FUSION_DIR=$OMACVM_FUSION_DIR
   UTM_ID=""
+  utm_status() { "$UTMCTL" status "$UTM_ID" 2>/dev/null; }
+  utm_wait() { local i; for ((i = 0; i < 30; i++)); do [[ $(utm_status) == "$1" ]] && return 0; sleep 1; done; return 1; }
   cleanup() {
     "$PRLCTL" delete "$NAME" >/dev/null 2>&1
-    [[ -n $UTM_ID ]] && osascript -e "tell application \"UTM\" to delete virtual machine id \"$UTM_ID\"" >/dev/null 2>&1
+    if [[ -n $UTM_ID ]]; then
+      # A suspended VM is deleted only once stopped: resume it, then stop it.
+      [[ $(utm_status) == paused ]] && { "$UTMCTL" start --hide "$UTM_ID" >/dev/null 2>&1; utm_wait started; }
+      [[ $(utm_status) == stopped ]] || { "$UTMCTL" stop "$UTM_ID" >/dev/null 2>&1; utm_wait stopped; }
+      osascript -e "tell application \"UTM\" to delete virtual machine id \"$UTM_ID\"" >/dev/null 2>&1
+    fi
     [[ -f $APPDIR/vm.env && $(app_env "$APPDIR" NAME) == "$NAME" ]] && rm -rf "$APPDIR"
     [[ -n ${FAKE_PID:-} ]] && kill "$FAKE_PID" 2>/dev/null
     rm -rf "$T"
@@ -152,6 +174,22 @@ if (( LIVE )); then
   err=$(P_EDITION=pro res_set "$NAME" parallels 3 8192 2>&1); rc=$?
   PRLCTL=$REAL
   check "parallels pro: prlctl's error shown, nothing changed" eq "$rc $err $(res_get "$NAME" parallels) $(vm_state "$NAME")" "1 Parallels: only in Pro 2 6144 stopped"
+
+  # UTM with a saved state: refused while UTM runs ("paused") and while it is
+  # closed (its registry; UTM "closed" through a pgrep that does not see it).
+  if [[ -n $UTM_ID && ! -e $HOME/.omacvm-user-testing ]]; then
+    "$UTMCTL" start --hide "$UTM_ID" >/dev/null 2>&1; utm_wait started
+    "$UTMCTL" suspend --save-state "$UTM_ID" >/dev/null 2>&1; utm_wait paused
+    for ((i = 0; i < 20; i++)); do [[ $(plutil -extract "Registry.$UTM_ID.Suspended" raw "$UTM_PREFS" 2>/dev/null) == true ]] && break; sleep 1; done
+    before=$(res_get "$NAME" utm)
+    out=$("$O" resources --vm "$NAME" --vm-type utm --cpus 1 2>&1); rc=$?
+    check "utm suspended, UTM running: refused (exit 3), unchanged" eq "$rc $(res_get "$NAME" utm) $(grep -c paused <<<"$out")" "3 $before 1"
+    mkdir -p "$T/bin"; printf '#!/bin/bash\n[[ "$*" == "-xq UTM" ]] && exit 1\nexec /usr/bin/pgrep "$@"\n' > "$T/bin/pgrep"; chmod +x "$T/bin/pgrep"
+    out=$(PATH=$T/bin:$PATH "$O" resources --vm "$NAME" --vm-type utm --cpus 1 2>&1); rc=$?
+    check "utm suspended, UTM closed: refused (exit 3), unchanged" eq "$rc $(res_get "$NAME" utm) $(grep -c suspended <<<"$out")" "3 $before 1"
+  elif [[ -n $UTM_ID ]]; then
+    echo "  skip  UTM suspended: the user is testing (~/.omacvm-user-testing), no VM starts"
+  fi
 
   # OmacVM.app while its VM runs: written, for the next start (a stand-in
   # process with the VM's disk on its command line, as QEMU has).

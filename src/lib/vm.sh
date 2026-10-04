@@ -18,7 +18,8 @@ vms_list() {
     "$UTMCTL" list 2>/dev/null | awk 'NR > 1 { s = $2; $1 = ""; $2 = ""; sub(/^  /, ""); print $0 "\tutm\t" (s == "started" ? "running" : s) }'
   elif [[ -f $UTM_PREFS ]]; then
     # UTM not running (utmctl would start it): its VMs, wherever they are, from
-    # UTM's registry; all stopped.
+    # UTM's registry; stopped, or suspended when UTM saved their state (UTM
+    # itself calls those "paused" once it runs).
     python3 - "$UTM_PREFS" <<'PY' 2>/dev/null
 import os, plistlib, sys
 for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values():
@@ -29,7 +30,7 @@ for entry in plistlib.load(open(sys.argv[1], "rb")).get("Registry", {}).values()
         name = plistlib.load(open(os.path.join(path, "config.plist"), "rb"))["Information"]["Name"]
     except Exception:
         name = os.path.basename(path)[:-4]
-    print(f"{name}\tutm\tstopped")
+    print(f"{name}\tutm\t{'suspended' if entry.get('Suspended') else 'stopped'}")
 PY
   fi
   local n x
