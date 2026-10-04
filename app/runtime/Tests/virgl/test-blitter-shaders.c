@@ -1,0 +1,130 @@
+/* The renderer's own blit shaders must compile on the Mac's core profile.
+ * They were "#version 130", which Apple's OpenGL refuses: every QEMU start
+ * logged the failure and blits that need a shader (format conversion,
+ * swizzle, multisample resolve to another format, depth) drew nothing.
+ * Builds the blitter's real shaders (vrend_blitter.c is compiled into this
+ * test for its static functions) in a CGL core profile context, no window. */
+#include <dlfcn.h>
+#include "vrend/vrend_blitter.c"
+
+typedef int (*choose_fn)(const int *, void **, int *);
+typedef int (*create_fn)(void *, void *, void **);
+typedef int (*current_fn)(void *);
+
+static bool gl_init(void)
+{
+   void *cgl = dlopen("/System/Library/Frameworks/OpenGL.framework/OpenGL", RTLD_LAZY);
+   if (!cgl)
+      return false;
+   choose_fn choose = (choose_fn)dlsym(cgl, "CGLChoosePixelFormat");
+   create_fn create = (create_fn)dlsym(cgl, "CGLCreateContext");
+   current_fn current = (current_fn)dlsym(cgl, "CGLSetCurrentContext");
+   if (!choose || !create || !current)
+      return false;
+   const int attrs[] = {99 /* kCGLPFAOpenGLProfile */, 0x3200 /* 3.2 core and later */, 0};
+   void *pix = NULL, *ctx = NULL;
+   int n = 0;
+   return !choose(attrs, &pix, &n) && pix && !create(pix, NULL, &ctx) && ctx && !current(ctx);
+}
+
+static int link_with_vs(const char *name, GLuint vs, GLuint fs)
+{
+   if (!fs) {
+      printf("FAIL: %s does not compile (log above)\n", name);
+      return 1;
+   }
+   GLuint prog = glCreateProgram();
+   GLint ok = 0;
+   glAttachShader(prog, vs);
+   glAttachShader(prog, fs);
+   glLinkProgram(prog);
+   glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+   glDeleteProgram(prog);
+   glDeleteShader(fs);
+   if (!ok) {
+      printf("FAIL: %s does not link\n", name);
+      return 1;
+   }
+   printf("PASS: %s\n", name);
+   return 0;
+}
+
+int main(void)
+{
+   if (!gl_init()) {
+      puts("SKIP: no OpenGL context here");
+      return 0;
+   }
+   struct vrend_blitter_ctx blit = {0};
+   blit.use_gles = !epoxy_is_desktop_gl();
+   blit_set_glsl_version(&blit, epoxy_gl_version());
+   printf("blit shaders: %s", blit.glsl_header);
+
+   blit.vs = blit_shader_build_and_check(&blit, GL_VERTEX_SHADER, VS_PASSTHROUGH_GL);
+   if (!blit.vs) {
+      puts("FAIL: blit vertex shader does not compile");
+      return 1;
+   }
+   puts("PASS: blit vertex shader");
+
+   static const struct {
+      const char *name;
+      enum tgsi_texture_type target;
+      int samples;
+   } targets[] = {
+      {"1D", TGSI_TEXTURE_1D, 0},
+      {"2D", TGSI_TEXTURE_2D, 0},
+      {"RECT", TGSI_TEXTURE_RECT, 0},
+      {"3D", TGSI_TEXTURE_3D, 0},
+      {"CUBE", TGSI_TEXTURE_CUBE, 0},
+      {"1D_ARRAY", TGSI_TEXTURE_1D_ARRAY, 0},
+      {"2D_ARRAY", TGSI_TEXTURE_2D_ARRAY, 0},
+      {"CUBE_ARRAY", TGSI_TEXTURE_CUBE_ARRAY, 0},
+      {"2D_MSAA", TGSI_TEXTURE_2D_MSAA, 4},
+      {"2D_ARRAY_MSAA", TGSI_TEXTURE_2D_ARRAY_MSAA, 4},
+   };
+   static const struct {
+      const char *name;
+      enum tgsi_return_type ret;
+   } types[] = {
+      {"float", TGSI_RETURN_TYPE_UNORM},
+      {"uint", TGSI_RETURN_TYPE_UINT},
+      {"int", TGSI_RETURN_TYPE_SINT},
+   };
+   static const enum pipe_swizzle bgra[4] = {
+      PIPE_SWIZZLE_Z, PIPE_SWIZZLE_Y, PIPE_SWIZZLE_X, PIPE_SWIZZLE_W,
+   };
+   int failed = 0;
+   char name[128];
+   for (unsigned t = 0; t < ARRAY_SIZE(targets); t++) {
+      for (unsigned r = 0; r < ARRAY_SIZE(types); r++) {
+         /* integer multisample sources are resolved by taking sample 0 */
+         int samples = targets[t].samples && types[r].ret != TGSI_RETURN_TYPE_UNORM ?
+                       1 : targets[t].samples;
+         snprintf(name, sizeof(name), "color %s %s", targets[t].name, types[r].name);
+         failed |= link_with_vs(name, blit.vs,
+                                blit_build_frag_tex_col(&blit, targets[t].target, types[r].ret,
+                                                        NULL, samples, 0));
+      }
+      snprintf(name, sizeof(name), "color %s swizzled, sRGB decode and encode", targets[t].name);
+      failed |= link_with_vs(name, blit.vs,
+                             blit_build_frag_tex_col(&blit, targets[t].target,
+                                                     TGSI_RETURN_TYPE_UNORM, bgra,
+                                                     targets[t].samples,
+                                                     BLIT_MANUAL_SRGB_DECODE |
+                                                     BLIT_MANUAL_SRGB_ENCODE));
+   }
+   static const enum tgsi_texture_type depth_targets[] = {
+      TGSI_TEXTURE_2D, TGSI_TEXTURE_RECT, TGSI_TEXTURE_CUBE, TGSI_TEXTURE_2D_ARRAY,
+   };
+   for (unsigned t = 0; t < ARRAY_SIZE(depth_targets); t++) {
+      snprintf(name, sizeof(name), "depth target %d", depth_targets[t]);
+      failed |= link_with_vs(name, blit.vs, blit_build_frag_depth(&blit, depth_targets[t], false));
+   }
+   failed |= link_with_vs("depth 2D_MSAA", blit.vs,
+                          blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_MSAA, true));
+   failed |= link_with_vs("depth 2D_ARRAY_MSAA", blit.vs,
+                          blit_build_frag_depth(&blit, TGSI_TEXTURE_2D_ARRAY_MSAA, true));
+   glDeleteShader(blit.vs);
+   return failed;
+}

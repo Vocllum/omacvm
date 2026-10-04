@@ -1,0 +1,145 @@
+virglrenderer: the blitter's shaders use a GLSL version core profiles accept
+
+What: the GL blitter's desktop shaders were "#version 130". The version line now
+comes from the blit context's GL version: 4.00 from GL 4.0 (macOS: 4.1), 1.50
+from GL 3.2, else 1.30 as before. The ARB_texture_multisample and
+ARB_texture_cube_map_array "#extension" lines are left out where that version
+has them in core. GLES is unchanged.
+Why: Apple's core profile refuses GLSL 1.30, so the blit vertex shader failed at
+every QEMU start ("version '130' is not supported") and every blit that needs a
+shader (format conversion, swizzle, sRGB, depth, multisample resolve to another
+format) drew nothing.
+Upstreamable; not sent.
+Tests: Tests/virgl/test-blitter-shaders.c (builds the blitter's real shaders for
+every target and type with the Mac's OpenGL and links them).
+--- a/src/vrend/vrend_blitter.c
++++ b/src/vrend/vrend_blitter.c
+@@ -62,6 +62,9 @@ struct vrend_blitter_ctx {
+    virgl_gl_context gl_context;
+    bool initialised;
+    bool use_gles;
++   /* desktop GL: GLSL version of the blit shaders and their #version line */
++   int glsl_ver;
++   char glsl_header[16];
+ 
+    GLuint vaoid;
+ 
+@@ -123,11 +126,13 @@ prog_key_to_uint64( struct blit_prog_key prog_key )
+    return pu.u;
+ }
+ 
+-static GLint blit_shader_build_and_check(GLenum shader_type, const char *buf)
++static GLint blit_shader_build_and_check(const struct vrend_blitter_ctx *blit_ctx,
++                                         GLenum shader_type, const char *buf)
+ {
+    GLint param;
+    GLint id = glCreateShader(shader_type);
+-   glShaderSource(id, 1, (const char **)&buf, NULL);
++   const char *sources[] = { blit_ctx->glsl_header, buf };
++   glShaderSource(id, 2, sources, NULL);
+    glCompileShader(id);
+ 
+    glGetShaderiv(id, GL_COMPILE_STATUS, &param);
+@@ -136,7 +141,7 @@ static GLint blit_shader_build_and_check(GLenum shader_type, const char *buf)
+       int len;
+       glGetShaderInfoLog(id, 65536, &len, infolog);
+       virgl_error("Shader failed to compile\n%s\n", infolog);
+-      virgl_error("GLSL:\n%s\n", buf);
++      virgl_error("GLSL:\n%s%s\n", blit_ctx->glsl_header, buf);
+       glDeleteShader(id);
+       return 0;
+    }
+@@ -286,13 +291,14 @@ static GLuint blit_build_frag_tex_col(struct vrend_blitter_ctx *blit_ctx,
+    const char *ext_str = "";
+    bool msaa = nr_samples > 1;
+ 
+-   if (msaa && !blit_ctx->use_gles)
+-      ext_str = "#extension GL_ARB_texture_multisample : enable\n";
+-   else if (tgsi_tex_target == TGSI_TEXTURE_CUBE_ARRAY ||
+-            tgsi_tex_target == TGSI_TEXTURE_SHADOWCUBE_ARRAY) {
++   if (msaa && !blit_ctx->use_gles) {
++      if (blit_ctx->glsl_ver < 150)
++         ext_str = "#extension GL_ARB_texture_multisample : enable\n";
++   } else if (tgsi_tex_target == TGSI_TEXTURE_CUBE_ARRAY ||
++              tgsi_tex_target == TGSI_TEXTURE_SHADOWCUBE_ARRAY) {
+       if (blit_ctx->use_gles)
+          ext_str = "#extension GL_EXT_texture_cube_map_array : require\n";
+-      else
++      else if (blit_ctx->glsl_ver < 400)
+          ext_str = "#extension GL_ARB_texture_cube_map_array : require\n";
+    }
+ 
+@@ -338,7 +344,7 @@ static GLuint blit_build_frag_tex_col(struct vrend_blitter_ctx *blit_ctx,
+    VREND_DEBUG(dbg_blit, NULL, "-- Blit FS color shader MSAA: %d -----------------\n"
+                "%s\n---------------------------------------\n", msaa, shader_buf);
+ 
+-   return blit_shader_build_and_check(GL_FRAGMENT_SHADER, shader_buf);
++   return blit_shader_build_and_check(blit_ctx, GL_FRAGMENT_SHADER, shader_buf);
+ }
+ 
+ static GLuint blit_build_frag_depth(struct vrend_blitter_ctx *blit_ctx, enum tgsi_texture_type tgsi_tex_target, bool msaa)
+@@ -364,7 +370,7 @@ static GLuint blit_build_frag_depth(struct vrend_blitter_ctx *blit_ctx, enum tgs
+    VREND_DEBUG(dbg_blit, NULL, "-- Blit FS depth shader MSAA: %d -----------------\n"
+                "%s\n---------------------------------------\n", msaa, shader_buf);
+ 
+-   return blit_shader_build_and_check(GL_FRAGMENT_SHADER, shader_buf);
++   return blit_shader_build_and_check(blit_ctx, GL_FRAGMENT_SHADER, shader_buf);
+ }
+ 
+ static GLuint blit_get_frag_tex_writedepth(struct vrend_blitter_ctx *blit_ctx, enum pipe_texture_target pipe_tex_target, unsigned nr_samples)
+@@ -453,6 +459,18 @@ static GLuint blit_get_frag_tex_col(struct vrend_blitter_ctx *blit_ctx,
+    return prog_id;
+ }
+ 
++/* GLES shaders carry their own #version. On desktop GL, core profiles need
++ * not accept GLSL 1.30 (macOS refuses it), so use the newest version the blit
++ * shaders need: 4.00 makes cube map arrays core, 1.50 multisample textures. */
++static void blit_set_glsl_version(struct vrend_blitter_ctx *blit_ctx, int gl_ver)
++{
++   if (blit_ctx->use_gles)
++      return;
++   blit_ctx->glsl_ver = gl_ver >= 40 ? 400 : gl_ver >= 32 ? 150 : 130;
++   snprintf(blit_ctx->glsl_header, sizeof(blit_ctx->glsl_header),
++            "#version %d\n", blit_ctx->glsl_ver);
++}
++
+ static void vrend_renderer_init_blit_ctx(struct vrend_blitter_ctx *blit_ctx)
+ {
+    struct virgl_gl_ctx_param ctx_params;
+@@ -482,11 +500,12 @@ static void vrend_renderer_init_blit_ctx(struct vrend_blitter_ctx *blit_ctx)
+    }
+ 
+    vrend_sync_make_current(blit_ctx->gl_context);
++   blit_set_glsl_version(blit_ctx, epoxy_gl_version());
+    glGenVertexArrays(1, &blit_ctx->vaoid);
+    glGenFramebuffers(1, &blit_ctx->fb_id);
+ 
+    glGenBuffers(1, &blit_ctx->vbo_id);
+-   blit_ctx->vs = blit_shader_build_and_check(GL_VERTEX_SHADER,
++   blit_ctx->vs = blit_shader_build_and_check(blit_ctx, GL_VERTEX_SHADER,
+         blit_ctx->use_gles ? VS_PASSTHROUGH_GLES : VS_PASSTHROUGH_GL);
+ 
+    for (i = 0; i < 4; i++) {
+--- a/src/vrend/vrend_blitter.h
++++ b/src/vrend/vrend_blitter.h
+@@ -27,10 +27,10 @@
+ #include "util/os_misc.h"
+ #include "util/macros.h"
+ 
+-/* shaders for blitting */
++/* shaders for blitting; desktop GL shaders get their #version line from
++ * the blitter (blit_ctx->glsl_header) */
+ 
+ #define FS_HEADER_GL                               \
+-   "#version 130\n"                             \
+    "// Blitter\n"                               \
+    "%s"                                         \
+ 
+@@ -54,7 +54,6 @@
+    "precision mediump float;\n"                 \
+ 
+ #define HEADER_GL                               \
+-   "#version 130\n"                             \
+    "// Blitter\n"                               \
+ 
+ #define HEADER_GLES                             \
