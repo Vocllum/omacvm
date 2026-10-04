@@ -5,8 +5,10 @@ stream, then "failed to dispatch context op"), the proxy marks the context lost:
 fences submitted for it are queued and retired by the next retire_fences call
 (the fence poll, or the sync thread, which is woken), queued fences are retired at
 once instead of after 100 stalled polls, and further SUBMIT_CMDs are dropped
-without a log line each. On macOS a closed peer of a stream socket is reported as
-readable, not POLLHUP: proxy_socket_is_connected now also peeks for end of stream.
+without a log line each. On macOS poll() reports POLLHUP for a closed peer of a
+stream socket only when POLLIN is asked for: proxy_socket_is_connected asks for it.
+(An earlier version also peeked at the socket with recv(MSG_PEEK); with it the
+guest hung in Venus soaks within 6-10 minutes, without it the soak passes.)
 Why: the proxy dropped the fence of every submit that failed, so the guest's
 vkWaitForFences (and anything waiting on that syncobj) blocked forever: the app
 hung (tests/graphics/venus-loss.sh: 60 s timeout). Now the app runs on, and the
@@ -94,28 +96,15 @@ Tests: tests/graphics/venus-loss.sh (needs a Venus runtime and guest Mesa venus)
        .size = size,
 --- a/src/proxy/proxy_socket.c
 +++ b/src/proxy/proxy_socket.c
-@@ -92,6 +92,7 @@
+@@ -90,8 +90,11 @@
+ bool
+ proxy_socket_is_connected(const struct proxy_socket *socket)
  {
++   /* macOS reports POLLHUP for a closed peer of a stream socket only when POLLIN is
++    * asked for (with no events it reports nothing). */
     struct pollfd poll_fd = {
        .fd = socket->fd,
 +      .events = POLLIN,
     };
  
     while (true) {
-@@ -111,6 +112,16 @@
-          return false;
-       }
- 
-+      /* macOS reports a closed peer of a stream socket as readable, not POLLHUP:
-+       * look for the end of the stream. */
-+      if (poll_fd.revents & POLLIN) {
-+         char byte;
-+         if (recv(socket->fd, &byte, 1, MSG_PEEK | MSG_DONTWAIT) == 0) {
-+            proxy_log("socket disconnected");
-+            return false;
-+         }
-+      }
-+
-       return true;
-    }
- }
