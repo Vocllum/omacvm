@@ -5,9 +5,9 @@ the host has no ARB_framebuffer_no_attachments, a DEPTH_COMPONENT16
 renderbuffer is attached to the host framebuffer while the guest draws
 without attachments: detached when the guest binds real buffers
 (unless its depth buffer took the place), kept for the next switch and freed
-after 64 framebuffer changes without it or with the guest context. It is as
-large as the first viewport (grown at draw time, at most 8192x8192 = 128 MiB
-and the host's renderbuffer limit), and while it is attached the guest's depth
+after 64 framebuffer changes without it or with the guest context. It starts
+1x1 and draws make it as large as the first viewport (at most 8192x8192 =
+128 MiB and the host's renderbuffer limit), and while it is attached the guest's depth
 test is kept off, as GL behaves without a depth buffer; there is no stencil,
 so the stencil test passes.
 Why: the guest sends such a framebuffer when all its draw buffers are GL_NONE
@@ -30,7 +30,16 @@ test on count every sample of a 64x48 viewport twice, and of a 32x16 one after
 the stand-in was freed and made again; fails without this patch).
 --- a/src/vrend/vrend_renderer.c
 +++ b/src/vrend/vrend_renderer.c
-@@ -761,6 +761,11 @@
+@@ -384,6 +384,8 @@
+    uint32_t max_draw_buffers;
+    uint32_t max_texture_buffer_size;
+    uint32_t max_texture_2d_size;
++   /* GL_MAX_RENDERBUFFER_SIZE, read once (vrend_hw_size_fb_placeholder) */
++   GLint max_renderbuffer_size;
+    uint32_t max_texture_3d_size;
+    uint32_t max_texture_cube_size;
+    uint32_t max_shader_patch_varyings;
+@@ -761,6 +763,11 @@
     uint32_t nr_cbufs;
     struct vrend_surface *zsurf;
     struct vrend_surface *surf[PIPE_MAX_COLOR_BUFS];
@@ -42,7 +51,7 @@ the stand-in was freed and made again; fails without this patch).
  
     struct vrend_viewport vps[PIPE_MAX_VIEWPORTS];
     /* viewport is negative */
-@@ -908,6 +913,7 @@
+@@ -908,6 +915,7 @@
                                        struct vrend_sampler_view *tview);
  static void vrend_object_bind_dsa_to_sub_context(struct vrend_sub_context *sub_ctx,
                                                   uint32_t handle);
@@ -50,18 +59,21 @@ the stand-in was freed and made again; fails without this patch).
  static GLenum tgsitargettogltarget(const enum pipe_texture_target target, int nr_samples);
  
  void vrend_update_stencil_state(struct vrend_sub_context *sub_ctx);
-@@ -3142,6 +3148,85 @@
-    }
- }
- 
+@@ -3139,7 +3147,89 @@
+       vrend_fb_bind_texture_id(surf->texture, surf->gl_id, index, surf->level,
+                                first_layer != last_layer ? -1 : (GLint)first_layer,
+                                surf->nr_samples);
++   }
++}
++
 +/* Without ARB_framebuffer_no_attachments (macOS) the host GL refuses to draw
 + * or clear into a framebuffer that has no attachments (GL error, which stops
 + * the guest context). The guest has such a framebuffer when all its draw
 + * buffers are GL_NONE: legal, nothing is written, but occlusion queries still
 + * count the fragments. The stand-in is a depth renderbuffer (Apple's GL calls
 + * a framebuffer whose only colour attachment no draw buffer selects
-+ * "unsupported"). It is as large as the first viewport (the guest does not
-+ * send its framebuffer size without VIRGL_CAP_FB_NO_ATTACH), at most
++ * "unsupported"). Draws make it as large as the first viewport (the guest
++ * does not send its framebuffer size without VIRGL_CAP_FB_NO_ATTACH), at most
 + * VREND_FB_PLACEHOLDER_MAX square (128 MiB) and the host's renderbuffer limit,
 + * kept while the guest switches framebuffers and freed after
 + * VREND_FB_PLACEHOLDER_IDLE framebuffer changes without it. While it is
@@ -73,25 +85,21 @@ the stand-in was freed and made again; fails without this patch).
 +static void vrend_hw_size_fb_placeholder(struct vrend_sub_context *sub_ctx)
 +{
 +   const struct vrend_viewport *vp = &sub_ctx->vps[0];
-+   GLint max_rb = 0;
++   if (!vrend_state.max_renderbuffer_size)
++      glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &vrend_state.max_renderbuffer_size);
++   int64_t max = CLAMP((int64_t)vrend_state.max_renderbuffer_size, 1, VREND_FB_PLACEHOLDER_MAX);
 +   int64_t y = sub_ctx->viewport_is_negative ? (int64_t)vp->cur_y - vp->height : vp->cur_y;
-+   int64_t width = MAX2((int64_t)vp->cur_x + vp->width, 1);
-+   int64_t height = MAX2(y + vp->height, 1);
++   int64_t width = CLAMP((int64_t)vp->cur_x + vp->width, 1, max);
++   int64_t height = CLAMP(y + vp->height, 1, max);
 +
 +   if (width <= sub_ctx->fb_placeholder_width && height <= sub_ctx->fb_placeholder_height)
 +      return;
 +
-+   glGetIntegerv(GL_MAX_RENDERBUFFER_SIZE, &max_rb);
-+   int64_t max = MIN2((int64_t)MAX2(max_rb, 1), VREND_FB_PLACEHOLDER_MAX);
-+   width = MIN2(MAX2(width, sub_ctx->fb_placeholder_width), max);
-+   height = MIN2(MAX2(height, sub_ctx->fb_placeholder_height), max);
-+   if (width == sub_ctx->fb_placeholder_width && height == sub_ctx->fb_placeholder_height)
-+      return;
-+
-+   sub_ctx->fb_placeholder_width = width;
-+   sub_ctx->fb_placeholder_height = height;
++   sub_ctx->fb_placeholder_width = MAX2(sub_ctx->fb_placeholder_width, (GLsizei)width);
++   sub_ctx->fb_placeholder_height = MAX2(sub_ctx->fb_placeholder_height, (GLsizei)height);
 +   glBindRenderbuffer(GL_RENDERBUFFER, sub_ctx->fb_placeholder_rb);
-+   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height);
++   glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
++                         sub_ctx->fb_placeholder_width, sub_ctx->fb_placeholder_height);
 +   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 +}
 +
@@ -119,24 +127,29 @@ the stand-in was freed and made again; fails without this patch).
 +
 +   sub_ctx->fb_placeholder_attached = needed;
 +   if (needed) {
-+      if (!sub_ctx->fb_placeholder_rb)
++      if (!sub_ctx->fb_placeholder_rb) {
++         /* 1x1 for now (a clear needs a complete framebuffer); the draws size
++          * it, the viewport here may still be the last framebuffer's */
 +         glGenRenderbuffers(1, &sub_ctx->fb_placeholder_rb);
-+      vrend_hw_size_fb_placeholder(sub_ctx);
++         glBindRenderbuffer(GL_RENDERBUFFER, sub_ctx->fb_placeholder_rb);
++         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, 1, 1);
++         glBindRenderbuffer(GL_RENDERBUFFER, 0);
++         sub_ctx->fb_placeholder_width = 1;
++         sub_ctx->fb_placeholder_height = 1;
++      }
 +      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
 +                                sub_ctx->fb_placeholder_rb);
 +   } else if (!sub_ctx->zsurf ||
 +              !util_format_has_depth(util_format_description(sub_ctx->zsurf->format))) {
 +      /* unless the guest's depth buffer has taken its place already */
 +      glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
-+   }
+    }
 +   /* the guest's depth test is off while the stand-in is there, back after */
 +   vrend_hw_emit_dsa(sub_ctx);
-+}
-+
+ }
+ 
  static void vrend_hw_emit_framebuffer_state(struct vrend_sub_context *sub_ctx)
- {
-    static const GLenum buffers[8] = {
-@@ -3154,6 +3239,8 @@
+@@ -3154,6 +3244,8 @@
        GL_COLOR_ATTACHMENT6,
        GL_COLOR_ATTACHMENT7,
     };
@@ -145,17 +158,17 @@ the stand-in was freed and made again; fails without this patch).
  
     if (sub_ctx->nr_cbufs == 0) {
        glReadBuffer(GL_NONE);
-@@ -6049,6 +6136,9 @@
+@@ -6048,6 +6140,9 @@
+ 
     if (ctx->sub->viewport_state_dirty)
        vrend_update_viewport_state(sub_ctx);
- 
++
 +   if (sub_ctx->fb_placeholder_attached)
 +      vrend_hw_size_fb_placeholder(sub_ctx);
-+
+ 
     if (ctx->sub->blend_state_dirty)
        vrend_patch_blend_state(sub_ctx);
- 
-@@ -6714,7 +6804,8 @@
+@@ -6714,7 +6809,8 @@
  {
     struct pipe_depth_stencil_alpha_state *state = &sub_ctx->dsa_state;
  
@@ -165,7 +178,7 @@ the stand-in was freed and made again; fails without this patch).
        vrend_depth_test_enable(sub_ctx, true);
        glDepthFunc(GL_NEVER + state->depth.func);
        if (state->depth.writemask)
-@@ -8046,6 +8137,8 @@
+@@ -8046,6 +8142,8 @@
     if (sub->fb_id)
        glDeleteFramebuffers(1, &sub->fb_id);
  
