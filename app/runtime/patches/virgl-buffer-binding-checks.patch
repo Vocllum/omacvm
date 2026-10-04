@@ -170,11 +170,10 @@ whose buffers are unbound or too small).
        }
  
        gr->storage_bits |= VREND_STORAGE_GL_IMMUTABLE;
-@@ -8748,8 +8780,25 @@
-       gr->size = width;
+@@ -8749,7 +8781,24 @@
     } else
        glBufferData(gr->target, width, NULL, GL_STREAM_DRAW);
-+
+ 
 +   GLint64 size = -1;
 +   glGetBufferParameteri64v(gr->target, GL_BUFFER_SIZE, &size);
 +   if (size != (GLint64)width) {
@@ -183,7 +182,7 @@ whose buffers are unbound or too small).
 +         ;
 +      goto fail;
 +   }
- 
++
     glBindBufferARB(gr->target, 0);
 +   return 0;
 +
@@ -238,7 +237,7 @@ whose buffers are unbound or too small).
     } else {
        virgl_error("%s: Illegal buffer binding flags 0x%x\n", __func__, bind);
        return -EINVAL;
-@@ -12546,10 +12595,14 @@
+@@ -12546,10 +12595,15 @@
       return EINVAL;
  
    res = vrend_renderer_ctx_res_lookup(ctx, qbo_handle);
@@ -247,14 +246,15 @@ whose buffers are unbound or too small).
       vrend_report_context_error(ctx, VIRGL_ERROR_CTX_ILLEGAL_RESOURCE, qbo_handle);
       return EINVAL;
    }
-+  if (!vrend_buffer_range_ok(res, offset, 8)) {
++  const bool wide = result_type == PIPE_QUERY_TYPE_I64 || result_type == PIPE_QUERY_TYPE_U64;
++  if (!vrend_buffer_range_ok(res, offset, wide ? 8 : 4)) {
 +     vrend_report_context_error(ctx, VIRGL_ERROR_CTX_RESOURCE_OUT_OF_RANGE, qbo_handle);
 +     return EINVAL;
 +  }
  
    VREND_DEBUG(dbg_query, ctx, "Get query result from Query:%d\n", q->id);
  
-@@ -12586,25 +12639,25 @@
+@@ -12586,25 +12640,25 @@
       case PIPE_QUERY_TYPE_I32: {
          GLint value;
          glGetQueryObjectiv(q->id, qtype, &value);
@@ -284,7 +284,7 @@ whose buffers are unbound or too small).
          break;
       }
       }
-@@ -12699,10 +12752,17 @@
+@@ -12699,10 +12753,17 @@
     struct vrend_resource *res;
     int ret_handle;
     res = vrend_renderer_ctx_res_lookup(ctx, res_handle);

@@ -114,7 +114,7 @@ gl-oracle.c (checks every active block of every GL draw).
        }
        next_ubo_id++;
     }
-@@ -6681,6 +6723,16 @@
+@@ -6682,6 +6724,16 @@
        return 0;
     }
  
@@ -131,7 +131,7 @@ gl-oracle.c (checks every active block of every GL draw).
     struct vrend_direct_draw one_draw, *draws;
     uint32_t num_draws;
     const char *why = NULL;
-@@ -6906,6 +6958,14 @@
+@@ -6907,6 +6959,14 @@
        return;
     }
  
@@ -146,7 +146,7 @@ gl-oracle.c (checks every active block of every GL draw).
     vrend_use_program(sub_ctx->prog);
  
     vrend_set_active_pipeline_stage(sub_ctx->prog, PIPE_SHADER_COMPUTE);
-@@ -9104,11 +9164,11 @@
+@@ -9105,11 +9165,11 @@
        gr->buffer_storage_flags = buffer_storage_flags;
        gr->size = width;
     } else
