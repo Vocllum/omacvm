@@ -20,7 +20,16 @@ Host (OmacVM.app runtime, `app/runtime`):
 | `virgl-darwin-kosmickrisp-fallback.patch` | Before choosing KosmicKrisp, make a throwaway instance with it; when it does not load or has no device, log and use MoltenVK. |
 | `prepare-qemu-gpu-runtime.sh`, `verify-macos-compatibility.sh` | `lib/libvulkan_kosmickrisp.dylib` + `share/vulkan/icd.d/kosmickrisp_mesa_icd.json` next to MoltenVK. The dylib is the one image allowed a macOS 26 minimum: only the Vulkan loader opens it, and only on 26+. |
 
-`OMACVM_RUNTIME_KOSMICKRISP=0` builds the runtime without it (MoltenVK only).
+KosmicKrisp is opt-in at build time: `OMACVM_RUNTIME_KOSMICKRISP=1` adds it, and the runtime
+build first runs `build-kosmickrisp.sh --check`, which lists every missing build tool
+(Homebrew LLVM, SPIRV-LLVM-Translator, SPIRV-Tools, bison, the macOS 26 SDK) and stops before
+QEMU is built. Without the variable the runtime has MoltenVK only; the MacBook builds that way.
+The build writes `LICENSE.mesa-kosmickrisp.txt`: it reads ninja's inputs and header deps for the
+dylib (871 Mesa files at this commit), sorts them by licence (MIT 855, BSD notices for xxHash and
+Berkeley SoftFloat, BSL-1.0 for the C11 threads code, BLAKE3 under Apache-2.0, Khronos
+Apache-2.0 and SGI-B-2.0 headers) and writes the licence texts with every copyright line. An
+unknown licence stops the build. The runtime carries it in `share/licenses`, and `build-app.sh`
+refuses to build an app whose runtime has the dylib but not the notice.
 `OMACVM_VULKAN_DRIVER=moltenvk|kosmickrisp` picks the driver by hand at run time.
 QEMU's log says which one runs: `vkr: vulkan driver: .../kosmickrisp_mesa_icd.json`.
 
@@ -135,7 +144,7 @@ Metal entry point), `guest-mesa.sh`,
   next to MoltenVK, chosen on macOS 26+, falls back to MoltenVK when it has no device.
 - Status table: "Venus on KosmicKrisp" built on branch `kosmickrisp`.
 - Settings: `OMACVM_VULKAN_DRIVER=moltenvk|kosmickrisp` (run time),
-  `OMACVM_RUNTIME_KOSMICKRISP=0` (build time). KosmicKrisp's own `MESA_KK_*` variables
+  `OMACVM_RUNTIME_KOSMICKRISP=1` (build time, opt-in). KosmicKrisp's own `MESA_KK_*` variables
   reach it through QEMU's environment.
 - Security: the Metal entry points are checked before use (a missing one was a
   guest-triggered host crash).
