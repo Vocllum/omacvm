@@ -346,6 +346,17 @@ def shell_pid() -> int | None:
     return None
 
 
+def layout_event(data: bytes) -> bool:
+    """Hyprland events (socket2 lines "name>>data") that change the layout.
+    Not "screencast>>1,monitor,...": every grim (also the desktop check's
+    own) sends that."""
+    for line in data.split(b"\n"):
+        name = line.split(b">>", 1)[0]
+        if name.startswith(b"monitor") or name == b"configreloaded":
+            return True
+    return False
+
+
 def run_sync() -> None:
     try:
         subprocess.run([SYNC, "--once"], timeout=20, check=False,
@@ -593,7 +604,7 @@ class Agent:
                 if not data:
                     self.events.close()
                     self.events = None
-                elif b"monitor" in data or b"configreloaded" in data:
+                elif layout_event(data):
                     self.layout_changed()
                     self.soon(0.3)
             mtime = config_mtime()
