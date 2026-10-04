@@ -5,14 +5,22 @@
 <script>
 // Frame pacing probe: each rAF draws its frame number as 16 bits (cells 1..16) between a white
 // marker (cell 0) and a black marker (cell 17), plus a moving bar. rAF intervals go to /stats.
+// ?fps=24 draws a new frame only when a 24 fps clock ticks (video-like content at a fixed rate).
 const c = document.getElementById('c'), g = c.getContext('2d', {alpha: false});
 const q = new URLSearchParams(location.search);
-const secs = +(q.get('secs') || 20), load = +(q.get('load') || 0);
-let n = 0, last = 0, t0 = 0, mark = 0; const iv = [];
+const secs = +(q.get('secs') || 20), load = +(q.get('load') || 0), fps = +(q.get('fps') || 0);
+let n = 0, last = 0, t0 = 0, mark = 0, tick = -1; const iv = [];
 addEventListener('keydown', () => { mark ^= 1; });
 function size() { c.width = innerWidth * devicePixelRatio; c.height = innerHeight * devicePixelRatio; }
 addEventListener('resize', size); size();
 function frame(t) {
+  if (fps) {
+    if (!t0) t0 = t;
+    // + 0.5: the clock ticks between two vblanks, not on one (no jitter from rounding).
+    const k = Math.floor((t - t0) * fps / 1000 + 0.5);
+    if (k == tick) { requestAnimationFrame(frame); return; }
+    tick = k;
+  }
   const W = c.width, H = c.height, cell = Math.floor(W / 24);
   g.fillStyle = '#202020'; g.fillRect(0, 0, W, H);
   for (let i = 0; i < 18; i++) {

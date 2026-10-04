@@ -5,7 +5,9 @@ measure what reaches the Mac's screen, not what the guest thinks it drew.
 
 | File | Where | What |
 |---|---|---|
-| `pacing.html`, `srv.py`, `stats.py` | guest (`/opt/pacing`, `python3 srv.py` serves on 127.0.0.1:8765) | rAF loop that draws its frame number as 16 cells, a key-toggled marker; posts rAF intervals (`stats.py` summarises them) |
+| `pacing.html`, `srv.py`, `stats.py` | guest (`/opt/pacing`, `python3 srv.py` serves on 127.0.0.1:8765) | rAF loop that draws its frame number as 16 cells, a key-toggled marker; posts rAF intervals (`stats.py` summarises them); `?fps=N` draws only N new frames a second (video-like content) |
+| `cadence.py` | Mac | from a `sckpace` log of `pacing.html?fps=N`: how many refreshes each frame stayed on screen, and the share held exactly as long as it should |
+| `dispcap.swift` | Mac | how often a whole display's picture changes (ScreenCaptureKit complete frames per second, small capture), for the refresh-rate and power tests |
 | `colors.html` | guest | six colour bars (red, green, blue, white, grey, black) |
 | `hdrcss.html` | guest | CSS `color(rec2100-pq ...)` bars at 100/203/400/600/1000 nits and SDR white (Chrome HDR check; Chrome 154 still clips them at SDR white) |
 | `sckpace.swift` | Mac | ScreenCaptureKit capture of the VM window; counts how far the frame number moved per WindowServer frame; with `QMP=` also key -> screen latency |
@@ -30,6 +32,12 @@ guest$ python3 stats.py /tmp/pacing-stats.json
 Results are only comparable with `~/.omacvm-bench.lock` held, the other test
 VMs paused and nothing else on that display. Control: the same page in the
 Mac's own Chrome gives 120.2 shown frames/s, steps {1: 1192, 2: 4, 0: 6}.
+
+Refresh rate (ADR 0023): run QEMU with `-trace 'cocoa_present_*'` and open
+`pacing.html?fps=24` (or 30, 60, 5); the trace shows the rate the display
+link asks for and its ticks a second, `cadence.py cap.jsonl 24` the cadence
+on screen. A virtual display has one rate, so the rate only follows the
+guest on a variable-refresh screen (the MacBook panel).
 
 Colour: open `colors.html` full screen in the guest, then `./snapcolor <id>`.
 With tagged surfaces guest red is Display P3 (234,51,35); untagged (255,0,0).
