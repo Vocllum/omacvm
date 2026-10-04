@@ -526,6 +526,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-ev
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-mapping-entries.patch"
 # OmacVM: no Dock, menu bar or hot corner from inside full screen (all displays).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-edges.patch"
+# Test hook: real full screen on some displays only (OMACVM_TEST_ONLY_DISPLAYS).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-test-only-displays.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
