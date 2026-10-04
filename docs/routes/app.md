@@ -48,8 +48,7 @@ OmacVM's version.
   the VM's clock is set to the Mac's.
 - Full screen in its own Space, below the notch, like Parallels; Omanotch puts
   Omarchy's bar into the strip beside the notch, as on the other routes.
-- Every Mac display in full screen (so far tested on virtual displays only,
-  see [Not done yet](#not-done-yet)): with an external display connected, full
+- Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
   ...), each at that display's resolution, scale and refresh rate, placed as
@@ -125,10 +124,14 @@ one VM at a time: the build stops at the start while another one runs.
   trackpad gestures: the build installs Bridge and Gestures on the Mac and
   they accept the VM on 127.0.0.1 (below), but these are not confirmed on
   this route yet.
-- Every Mac display is tested on virtual displays (macOS's CGVirtualDisplay,
-  `app/scripts/dev/virtual-display.m`) with the windows over the displays;
-  real full screen (a Space per display) on a real monitor is not confirmed
-  yet. Up to five displays (the window and four more).
+- Every Mac display: up to five (the window and four more). Tested with one
+  real external monitor and with virtual displays; two or more real
+  monitors are not tested yet.
+- When another app takes over a display (it shows that app's desktop there)
+  or the display with the main window is unplugged and plugged in again,
+  macOS may leave the other display on its desktop after you come back to
+  OmacVM. Swipe to OmacVM's Space on that display (Control-arrow or
+  Mission Control); the pointer goes to Omarchy again once its window shows.
 - The app needs Xcode's Command Line Tools (it builds OmacVM's Mac helpers);
   it checks for them before a build and offers to install them.
 
@@ -195,6 +198,17 @@ window per guest screen:
   The other displays' windows take the pointer (and with it the keyboard)
   only while OmacVM.app is in front, or on a click; another app coming to
   the front gets both back.
+- A drag keeps the pointer from one display to the next, also across the
+  menu bar strip above a full-screen window on a MacBook with a notch, so
+  ⌘-dragging a window moves it to the other display. QEMU reads the
+  modifier keys only from input events
+  (`qemu-cocoa-modifiers-input-only.patch`): the pointer entering another
+  window comes without them and used to let go of Super mid-drag.
+- On a Mac with a notch, macOS's full screen ends below the menu bar, a few
+  points lower than the screen's safe area. Each output gets its window's
+  real size once the window is in full screen
+  (`omacvm-cocoa-fullscreen-size.patch`), so the picture is not squeezed
+  and the pointer is exact.
 - Two outputs switched at once could leave Linux with an old list (it
   clears the display event after reading); a small virtio-gpu patch
   (`qemu-virtio-gpu-display-event-race.patch`) raises the event again.
