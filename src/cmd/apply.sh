@@ -41,8 +41,6 @@ while (( $# )); do
     --no-token) TOKEN=0; shift ;;   # prebuilt images: no Bridge token in the VM
     --no-tools) TOOLS=0; shift ;;   # prebuilt images: no Parallels Tools
     --feature) set_feature "${2%%=*}" "${2#*=}"; shift 2 ;;
-    --mac-wallpaper) set_feature wallpaper on; shift ;;       # 1.x names
-    --no-mac-wallpaper) set_feature wallpaper off; shift ;;
     --no-*) set_feature "${1#--no-}" off; shift ;;
     -h|--help) sed -n '2,16s/^# \{0,1\}//p' "$0"; exit 0 ;;
     --*) f=${1#--}; feature_index "$f" >/dev/null || { echo "omacvm apply: unknown option $1 (see --help)" >&2; exit 2; }

@@ -5,6 +5,12 @@ in more words.
 
 ## Unreleased
 
+- **VMs last set up or updated with OmacVM 2.3 or older need one
+  `omacvm update`** (with the VM running). Until then OmacVM Gestures no
+  longer lets them in: their trackpad daemon has no Bridge token.
+- Old names are gone: `--mac-wallpaper` (now `--wallpaper`), the feature
+  name `glide` (now `scroll-momentum`), and the clean-up of the "Omarchy
+  Notch Bar" app from before Omanotch had its name.
 - The 1.x commands `./build.sh`, `./apply.sh` and `./check.sh` in the
   repository's root are gone: use `omacvm build`, `omacvm apply` and
   `omacvm check`.

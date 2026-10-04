@@ -58,9 +58,7 @@ features_read_env() {
     v=$(sed -n "s/^OMACVM_FEATURE_$(tr - _ <<<"${FN[$i]}")=//p" <<<"$1" | tail -1)
     if [[ -z $v ]]; then
       # VMs from before a feature existed: what they were built with.
-      # (scroll-momentum was called glide in the experiment)
-      [[ ${FN[$i]} == scroll-momentum ]] && v=$(sed -n 's/^OMACVM_FEATURE_glide=//p' <<<"$1" | tail -1)
-      [[ -n $v ]] || case ${FN[$i]} in omanotch|scroll-momentum|autologin|thp-kernel) v=off ;; *) v=$(feature_default "$i") ;; esac
+      case ${FN[$i]} in omanotch|scroll-momentum|autologin|thp-kernel) v=off ;; *) v=$(feature_default "$i") ;; esac
     fi
     FV[$i]=$v
   done

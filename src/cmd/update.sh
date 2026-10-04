@@ -47,9 +47,6 @@ launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--sk
 launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
-# Omanotch comes with OmacVM now (src/omanotch): the clone earlier versions
-# made is no longer used.
-[[ -d $HOME/omanotch/.git ]] && info "Omanotch: ~/omanotch is no longer used (it comes with OmacVM now), delete it when you like"
 
 # ---------- OmacVM.app ----------
 # The version that goes with this OmacVM, from its release (curl: no

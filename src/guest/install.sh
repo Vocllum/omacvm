@@ -8,8 +8,7 @@
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
 # omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
-# so a later run without --feature keeps them. Old flags --no-thp-kernel,
-# --thp-kernel and --autologin still work.
+# so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
 # --display (UTM: the fixed mode, from display/mac-display.swift) is required on UTM.
 # --vm-name-b64: the VM's name in its app, base64 (kept in /etc/omacvm/env): the
@@ -34,10 +33,7 @@ while (( $# )); do
     --host) HOST_GIVEN=$2; shift 2 ;;
     --clock-format-b64) CLOCK_FMT=$(base64 -d <<<"$2"); shift 2 ;;
     --vm-name-b64) NAME64=$2; shift 2 ;;
-    --feature) k=${2%%=*}; [[ $k == glide ]] && k=scroll-momentum; SET[$k]=${2#*=}; shift 2 ;;
-    --no-thp-kernel) SET[thp-kernel]=off; shift ;;
-    --thp-kernel) SET[thp-kernel]=on; shift ;;
-    --autologin) SET[autologin]=on; shift ;;
+    --feature) SET[${2%%=*}]=${2#*=}; shift 2 ;;
     *) sed -n '5,6s/^# \{0,1\}//p' "$0" >&2; exit 2 ;;
   esac
 done
@@ -56,8 +52,6 @@ AUTOLOGIN_CONF=/etc/sddm.conf.d/20-omacvm-autologin.conf
 [[ $NAME64 =~ ^[A-Za-z0-9+/=]*$ ]] || { echo "guest/install.sh: --vm-name-b64: not base64" >&2; exit 2; }
 if [[ -r $ENV ]]; then
   [[ -n $NAME64 ]] || NAME64=$(sed -n 's/^OMACVM_VM_NAME_B64=//p' "$ENV" | tail -1)
-  # scroll-momentum was called glide in the experiment
-  v=$(sed -n "s/^OMACVM_FEATURE_glide=//p" "$ENV" | tail -1); [[ -n $v ]] && F[scroll-momentum]=$v
   for f in "${FEATURES[@]}"; do
     v=$(sed -n "s/^OMACVM_FEATURE_${f//-/_}=//p" "$ENV" | tail -1)
     [[ -n $v ]] && F[$f]=$v

@@ -62,9 +62,9 @@ feature_flag() {   # NAME on|off
   local v; [[ $2 == on ]] && v=1 || v=0
   case $1 in
     bridge) BRIDGE=$v; (( v )) || WALLPAPER=0 ;;
-    wallpaper|mac-wallpaper) WALLPAPER=$v ;;
+    wallpaper) WALLPAPER=$v ;;
     gestures) GESTURES=$v ;;
-    scroll-momentum|glide) GLIDE=$v ;;
+    scroll-momentum) GLIDE=$v ;;
     omanotch) OMANOTCH=$v ;;
     mac-clock) MAC_CLOCK=$v ;;
     camera) CAMERA=$v ;;
