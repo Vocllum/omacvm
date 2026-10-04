@@ -98,6 +98,7 @@ virgl_block_array_patch="$native_dir/patches/virgl-uniform-block-array.patch"
 virgl_draw_error_patch="$native_dir/patches/virgl-draw-gl-error-check.patch"
 virgl_vertex_unused_patch="$native_dir/patches/virgl-vertex-unused-first-input.patch"
 virgl_memory_budget_patch="$native_dir/patches/virgl-resource-memory-budget.patch"
+virgl_queue_flush_patch="$native_dir/patches/virgl-control-queue-flush.patch"
 virgl_venus_robust_patch="$native_dir/patches/virgl-venus-robust-buffer-access.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
@@ -147,6 +148,7 @@ virgl_block_array_patch_sha256=8b9fb4870fbd4ee629d2802d10672406c7ad43bdf54ae558b
 virgl_draw_error_patch_sha256=9243046f78aa8eaa1c22591a3afeafe6a51ea092170ac8370d26ffa57e92c363
 virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5621236444aa1a2cc6
 virgl_memory_budget_patch_sha256=98bfbf392aa1903e6cf3cb5548ebbb2f5a4e0ead8458aa717c4b85da1dc76504
+virgl_queue_flush_patch_sha256=e0977a7d26389a4c40b61075430945c3fc0032a35b03738de1d09f98ba2588a7
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
@@ -546,7 +548,7 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thr
 # changes left whole screen textures in GPU memory. Tested on Apple's software
 # renderer with the patched with_gl_view_ctx(), no VM needed.
 cocoa_view_flush_patch="$native_dir/patches/qemu-cocoa-gl-view-flush.patch"
-cocoa_view_flush_patch_sha256=dcaadc2b20cc52a140ba837114429a9c849ca52bf6c7d940f98f3aeb6c3ced0f
+cocoa_view_flush_patch_sha256=cf979033b462b39ed264c4899d2711f63674ae61ad091a3933832439fd3c285c
 verify_file_sha "QEMU Cocoa view-context flush" \
   "$cocoa_view_flush_patch" "$cocoa_view_flush_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$cocoa_view_flush_patch"
@@ -738,6 +740,9 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_vertex_unused_patch"
 # OmacVM: guest resources have a memory budget (OMACVM_GPU_MEMORY_MB, default a quarter of the Mac's memory).
 verify_file_sha "Resource memory budget" "$virgl_memory_budget_patch" "$virgl_memory_budget_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_memory_budget_patch"
+# OmacVM: QEMU's resource and transfer commands are flushed (Apple's GL keeps unflushed texture memory).
+verify_file_sha "Control queue flush" "$virgl_queue_flush_patch" "$virgl_queue_flush_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_queue_flush_patch"
 # OmacVM: Venus devices always get robust buffer access where the host device has it.
 verify_file_sha "Venus robust buffer access" "$virgl_venus_robust_patch" "$virgl_venus_robust_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_venus_robust_patch"

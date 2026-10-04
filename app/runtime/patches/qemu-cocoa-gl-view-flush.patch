@@ -8,18 +8,20 @@ textures made, deleted or uploaded on a context until it is flushed. With virgl
 the layer shows the guest's scanout texture and never touches the surface
 texture, so every guest mode change (set_scanout -> qemu_console_resize ->
 cocoa_gl_switch) left a whole screen texture behind in "IOAccelerator
-(graphics)". A guest switching between two large modes in a loop grew QEMU by
-about 1.1 GB per switch and never gave it back (20 GB after 18 switches; also
-in 2.6.0 and 2.7.0): any guest could use up the Mac's memory. Measured on the
-Mac mini's GPU (M4) with the same GL calls (Tests/display/view-texture-churn.c):
-3840x2160 <-> 2560x1440 +16 MB per switch, 8000x6000 <-> 7000x5000 +166 MB per
-switch; 2560x1600 and smaller did not grow. With the flush all stay flat.
+(graphics)". A guest switching between two large modes in a loop grew QEMU
+without end (gpu-native: about 1.1 GB per switch at 8000x6000 <-> 7000x5000,
+20 GB after 18; also in 2.6.0 and 2.7.0). This patch fixes one of the two causes;
+the other is vrend's own context, which uploads the new screen on every switch
+and was not flushed either (virgl-control-queue-flush.patch). Test VM, 3840x2160
+<-> 2560x1440 (tests/graphics/scanout-churn.sh): about 100 MB per switch without
+either patch, about 16 MB with this one only, flat with both.
 Upstream: the Cocoa GL code comes from the texture-borrowing patch, not upstream
 QEMU; not sent.
 Tests: Tests/display/test-gl-view-flush.c (build time, Apple's software
 renderer: runs with_gl_view_ctx() from the patched cocoa.m and counts texture
 work left unflushed; without this patch all 128 checks fail);
-Tests/display/view-texture-churn.c (manual, GPU memory per switch, capped).
+Tests/display/view-texture-churn.c (manual, GPU memory per switch, capped);
+tests/graphics/scanout-churn.sh (test VM).
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -2629,6 +2629,7 @@
