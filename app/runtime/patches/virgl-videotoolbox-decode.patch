@@ -75,10 +75,10 @@ index e954559..5cc19a2 100644
  /*
 diff --git a/src/vrend/virgl_video_vt.c b/src/vrend/virgl_video_vt.c
 new file mode 100644
-index 0000000..fd2e44a
+index 0000000..af75a3b
 --- /dev/null
 +++ b/src/vrend/virgl_video_vt.c
-@@ -0,0 +1,2327 @@
+@@ -0,0 +1,2330 @@
 +/**************************************************************************
 + *
 + * Copyright (C) 2026 OmacVM contributors
@@ -2360,6 +2360,9 @@ index 0000000..fd2e44a
 +    codec->desc = *desc;
 +    codec->have_desc = true;
 +    for (unsigned i = 0; i < num_buffers; i++) {
++        /* One compressed picture; far below this even for 8K. */
++        if (codec->bits.size + sizes[i] > 64u * 1024 * 1024)
++            return -1;
 +        if (!bytes_append(&codec->bits, buffers[i], sizes[i]))
 +            return -1;
 +    }
@@ -2428,7 +2431,7 @@ index 394fb9b..ba0a885 100644
          if (vrend_clicbs->get_drm_fd)
              vrend_video_init(vrend_clicbs->get_drm_fd());
 diff --git a/src/vrend/vrend_video.c b/src/vrend/vrend_video.c
-index 57341d8..d9dc90c 100644
+index 57341d8..d37d547 100644
 --- a/src/vrend/vrend_video.c
 +++ b/src/vrend/vrend_video.c
 @@ -74,6 +74,12 @@
@@ -2756,4 +2759,19 @@ index 57341d8..d9dc90c 100644
 +#endif
  
      virgl_video_destroy_buffer(buf->buffer);
+ 
+@@ -771,10 +984,11 @@ int vrend_video_decode_bitstream(struct vrend_video_context *ctx,
+             continue;
+         }
+ 
+-        vrend_read_from_iovec(res->iov, res->num_iovs, 0,
+-                              res->ptr, buffer_sizes[i]);
++        /* The size comes from the guest: never past the buffer. */
++        uint32_t size = MIN2(buffer_sizes[i], res->base.width0);
++        vrend_read_from_iovec(res->iov, res->num_iovs, 0, res->ptr, size);
+         bs_buffers[num_bs] = res->ptr;
+-        bs_sizes[num_bs] = buffer_sizes[i];
++        bs_sizes[num_bs] = size;
+         num_bs++;
+     }
  
