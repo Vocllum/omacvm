@@ -24,6 +24,10 @@ OmacVM.app's own code is MIT (`LICENSE`). It ships or uses:
 - **QEMU's libraries** in the app: GLib, libintl, libusb (LGPL-2.1+, kept as
   replaceable .dylib files); virglrenderer, libepoxy, pixman (MIT); ANGLE,
   libslirp, PCRE2 (BSD); SDL (zlib); zstd, lz4 (BSD); xz (0BSD).
+- **Vulkan for the VM (Venus)**: MoltenVK 1.4.2 (Apache-2.0, The Brenwill
+  Workshop / Khronos) and the Khronos Vulkan loader 1.4.357 (Apache-2.0), from
+  Homebrew's arm64_sequoia bottles. virglrenderer's macOS and Venus-on-Metal
+  patches come from github.com/startergo/homebrew-virglrenderer (MIT).
 - **OmacVM** (github.com/gillesgoetsch/omacvm, the repository the app is
   part of), MIT: the VM side, the base and Omarchy installers, the icon.
 - In the VM, nothing is bundled: Arch Linux ARM and Omarchy (omarchy-mac) come
