@@ -12,6 +12,7 @@ in more words.
 - OmacVM.app: the textures and buffers a VM's apps make have a memory budget
   on the Mac, a quarter of its memory (`OMACVM_GPU_MEMORY_MB` changes it, 0
   turns it off). Past it, the app's GPU context stops; the VM and the Mac go on.
+  Screens and cursors may go 256 MB past it, so the desktop keeps working.
 - OmacVM.app: a Linux app could make the Mac's GPU read outside a buffer (a
   draw past the end of its buffers, an unbound uniform block); the GPU
   faulted and macOS restarted. The app now checks every buffer range a draw

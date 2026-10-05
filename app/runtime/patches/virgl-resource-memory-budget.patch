@@ -7,8 +7,11 @@ A resource that would take the total past the budget is refused like a failed
 allocation (resource create fails, the guest's later use of it is refused);
 freeing a resource gives its bytes back. OMACVM_GPU_MEMORY_MB sets the budget,
 0 turns it off; the default is a quarter of the Mac's memory. Screens and
-cursors may go 256 MB past it, so an app that fills the budget does not also
-stop the desktop's next screen or cursor. The QEMU log says
+cursors (resources with a SCANOUT, CURSOR or DISPLAY_TARGET bind) may go 256 MB
+past it, so an app that fills the budget does not also stop the desktop's next
+screen or cursor. QEMU's 2D resources (dumb buffers: console, plymouth, dumb
+screens and cursors) get SCANOUT from qemu-virgl-2d-resource-scanout.patch;
+without that patch they count as ordinary resources. The QEMU log says
 the budget at start ("guest GPU memory budget: N MB") and logs refusals at the
 1st, 2nd, 4th, 8th ... one. Blob pipe resources a guest made but never
 claimed are now freed with their context including their GL storage (upstream

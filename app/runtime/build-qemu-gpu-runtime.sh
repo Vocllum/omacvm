@@ -153,7 +153,7 @@ virgl_ubo_align_patch_sha256=0087f49d9f64e497580bbb6174b92ef0990c85eea73afbc18ff
 virgl_block_array_patch_sha256=8b9fb4870fbd4ee629d2802d10672406c7ad43bdf54ae558bd6427e6f5a4011c
 virgl_draw_error_patch_sha256=9243046f78aa8eaa1c22591a3afeafe6a51ea092170ac8370d26ffa57e92c363
 virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5621236444aa1a2cc6
-virgl_memory_budget_patch_sha256=2c1b19f222661520d67aa2a3ee4677ae859307039dada76cc312c099318a2d01
+virgl_memory_budget_patch_sha256=c8068ca79738984e8c1205fc4eea73956de44ce92a98148bca50ee19e304c868
 virgl_queue_flush_patch_sha256=7f468d955d47cfbf9df75578efddfab0f36256b9b092c8e992f6b78faf67991b
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
@@ -576,6 +576,17 @@ cc -fblocks -Wall -Werror -Wno-deprecated-declarations -I"$display_tests" \
   "$native_dir/Tests/display/test-gl-view-flush.c" -framework OpenGL \
   -o "$display_tests/test-gl-view-flush"
 "$display_tests/test-gl-view-flush"
+# OmacVM: 2D resources (the guest's dumb buffers: console, plymouth, dumb
+# screens and cursors) are made with the SCANOUT bind, so the guest memory
+# budget's display reserve covers them (test-resource-budget checks the reserve
+# with this bind).
+virgl_2d_scanout_patch="$native_dir/patches/qemu-virgl-2d-resource-scanout.patch"
+virgl_2d_scanout_patch_sha256=24bbe264116db2cea635ba3c1218ec5bcd3a2a1db1cc5cb508f2918528aaec0a
+verify_file_sha "QEMU virgl 2D resources as screens" \
+  "$virgl_2d_scanout_patch" "$virgl_2d_scanout_patch_sha256"
+patch -d "$source_dir" -p1 -f -i "$virgl_2d_scanout_patch"
+grep -q 'args.bind = (1 << 1) | (1 << 18);' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
+  die "virgl_cmd_create_resource_2d does not make 2D resources as screens"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

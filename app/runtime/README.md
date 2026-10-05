@@ -88,7 +88,12 @@ commit 82927e9. Changes here:
 - `patches/virgl-resource-memory-budget.patch`: guest resources are charged
   their estimated size against a budget (`OMACVM_GPU_MEMORY_MB`, default a
   quarter of the Mac's memory, 0 = off); past it, creation fails and the
-  QEMU log says so (ADR 0018). Checked by `Tests/virgl/test-resource-budget.c`
+  QEMU log says so (ADR 0018). Screens and cursors may go 256 MB past it.
+  Checked by `Tests/virgl/test-resource-budget.c`
+- `patches/qemu-virgl-2d-resource-scanout.patch`: QEMU makes 2D resources
+  (the guest's dumb buffers: console, plymouth, dumb screens and cursors)
+  with the SCANOUT bind, so the budget's screen reserve covers them; the
+  build checks the patched source
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
