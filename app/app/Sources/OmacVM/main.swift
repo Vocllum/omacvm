@@ -1,4 +1,5 @@
 import AppKit
+import OmacVMUpdate
 import SwiftUI
 
 /// The launcher: sets up the VM, starts it and steps aside. QEMU shows the VM
@@ -22,6 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 FileHandle.standardError.write("install failed: \(error.localizedDescription)\n".data(using: .utf8)!)
                 exit(1)
             }
+        }
+        // Started by update-swap.sh after an update: check that this build
+        // works (else the previous version goes back), then start as usual.
+        if let i = args.firstIndex(of: "--update-check"), i + 1 < args.count {
+            Updater.launchCheck(token: args[i + 1])
         }
         // One launcher at a time: a second one hands over to the first (a
         // start request too: `open -n ... --args --start --vm NAME`). The
@@ -47,6 +53,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.startRequested(name) }
         }
         state.startVM = { [weak self] in self?.startVM() }
+        Updater.shared.busyReason = { [weak self] in
+            guard let self else { return nil }
+            if self.runner?.isRunning == true { return "The VM runs: the update waits until it is shut down." }
+            if self.state.screen == .building { return "A VM is being built: the update waits until it is done." }
+            return nil
+        }
+        Updater.shared.start()
         buildMenu()
         if state.config.isReady && CommandLine.arguments.contains("--start") {
             startVM()
@@ -55,11 +68,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    static let startRequest = Notification.Name("org.omacvm.app.start")
-    /// The VM's window belongs to QEMU's process.
+    /// Per bundle id: a test build (build-app.sh --id) does not take the
+    /// installed app's start requests.
+    static let startRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").start")
+    /// The VM's window belongs to QEMU's process: the one from this app
+    /// (another copy of OmacVM may run a VM of its own).
     static var qemuApp: NSRunningApplication? {
-        NSWorkspace.shared.runningApplications.first {
-            $0.executableURL?.path.hasSuffix("/runtime/bin/OmacVM") == true
+        let mine = Running.realPath(Bundle.main.bundleURL) + "/"
+        return NSWorkspace.shared.runningApplications.first {
+            guard let p = $0.executableURL.map(Running.realPath) else { return false }
+            return p.hasPrefix(mine) && p.hasSuffix("/runtime/bin/OmacVM")
         }
     }
 
@@ -152,6 +170,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appItem = NSMenuItem()
         main.addItem(appItem)
         let appMenu = NSMenu()
+        appMenu.delegate = self
+        appMenu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates(_:)), keyEquivalent: "")
+        let back = appMenu.addItem(withTitle: "Go Back…", action: #selector(goBack(_:)), keyEquivalent: "")
+        back.tag = Self.goBackTag
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit \(Product.name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         appItem.submenu = appMenu
         let editItem = NSMenuItem()
@@ -163,6 +186,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         edit.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editItem.submenu = edit
         NSApp.mainMenu = main
+    }
+}
+
+// MARK: - updates (Updater.swift)
+
+extension AppDelegate: NSMenuDelegate {
+    static let goBackTag = 7301
+
+    /// "Go Back to OmacVM 2.7.0…" only while that older version is kept.
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        guard let item = menu.item(withTag: Self.goBackTag) else { return }
+        let prev = Updater.shared.previousVersion
+        item.isHidden = prev == nil
+        item.title = "Go Back to \(Product.name) \(prev ?? "")…"
+    }
+
+    @objc func checkForUpdates(_ sender: Any?) {
+        let u = Updater.shared
+        Task { @MainActor in
+            let outcome = await u.check(manual: true)
+            let alert = NSAlert()
+            switch outcome {
+            case .ready(let v):
+                alert.messageText = "\(Product.name) \(v) is ready to install"
+                alert.informativeText = "This is \(u.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed. If it does not start, \(u.currentVersion) comes back by itself."
+                alert.addButton(withTitle: "Update and Relaunch")
+                alert.addButton(withTitle: "Later")
+                if alert.runModal() == .alertFirstButtonReturn { u.install() }
+                return
+            case .upToDate:
+                alert.messageText = "\(Product.name) \(u.currentVersion) is the newest version"
+            case .skipped(let v):
+                alert.messageText = "\(Product.name) \(v) is skipped"
+            case .needsMacOS(let v, let m):
+                alert.messageText = "\(Product.name) \(v) needs macOS \(m)"
+            case .failed(let why):
+                alert.messageText = "No update check"
+                alert.informativeText = why
+            }
+            alert.runModal()
+        }
+    }
+
+    @objc func goBack(_ sender: Any?) {
+        let u = Updater.shared
+        guard let prev = u.previousVersion else { return }
+        let alert = NSAlert()
+        alert.messageText = "Go back to \(Product.name) \(prev)?"
+        alert.informativeText = "\(Product.name) restarts as \(prev); \(u.currentVersion) is skipped until a later version comes out. Your VMs are not changed."
+        alert.addButton(withTitle: "Go Back")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn { u.goBack() }
+        if let n = u.notice { state.message = n }
     }
 }
 

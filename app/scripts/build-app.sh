@@ -3,20 +3,26 @@
 # first run and when its patches or build scripts change, about 70 seconds),
 # UEFI firmware, the VM scripts and OmacVM's VM side (src/ of the repo this
 # lives in, as committed). Signed ad hoc, or with OMACVM_SIGN_ID (below).
-#   scripts/build-app.sh [--name NAME] [--release]
+#   scripts/build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]
 #     --name     the app's name and Dock title (default OmacVM)
+#     --id       another bundle id (default org.omacvm.app): test builds that
+#                must not share settings, VMs or the running app with an
+#                installed OmacVM
 #     --release  for a published zip: the whole repo must be committed
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$ROOT/.." && pwd)
-NAME=OmacVM; RELEASE=0
+NAME=OmacVM; ID=org.omacvm.app; RELEASE=0
 while (( $# )); do
   case $1 in
     --name) NAME=$2; shift 2 ;;
+    --id) ID=$2; shift 2 ;;
     --release) RELEASE=1; shift ;;
-    *) echo "usage: build-app.sh [--name NAME] [--release]" >&2; exit 2 ;;
+    *) echo "usage: build-app.sh [--name NAME] [--id BUNDLE_ID] [--release]" >&2; exit 2 ;;
   esac
 done
+[[ $ID =~ ^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$ ]] || { echo "not a bundle id: $ID" >&2; exit 2; }
+(( ! RELEASE )) || [[ $ID == org.omacvm.app ]] || { echo "a release keeps the bundle id org.omacvm.app" >&2; exit 2; }
 log() { printf '==> %s\n' "$*"; }
 
 # OmacVM's VM side as committed (git archive of HEAD), so the app always says
@@ -64,7 +70,7 @@ log "launcher"
 cd "$ROOT/app"
 mkdir -p .build/mc/swift .build/mc/clang
 SWIFT_MODULECACHE_PATH=$PWD/.build/mc/swift CLANG_MODULE_CACHE_PATH=$PWD/.build/mc/clang \
-  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none 2>&1 | { grep -v '^\[' || true; } ||
+  MACOSX_DEPLOYMENT_TARGET=15.0 swift build --disable-sandbox -c release -debug-info-format none --product OmacVM 2>&1 | { grep -v '^\[' || true; } ||
   { echo "launcher build failed" >&2; exit 1; }
 LAUNCHER=$ROOT/app/.build/release/OmacVM
 [[ -x $LAUNCHER ]] || { echo "launcher build failed" >&2; exit 1; }
@@ -86,7 +92,8 @@ install -m644 "$ICON" "$C/Resources/OmacVM.icns"
 ditto "$RT/qemu-gpu-runtime" "$C/Resources/runtime"
 mv "$C/Resources/runtime/bin/qemu-system-aarch64" "$C/Resources/runtime/bin/OmacVM"
 install -m644 "$RT/firmware/edk2-aarch64-code.fd" "$RT/firmware/firmware-source" "$C/Resources/firmware/"
-install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" "$C/Resources/scripts/"
+install -m755 "$ROOT/scripts/create-vm.sh" "$ROOT/scripts/apply-vm.sh" "$ROOT/scripts/vm-common.sh" \
+  "$ROOT/scripts/update-swap.sh" "$C/Resources/scripts/"
 git -C "$REPO" archive "$COMMIT" src | tar -x -C "$C/Resources/omacvm"
 echo "$COMMIT" > "$C/Resources/omacvm/COMMIT"
 install -m644 "$ROOT/LICENSE" "$C/Resources/licenses/LICENSE.omacvm-app"
@@ -112,7 +119,7 @@ cat > "$C/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>org.omacvm.app</string>
+  <key>CFBundleIdentifier</key><string>$ID</string>
   <key>CFBundleName</key><string>$NAME</string>
   <key>CFBundleDisplayName</key><string>$NAME</string>
   <key>CFBundleExecutable</key><string>OmacVM</string>
@@ -140,10 +147,10 @@ if [[ -n ${OMACVM_SIGN_ID:-} ]]; then
   for f in "$C/Resources/runtime/lib"/*.dylib "$C/Resources/runtime/bin/zstd"; do
     codesign "${SIGN[@]}" "$f"
   done
-  codesign "${SIGN[@]}" --identifier org.omacvm.app.qemu \
+  codesign "${SIGN[@]}" --identifier "$ID.qemu" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign "${SIGN[@]}" --identifier org.omacvm.netd "$NETD"
-  codesign "${SIGN[@]}" --identifier org.omacvm.app \
+  codesign "${SIGN[@]}" --identifier "$ID" \
     --entitlements "$ROOT/app/OmacVM.entitlements" "$APP"
 else
   log "signing (ad hoc)"
@@ -152,10 +159,10 @@ else
   done
   # The designated requirement names the identifier, not the binary's hash, so
   # macOS keeps Accessibility and other grants across rebuilds (as OmacVM's helpers).
-  codesign --force --sign - --identifier org.omacvm.app.qemu -r='designated => identifier "org.omacvm.app.qemu"' \
+  codesign --force --sign - --identifier "$ID.qemu" -r="designated => identifier \"$ID.qemu\"" \
     --entitlements "$ROOT/runtime/qemu-hvf.entitlements" "$C/Resources/runtime/bin/OmacVM"
   codesign --force --sign - --identifier org.omacvm.netd "$NETD"
-  codesign --force --sign - --identifier org.omacvm.app -r='designated => identifier "org.omacvm.app"' "$APP"
+  codesign --force --sign - --identifier "$ID" -r="designated => identifier \"$ID\"" "$APP"
 fi
 codesign --verify --deep --strict "$APP"
 log "built $APP ($(du -sh "$APP" | cut -f1))"

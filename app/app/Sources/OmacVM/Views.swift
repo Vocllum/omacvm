@@ -287,6 +287,7 @@ struct ReadyView: View {
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
             if let m = state.message { Text(m).foregroundStyle(.red) }
+            UpdateSection(updater: Updater.shared)
             HStack {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
                 Button("Delete…") { deleteVM() }
@@ -294,6 +295,33 @@ struct ReadyView: View {
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
             }
+        }
+    }
+}
+
+/// The self-update in the window: a ready update (never while update checks
+/// are off) and the weekly-check switch, shared with the control centre.
+struct UpdateSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if updater.enabled, let s = updater.staged {
+                Divider()
+                Text("\(Product.name) \(s.version) is ready to install (this is \(updater.currentVersion)).")
+                HStack {
+                    if let n = s.notes { Button("What's New") { NSWorkspace.shared.open(n) } }
+                    Button("Skip This Version") { updater.skip() }
+                    Spacer()
+                    Button("Update and Relaunch") { updater.install() }
+                }
+            }
+            if let n = updater.notice {
+                Text(n).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            Toggle("Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
+            Text("Off: no checks and no messages (the same switch as in OmacVM's control centre). Check for Updates… in the \(Product.name) menu still works.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
