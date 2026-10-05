@@ -4,14 +4,16 @@ Nothing is uploaded by OmacVM: the browser opens a form the person submits.
 
 Redaction, in this order:
  1. Known values (exact, case-insensitive, longest first): user, full and
-    first names (always, also "Max"), host names (and the owner in "Anna's
-    MacBook Pro"), VM names, Wi-Fi names and BSSIDs (whole words only),
+    first names (a plain word like "max" only where it stands as a name:
+    "Max", "user max", "max@host"), host names (and the owner in "Anna's
+    MacBook Pro", "Maxs-MacBook-Pro"), VM names, Wi-Fi names and BSSIDs (a
+    plain one-word Wi-Fi name as a whole word only),
     Bluetooth names and addresses, the Bridge token, home folders.
  2. Patterns: the names in the Bridge's own log lines (its connected
     Bluetooth devices, the Wi-Fi name after ssid=, audio devices, the camera,
     Omanotch's VM names, ...), an owner's name with a device word ("Anna's
     AirPods", "AirPods von Anna", "iPhone de Jean-Luc", "MacBook-Pro-von-Anna",
-    "iPhone (Anna)", known or not), PEM blocks, SSH keys, bearer, Basic,
+    "iPhone (Anna)", Finnish "Annan AirPods", "annas-macbook-pro", known or not), PEM blocks, SSH keys, bearer, Basic,
     GitHub, Anthropic, Slack, AWS and GitLab tokens, key=value and
     "--passphrase value" secrets, e-mail
     addresses, hardware addresses, UUIDs, serial numbers, IPv4/IPv6
@@ -77,8 +79,13 @@ class Known:
             if kind in ("bt", "host") and re.search(r"\b" + DEVICE_WORDS, v, re.IGNORECASE):
                 for m in OWNER_AFTER.finditer(v):
                     part = m.group(1) or m.group(2)
-                    if len(part) >= 2 and owner_word(part) and not self.has(part):
+                    if self._owner(part):
                         self.user.append(part)
+            # macOS's host name form, also in lower case: "Maxs-MacBook-Pro",
+            # "annas-macbook-pro", Finnish "Annan-MacBook-Pro".
+            m = HOST_FORM.match(v) if kind == "host" else None
+            if m and self._owner(m.group(1)):
+                self.user.append(m.group(1))
             # Wi-Fi and Bluetooth names of device and plain words alone (a
             # phone's hotspot "iPhone", "AirPods Pro") are nobody's name, and
             # taking them out would take out every "iPhone" in the logs. So is
@@ -110,6 +117,11 @@ class Known:
                                 and not product_only(part)
                     if ok and not self.has(part):
                         getattr(self, k).append(part)
+
+    def _owner(self, part: str) -> bool:
+        """PART, the owner in a known device or host name, is a new name."""
+        return len(part) >= 2 and (owner_word(part) or part.casefold() in NAME_LIKE) and \
+            part.casefold() not in GENERIC_ACCOUNTS and not self.has(part)
 
     def has(self, v: str) -> bool:
         return any(v.casefold() == w.casefold() for _, w in self.items())
@@ -229,19 +241,62 @@ def variants(v: str) -> list:
     return out
 
 
+def one_plain_word(v: str) -> bool:
+    """One word of letters, no digit and no capital inside ("Light",
+    "garden", "FRITZ"; not "ZorroNet", "Zorro5", "Zorro Net")."""
+    return re.fullmatch(r"[^\W\d_]+", v) is not None and \
+        not any(a.islower() and b.isupper() for a, b in zip(v, v[1:]))
+
+
 def edges(kind: str, v: str) -> tuple:
     """Values matched as whole words only: short ones ("pi" must not eat
-    "pipewire"), plain words, and Wi-Fi names, which are often plain words:
-    a Wi-Fi called "Light" must not turn "backlight" or "keyboard-light"
-    into "back<wifi>". ("", "") for the rest: matched anywhere."""
-    if kind == "wifi":
+    "pipewire") and plain words. A Wi-Fi name that is one plain word also
+    needs no hyphen next to it: a Wi-Fi called "Light" must not turn
+    "backlight" or "keyboard-light" into "back<wifi>". Other Wi-Fi names
+    ("ZorroNet", "Zorro Home") go also inside a neighbour's ("ZorroNet-5G",
+    "ZorroNets"). ("", "") for the rest: matched anywhere."""
+    if kind == "wifi" and one_plain_word(v):
         return r"(?<![^\W_])(?<!-)", r"(?![^\W_])(?!-)"
     if len(v) < 4 or common_only(v):
         return r"(?<![^\W_])", r"(?![^\W_])"   # no letter or digit next to it
     return "", ""
 
 
+def plain_user(kind: str, v: str) -> bool:
+    """A user or first name that is a plain word too ("max", "Marshall",
+    "pro"): taken out only where it stands as a name (name_like_re)."""
+    return kind == "user" and re.fullmatch(r"[^\W\d_]+", v) is not None and \
+        (v.casefold() in COMMON or v.casefold() in NAME_LIKE)
+
+
+# Where a plain word is a user name: after a word that says so ("user max",
+# "User: max", "login=max", "-u max", "su max", "chown max:..."), before @
+# (max@host), in id's "1000(max)", at the start of a passwd line, with 's.
+USER_KEYS = ("user", "users", "username", "login", "logname", "owner", "account", "-u", "--user", "su", "chown",
+             "for user", "as user", "as", "hi", "hello", "dear")
+USER_SEPS = ("=", ": ", ":", " ", '="', "='", ': "', "=\\\"")
+
+
+def name_like_re(v: str) -> re.Pattern:
+    """V as a name: capitalised ("Max", "Hi Max", "Max's"), or any case in
+    the places above. Not "max size", "set to max", "max_connections"."""
+    w = re.escape(v)
+    cap = re.escape(v[:1].upper() + v[1:].lower())
+    after = "|".join("(?<=(?i:%s)%s)" % (re.escape(k), re.escape(sep)) for k in USER_KEYS for sep in USER_SEPS)
+    edge_l, edge_r = r"(?<![\w<'-])", r"(?![\w-])"
+    return re.compile(
+        edge_l + cap + edge_r +                                  # "Max", "Max's", "Hi Max"
+        "|" + edge_l + "(?i:" + w + r")(?=@[\w.-]|'s\b)" +      # max@host, max's
+        "|(?:" + after + ")(?i:" + w + ")" + edge_r +            # user max, -u max, login=max
+        r"|(?<=\d\()(?i:" + w + r")(?=\))" +                    # uid=1000(max)
+        "|(?<=(?i:" + w + "):)(?i:" + w + ")" + edge_r +         # chown max:max
+        "|" + edge_l + "(?i:" + w + ")(?=:(?i:" + w + ")" + edge_r + ")" +
+        "|(?m:^)(?i:" + w + r")(?=:[^:\n]*:\d)")                 # max:x:1000:... (passwd)
+
+
 def _value_re(v: str, kind: str = "user") -> re.Pattern:
+    if plain_user(kind, v):
+        return name_like_re(v)
     left, right = edges(kind, v)
     return re.compile(left + re.escape(v) + right, re.IGNORECASE)
 
@@ -343,6 +398,28 @@ POSSESSIVE_ANY = re.compile(r"(?<![\w<'])([^\W\d_][\w.-]*?)'s?(?=[ \t]+(?:[^\W\d
 GENITIVE_S = re.compile(r"(?<![\w<'])([^\W\d_][^\W\d_]+?)s(?=[ \t]+(?:AirPods|iPhone|iPad|MacBook|iMac|Apple Watch"
                         r"|Watch|HomePod|AirTag|Galaxy|Pixel|Buds|Headphones|Omarchy)\b)")
 HOST_OWNER = re.compile(r"(?<![\w<-])([A-Z][^\W\d_]+?)s?(?=-(?:MacBook|iMac|Mac-mini|Mac-Studio|Mac-Pro|iPhone|iPad)\b)")
+# The same in lower case, where a tool wrote the host name so ("maxs-macbook-pro"):
+# only with the s, which says it is someone's.
+HOST_OWNER_LOWER = re.compile(r"(?<![\w<-])([a-z][a-z]+?)s(?=-(?:macbook|imac|mac-mini|mac-studio|mac-pro|iphone|ipad)\b)")
+# A known host name's owner (Known.add): "Maxs-MacBook-Pro" and
+# "annas-macbook-pro" give Max and anna, Finnish "Annan-MacBook-Pro" Annan.
+HOST_FORM = re.compile(r"^([^\W\d_]+?)s?-(?:macbook|imac|mac-mini|mac-studio|mac-pro|iphone|ipad)\b", re.IGNORECASE)
+# Finnish names a device with the owner's genitive in -n ("Annan AirPods",
+# "Mikon iPhone", "Jussin MacBook Pro"): a capitalised word ending in a vowel
+# and n before an Apple device, but not the words that look the same
+# ("Open iPhone Mirroring", German "Meinen AirPods").
+GENITIVE_N = re.compile(r"(?<![\w<'])([A-Z\u00c4\u00d6\u00c5][a-z\u00e4\u00f6\u00e5]+[aeiouy\u00e4\u00f6]n)"
+                        r"(?=[ \t]+(?:AirPods|iPhone|iPad|MacBook|iMac|Apple Watch|HomePod|AirTag)\b)")
+NOT_GENITIVE = {"open", "golden", "green", "garden", "kitchen", "main", "plain", "hidden", "broken", "chosen", "given",
+                "seven", "eleven", "even", "often", "again", "then", "when", "screen", "modern", "wooden", "silicon",
+                "cotton", "common", "certain", "domain", "join", "rejoin", "scan", "plan", "clean", "mean", "lean",
+                "between", "within", "begin", "login", "plugin", "admin", "origin", "margin", "button", "season",
+                "reason", "person", "lesson", "iron", "neon", "satin", "token", "taken", "spoken", "written",
+                "forgotten", "frozen", "proven", "listen", "fallen", "seen", "been", "keen", "teen", "queen",
+                "geen", "mein", "dein", "sein", "kein", "nein", "einen", "meinen", "deinen", "seinen", "ihren",
+                "unseren", "euren", "keinen", "neuen", "alten", "anderen", "beiden", "diesen", "jeden", "welchen",
+                "allen", "verbinden", "trennen", "suchen", "finden", "entfernen", "laden", "aufladen", "zeigen",
+                "vergessen", "ignorieren", "aktivieren", "deaktivieren", "your", "lion", "union"}
 # macOS in other languages names a device after its owner the other way round:
 # "AirPods von Dana", "iPhone de Jean-Luc", "AirPods di Marco", "iPad van Jan",
 # and its host name "MacBook-Pro-von-Dana"; French also "iPhone d'Anne".
@@ -389,7 +466,9 @@ def device_owners(text: str) -> tuple[str, int]:
     def after(m: re.Match) -> str:
         nonlocal n
         prep, name = m.group(2), m.group(3)
-        if plain(name) or (prep.casefold() in PREPS_CAPITAL and not name[0].isupper()):
+        # In a host name the owner may be in lower case: "mac-mini-von-max".
+        hyphen_name = m.re is OWNER_HYPHEN and name.casefold() in NAME_LIKE
+        if not hyphen_name and (plain(name) or (prep.casefold() in PREPS_CAPITAL and not name[0].isupper())):
             return m.group(0)
         n += 1
         end = 3
@@ -421,7 +500,19 @@ def device_owners(text: str) -> tuple[str, int]:
     text = DEVICE_OWNER.sub(owner, text)
     text = POSSESSIVE_ANY.sub(capital_owner, text)
     text = GENITIVE_S.sub(capital_owner, text)
+
+    def genitive_n(m: re.Match) -> str:
+        return m.group(0) if m.group(1).casefold() in NOT_GENITIVE else owner(m)
+
+    def lower_host(m: re.Match) -> str:
+        nonlocal n
+        if m.group(1) in NAME_LIKE or not plain(m.group(1)):
+            n += 1
+            return "<user>s"
+        return m.group(0)
+    text = GENITIVE_N.sub(genitive_n, text)
     text = HOST_OWNER.sub(owner, text)
+    text = HOST_OWNER_LOWER.sub(lower_host, text)
     return text, n
 
 
@@ -612,7 +703,14 @@ def gate(text: str, known: Known) -> None:
     def clean(t: str) -> str:   # the labels put in and product names are no survivors
         return PRODUCT_NAMES.sub(" ", LABEL.sub(" ", norm(t))).casefold()
     t, t2 = clean(text), clean(up.unquote_plus(text))
+    # Plain-word user names count only as names, which needs the case kept.
+    c, c2 = (PRODUCT_NAMES.sub(" ", LABEL.sub(" ", norm(x))) for x in (text, up.unquote_plus(text)))
     for kind, v in known.items():
+        if plain_user(kind, v):
+            rx = name_like_re(norm(v))
+            if rx.search(c) or rx.search(c2):
+                raise RedactionFailed(kind)
+            continue
         w = norm(v).casefold()
         for x in (t, t2):
             left, right = edges(kind, v)

@@ -624,3 +624,85 @@ def test_brackets_that_are_no_owner_stay(line):
 def test_more_token_forms(token):
     out, counts = R.redact(f"export X={token[:4]}; using {token} now", R.Known())
     assert token not in out and "using <secret> now" in out, out
+
+
+# ---- re-check after round 6: Wi-Fi neighbours, Finnish, lower-case hosts, plain-word users ----
+
+def test_wifi_name_inside_a_neighbours_name():
+    """A Wi-Fi name with a capital inside, a digit or a space goes also in a
+    neighbour's name ("ZorroNet-5G"); a plain one-word name only whole."""
+    k = R.Known()
+    k.add("wifi", "ZorroNet", "Zorro Home", "Zorro5", "Light", "garden")
+    text = ("ZorroNet-5G; ZorroNets; Zorro Home-Ext; Zorro5-ext; "
+            "backlight; keyboard-light; Light-2; gardener; garden-party; Light on")
+    out, _ = R.redact(text, k)
+    R.gate(out, k)
+    assert "Zorro" not in out, out
+    assert out.endswith("backlight; keyboard-light; Light-2; gardener; garden-party; <wifi> on"), out
+
+
+@pytest.mark.parametrize("line,gone", [
+    ("Annan AirPods connected", "Annan"), ("Mikon iPhone", "Mikon"), ("Jussin MacBook Pro", "Jussin"),
+    ("Kallen iPad", "Kallen"), ("Päivin Apple Watch", "Päivin"),
+])
+def test_finnish_genitive_owner(line, gone):
+    out, n = R.redact(line, R.Known())
+    assert gone not in out and out.startswith("<user> "), out
+
+
+@pytest.mark.parametrize("line", [
+    "Open iPhone Mirroring", "Golden AirPods", "Green iPhone case", "Meinen AirPods verbinden", "Mein iPhone",
+    "Kitchen iPad", "Main iPhone", "Then iPhone asks", "Geen iPhone", "Ein iPhone", "Screen iPad",
+])
+def test_words_ending_in_n_before_a_device_stay(line):
+    assert R.redact(line, R.Known())[0] == line
+
+
+def test_lower_case_host_name_forms():
+    # nothing known
+    for line, want in [("maxs-macbook-pro.local", "<user>s-macbook-pro.local"),
+                       ("annas-macbook-pro", "<user>s-macbook-pro"),
+                       ("mac-mini-von-max.local", "mac-mini-von-<user>.local"),
+                       ("macbook-pro-de-max", "macbook-pro-de-<user>"),
+                       ("my-macbook-pro", "my-macbook-pro"), ("works-iphone", "works-iphone"),
+                       ("iphone-do-not-disturb", "iphone-do-not-disturb")]:
+        assert R.redact(line, R.Known())[0] == want, line
+    # known host names give their owner as a user name
+    for host, owner in [("Maxs-MacBook-Pro", "Max"), ("annas-macbook-pro", "anna"),
+                        ("mac-mini-von-max", "max"), ("Annan-MacBook-Pro", "Annan")]:
+        k = R.Known()
+        k.add("host", host)
+        assert owner in k.user, (host, k.user)
+    k = R.Known()
+    k.add("host", "Maxs-MacBook-Pro", "mac-mini-von-max")
+    out, _ = R.redact("Hi Max; ssh max@10.211.55.5 from mac-mini-von-max; Maxs-MacBook-Pro; max size", k)
+    R.gate(out, k)
+    assert out == "Hi <user>; ssh <user>@<ip-1> from mac-mini-von-<user>; <host>; max size", out
+
+
+def test_plain_word_user_only_where_it_is_a_name():
+    k = R.Known()
+    k.add("user", "max", "Max Muster")
+    stay = "max size; set to max; max_connections=100; MAX_FPS; maximum; --max-old-space; Max-Planck"
+    out, _ = R.redact(stay, k)
+    R.gate(out, k)
+    assert out == stay, out
+    for line, want in [("user max logged in", "user <user> logged in"), ("User: max", "User: <user>"),
+                       ("login=max", "login=<user>"), ("USER=max", "USER=<user>"), ("sudo -u max ls", "sudo -u <user> ls"),
+                       ("uid=1000(max) gid=1000(max)", "uid=1000(<user>) gid=1000(<user>)"),
+                       ("max:x:1000:1000::/home/max:/bin/bash", "<user>:x:1000:1000::~:/bin/bash"),
+                       ("chown max:max /x", "chown <user>:<user> /x"), ("ssh max@omarchy", "ssh <user>@omarchy"),
+                       ("max's files", "<user>'s files"), ("Hi Max,", "Hi <user>,"), ("Max Muster wrote", "<user> wrote")]:
+        out, _ = R.redact(line, k)
+        R.gate(out, k)
+        assert out == want, (line, out)
+
+
+def test_gate_still_refuses_a_plain_word_user_left_as_a_name():
+    k = R.Known()
+    k.add("user", "max")
+    with pytest.raises(R.RedactionFailed):
+        R.gate("hello Max", k)
+    with pytest.raises(R.RedactionFailed):
+        R.gate("ssh max@host", k)
+    R.gate("max size", k)
