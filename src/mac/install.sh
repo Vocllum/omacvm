@@ -41,6 +41,8 @@ mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
 # The omacvm the Bridge runs for the control centre's requests (control.swift
 # checks it belongs to this user and nobody else can write it).
 (umask 077; printf '%s\n' "$(cd "$R/.." && pwd)/omacvm" > ~/Library/Application\ Support/omacvm/cli)
+# Up to 2.7, Gestures kept its list of VMs without a token here; nothing reads it now.
+rm -f ~/Library/Application\ Support/omacvm/gestures-legacy{,.new}
 
 # install_app NAME LAUNCHD_LABEL DIR [ARGS...]: DIR/install.sh unless the same
 # sources and options are already installed and running.
