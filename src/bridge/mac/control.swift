@@ -144,7 +144,7 @@ final class JobRun {
 final class Control {
   private let q = DispatchQueue(label: "omacvm-bridge.control")
   private var limiter = JobLimiter()
-  private var vms: (at: Date, list: [VMEntry]) = (.distantPast, [])
+  private var vms = VMListCache()
   private var status: [String: (at: Date, body: [String: Any])] = [:]
   private var statusRunning: Set<String> = []
   private var jobs: [String: JobRun] = [:]
@@ -178,11 +178,12 @@ final class Control {
     var vmName = "-"
     // Set once the VM's signature checked out: the answer is signed with its key.
     var signer: (key: String, nonce: String)?
-    var quiet = false   // a VM over its request rate: logged once a minute, not per request
     func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
-      if !quiet {
-        log("control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))")
-      }
+      let line = "control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))"
+      // Refusals once a minute per address, VM and reason: a guest that
+      // floods (or any guest, from addresses of its own) must not fill the
+      // log the report reads.
+      if code >= 400 { logRefusal("control \(peer) \(vmName) \(code) \(note)", line) } else { log(line) }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -223,13 +224,19 @@ final class Control {
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
-      switch vmForApp(name, vmList(cli, refreshFor: "app/" + name)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
-      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { quiet = rateLogged(vm); return refuse(e) }
+      switch vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false }) {
+      case .success(let v): vm = v
+      case .failure(let e): return refuse(lookingAgain(e))
+      }
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
-      switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
+      switch vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
+      case .success(let v): vm = v
+      case .failure(let e): return refuse(lookingAgain(e))
+      }
       vmName = vm.name
       // Each VM's requests are limited on their own: one VM cannot crowd out another.
-      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { quiet = rateLogged(vm); return refuse(e) }
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
       // Signed with the VM's own key, which never crosses the network.
       let key = storedVMKey(vm)
       let checked = q.sync { () -> Result<String, AuthFailure> in
@@ -292,18 +299,6 @@ final class Control {
     }
   }
 
-  /// True when this VM's rate refusals were logged in the last minute (then
-  /// this one is not: a flooding VM must not fill the log the report reads).
-  private var rateLog: [String: Date] = [:]
-  private func rateLogged(_ vm: VMEntry) -> Bool {
-    q.sync {
-      let k = vmKey(vm), now = Date()
-      if let at = rateLog[k], now.timeIntervalSince(at) < 60 { return true }
-      rateLog[k] = now
-      return false
-    }
-  }
-
   // ---- nonces kept across restarts (on q) ----
   private var noncePath: String { supportDir + "/nonces" }
 
@@ -328,7 +323,7 @@ final class Control {
   }
 
   // ---- which VM ----
-  private func vmKey(_ v: VMEntry) -> String { "\(v.type)/\(v.name)" }
+  private func vmKey(_ v: VMEntry) -> String { VMListCache.key(v) }
 
   /// The control key `omacvm apply` made for this VM (lib/mac.sh
   /// vm_key_ensure): only when this user's alone.
@@ -340,35 +335,61 @@ final class Control {
     return try? String(contentsOfFile: path, encoding: .utf8)
   }
 
-  /// `omacvm vms --json`, cached for a minute; asked again (at most every
-  /// 10 s) when a peer is not in it, e.g. a VM that just started. One run at
-  /// a time: requests meanwhile wait for it (each run uses SSH to every VM).
-  private var vmsRunning = false, vmsFailed = Date.distantPast
-  private let vmsDone = NSCondition()
-  private func vmList(_ cli: String, refreshFor peer: String) -> [VMEntry] {
-    func known(_ list: [VMEntry]) -> Bool { list.contains { $0.ip == peer || "app/" + $0.name == peer } }
-    vmsDone.lock()
-    while vmsRunning { vmsDone.wait() }
-    let (cached, age) = q.sync { (vms.list, Date().timeIntervalSince(vms.at)) }
-    // Fresh enough, or a run failed a moment ago (not again right away).
-    if (age < 60 && (known(cached) || age < 10)) || Date().timeIntervalSince(vmsFailed) < 10 { vmsDone.unlock(); return cached }
-    vmsRunning = true
-    vmsDone.unlock()
-    defer { vmsDone.lock(); vmsRunning = false; vmsDone.broadcast(); vmsDone.unlock() }
-    guard let (rc, out) = runCLI([cli, "vms", "--json"], timeout: 90), rc == 0,
-          let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any],
-          let list = o["vms"] as? [[String: Any]] else {
-      vmsDone.lock(); vmsFailed = Date(); vmsDone.unlock()
-      return cached
+  /// `omacvm vms --json`, cached (VMListCache): the cache at once, never
+  /// waiting for a run; a run in the background when it is due. `known`:
+  /// whether the cache already has the VM that asks.
+  private func vmList(_ cli: String, known: ([VMEntry]) -> Bool) -> [VMEntry] {
+    let (list, start) = q.sync { () -> ([VMEntry], Bool) in
+      (vms.list, vms.shouldRefresh(known: known(vms.list), now: Date()))
     }
-    let fresh = list.map { v in
-      VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
-              ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
-              // Set up by OmacVM, and its remembered SSH host key answered at that address just now.
-              setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false))
+    if start { refreshVMs(cli) }
+    return list
+  }
+
+  /// One run of `omacvm vms --json` in the background (the cache says when).
+  private func refreshVMs(_ cli: String) {
+    DispatchQueue.global(qos: .utility).async { [self] in
+      var fresh: [VMEntry]?
+      if let (rc, out) = runCLI([cli, "vms", "--json"], timeout: 90), rc == 0,
+         let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any],
+         let list = o["vms"] as? [[String: Any]] {
+        fresh = list.map { v in
+          VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
+                  ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
+                  // Set up by OmacVM, and its remembered SSH host key answered at that address just now.
+                  setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false))
+        }
+      } else {
+        log("control: omacvm vms --json gave no list (asked again in 10 s at the earliest)")
+      }
+      let again = q.sync { () -> Bool in
+        let r = vms.finished(fresh, now: Date())
+        for k in r.changed { status[k] = nil }   // asked again with the VM's new state
+        return r.again
+      }
+      if again { refreshVMs(cli) }
     }
-    q.sync { vms = (Date(), fresh) }
-    return fresh
+  }
+
+  /// An unknown VM while a run is going: say it is being looked for.
+  private func lookingAgain(_ e: PolicyError) -> PolicyError {
+    guard e.code == "unknown-vm", q.sync(execute: { vms.running }) else { return e }
+    return PolicyError(e.status, e.code, e.message + " (the Mac is looking at its VMs again: try in a moment)")
+  }
+
+  /// For the connection limits (server.swift): the VM at this address, when
+  /// the cache has it. Never waits for a run.
+  func connectionKey(_ peer: String) -> (key: String, known: Bool) {
+    if peer.hasPrefix("127.") { return ("mac", true) }   // this Mac and OmacVM.app's relay
+    if let vm = q.sync(execute: { vms.vm(at: peer) }) { return ("vm " + vm, true) }
+    return ("address " + peer, false)
+  }
+
+  /// An address the cache does not have was turned away for the limits: a
+  /// VM that just started may be one, so look again (at most once a minute).
+  func unknownTurnedAway() {
+    guard q.sync(execute: { vms.shouldRefresh(known: false, now: Date()) }) else { return }
+    if case .success(let cli) = controlCLI() { refreshVMs(cli) } else { q.sync { _ = vms.finished(nil, now: Date()) } }
   }
 
   // ---- status: the Mac's view of this VM's features ----
@@ -430,12 +451,15 @@ final class Control {
         usleep(250_000)
       }
       let rc = (st & 0x7f) == 0 ? (st >> 8) & 0xff : 128 + (st & 0x7f)
-      q.sync {
+      // A job that worked leaves the VM at the Mac's OmacVM; either way the VM list is read again.
+      let now = rc == 0 ? macVersionNow() : ""
+      let run = q.sync { () -> Bool in
         j.rc = rc
         limiter.finished(j.vm)
         status[j.vm] = nil   // the next status asks again
-        vms.at = .distantPast
+        return vms.jobEnded(vm: j.vm, version: now.isEmpty ? nil : now)
       }
+      if run, case .success(let cli) = controlCLI() { refreshVMs(cli) } else if run { q.sync { _ = vms.finished(nil, now: Date()) } }
       log("control: job \(id) (\(j.action) \(j.features.joined(separator: " "))) ended \(rc)")
     }
     return j

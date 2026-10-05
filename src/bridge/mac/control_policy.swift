@@ -487,3 +487,140 @@ func manifestSigned(_ data: Data, sig: Data, key: String) -> Bool {
         s.count == 64 else { return false }
   return pub.isValidSignature(s, for: data)
 }
+
+// ---- the VM list (`omacvm vms --json`): no request waits for it ----
+
+/// The cached VM list and when to read it again. A request always gets the
+/// cache at once; a run starts in the background, one at a time, when the
+/// list is a minute old, when a job ended (its VM changed), or for an
+/// address the list does not have (a VM that just started). That last one
+/// at most once a minute: any guest can add addresses, and each run asks
+/// every running VM over SSH. Only touched on Control's queue.
+struct VMListCache {
+  static let maxAge: Double = 60, unknownEvery: Double = 60, afterFailure: Double = 10
+  private(set) var list: [VMEntry] = []
+  private(set) var at = Date.distantPast
+  private(set) var running = false
+  private var again = false                  // a job ended while a run was going
+  private var unknownAt = Date.distantPast   // the last run started for an unknown address
+  private var failedAt = Date.distantPast
+
+  static func key(_ v: VMEntry) -> String { "\(v.type)/\(v.name)" }
+
+  /// True when this request starts a run (the caller runs it, then calls finished).
+  mutating func shouldRefresh(known: Bool, now: Date) -> Bool {
+    guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure else { return false }
+    let stale = now.timeIntervalSince(at) >= Self.maxAge
+    if known {
+      guard stale else { return false }
+    } else {
+      guard stale || now.timeIntervalSince(unknownAt) >= Self.unknownEvery else { return false }
+      unknownAt = now
+    }
+    running = true
+    return true
+  }
+
+  /// A job of this VM ended. `version`: the OmacVM it has now when the job
+  /// worked (the Mac's), so the next request does not see the old one while
+  /// the run goes. True when the caller starts a run now.
+  mutating func jobEnded(vm: String, version: String?) -> Bool {
+    if let version {
+      list = list.map { v in
+        Self.key(v) == vm ? VMEntry(name: v.name, type: v.type, state: v.state, ip: v.ip, omacvm: version, setup: v.setup) : v
+      }
+    }
+    if running { again = true; return false }
+    running = true
+    return true
+  }
+
+  /// A run ended (nil: it failed). Returns the VMs whose entry changed (their
+  /// cached status goes) and whether the caller starts another run at once.
+  mutating func finished(_ fresh: [VMEntry]?, now: Date) -> (changed: Set<String>, again: Bool) {
+    running = false
+    var changed = Set<String>()
+    if let fresh {
+      let old = Dictionary(list.map { (Self.key($0), $0) }, uniquingKeysWith: { a, _ in a })
+      let new = Dictionary(fresh.map { (Self.key($0), $0) }, uniquingKeysWith: { a, _ in a })
+      for k in Set(old.keys).union(new.keys) where old[k] != new[k] { changed.insert(k) }
+      list = fresh
+      at = now
+    } else {
+      failedAt = now
+    }
+    if again && fresh != nil {
+      again = false
+      running = true
+      return (changed, true)
+    }
+    again = false
+    return (changed, false)
+  }
+
+  /// The running VM at this address, for the connection limits ("type/name").
+  func vm(at peer: String) -> String? {
+    let hits = list.filter { $0.state == "running" && $0.ip == peer }
+    return hits.count == 1 ? Self.key(hits[0]) : nil
+  }
+}
+
+// ---- refusals in the log ----
+
+/// A refusal is logged once a minute per key (an address, a VM and the
+/// reason); the next line says how many were left out. At most `maxKeys`
+/// keys at a time, then the rest share one, so many addresses cannot grow
+/// it or the log either.
+struct LogLimiter {
+  let every: Double, maxKeys: Int
+  private var keys: [String: (at: Date, skipped: Int)] = [:]
+  init(every: Double = 60, maxKeys: Int = 256) { self.every = every; self.maxKeys = maxKeys }
+
+  /// nil: leave this line out. Else log it, with the count left out before it.
+  mutating func admit(_ key: String, now: Date) -> Int? {
+    var k = key
+    if keys[k] == nil && keys.count >= maxKeys {
+      keys = keys.filter { now.timeIntervalSince($0.value.at) < every || $0.value.skipped > 0 }
+      if keys.count >= maxKeys { k = "*" }
+    }
+    if let e = keys[k], now.timeIntervalSince(e.at) < every {
+      keys[k] = (e.at, e.skipped + 1)
+      return nil
+    }
+    let skipped = keys[k]?.skipped ?? 0
+    keys[k] = (now, 0)
+    return skipped
+  }
+
+  var count: Int { keys.count }
+}
+
+// ---- connections being handled ----
+
+/// Requests being handled at once, one thread each: at most `total`. A VM
+/// the Mac knows (by its address in the VM list), and this Mac (127.x), at
+/// most `perKey` each. Addresses it does not know at most `perUnknown` each
+/// and `unknownTotal` together: a guest can add any number of addresses,
+/// and with them it must never take the places of the known VMs.
+struct ConnectionGate {
+  let total: Int, perKey: Int, perUnknown: Int, unknownTotal: Int
+  private var all = 0, unknown = 0, per: [String: Int] = [:]
+  init(total: Int = 32, perKey: Int = 16, perUnknown: Int = 8, unknownTotal: Int = 16) {
+    self.total = total; self.perKey = perKey; self.perUnknown = perUnknown; self.unknownTotal = unknownTotal
+  }
+
+  mutating func enter(_ key: String, known: Bool) -> Bool {
+    let n = per[key, default: 0]
+    guard all < total, n < (known ? perKey : perUnknown), known || unknown < unknownTotal else { return false }
+    all += 1; per[key] = n + 1
+    if !known { unknown += 1 }
+    return true
+  }
+
+  mutating func leave(_ key: String, known: Bool) {
+    all -= 1
+    if !known { unknown -= 1 }
+    let n = per[key, default: 1] - 1
+    per[key] = n > 0 ? n : nil
+  }
+}

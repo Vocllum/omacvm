@@ -80,25 +80,29 @@ func setTimeout(_ fd: Int32, _ opt: Int32, _ seconds: Int) {
   setsockopt(fd, SOL_SOCKET, opt, &tv, socklen_t(MemoryLayout<timeval>.size))
 }
 
-/// Requests being handled: at most 32, 16 per peer, so slow or stuck peers
-/// cannot hold every worker thread.
+/// Requests being handled (ConnectionGate in control_policy.swift): limits
+/// per VM where the VM list knows the address, so slow or stuck peers cannot
+/// hold every worker thread, and addresses a guest adds cannot take the known
+/// VMs' places. Called from the listeners' queue and worker threads.
 final class Gate {
   private let lock = NSLock()
-  private var total = 0, perPeer: [String: Int] = [:]
-  func enter(_ peer: String) -> Bool {
-    lock.lock(); defer { lock.unlock() }
-    guard total < 32, perPeer[peer, default: 0] < 16 else { return false }
-    total += 1; perPeer[peer, default: 0] += 1
-    return true
-  }
-  func leave(_ peer: String) {
-    lock.lock(); defer { lock.unlock() }
-    total -= 1
-    let n = perPeer[peer, default: 1] - 1
-    perPeer[peer] = n > 0 ? n : nil
-  }
+  private var g = ConnectionGate()
+  func enter(_ key: String, known: Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return g.enter(key, known: known) }
+  func leave(_ key: String, known: Bool) { lock.lock(); defer { lock.unlock() }; g.leave(key, known: known) }
 }
 let gate = Gate()
+
+/// Refusals in the log once a minute per key (LogLimiter): a peer that
+/// floods must not fill the log the problem report reads.
+private let refusalLock = NSLock()
+private var refusals = LogLimiter()
+func logRefusal(_ key: String, _ line: String) {
+  refusalLock.lock()
+  let skipped = refusals.admit(key, now: Date())
+  refusalLock.unlock()
+  guard let skipped else { return }
+  log(skipped > 0 ? "\(line) (and \(skipped) more like it in the last minute)" : line)
+}
 
 func ipv4String(_ a: in_addr) -> String {
   var a = a, buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
@@ -325,7 +329,7 @@ func handle(_ fd: Int32, peer: String) {
     return
   }
   guard authorized(headers["authorization"]) else {
-    log("401 \(logSafe(method)) \(logSafe(path)) from \(peer)")
+    logRefusal("401 \(peer)", "401 \(logSafe(method)) \(logSafe(path)) from \(peer)")
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")
     return
   }
@@ -500,8 +504,14 @@ final class Server {
         }
         if c < 0 { break }
         let who = ipv4String(peer.sin_addr)
-        guard gate.enter(who) else { close(c); continue }
-        DispatchQueue.global(qos: .utility).async { onConnection(c, who); gate.leave(who) }
+        let (key, known) = control.connectionKey(who)
+        guard gate.enter(key, known: known) else {
+          close(c)
+          if !known { control.unknownTurnedAway() }   // never waits: a run goes in the background
+          logRefusal("busy \(key)", "busy: turned away a connection from \(who) (\(known ? "too many from this VM" : "too many from unknown addresses"))")
+          continue
+        }
+        DispatchQueue.global(qos: .utility).async { onConnection(c, who); gate.leave(key, known: known) }
       }
     }
     src.setCancelHandler { close(fd) }

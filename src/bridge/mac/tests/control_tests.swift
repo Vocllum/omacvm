@@ -272,6 +272,78 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     let badPart = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: "\"gestures\"", with: "\"../x\"").utf8)
     if case .failure = parseManifest(badPart) { expect(true, "bad part name") } else { expect(false, "bad part name") }
 
+    do {   // own scope: names of their own
+    // ---- the VM list: never waited for (review round 4, point 3) ----
+    let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    let vmA = VMEntry(name: "A", type: "parallels", state: "running", ip: "10.211.55.5", omacvm: "2.8.0", setup: true)
+    let vmB = VMEntry(name: "B", type: "parallels", state: "running", ip: "10.211.55.6", omacvm: "2.8.0", setup: true)
+    var c = VMListCache()
+    expect(c.shouldRefresh(known: false, now: t0), "empty cache: a run starts")
+    expect(!c.shouldRefresh(known: false, now: t0) && !c.shouldRefresh(known: true, now: t0), "one run at a time")
+    var r = c.finished([vmA], now: t0 + 2)
+    expect(r.changed == ["parallels/A"] && !r.again && c.list == [vmA], "run done: A is in, it changed")
+    expect(!c.shouldRefresh(known: true, now: t0 + 30), "known and fresh: no run")
+    expect(c.shouldRefresh(known: false, now: t0 + 3) == false, "unknown: at most once a minute (one ran at t0)")
+    expect(!c.shouldRefresh(known: false, now: t0 + 59), "unknown: still within the minute")
+    expect(c.shouldRefresh(known: false, now: t0 + 61), "unknown: a minute later, a run")
+    _ = c.finished([vmA, vmB], now: t0 + 62)
+    // An address flood (unknown addresses) starts one run a minute, no more.
+    var runs = 0
+    for s in stride(from: 63.0, to: 63.0 + 300, by: 0.5) where c.shouldRefresh(known: false, now: t0 + s) {
+      runs += 1; _ = c.finished([vmA, vmB], now: t0 + s + 3)
+    }
+    expect(runs <= 6, "flood of unknown addresses for 5 minutes: at most a run a minute (\(runs))")
+    var c2 = VMListCache()
+    _ = c2.shouldRefresh(known: false, now: t0); _ = c2.finished([vmA], now: t0)
+    expect(c2.shouldRefresh(known: true, now: t0 + 60), "known but a minute old: a run (the cache is served meanwhile)")
+    expect(c2.list == [vmA], "the cache stays while the run goes")
+    // A job ended while a run goes: that run's list may be from before the job.
+    expect(!c2.jobEnded(vm: "parallels/A", version: "2.8.1"), "job ended during a run: not a second run now")
+    expect(c2.list.first?.omacvm == "2.8.1", "the job's VM has the Mac's OmacVM at once")
+    r = c2.finished([vmA], now: t0 + 63)
+    expect(r.again, "and a run again after the one going")
+    r = c2.finished([VMEntry(name: "A", type: "parallels", state: "running", ip: "10.211.55.5", omacvm: "2.8.1", setup: true)], now: t0 + 66)
+    expect(!r.again && r.changed == ["parallels/A"], "then done")
+    expect(c2.jobEnded(vm: "parallels/A", version: nil), "job ended, nothing running: a run now")
+    _ = c2.finished(nil, now: t0 + 70)
+    expect(!c2.shouldRefresh(known: false, now: t0 + 75) && !c2.shouldRefresh(known: true, now: t0 + 200 - 126),
+           "a failed run: not again within 10 s")
+    expect(c2.vm(at: "10.211.55.5") == "parallels/A" && c2.vm(at: "10.211.55.99") == nil, "VM by address")
+
+    // ---- refusals in the log ----
+    var ll = LogLimiter(every: 60, maxKeys: 4)
+    expect(ll.admit("a", now: t0) == 0, "first refusal logged")
+    expect(ll.admit("a", now: t0 + 1) == nil && ll.admit("a", now: t0 + 2) == nil, "then not within a minute")
+    expect(ll.admit("b", now: t0 + 2) == 0, "another key is logged")
+    expect(ll.admit("a", now: t0 + 61) == 2, "a minute later: logged, with 2 left out")
+    for i in 0..<100 { _ = ll.admit("addr\(i)", now: t0 + 62) }
+    expect(ll.count <= 5, "many addresses share one key over the cap (\(ll.count))")
+    var lines = 0
+    for i in 0..<10_000 where ll.admit("addr\(i % 500)", now: t0 + 62 + Double(i) / 100) != nil { lines += 1 }
+    expect(lines <= 8, "a flood from 500 addresses for 100 s: a few lines (\(lines))")
+
+    // ---- connection limits ----
+    var g = ConnectionGate()
+    var held = 0
+    for _ in 0..<40 where g.enter("address 10.211.55.200", known: false) { held += 1 }
+    expect(held == 8, "one unknown address: 8")
+    for _ in 0..<40 where g.enter("address 10.211.55.201", known: false) { held += 1 }
+    for _ in 0..<40 where g.enter("address 10.211.55.202", known: false) { held += 1 }
+    expect(held == 16, "unknown addresses together: 16")
+    expect(g.enter("vm parallels/A", known: true), "a known VM still gets in")
+    var inA = 1
+    for _ in 0..<40 where g.enter("vm parallels/A", known: true) { inA += 1 }
+    expect(inA == 16 && !g.enter("vm parallels/B", known: true), "16 per VM, 32 in all")
+    g.leave("vm parallels/A", known: true)
+    expect(g.enter("vm parallels/B", known: true), "a place freed: B gets in")
+    expect(!g.enter("vm parallels/C", known: true) && !g.enter("address 10.211.55.203", known: false), "all 32 taken: nobody else")
+    g.leave("vm parallels/B", known: true)
+    expect(!g.enter("address 10.211.55.203", known: false), "a known VM's place freed: still not for the unknown pool")
+    expect(g.enter("vm parallels/C", known: true), "but for a known VM")
+    g.leave("address 10.211.55.200", known: false)
+    expect(g.enter("address 10.211.55.203", known: false), "a place in the unknown pool again")
+    }
+
     print("control policy: \(passed) passed, \(failures) failed")
     exit(failures == 0 ? 0 : 1)
   }

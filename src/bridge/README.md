@@ -296,7 +296,17 @@ From 127.0.0.1 (OmacVM.app's guests, or any Mac program) everything but
 `hello` is refused, except OmacVM.app relaying a request from a VM's control
 port (`org.omacvm.control`): `X-OmacVM-Relay` with the key in
 `relay-key` beside the token (no VM gets it) and `X-OmacVM-App-VM` (the VM's
-name, base64). Every request goes to the log with the VM and the answer.
+name, base64). Every request goes to the log with the VM and the answer;
+refusals (and 401s) once a minute per address, VM and reason, with the
+count left out.
+
+Which VM asked comes from `omacvm vms --json`, cached: a request never waits
+for it. It is read again in the background, one run at a time, when the list
+is a minute old, after a job, and for an address the list does not have (a
+VM that just started) at most once a minute, since any guest can add
+addresses. Connections being handled: 32 in all, 16 per VM the list knows
+(and 16 for 127.0.0.1), 8 per unknown address and 16 for all unknown
+addresses together, so added addresses never take a known VM's place.
 
 ### Not built: Wi-Fi control
 
