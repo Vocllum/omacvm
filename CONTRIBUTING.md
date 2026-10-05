@@ -63,6 +63,7 @@ src/tests/gestures-off.sh
 src/tests/app-paths.sh
 src/tests/app-notch.sh
 src/tests/bench-docs.sh
+src/tests/app-battery.sh
 python3 src/app/guest/tests/test_omacvm_displays.py
 python3 src/app/guest/tests/test_idle_waits.py
 ```
