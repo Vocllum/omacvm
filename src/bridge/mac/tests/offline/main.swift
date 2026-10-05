@@ -87,6 +87,16 @@ check(DisplayPick.forBox(boxBuiltin, windows: both, displays: displays) == built
 check(DisplayPick.forBox(CGRect(x: 0, y: 0, width: 1200, height: 800), windows: [windowOnExternal], displays: displays) == external,
       "windowed: the window's display")
 check(DisplayPick.forBox(boxExternal, windows: [], displays: displays) == nil, "no OmacVM.app window: nothing")
+// Another VM's window on a third display: the size tells (a window: + its title bar).
+let third = MacDisplay(id: 44, bounds: CGRect(x: -1920, y: 0, width: 1920, height: 1080), builtin: false)
+let ds3 = displays + [third]
+let mine = CGRect(x: 103, y: -1135, width: 1840, height: 1095), other = CGRect(x: -1880, y: 60, width: 1440, height: 838)
+check(DisplayPick.forBox(CGRect(x: 0, y: 0, width: 1840, height: 1067), windows: [mine, other], displays: ds3) == external,
+      "windowed, another VM elsewhere: the window of this size")
+check(DisplayPick.forBox(CGRect(x: 0, y: 0, width: 1440, height: 810), windows: [mine, other], displays: ds3) == third,
+      "...and the other one's")
+check(DisplayPick.forBox(boxExternal, windows: both + [other], displays: ds3) == external, "full screen on two, another VM on a third")
+check(DisplayPick.forBox(boxBuiltin, windows: both + [other], displays: ds3) == builtin, "...the built-in's output too")
 // External to the right of the built-in, tops aligned.
 let right = MacDisplay(id: 5, bounds: CGRect(x: 1728, y: 0, width: 2560, height: 1440), builtin: false)
 let ds2 = [builtin, right]
