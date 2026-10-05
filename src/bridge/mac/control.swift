@@ -148,12 +148,18 @@ final class Control {
   private var status: [String: (at: Date, body: [String: Any])] = [:]
   private var statusRunning: Set<String> = []
   private var jobs: [String: JobRun] = [:]
-  private var nonces = NonceCache()
+  private var nonces = NonceStore()
+  private var requests = RequestLimiter()
+  private var nonceFD: Int32 = -1, nonceAppended = 0
   private var lastCheck = Date.distantPast
   private var timer: DispatchSourceTimer?
 
   func start() {
     try? FileManager.default.createDirectory(atPath: jobsDir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    q.sync {
+      nonces.load((try? String(contentsOfFile: noncePath, encoding: .utf8)) ?? "", now: Date())
+      compactNonces()
+    }
     // Jobs older than a week go.
     for f in (try? FileManager.default.contentsOfDirectory(atPath: jobsDir)) ?? [] {
       let p = jobsDir + "/" + f
@@ -215,14 +221,20 @@ final class Control {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
       switch vmForApp(name, vmList(cli, refreshFor: "app/" + name)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
       vmName = vm.name
+      // Each VM's requests are limited on their own: one VM cannot crowd out another.
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
       // Signed with the VM's own key, which never crosses the network.
       let key = storedVMKey(vm)
-      let checked = q.sync {
-        verifyControlAuth(header: headers["x-omacvm-auth"], key: key, method: method, path: path,
-                          proto: headers["x-omacvm-proto"] ?? "", body: body, now: Date(), nonces: &nonces)
+      let checked = q.sync { () -> Result<String, AuthFailure> in
+        let r = verifyControlAuth(header: headers["x-omacvm-auth"], key: key, vm: vmKeyName(type: vm.type, name: vm.name),
+                                  method: method, path: path, proto: headers["x-omacvm-proto"] ?? "", body: body,
+                                  now: Date(), nonces: &nonces)
+        keepNonces()
+        return r
       }
       switch checked {
       case .success(let nonce): signer = (key!.trimmingCharacters(in: .whitespacesAndNewlines), nonce)
@@ -266,7 +278,7 @@ final class Control {
       // A job started before a Bridge restart (an update reinstalls the Bridge) still counts.
       if runningOnDisk(vmKey(vm)) { return refuse(PolicyError(409, "busy", "a job runs for this VM: wait for it")) }
       if let e = q.sync(execute: { limiter.admit(vmKey(vm)) }) { return refuse(e) }
-      let argv = jobArgv(cli: cli, r, vm: vm.name, commit: commit)
+      let argv = jobArgv(cli: cli, r, vm: vm.name, type: vm.type, commit: commit)
       guard let j = startJob(argv, vm: vm, request: r) else {
         q.sync { limiter.finished(vmKey(vm)) }
         return refuse(PolicyError(500, "spawn", "the job did not start"))
@@ -275,6 +287,29 @@ final class Control {
     default:
       refuse(PolicyError(404, "not-found", "not found"))
     }
+  }
+
+  // ---- nonces kept across restarts (on q) ----
+  private var noncePath: String { supportDir + "/nonces" }
+
+  /// The live nonces to a fresh file, then appended to one line per request.
+  private func compactNonces() {
+    if nonceFD >= 0 { close(nonceFD); nonceFD = -1 }
+    let tmp = noncePath + ".new"
+    let text = nonces.lines(now: Date()).map { $0 + "\n" }.joined()
+    FileManager.default.createFile(atPath: tmp, contents: Data(text.utf8), attributes: [.posixPermissions: 0o600])
+    if rename(tmp, noncePath) != 0 { log("control: nonces not kept across restarts (\(String(cString: strerror(errno))))") }
+    nonceFD = open(noncePath, O_WRONLY | O_APPEND | O_CLOEXEC)
+    nonceAppended = 0
+  }
+
+  private func keepNonces() {
+    let new = nonces.drainNew()
+    guard !new.isEmpty, nonceFD >= 0 else { return }
+    let d = Data(new.map { $0 + "\n" }.joined().utf8)
+    _ = d.withUnsafeBytes { write(nonceFD, $0.baseAddress, d.count) }
+    nonceAppended += new.count
+    if nonceAppended > 2 * nonces.perVMLimit { compactNonces() }
   }
 
   // ---- which VM ----
@@ -332,7 +367,7 @@ final class Control {
     var feats: Any = NSNull(), checks: Any = NSNull()
     let g = DispatchGroup()
     DispatchQueue.global().async(group: g) {
-      if let (_, out) = runCLI([cli, "features", "--vm", vm.name, "--json"], timeout: 60),
+      if let (_, out) = runCLI([cli, "features", "--vm", vm.name, "--vm-type", vm.type, "--json"], timeout: 60),
          let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any], let f = o["features"] as? [[String: Any]] {
         feats = f.map { ["name": $0["name"] ?? "", "on": $0["on"] ?? false, "available": $0["available"] ?? true, "reason": $0["reason"] ?? ""] }
       }

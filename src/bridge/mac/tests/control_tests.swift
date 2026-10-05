@@ -82,13 +82,14 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     if case .failure(let e) = vmForPeer("127.0.0.1", [appA]) { expect(e.code == "app-vm", "an app VM's address is no identity") } else { expect(false, "app loopback") }
 
     // ---- argv ----
-    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .enable, features: ["gestures"]), vm: "My VM", commit: nil)
-           == ["/c/omacvm", "enable", "gestures", "--vm", "My VM", "--yes", "--transaction"], "enable argv")
-    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .update, features: []), vm: "V", commit: String(repeating: "a", count: 40))
-           == ["/c/omacvm", "update", "--vm", "V", "--transaction", "--yes", "--commit", String(repeating: "a", count: 40)], "update argv")
-    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["bridge"]), vm: "V", commit: nil)
-           == ["/c/omacvm", "apply", "--vm", "V", "--transaction", "--yes", "--reinstall", "bridge"], "reinstall: that feature only")
-    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["gestures", "mac-clock"]), vm: "V", commit: nil).suffix(4)
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .enable, features: ["gestures"]), vm: "My VM", type: "parallels", commit: nil)
+           == ["/c/omacvm", "enable", "gestures", "--vm", "My VM", "--vm-type", "parallels", "--yes", "--transaction"], "enable argv")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .update, features: []), vm: "V", type: "app", commit: String(repeating: "a", count: 40))
+           == ["/c/omacvm", "update", "--vm", "V", "--vm-type", "app", "--transaction", "--yes", "--commit", String(repeating: "a", count: 40)],
+           "update argv")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["bridge"]), vm: "V", type: "utm", commit: nil)
+           == ["/c/omacvm", "apply", "--vm", "V", "--vm-type", "utm", "--transaction", "--yes", "--reinstall", "bridge"], "reinstall: that feature only")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["gestures", "mac-clock"]), vm: "V", type: "utm", commit: nil).suffix(4)
            == ["--reinstall", "gestures", "--reinstall", "mac-clock"], "reinstall two")
 
     // ---- the VM's own key: requests signed with it, never sent ----
@@ -105,11 +106,11 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
       "1 \(t) \(n) " + requestMAC(key: key, method: method, path: path, time: t, nonce: n, proto: "1", body: body)
     }
     func check(_ h: String?, stored: String? = k, method: String = "POST", path: String = "/omacvm/jobs", body: Data = jobBody,
-               now: Date = tNow, cache: inout NonceCache) -> Result<String, AuthFailure> {
-      verifyControlAuth(header: h, key: stored, method: method, path: path, proto: "1", body: body, now: now, nonces: &cache)
+               vm: String = String(repeating: "a", count: 32), now: Date = tNow, cache: inout NonceStore) -> Result<String, AuthFailure> {
+      verifyControlAuth(header: h, key: stored, vm: vm, method: method, path: path, proto: "1", body: body, now: now, nonces: &cache)
     }
     func code(_ r: Result<String, AuthFailure>) -> String { if case .failure(let f) = r { return f.error.code }; return "ok" }
-    var nc = NonceCache()
+    var nc = NonceStore()
     expect(code(check(auth(1760000090, n0), stored: k + "\n", cache: &nc)) == "ok", "signed with its key")
     expect(code(check(auth(1760000090, n0), cache: &nc)) == "replay", "the same request again: replay")
     let n1 = "1123456789abcdef0123456789abcdef", n2 = "2123456789abcdef0123456789abcdef"
@@ -133,10 +134,48 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     if case .failure(let f) = check(auth(1760000090, n2, key: String(repeating: "5b", count: 32)), cache: &nc) {
       expect(f.nonce == nil, "a wrong signature gets no signed answer (no oracle)")
     } else { expect(false, "unsigned refusal") }
-    var small = NonceCache(limit: 4)
-    for i in 0..<4 { _ = small.take(String(format: "%032x", i), now: tNow) }
-    expect(!small.take(String(format: "%032x", 9), now: tNow), "full of fresh nonces: refused, not forgotten")
-    expect(small.take(String(format: "%032x", 9), now: tNow.addingTimeInterval(2 * authWindow + 1)), "old ones expire")
+    // Per VM: one VM that fills its own set never stops another.
+    let vmA = String(repeating: "a", count: 32), vmB = String(repeating: "b", count: 32)
+    var small = NonceStore(perVMLimit: 4)
+    for i in 0..<4 { expect(small.take(vm: vmA, nonce: String(format: "%032x", i), time: 1760000090, now: tNow) == .taken, "A takes \(i)") }
+    expect(small.take(vm: vmA, nonce: String(format: "%032x", 9), time: 1760000090, now: tNow) == .full, "A full of fresh nonces: refused, not forgotten")
+    expect(small.take(vm: vmA, nonce: String(format: "%032x", 0), time: 1760000090, now: tNow) == .replay, "A's own replay still says replay")
+    expect(small.take(vm: vmB, nonce: String(format: "%032x", 9), time: 1760000090, now: tNow) == .taken, "B is not stopped by A")
+    expect(small.take(vm: vmB, nonce: String(format: "%032x", 0), time: 1760000090, now: tNow) == .taken, "the same nonce from B is B's own")
+    expect(small.take(vm: vmA, nonce: String(format: "%032x", 9), time: 1760000500, now: tNow.addingTimeInterval(authWindow + 1)) == .taken,
+           "A's old ones expire with their request time")
+    // A flood through verifyControlAuth: A gets "rate" (signed), B still gets in.
+    var flood = NonceStore(perVMLimit: 50)
+    for i in 0..<50 { _ = check(auth(1760000090, String(format: "%032x", 1000 + i)), vm: vmA, cache: &flood) }
+    expect(code(check(auth(1760000090, String(format: "%032x", 2000)), vm: vmA, cache: &flood)) == "rate", "flooding VM: rate")
+    if case .failure(let f) = check(auth(1760000090, String(format: "%032x", 2001)), vm: vmA, cache: &flood) {
+      expect(f.error.status == 429 && f.nonce != nil, "rate answer is signed (the VM believes it)")
+    } else { expect(false, "flood") }
+    expect(code(check(auth(1760000090, String(format: "%032x", 2002)), vm: vmB, cache: &flood)) == "ok", "the other VM still gets in")
+    // Kept across a restart: the lines, loaded into a new store.
+    var before = NonceStore()
+    _ = before.take(vm: vmA, nonce: n0, time: 1760000090, now: tNow)
+    _ = before.take(vm: vmB, nonce: n1, time: 1759999000, now: tNow)   // already expired
+    let fresh = before.drainNew()
+    expect(fresh == ["\(vmA) \(n0) 1760000090", "\(vmB) \(n1) 1759999000"] && before.drainNew().isEmpty, "new lines once: \(fresh)")
+    expect(before.lines(now: tNow) == ["\(vmA) \(n0) 1760000090"], "only live lines kept")
+    var after = NonceStore()
+    after.load(fresh.joined(separator: "\n") + "\nnot a line\n\(vmA) ZZ 1\n\(vmA.uppercased()) \(n2) 1760000090\n", now: tNow)
+    expect(after.count(vm: vmA) == 1 && after.count(vm: vmB) == 0, "load: live and well-formed only")
+    expect(code(check(auth(1760000090, n0), vm: vmA, cache: &after)) == "replay", "a request caught before a restart is refused after it")
+    var capped = NonceStore(perVMLimit: 2)
+    capped.load((0..<5).map { "\(vmA) \(String(format: "%032x", $0)) 1760000090" }.joined(separator: "\n"), now: tNow)
+    expect(capped.count(vm: vmA) == 2, "load keeps the cap")
+    // Requests per VM: a burst, then the steady rate; per VM.
+    var rl = RequestLimiter(burst: 3, perSecond: 1)
+    for _ in 0..<3 { expect(rl.admit("A", now: tNow) == nil, "burst") }
+    expect(rl.admit("A", now: tNow)?.code == "rate", "over the burst: rate")
+    expect(rl.admit("B", now: tNow) == nil, "another VM has its own")
+    expect(rl.admit("A", now: tNow.addingTimeInterval(1.1)) == nil, "refilled after a second")
+    expect(rl.admit("A", now: tNow.addingTimeInterval(1.2))?.code == "rate", "but only one")
+    // The defaults keep a VM at the steady rate below its nonce cap for a whole window.
+    let d = RequestLimiter(), cap = NonceStore().perVMLimit
+    expect(d.burst + d.perSecond * 2 * authWindow < Double(cap), "rate x window < cap")
     expect(logSafe("/omacvm/x\nFAKE line\r\u{1b}[31m") == "/omacvm/x?FAKE line??[31m", "log: no control characters")
     expect(logSafe("a\u{2028}b") == "a?b" && logSafe(String(repeating: "x", count: 500)).count == 200, "log: line separators, length")
     // As lib/mac.sh vm_key_file: printf '%s/%s' parallels "My VM" | shasum -a 256 | cut -c1-32

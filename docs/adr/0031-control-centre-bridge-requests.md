@@ -33,7 +33,12 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   VM in `~/.config/omacvm-bridge/vm-key`), which never crosses the network:
   `X-OmacVM-Auth: 1 <time> <nonce> <HMAC-SHA256(key, method, path, time,
   nonce, protocol header, SHA-256 of the body)>`. The Bridge takes it within
-  5 minutes of its own clock and each nonce once. Answers to signed requests
+  5 minutes of its own clock and each nonce once. Nonces are kept per VM
+  (each with its own cap, at most 4 requests a second per VM after a burst
+  of 60), so a VM that floods the Bridge is refused ("rate") and no other
+  VM is; they are kept in `omacvm-bridge/nonces` too, so a request caught
+  before a Bridge restart (every update restarts it) is still refused after
+  it. Answers to signed requests
   carry `X-OmacVM-Answer: <HMAC-SHA256(key, nonce, status, SHA-256 of the
   body)>`, and the VM believes nothing else: a VM that answers for the Mac's
   address (it has the Bridge token, as every VM does, so it passes /proof)

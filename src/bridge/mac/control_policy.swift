@@ -193,17 +193,77 @@ func sameText(_ a: String, _ b: String) -> Bool {
   return diff == 0
 }
 
-/// Nonces seen in the window: each signed request is taken once.
-struct NonceCache {
-  private var seen: [String: Date] = [:]
-  let limit: Int
-  init(limit: Int = 20000) { self.limit = limit }
-  /// False when it was seen already (or the cache is full of fresh ones).
-  mutating func take(_ nonce: String, now: Date) -> Bool {
-    if seen.count >= limit / 2 { seen = seen.filter { now.timeIntervalSince($0.value) < 2 * authWindow } }
-    if seen[nonce] != nil || seen.count >= limit { return false }
-    seen[nonce] = now
-    return true
+/// Nonces seen in the window, per VM: each signed request is taken once.
+/// Each VM has its own set and its own cap, so a VM that sends many requests
+/// fills only its own (and gets "rate"), never another VM's. A nonce is kept
+/// while its request time is still in the window (time + authWindow).
+/// `lines`/`load` keep the sets across Bridge restarts (an update restarts
+/// it): a request caught before a restart is still refused after it.
+enum NonceResult: Equatable { case taken, replay, full }
+
+struct NonceStore {
+  private var perVM: [String: [String: Int64]] = [:]   // VM -> nonce -> request time
+  private var fresh: [String] = []                       // taken since the last drainNew()
+  let perVMLimit: Int
+  init(perVMLimit: Int = 4096) { self.perVMLimit = perVMLimit }
+
+  private static func live(_ t: Int64, _ now: Int64) -> Bool { now - t <= Int64(authWindow) }
+
+  mutating func take(vm: String, nonce: String, time: Int64, now: Date) -> NonceResult {
+    let n = Int64(now.timeIntervalSince1970)
+    var seen = perVM[vm] ?? [:]
+    if seen[nonce] != nil { return .replay }
+    if seen.count >= perVMLimit { seen = seen.filter { Self.live($0.value, n) } }
+    defer { perVM[vm] = seen }
+    if seen.count >= perVMLimit { return .full }
+    seen[nonce] = time
+    fresh.append("\(vm) \(nonce) \(time)")
+    return .taken
+  }
+
+  /// The lines taken since the last call, to append to the file.
+  mutating func drainNew() -> [String] { defer { fresh = [] }; return fresh }
+
+  func count(vm: String) -> Int { perVM[vm]?.count ?? 0 }
+
+  /// The live entries, one "VM nonce time" line each (VM: a file-name-safe
+  /// key, vmKeyName).
+  func lines(now: Date) -> [String] {
+    let n = Int64(now.timeIntervalSince1970)
+    return perVM.flatMap { vm, seen in seen.filter { Self.live($0.value, n) }.map { "\(vm) \($0.key) \($0.value)" } }
+  }
+
+  /// Lines as `lines` wrote them (also appended one at a time); expired,
+  /// malformed and over-the-cap lines are dropped.
+  mutating func load(_ text: String, now: Date) {
+    let n = Int64(now.timeIntervalSince1970)
+    for line in text.split(separator: "\n") {
+      let f = line.split(separator: " ").map(String.init)
+      guard f.count == 3, f[0].utf8.count == 32, f[1].utf8.count == 32, let t = Int64(f[2]), Self.live(t, n),
+            (f[0] + f[1]).utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else { continue }
+      var seen = perVM[f[0]] ?? [:]
+      if seen.count < perVMLimit { seen[f[1]] = t }
+      perVM[f[0]] = seen
+    }
+  }
+}
+
+/// Signed requests per VM: a burst, then a steady rate (the control centre
+/// asks about once a second while a job runs). Keeps one VM's flood to itself
+/// and below its nonce cap (rate x window < cap).
+struct RequestLimiter {
+  let burst: Double, perSecond: Double
+  private var buckets: [String: (tokens: Double, at: Date)] = [:]
+  init(burst: Double = 60, perSecond: Double = 4) { self.burst = burst; self.perSecond = perSecond }
+
+  mutating func admit(_ vm: String, now: Date = Date()) -> PolicyError? {
+    var b = buckets[vm] ?? (burst, now)
+    b.tokens = min(burst, b.tokens + max(0, now.timeIntervalSince(b.at)) * perSecond)
+    b.at = now
+    defer { buckets[vm] = b }
+    guard b.tokens >= 1 else { return PolicyError(429, "rate", "too many requests from this VM: wait a moment") }
+    b.tokens -= 1
+    return nil
   }
 }
 
@@ -220,8 +280,8 @@ func noVMKey() -> PolicyError {
 
 /// Checks X-OmacVM-Auth against the key the Mac keeps for the VM (made by
 /// omacvm apply). Success: the request's nonce (the answer is signed with it).
-func verifyControlAuth(header: String?, key stored: String?, method: String, path: String, proto: String,
-                       body: Data, now: Date, nonces: inout NonceCache) -> Result<String, AuthFailure> {
+func verifyControlAuth(header: String?, key stored: String?, vm: String, method: String, path: String, proto: String,
+                       body: Data, now: Date, nonces: inout NonceStore) -> Result<String, AuthFailure> {
   guard let key = stored?.trimmingCharacters(in: .whitespacesAndNewlines), key.utf8.count >= authKeyMin else {
     return .failure(AuthFailure(error: noVMKey(), nonce: nil, macTime: nil))
   }
@@ -239,10 +299,13 @@ func verifyControlAuth(header: String?, key stored: String?, method: String, pat
     return .failure(AuthFailure(error: PolicyError(403, "clock", "this VM's clock is \(off < 1e9 ? String(Int(off)) : "far") s off the Mac's"),
                                 nonce: f[2], macTime: mac))
   }
-  guard nonces.take(f[2], now: now) else {
+  switch nonces.take(vm: vm, nonce: f[2], time: t, now: now) {
+  case .taken: return .success(f[2])
+  case .replay:
     return .failure(AuthFailure(error: PolicyError(403, "replay", "this request was sent before: not run again"), nonce: f[2], macTime: nil))
+  case .full:
+    return .failure(AuthFailure(error: PolicyError(429, "rate", "too many requests from this VM: wait a moment"), nonce: f[2], macTime: nil))
   }
-  return .success(f[2])
 }
 
 /// Text from a request for the Bridge's log: no control characters (a
@@ -254,15 +317,16 @@ func logSafe(_ s: String) -> String {
 
 /// The exact command for a job: a fixed argv, no shell. `commit` only for
 /// update, from the manifest the Mac verified itself. reinstall repairs the
-/// named features only.
-func jobArgv(cli: String, _ r: JobRequest, vm: String, commit: String?) -> [String] {
+/// named features only. The VM by name and app (a name may be in two apps).
+func jobArgv(cli: String, _ r: JobRequest, vm: String, type: String, commit: String?) -> [String] {
+  let which = ["--vm", vm, "--vm-type", type]
   switch r.action {
   case .enable, .disable:
-    return [cli, r.action.rawValue] + r.features + ["--vm", vm, "--yes", "--transaction"]
+    return [cli, r.action.rawValue] + r.features + which + ["--yes", "--transaction"]
   case .reinstall:
-    return [cli, "apply", "--vm", vm, "--transaction", "--yes"] + r.features.flatMap { ["--reinstall", $0] }
+    return [cli, "apply"] + which + ["--transaction", "--yes"] + r.features.flatMap { ["--reinstall", $0] }
   case .update:
-    return [cli, "update", "--vm", vm, "--transaction", "--yes"] + (commit.map { ["--commit", $0] } ?? [])
+    return [cli, "update"] + which + ["--transaction", "--yes"] + (commit.map { ["--commit", $0] } ?? [])
   }
 }
 
