@@ -71,6 +71,8 @@ struct SetupView: View {
     @State private var autologin = false
     @State private var location = Paths.vmsRoot.path
     @State private var locationProblem: String?
+    @State private var prebuilt: PrebuiltImage?
+    @State private var usePrebuilt = true
 
     private var userOK: Bool {
         state.config.user.range(of: "^[a-z_][a-z0-9_-]{0,31}$", options: .regularExpression) != nil
@@ -82,9 +84,17 @@ struct SetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Omarchy VM").font(.title2.bold())
-            Text("\(Product.name) installs Arch Linux ARM and Omarchy into a new VM. It takes 10 to 30 minutes and downloads a few GB.")
+            Text(prebuilt == nil
+                 ? "\(Product.name) installs Arch Linux ARM and Omarchy into a new VM. It takes 10 to 30 minutes and downloads a few GB."
+                 : "\(Product.name) downloads a VM that is already built (a few minutes), or builds it here from Arch Linux ARM and Omarchy (10 to 30 minutes).")
                 .foregroundStyle(.secondary)
             Form {
+                if let pb = prebuilt {
+                    Picker("How", selection: $usePrebuilt) {
+                        Text("Download a prebuilt VM (\(pb.size), Omarchy \(pb.omarchy))").tag(true)
+                        Text("Build it here (10 to 30 minutes)").tag(false)
+                    }
+                }
                 TextField("VM name", text: $state.config.name)
                 if !state.config.name.isEmpty && !VMConfig.validName(state.config.name) {
                     Text("Letters, digits, spaces, . _ and - only (64 at most).").font(.caption).foregroundStyle(.red)
@@ -130,6 +140,7 @@ struct SetupView: View {
                     .disabled(!canBuild)
             }
         }
+        .task { prebuilt = await PrebuiltImage.lookup() }
     }
 
     private func chooseLocation() {
@@ -172,7 +183,7 @@ struct SetupView: View {
         // Omanotch off for now: see VMConfig.features.
         state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
-        state.creator.start(config: state.config, password: password)
+        state.creator.start(config: state.config, password: password, prebuilt: usePrebuilt && prebuilt != nil)
         password = ""; password2 = ""
     }
 }
