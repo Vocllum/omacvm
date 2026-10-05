@@ -88,7 +88,7 @@ prebuilt_space_ok() {
     need_dest=$(( need_dest + need_cache )); need_cache=0
   fi
   if (( dest_kb < need_dest + 2097152 )); then
-    echo "not enough free space on $(df -P "$dest" | awk 'NR == 2 { print $6 }'): $(pb_gb $(( (need_dest + 2097152) * 1024 ))) GB needed, $(pb_gb $(( dest_kb * 1024 ))) GB free" >&2
+    echo "not enough free space on $(df -P "$dest" | awk 'NR == 2 { sub(/^([^ ]+ +){5}/, ""); print }'): $(pb_gb $(( (need_dest + 2097152) * 1024 ))) GB needed, $(pb_gb $(( dest_kb * 1024 ))) GB free" >&2
     return 1
   fi
   if (( need_cache && cache_kb < need_cache + 2097152 )); then

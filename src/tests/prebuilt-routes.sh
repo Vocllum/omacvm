@@ -290,6 +290,12 @@ expect "a strange file name: refused with a reason" yes "$(grep -q 'not used: un
   [[ $msg == "not enough free space"* ]] || { echo "FAIL free space: '$msg'"; exit 1; }
   PB_UNPACKED_KB=100 prebuilt_space_ok "$T/dest" || { echo "FAIL free space: 100 KB did not fit"; exit 1; }
 ) && expect "free space is checked" ok ok || fail=1
+# The message names the whole mount point, spaces and all.
+(
+  PREBUILT_CACHE=$T/cache PB_SIZE=1000 PB_UNPACKED_KB=1000000
+  df() { printf 'Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk9s1 2000000 1990000 10000 99%% /Volumes/My Disk\n'; }
+  prebuilt_space_ok "$T/dest" 2>&1 || true
+) | grep -q '^not enough free space on /Volumes/My Disk: ' && expect "free space: a mount point with spaces" ok ok || expect "free space: a mount point with spaces" ok no
 
 # printable: colour codes out, other escape sequences and controls too.
 got=$(printf '\033[1;32m==>\033[0m done\033]52;c;aGk=\007 x\r\033]0;title\007\n' | printable)
