@@ -103,6 +103,23 @@ final class Runner {
         return a
     }
 
+    /// The display for the VM's window: under the pointer, else the one with
+    /// the active menu bar; nil with one display.
+    static func placement() -> UInt32? {
+        let screens = NSScreen.screens.compactMap { s -> WindowPlacement.Screen? in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID else { return nil }
+            return WindowPlacement.Screen(id: id, frame: s.frame)
+        }
+        let menuBar = NSScreen.main?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+        return WindowPlacement.display(pointer: NSEvent.mouseLocation, screens: screens, menuBar: menuBar)
+    }
+
+    /// QEMU shows a window now (on any display).
+    nonisolated static func hasWindow(_ pid: pid_t) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        return list.contains { $0[kCGWindowOwnerPID as String] as? Int32 == pid && $0[kCGWindowLayer as String] as? Int == 0 }
+    }
+
     /// The path the network took at the last start (FastNetwork).
     private(set) var network = FastNetwork.Choice(vmnet: false, mac: FastNetwork.defaultMAC, record: "slirp off")
 
@@ -148,6 +165,10 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        // The window opens on the display the user is using (WindowPlacement).
+        // QEMU's hook for that (omacvm-cocoa-displays.patch) still has the name
+        // its first user, the display tests, gave it; it is no test mode.
+        if let d = Runner.placement() { env["OMACVM_TEST_MAIN_DISPLAY"] = String(d) }
         if Settings.hdrActive {
             env["OMACVM_GL_HDR"] = "1"
         }
