@@ -258,9 +258,14 @@ static void test_seen(void)
     f = frame(1920, 1080, false, false, 0);
     CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_EMPTY,
           "a black frame is not empty");
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1024, 768, false) == SPLASH_SEEN_OTHER &&
-          omacvm_splash_seen(NULL, 0, 1920, 1080, false) == SPLASH_SEEN_OTHER,
-          "a frame too small for the logo, or none, is not other");
+    /* The firmware's first mode, 640 x 480, black: empty, not other. */
+    CHECK(omacvm_splash_seen(f, 640 * 4, 640, 480, false) == SPLASH_SEEN_EMPTY,
+          "a black frame too small for the logo is not empty");
+    memset(f + (size_t)200 * 640 * 4, 0xaa, (size_t)40 * 640 * 4);
+    CHECK(omacvm_splash_seen(f, 640 * 4, 640, 480, false) == SPLASH_SEEN_OTHER,
+          "a small frame with something on it is not other");
+    CHECK(omacvm_splash_seen(NULL, 0, 1920, 1080, false) == SPLASH_SEEN_OTHER,
+          "no picture is not other");
     free(f);
 }
 

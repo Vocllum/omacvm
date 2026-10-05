@@ -9,7 +9,11 @@ then fades into it; if the guest is slower, the logo holds until its first
 picture. If the guest shows anything else before the animation ends (another
 firmware logo, GRUB, Linux), the rest plays within 0.35 s, then the fade: no
 half-made letters, and the guest is never held up. Which it is, is told by
-sampling the middle of each logo cell in the guest's picture. Reduce motion or
+sampling the middle of each logo cell in the guest's picture (read back from
+the scanout texture, as virgl shows the firmware's picture as one; only until
+something other than the logo shows). A black picture (the firmware's first
+mode, before the logo) counts as the guest's after 1 s, so the logo never
+hides a guest that draws little for long. Reduce motion or
 OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the main window
 animates.
 After that, until the guest shows a picture on an output, and when it switches
@@ -77,7 +81,7 @@ work notes).
      }
      return self;
  }
-@@ -2977,6 +2980,543 @@
+@@ -2977,6 +2980,715 @@
      CGLDestroyContext(ctx);
  }
  
@@ -106,7 +110,9 @@ work notes).
 +#include "ui/omacvm-splash.h"   /* the logo's cells, the animation's core */
 +
 +static int omacvm_splash_on = -1;       /* OMACVM_BOOT_SPLASH */
-+static int omacvm_intro_seen = -1;      /* the guest's main picture: SPLASH_SEEN_*, -1 none */
++static uint32_t gl_scanout_w, gl_scanout_h;  /* the scanout's size, if the texture has none */
++static int omacvm_intro_seen = -1;
++static bool omacvm_intro_watching = true;   /* until the animation hands over */      /* the guest's main picture: SPLASH_SEEN_*, -1 none */
 +static GLuint omacvm_splash_tex[2];     /* on black, on navy; gl_view_ctx's group */
 +static bool omacvm_guest_drew;          /* a GL scanout since the last reset */
 +static int omacvm_frame_w = 1920;       /* the last picture of the guest's */
@@ -260,7 +266,127 @@ work notes).
 +    });
 +}
 +
-+static void omacvm_intro_guest_drew(bool real);
++static void omacvm_intro_guest_drew(int seen);
++
++/*
++ * QEMU's thread, BQL: the same for a GL scanout (virgl shows the firmware's
++ * picture as one): the logo's place is read back from the texture. Only until
++ * the guest shows something other than the logo; 1215 x 285 pixels a time.
++ */
++/*
++ * With the view context: w x h pixels of the texture from (x, y) (GL's rows,
++ * from the bottom) into px as 0xAARRGGBB. False if it cannot be read; that is
++ * said once, and then the animation just plays to its end.
++ */
++static bool omacvm_intro_read(GLuint tex, int x, int y, int w, int h, uint32_t *px)
++{
++    static GLuint fb;
++    static bool said;
++    GLenum status, err;
++
++    if (!fb) {
++        glGenFramebuffers(1, &fb);
++    }
++    while (glGetError() != GL_NO_ERROR) {
++        /* not ours */
++    }
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, fb);
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
++    status = glCheckFramebufferStatus(GL_READ_FRAMEBUFFER);
++    if (status == GL_FRAMEBUFFER_COMPLETE) {
++        glPixelStorei(GL_PACK_ALIGNMENT, 4);
++        glPixelStorei(GL_PACK_ROW_LENGTH, 0);
++        glReadPixels(x, y, w, h, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, px);
++    }
++    err = glGetError();
++    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
++    if (status != GL_FRAMEBUFFER_COMPLETE || err != GL_NO_ERROR) {
++        if (!said) {
++            said = true;
++            info_report("cocoa: start animation cannot read the guest's picture "
++                        "(framebuffer 0x%x, error 0x%x): it plays to its end", status, err);
++        }
++        return false;
++    }
++    return true;
++}
++
++/*
++ * QEMU's thread, BQL: what a GL scanout shows (virgl shows the firmware's
++ * picture as one): the logo's place is read back from the texture, only
++ * until the guest shows something other than the logo; 1215 x 285 pixels a
++ * time. A picture too small for the logo is empty if its middle row and
++ * column are black. Unreadable: taken as the logo (the animation plays on).
++ */
++static int omacvm_intro_seen_texture(DisplayGLTexture tex, uint32_t sw, uint32_t sh)
++{
++    static uint32_t px[SPLASH_ROWS * SPLASH_CELL][SPLASH_COLS * SPLASH_CELL];
++    static uint32_t line[2][16384];
++    __block int seen = SPLASH_SEEN_LOGO;
++    int x0, y0;
++
++    if (!tex.width || !tex.height) {
++        tex.width = sw;     /* the scanout's size */
++        tex.height = sh;
++    }
++    if (!tex.id || !tex.width || !tex.height || tex.width > 16384 || tex.height > 16384) {
++        return SPLASH_SEEN_LOGO;
++    }
++    if (!omacvm_splash_logo_at(tex.width, tex.height, &x0, &y0)) {
++        with_gl_view_ctx(^{
++            if (omacvm_intro_read(tex.id, 0, tex.height / 2, tex.width, 1, line[0]) &&
++                omacvm_intro_read(tex.id, tex.width / 2, 0, 1, tex.height, line[1])) {
++                seen = SPLASH_SEEN_EMPTY;
++                for (uint32_t i = 0; i < tex.width + tex.height; i++) {
++                    uint32_t p = i < tex.width ? line[0][i] : line[1][i - tex.width];
++                    if (!omacvm_splash_black(p)) {
++                        seen = SPLASH_SEEN_OTHER;
++                        cocoa_gl_log("intro: texture %u %ux%u: pixel %u is %08x", tex.id,
++                                     tex.width, tex.height, i, p);
++                        break;
++                    }
++                }
++            }
++        });
++        cocoa_gl_log("intro: texture %u %ux%u (no room for the logo): seen %d",
++                     tex.id, tex.width, tex.height, seen);
++        return seen;
++    }
++    with_gl_view_ctx(^{
++        const int lw = SPLASH_COLS * SPLASH_CELL, lh = SPLASH_ROWS * SPLASH_CELL;
++        /* Texture rows count from the bottom unless y_0_top. */
++        int y = tex.y_0_top ? y0 : (int)tex.height - y0 - lh;
++
++        if (!omacvm_intro_read(tex.id, x0, y, lw, lh, &px[0][0])) {
++            return;
++        }
++        /*
++         * virgl may keep a BGRX resource as RGBA with swizzled sampling, and
++         * the rows' order depends on y_0_top: either channel order and either
++         * row order count as the logo.
++         */
++        seen = SPLASH_SEEN_OTHER;
++        for (int flip = 0; flip < 2 && seen != SPLASH_SEEN_LOGO; flip++) {
++            if (flip) {
++                for (int r = 0; r < lh / 2; r++) {
++                    for (int c = 0; c < lw; c++) {
++                        uint32_t t = px[r][c];
++                        px[r][c] = px[lh - 1 - r][c];
++                        px[lh - 1 - r][c] = t;
++                    }
++                }
++            }
++            for (int bgr = 0; bgr < 2 && seen != SPLASH_SEEN_LOGO; bgr++) {
++                seen = omacvm_splash_seen_logo((const uint8_t *)px, sizeof(px[0]), bgr);
++            }
++        }
++        cocoa_gl_log("intro: texture %u %ux%u top=%d: seen %d (pixels %08x %08x)",
++                     tex.id, tex.width, tex.height, tex.y_0_top, seen,
++                     px[lh / 2][lw / 2], px[SPLASH_CELL / 2][SPLASH_CELL * 2 + SPLASH_CELL / 2]);
++    });
++    return seen;
++}
 +
 +/*
 + * QEMU's thread, BQL: tell the start animation what the guest shows. The
@@ -273,10 +399,13 @@ work notes).
 +{
 +    int seen = SPLASH_SEEN_OTHER;
 +
-+    if (omacvm_intro_seen == SPLASH_SEEN_OTHER) {
++    if (omacvm_intro_seen == SPLASH_SEEN_OTHER || !qatomic_read(&omacvm_intro_watching)) {
 +        return;
 +    }
-+    if (!gl_scanout_borrow) {
++    if (gl_scanout_borrow) {
++        seen = omacvm_intro_seen_texture(gl_scanout_borrow(gl_scanout_id),
++                                         gl_scanout_w, gl_scanout_h);
++    } else {
 +        pixman_format_code_t f;
 +
 +        if (!surface || surface_is_placeholder(surface)) {
@@ -289,19 +418,19 @@ work notes).
 +                                      surface_width(surface), surface_height(surface),
 +                                      f == PIXMAN_x8b8g8r8 || f == PIXMAN_a8b8g8r8);
 +        }
-+        if (seen == SPLASH_SEEN_EMPTY) {
-+            if (omacvm_intro_seen != SPLASH_SEEN_LOGO) {
-+                return;     /* the firmware cleared the screen, the logo comes */
-+            }
-+            seen = SPLASH_SEEN_OTHER;
-+        }
++        cocoa_gl_log("intro: surface %dx%d format %x: seen %d", surface_width(surface),
++                     surface_height(surface), f, seen);
 +    }
-+    if (seen == omacvm_intro_seen) {
++    if (seen == SPLASH_SEEN_EMPTY && omacvm_intro_seen == SPLASH_SEEN_LOGO) {
++        seen = SPLASH_SEEN_OTHER;   /* the logo went away */
++    }
++    if (seen == omacvm_intro_seen ||
++        (seen == SPLASH_SEEN_EMPTY && omacvm_intro_seen == SPLASH_SEEN_OTHER)) {
 +        return;
 +    }
 +    omacvm_intro_seen = seen;
 +    dispatch_async(dispatch_get_main_queue(), ^{
-+        omacvm_intro_guest_drew(seen == SPLASH_SEEN_OTHER);
++        omacvm_intro_guest_drew(seen);
 +    });
 +}
 +
@@ -381,13 +510,14 @@ work notes).
 +@interface OmacVMIntroLayer : CALayer
 +- (id)initWithFrameWidth:(int)fw height:(int)fh still:(BOOL)still;
 +- (void)play;
-+- (void)guestShows:(bool)real;
++- (void)guestShows:(int)seen;
 +@end
 +
 +static OmacVMIntroLayer *omacvm_intro;   /* main thread; nil once handed over */
 +
 +#define INTRO_RUSH 0.35   /* s: the rest of the animation once the guest shows more */
 +#define INTRO_FADE 0.35   /* s */
++#define INTRO_BLACK 1.0   /* s a black picture (the firmware's start) may last under it */
 +
 +@implementation OmacVMIntroLayer {
 +    CAShapeLayer *cells;
@@ -398,8 +528,11 @@ work notes).
 +    CFTimeInterval start;       /* of the first frame; 0 before */
 +    CFTimeInterval rush_at;     /* when the guest showed a real picture; 0 before */
 +    double rush_from, rush_rate;
-+    double shown_t;             /* t when the guest's first picture came; -1 before */
-+    bool real;                  /* that picture was not the firmware's logo */
++    CFTimeInterval opened;      /* when the window opened */
++    double shown_after;         /* s after that the guest's first picture came; -1 before */
++    CFTimeInterval black_at;    /* when the guest showed a black picture; 0 before */
++    bool real;                  /* the guest showed something other than the logo */
++    bool logo;                  /* the guest showed the firmware's logo */
 +    bool fading;
 +    IntroCell buf[INTRO_MAX];
 +    uint8_t bg[INTRO_BG_W * INTRO_BG_H * 4];
@@ -418,7 +551,8 @@ work notes).
 +        fw = w;
 +        fh = h;
 +        t = still ? INTRO_END : 0;
-+        shown_t = -1;
++        opened = CACurrentMediaTime();
++        shown_after = -1;
 +        /* Like the cursor's image: sRGB, the colours of the preview. */
 +        space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 +        [self setActions:none];
@@ -528,9 +662,11 @@ work notes).
 +        return;
 +    }
 +    fading = true;
-+    info_report("cocoa: start animation fades into the guest's picture (%s; the first "
-+                "came %.2f s into the %.1f s animation)",
-+                real ? "not the logo, sped up" : "the firmware's logo", shown_t, INTRO_END);
++    qatomic_set(&omacvm_intro_watching, false);
++    info_report("cocoa: start animation fades into the guest's picture (%s; it came "
++                "%.2f s after the window opened, the animation is %.1f s)",
++                real ? "not the logo, sped up" : logo ? "the firmware's logo" : "black",
++                shown_after, INTRO_END);
 +    [a setFromValue:@1.0];
 +    [a setToValue:@0.0];
 +    [a setBeginTime:now];
@@ -567,20 +703,59 @@ work notes).
 +        t = INTRO_END;
 +        [link invalidate];
 +        link = nil;
-+        if (shown_t >= 0) {
++        if (shown_after >= 0) {
 +            [self fade];
++        } else if (black_at) {
++            [self fadeIfBlack];
 +        }
 +    }
 +    [self render];
 +}
 +
-+/* The guest's picture: the firmware's logo (real: false) or anything else. */
-+- (void)guestShows:(bool)r
++/*
++ * A black picture is the firmware clearing the screen before its logo, or a
++ * guest drawing little (text in a small mode): after INTRO_BLACK s it counts
++ * as the guest's picture, so the logo never hides it for long.
++ */
++- (void)fadeIfBlack
 +{
-+    if (shown_t < 0) {
-+        shown_t = t;
++    double left = INTRO_BLACK - (CACurrentMediaTime() - black_at);
++
++    if (fading || link) {
++        return;
++    }
++    if (left > 0) {
++        [self retain];
++        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(left * NSEC_PER_SEC)),
++                       dispatch_get_main_queue(), ^{
++            [self fadeIfBlack];
++            [self release];
++        });
++        return;
++    }
++    if (shown_after < 0) {
++        shown_after = CACurrentMediaTime() - opened;
++    }
++    [self fade];
++}
++
++/* What the guest shows: SPLASH_SEEN_EMPTY, _LOGO (the firmware's) or _OTHER. */
++- (void)guestShows:(int)seen
++{
++    bool r = seen == SPLASH_SEEN_OTHER;
++
++    if (seen == SPLASH_SEEN_EMPTY) {
++        if (!black_at) {
++            black_at = CACurrentMediaTime();
++            [self fadeIfBlack];
++        }
++        return;
++    }
++    if (shown_after < 0) {
++        shown_after = CACurrentMediaTime() - opened;
 +    }
 +    real |= r;
++    logo |= seen == SPLASH_SEEN_LOGO;
 +    if (!link) {
 +        [self fade];
 +    } else if (r && !rush_at) {
@@ -592,9 +767,9 @@ work notes).
 +@end
 +
 +/* Main thread: what the guest shows on the main output now. */
-+static void omacvm_intro_guest_drew(bool real)
++static void omacvm_intro_guest_drew(int seen)
 +{
-+    [omacvm_intro guestShows:real];
++    [omacvm_intro guestShows:seen];
 +}
 +
 +/* Main thread, with the BQL (cocoa_display_init): start the animation. */
@@ -606,6 +781,7 @@ work notes).
 +
 +    if (!omacvm_splash_enabled() || getenv("OMACVM_COCOA_HIDDEN") ||
 +        ![[cocoaView layer] isKindOfClass:[CAOpenGLLayer class]]) {
++        omacvm_intro_watching = false;
 +        return;
 +    }
 +    info_report("cocoa: start animation %s", reduce ? "still (Reduce motion)" :
@@ -621,7 +797,7 @@ work notes).
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -2984,6 +3524,7 @@
+@@ -2984,6 +3696,7 @@
          surface_gl_update_texture(dgc.gls, surface, x, y, w, h);
          gl_dirty = true;
      });
@@ -629,7 +805,7 @@ work notes).
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -2996,6 +3537,7 @@
+@@ -2996,6 +3709,7 @@
  
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
@@ -637,7 +813,7 @@ work notes).
  }
  
  static void cocoa_gl_render(void)
-@@ -3073,6 +3615,8 @@
+@@ -3073,6 +3787,8 @@
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -646,7 +822,7 @@ work notes).
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3123,6 +3667,7 @@
+@@ -3123,6 +3839,7 @@
  {
      gl_scanout_borrow = NULL;
      gl_dirty = true;
@@ -654,15 +830,36 @@ work notes).
  
      cocoa_gl_log("scanout disable");
  }
-@@ -3136,6 +3681,7 @@
+@@ -3135,7 +3852,10 @@
+ {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
++    gl_scanout_w = x + w;
++    gl_scanout_h = y + h;
      gl_dirty = true;
 +    omacvm_splash_update();
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -3711,6 +4257,8 @@
+@@ -3145,7 +3865,17 @@
+                                    uint32_t x, uint32_t y,
+                                    uint32_t w, uint32_t h)
+ {
++    int lx, ly;
++
+     gl_dirty = true;
++    /* Once the logo is there, only changes where it is matter (not the
++     * firmware's progress bar under it). */
++    if (omacvm_intro_seen != SPLASH_SEEN_LOGO ||
++        !omacvm_splash_logo_at(gl_scanout_w, gl_scanout_h, &lx, &ly) ||
++        (x < (uint32_t)lx + SPLASH_COLS * SPLASH_CELL && x + w > (uint32_t)lx &&
++         y < (uint32_t)ly + SPLASH_ROWS * SPLASH_CELL && y + h > (uint32_t)ly)) {
++        omacvm_intro_watch();
++    }
+ 
+     cocoa_gl_log("scanout flush region=%ux%u+%u+%u", w, h, x, y);
+ }
+@@ -3711,6 +4441,8 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -671,20 +868,22 @@ work notes).
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -4641,6 +5189,10 @@
+@@ -4641,6 +5373,12 @@
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;
 +        qemu_register_reset(omacvm_splash_reset, NULL);
 +        if (opts->gl != DISPLAY_GL_MODE_ES) {
 +            omacvm_intro_start();
++        } else {
++            omacvm_intro_watching = false;
 +        }
  
          for (unsigned int index = 0; ; index++) {
              QemuConsole *con = qemu_console_lookup_by_index(index);
 --- /dev/null
 +++ b/ui/omacvm-splash.h
-@@ -0,0 +1,514 @@
+@@ -0,0 +1,550 @@
 +/*
 + * OmacVM boot splash: Omarchy's logo as cells, and the core of the start
 + * animation (OMACVM turns into the logo). Only C, no Cocoa or QEMU, so that
@@ -902,24 +1101,20 @@ work notes).
 +enum { SPLASH_SEEN_EMPTY, SPLASH_SEEN_LOGO, SPLASH_SEEN_OTHER };
 +
 +/*
-+ * A w x h picture of 32-bit pixels, 0xXXRRGGBB (0xXXBBGGRR with bgr), rows
-+ * stride bytes apart: does it show the firmware's logo (centred as edk2 draws
-+ * it, SPLASH_CELL pixels a cell), black where the logo goes, or something
-+ * else? One pixel in the middle of each cell; 1 % of them may be off.
++ * The logo's place in a picture of 32-bit pixels, 0xXXRRGGBB (0xXXBBGGRR with
++ * bgr), rows stride bytes apart, data at the logo's top left: does it show
++ * the firmware's logo (SPLASH_CELL pixels a cell), black, or something else?
++ * One pixel in the middle of each cell; 1 % of them may be off.
 + */
-+static int omacvm_splash_seen(const uint8_t *data, int stride, int w, int h, bool bgr)
++static int omacvm_splash_seen_logo(const uint8_t *data, size_t stride, bool bgr)
 +{
-+    const int lw = SPLASH_COLS * SPLASH_CELL, lh = SPLASH_ROWS * SPLASH_CELL;
 +    const int n = SPLASH_COLS * SPLASH_ROWS;
-+    int x0 = (w - lw) / 2, y0 = (h - lh) / 2, logo = 0, dark = 0;
++    int logo = 0, dark = 0;
 +
-+    if (!data || w < lw || h < lh || stride < w * 4) {
-+        return SPLASH_SEEN_OTHER;
-+    }
 +    for (int r = 0; r < SPLASH_ROWS; r++) {
 +        for (int c = 0; c < SPLASH_COLS; c++) {
-+            const uint8_t *q = data + (size_t)(y0 + r * SPLASH_CELL + SPLASH_CELL / 2) * stride +
-+                               (size_t)(x0 + c * SPLASH_CELL + SPLASH_CELL / 2) * 4;
++            const uint8_t *q = data + (size_t)(r * SPLASH_CELL + SPLASH_CELL / 2) * stride +
++                               (size_t)(c * SPLASH_CELL + SPLASH_CELL / 2) * 4;
 +            uint32_t p = q[0] | q[1] << 8 | q[2] << 16 | (uint32_t)q[3] << 24;
 +            int red = bgr ? p & 0xff : (p >> 16) & 0xff, green = (p >> 8) & 0xff;
 +            int blue = bgr ? (p >> 16) & 0xff : p & 0xff;
@@ -934,6 +1129,46 @@ work notes).
 +        return SPLASH_SEEN_EMPTY;
 +    }
 +    return logo >= n - n / 100 ? SPLASH_SEEN_LOGO : SPLASH_SEEN_OTHER;
++}
++
++/* Where edk2 puts the logo in a w x h picture (centred); false: it does not fit. */
++static bool omacvm_splash_logo_at(int w, int h, int *x0, int *y0)
++{
++    *x0 = (w - SPLASH_COLS * SPLASH_CELL) / 2;
++    *y0 = (h - SPLASH_ROWS * SPLASH_CELL) / 2;
++    return *x0 >= 0 && *y0 >= 0;
++}
++
++static bool omacvm_splash_black(uint32_t p)
++{
++    return (p & 0xff) < 0x40 && ((p >> 8) & 0xff) < 0x40 && ((p >> 16) & 0xff) < 0x40;
++}
++
++/*
++ * The same for a whole w x h picture. One too small for the logo (the
++ * firmware starts at 640 x 480 before it sets its mode) is empty if it is
++ * black (16 x 16 pixels across it), else something other than the logo.
++ */
++static int omacvm_splash_seen(const uint8_t *data, int stride, int w, int h, bool bgr)
++{
++    int x0, y0;
++
++    if (!data || w < 1 || h < 1 || stride < w * 4) {
++        return SPLASH_SEEN_OTHER;
++    }
++    if (!omacvm_splash_logo_at(w, h, &x0, &y0)) {
++        for (int j = 0; j < 16; j++) {
++            for (int i = 0; i < 16; i++) {
++                const uint8_t *q = data + (size_t)((2 * j + 1) * h / 32) * stride +
++                                   (size_t)((2 * i + 1) * w / 32) * 4;
++                if (!omacvm_splash_black(q[0] | q[1] << 8 | q[2] << 16)) {
++                    return SPLASH_SEEN_OTHER;
++                }
++            }
++        }
++        return SPLASH_SEEN_EMPTY;
++    }
++    return omacvm_splash_seen_logo(data + (size_t)y0 * stride + (size_t)x0 * 4, stride, bgr);
 +}
 +
 +#define INTRO_END     2.4   /* s: the last movement; the logo holds after it */
