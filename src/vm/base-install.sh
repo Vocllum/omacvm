@@ -16,6 +16,27 @@ D=$(lsblk -dnpo NAME,TRAN | awk '$2 == "nvme" { print $1; exit }')
 [[ -b ${D:-} ]] || { echo "base-install: no NVMe disk found" >&2; exit 1; }
 P=${D}p
 
+log "clock"
+# Package signatures and HTTPS need a right clock. The live system's comes from
+# the VM's RTC; check it against the mirror's Date header (plain HTTP, so a
+# wrong clock can't fail the TLS check) and set it when it is off by > 5 min.
+timedatectl set-ntp true 2>/dev/null || true
+web=$(curl -sI --max-time 6 http://mirror.archlinuxarm.org/aarch64/core/core.db 2>/dev/null |
+  tr -d '\r' | sed -n 's/^[Dd]ate: //p' | head -1 || true)
+if [[ -n $web ]] && ref=$(date -u -d "$web" +%s 2>/dev/null); then
+  off=$(( $(date -u +%s) - ref ))
+  if (( off > 300 || off < -300 )); then
+    echo "the clock is off by ${off}s ($(date -u '+%F %T') UTC, the mirror says $web): setting it"
+    date -u -s "@$ref" >/dev/null || echo "WARNING: could not set the clock"
+  fi
+else
+  echo "WARNING: no time from the mirror; keeping the clock as it is"
+fi
+# This script is from 2026: an earlier year means the clock is wrong.
+(( $(date -u +%Y) >= 2026 )) ||
+  echo "WARNING: the clock says $(date -u '+%F %T') UTC; package signature checks will likely fail"
+echo "clock: $(date -u '+%F %T') UTC"
+
 log "fastest Arch Linux ARM mirrors from here"
 # The geo-DNS default can send you across the world and time out; rank a few
 # mirrors by how fast they serve the core database, keep the default last.
