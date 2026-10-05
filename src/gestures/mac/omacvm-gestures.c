@@ -1110,8 +1110,14 @@ static int (*escapeAllFn)(void) = escapeAll;
 static void (*saveSignFn)(void) = saveSwipeSign;
 static double verifyAfter = 0.8;   // s: a swipe's animation is over by then
 
+// The escape combo's steps still to run (main thread): the offline test runs
+// the main queue until none is left.
+static int pendingSteps;
+
 static void after(void (^f)(void)) {
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), f);
+  pendingSteps++;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(),
+                 ^{ pendingSteps--; f(); });
 }
 
 // The Space each display showed the VM on when the combo left it (pressing
@@ -1433,7 +1439,7 @@ static void enterWindow(void) {
 
 // The switch runs after the tap's callback has returned (it talks to the
 // window server; the callback must stay quick).
-static void later(void (*f)(void)) { dispatch_async(dispatch_get_main_queue(), ^{ f(); }); }
+static void later(void (*f)(void)) { pendingSteps++; dispatch_async(dispatch_get_main_queue(), ^{ pendingSteps--; f(); }); }
 
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
 static int swallowEscUp;
