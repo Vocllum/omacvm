@@ -281,9 +281,25 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
   `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
   connection (macOS restores it when QEMU dies); a watchdog thread turns it
-  on after 2 s without the main thread. `macShortcuts` (org.omacvm.app) →
-  `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS. Gestures' tap still takes
-  ⌃⌥⌘ Esc first; the Bridge still routes media keys.
+  on after 2 s without the main thread. Off by default since RC11 (not
+  always handed back on the Mac mini): `macShortcuts` (org.omacvm.app,
+  default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
+  turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge
+  still routes media keys.
+- Escape combo (Gestures): every way out of a full-screen VM ends in
+  `verifyOut` (front app not the VM, its full-screen window not on the
+  pointer's display); still in → AXFullScreen false + hide, and the next
+  combo restores full screen (`restoreFull`). An OmacVM.app window with the
+  keyboard: the combo gives it to the app from before / Finder
+  (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
+- Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume
+  only there). Brightness keys reach no tap on macOS 27: `hid-keys.swift`
+  reads them with IOHIDManager (not seized; Input Monitoring): F1/F2 through
+  the keyboard's own `FnFunctionUsageMap` (IORegistry) and
+  `com.apple.keyboard.fnState`, or the consumer/Apple brightness usages;
+  acted on only with an OmacVM.app VM in front (`MediaRoute`), deduplicated
+  against the tap (`BrightnessOnce`), and not stepped again when macOS
+  changed the display itself.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.

@@ -46,9 +46,9 @@ in more words.
   Studio Display) set that display with the VM in front, full screen or in a
   window. A key the Bridge cannot use goes to macOS, and the Bridge's log
   says once why.
-- OmacVM.app: every key combination goes to the VM while it has the
-  keyboard (full screen, or its window in front): macOS's own shortcuts
-  are switched off meanwhile, so screenshots (⌘⇧3/4/5 and the ⌃ variants),
+- OmacVM.app, experimental and off by default: every key combination goes
+  to the VM while it has the keyboard (full screen, or its window in front):
+  macOS's own shortcuts are switched off meanwhile, so screenshots (⌘⇧3/4/5 and the ⌃ variants),
   Mission Control, App Exposé, Show Desktop (F11, ⌘F11), Launchpad,
   ⌃-arrows, Spotlight (⌘Space), input sources (⌃Space), ⌘Tab, ⌘\`, ⌘Q/H/M/W
   and F-keys with any modifier reach Omarchy. The top-row keys macOS knows by
@@ -58,8 +58,25 @@ in more words.
   previous: the VM's). Checked against macOS's whole list (405 shortcuts,
   each typed into a real QEMU). macOS turns its shortcuts back on by itself
   when the VM's app quits or crashes, and OmacVM turns them on if the VM's
-  window stops answering. To keep them with macOS:
-  `defaults write org.omacvm.app macShortcuts -bool true`.
+  window stops answering. On a Mac mini the switch was not always handed
+  back (macOS's brightness keys then stopped working in macOS), so by
+  default macOS keeps its shortcuts, as before. To try it:
+  `defaults write org.omacvm.app macShortcuts -bool false` and a VM restart.
+- ⌃⌥⌘ Esc always gets you out of the full-screen VM: after the swipe (or
+  the app switch) OmacVM Gestures checks that the VM is no longer in front
+  and its Space no longer shows. If it still is (on a Mac mini the swipe did
+  nothing and Finder came to the front without a window), the VM's window
+  leaves full screen and its app is hidden. ⌃⌥⌘ Esc in macOS then brings it
+  back in full screen.
+- ⌃⌥⌘ Esc in an OmacVM.app window gives the keyboard back to macOS (the app
+  you were in before, else Finder); pressed again in macOS, the window comes
+  back with the keyboard.
+- Brightness keys with an OmacVM.app VM in front work on macOS 27 too: there
+  they reach no app at all, so OmacVM Bridge reads them from the keyboard
+  (Input Monitoring; macOS still gets every key) and sets the display the VM
+  is on. With no VM in front macOS handles them as always. The volume keys
+  are taken at the keyboard level now (on macOS 27 they did not reach the
+  Bridge before).
 - Scroll momentum only ever takes a trackpad's scrolling (the built-in one,
   a Magic Trackpad, also one connected later), decided per scroll: wheel
   mice, smooth-scrolling mice (Logitech MX and co.) and a Magic Mouse scroll

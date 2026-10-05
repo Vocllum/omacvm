@@ -38,9 +38,10 @@ Put the VM in full screen for the trackpad gestures, the scroll momentum and
 the media keys. While it is full screen and in front, the Mac's trackpad
 gestures and ⌘ shortcuts go to Omarchy, and macOS's own Spaces swipe is off.
 
-**Every key combination goes to the VM while it has the keyboard**
-(OmacVM.app, full screen or its window in front): macOS's own shortcuts are
-off meanwhile. Screenshots (⌘⇧3, ⌘⇧4, ⌘⇧5 and the ⌃ variants), Mission
+**Every key combination to the VM** (OmacVM.app, experimental, off by
+default): `defaults write org.omacvm.app macShortcuts -bool false` and a VM
+restart. Then, while the VM has the keyboard (full screen or its window in
+front), macOS's own shortcuts are off. Screenshots (⌘⇧3, ⌘⇧4, ⌘⇧5 and the ⌃ variants), Mission
 Control, App Exposé, Show Desktop (F11, ⌘F11), Launchpad, ⌃-arrows,
 Spotlight (⌘ Space), input sources (⌃ Space), ⌘ Tab, ⌘ \`, ⌘ Q/H/M/W (they
 never quit or hide the VM's app) and F-keys with any modifier reach Omarchy.
@@ -51,9 +52,10 @@ the Mac's, else the VM's; play, next and previous go to the VM's players).
 The moment the VM's window loses the keyboard (another app, the escape
 combo, a click outside its window), macOS has its shortcuts again; macOS
 also turns them back on by itself if the VM's app quits or crashes, and
-OmacVM does if its window stops answering. To keep macOS's shortcuts for
-macOS: `defaults write org.omacvm.app macShortcuts -bool true` and a VM
-restart. `omacvm check` says which way it went.
+OmacVM does if its window stops answering. Off by default because on a Mac
+mini the switch was not always handed back: `defaults delete org.omacvm.app
+macShortcuts` and a VM restart go back to macOS keeping them. `omacvm check`
+says which way it went.
 
 **⌃⌥⌘ Esc** (Control + Option + Command + Escape) in the VM takes you
 straight back to macOS: the trackpad and keys go back to macOS and the
@@ -70,8 +72,15 @@ EscapeSwipe all` (or `pointer`).
 
 Never stuck: if the swipe cannot be made (the VM's Space has no neighbour,
 or macOS gives no Spaces information) or does not land, the app you were in
-before comes to the front instead, with its Space (Finder if it has quit);
-if macOS refuses that too, the VM's app is hidden, so macOS has the keyboard.
+before comes to the front instead, with its Space (Finder if it has quit).
+Every way out ends with a check: if the VM is still in front or its full
+screen still shows, its window leaves full screen and the VM's app is
+hidden, so macOS has the keyboard and the screen. ⌃⌥⌘ Esc brings it back,
+in full screen again.
+
+In an OmacVM.app window, ⌃⌥⌘ Esc gives the keyboard back to macOS (the app
+you were in before, else Finder); press it again in macOS to get the window
+back with the keyboard.
 The combo brings it back.
 
 Media keys while a VM is in front (OmacVM.app full screen or in a window;
