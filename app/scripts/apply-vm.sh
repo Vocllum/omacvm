@@ -15,6 +15,12 @@ vssh true < /dev/null 2>/dev/null || die "the VM is not running (or has no SSH y
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 mkdir "$tmp/omacvm"
 cp -R "$OMACVM_SRC" "$tmp/omacvm/src"
+# The app's signed Mac helpers (Contents/Helpers): installed instead of
+# building them, when made from these sources (src/lib/helpers.sh).
+if [[ -d $HERE/../../Helpers ]]; then
+  OMACVM_HELPERS=$(cd "$HERE/../../Helpers" && pwd)
+  export OMACVM_HELPERS
+fi
 args=(--vm "$NAME" --vm-type app --ip "127.0.0.1:$SSH_PORT" --user "$VM_USER" --keyboard "$KEYBOARD")
 for f in ${FEATURES:-}; do args+=(--feature "$f"); done
 [[ ${2:-} == --no-mac ]] && args+=(--no-mac)

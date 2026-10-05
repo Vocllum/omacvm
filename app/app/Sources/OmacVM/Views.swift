@@ -248,6 +248,7 @@ struct ReadyView: View {
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
     @State private var keepDockAway = Settings.keepDockAway
+    @State private var escape = EscapeSetting.current()
     @State private var resourcesNote: String?
 
     /// The create screen's tiers; resources set some other way show as Custom.
@@ -293,6 +294,11 @@ struct ReadyView: View {
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
             Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
                 .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
+            Picker("Escape combo (⌃⌥⌘ Esc)", selection: $escape) {
+                ForEach(EscapeSetting.Choice.allCases, id: \.self) { Text($0.title).tag($0) }
+            }
+            .help("In a full-screen VM, Control-Option-Command-Esc swipes back to macOS with macOS's own animation, and again to the VM. The keyboard follows the pointer's monitor.")
+            .onChange(of: escape) { _, v in EscapeSetting.set(v) }
             if state.hasNotch {
                 Toggle("Use the notch for the menu bar", isOn: $notch)
                     .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")

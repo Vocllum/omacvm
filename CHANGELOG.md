@@ -96,10 +96,36 @@ from the release candidate, with the benchmark lock held.
 ### Keys, brightness and the Mac's helpers
 
 - ⌃⌥⌘ Esc in the full-screen VM now takes you straight back to macOS: the
-  app you were in before comes to the front with its Space, no swipe needed
-  (a mouse is enough). Pressed in macOS it takes you back into the VM, full
-  screen, with the trackpad and keys. Before, it only handed the trackpad
+  monitor under the pointer swipes to the Space beside the VM's, with
+  macOS's own animation, and the keyboard follows the pointer's monitor (no
+  trackpad needed, a mouse is enough). Pressed there again it swipes back
+  into the VM, full screen, with the trackpad and keys. OmacVM.app's
+  "Escape combo" setting swipes all monitors instead (other routes:
+  `defaults write org.omacvm.gestures EscapeSwipe all`). If the swipe cannot
+  be made or does not land, the app you were in before comes to the front
+  instead, and if macOS refuses that too, the VM's app is hidden: the
+  keyboard is never stuck in the VM. Before, it only handed the trackpad
   back. OmacVM.app, Parallels, UTM and VMware Fusion.
+- Media keys with an OmacVM.app VM in front, full screen or in a window:
+  volume and mute set the Mac's output; when it has no software volume (an
+  audio interface such as a Focusrite Scarlett), they set the VM's own
+  volume with Omarchy's popup instead of macOS's greyed-out panel.
+  Play/pause, next and previous go to the VM's players, not macOS's Now
+  Playing. The keys reach the VM through QEMU's control socket; if that is
+  busy, the key goes to macOS.
+- Brightness keys on a Mac mini with one Apple-style display (LG UltraFine,
+  Studio Display) set that display with the VM in front, full screen or in a
+  window. A key the Bridge cannot use goes to macOS, and the Bridge's log
+  says once why.
+- OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
+  OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
+  these copies (nothing is compiled on the Mac), and macOS keeps their
+  Accessibility and Input Monitoring permissions across updates. macOS asks
+  once more after the first signed install. A source checkout without the
+  app, or of another version, builds them as before. Both helpers log which
+  permission is missing, and `omacvm check` shows it.
+- OmacVM.app opens the VM's window on the display you are using (under the
+  pointer, else the one with the active menu bar) and gives it the keyboard.
 - After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
   working until the Mac's helpers were restarted: the new VM's own key tap
   sat ahead of theirs. They now take the front place again whenever an

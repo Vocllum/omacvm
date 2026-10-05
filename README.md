@@ -132,9 +132,9 @@ omacvm resources --vm NAME      # change its CPUs and memory
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.
 
-Put the VM in full screen for the gestures and media keys. **⌃⌥⌘ Esc** takes
-you from the VM back to the app and Space you were in before; press it in
-macOS to go back into the VM ([more](docs/features.md#full-screen-and-the-escape-keys)).
+Put the VM in full screen for the gestures. **⌃⌥⌘ Esc** swipes the monitor
+under the pointer from the VM back to macOS; press it there again to swipe
+back into the VM ([more](docs/features.md#full-screen-and-the-escape-keys)).
 Everything else: [docs/guide.md](docs/guide.md).
 
 ## How it works
@@ -155,7 +155,8 @@ Start with `omacvm check`: it names what is wrong and what to do.
 - **The Mac's menu bar stays over the full-screen VM**: System Settings › Menu
   Bar › Automatically hide and show the menu bar: **In Full Screen Only**.
 - **Gestures do nothing**: the VM must be full screen and in front; if ⌃⌥⌘ Esc
-  left you in the VM without the trackpad, press it again.
+  left you in the VM without the trackpad, press it again. `omacvm check`
+  says when the helpers miss a permission.
 - **"answers with another SSH host key"** after a rebuild:
   `omacvm apply --vm NAME --reset-host-key`.
 

@@ -423,11 +423,18 @@ enum VMApp {
   /// The app's executable: OmacVM.app runs each VM as Contents/Resources/runtime/bin/OmacVM
   /// (a development build as qemu-system-aarch64); its launcher has no VM windows.
   static func of(_ app: NSRunningApplication?) -> VMApp? {
-    guard let exe = app?.executableURL?.path else { return nil }
+    guard let app, let exe = app.executableURL?.path ?? pidPath(app.processIdentifier) else { return nil }
     let name = (exe as NSString).lastPathComponent
     if exe.hasSuffix("/runtime/bin/OmacVM") || name == "qemu-system-aarch64" { return .omacvm }
     return ["prl_client_app", "UTM", "VMware Fusion"].contains(name) ? .other : nil
   }
+}
+
+/// A process's executable, for an app LaunchServices names no executable for
+/// (QEMU makes itself an app without a bundle).
+func pidPath(_ pid: pid_t) -> String? {
+  var buf = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+  return proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 ? String(cString: buf) : nil
 }
 
 enum VMScreens {
