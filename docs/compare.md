@@ -34,7 +34,7 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
 | YouTube 4K at 60 fps | **✓ decoded by the Mac's media engine** in Google Chrome, Brave and Firefox ([which apps](video-decode.md)) | ✓ decoded by the CPU | ✓ decoded by the CPU | ✓ decoded by the CPU |
-| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | 45 %, not released yet (2.9.0) | ✗ | ✗ | ✗ |
+| GPU compute (Vulkan, OpenCL; Geekbench 7 GPU) | 45 %, not released yet | ✗ | ✗ | ✗ |
 | **Battery** (power draw, and hours on a full 100 Wh battery) | | | | |
 | Idle desktop | 6.2 W · 16 h | being re-measured | **5.5 W · 18 h** | 5.7 W · 18 h |
 | Reading, scrolling a page | 6.8 W · 15 h | being re-measured | **5.9 W · 17 h** | 7.3 W · 14 h |
