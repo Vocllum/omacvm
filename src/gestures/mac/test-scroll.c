@@ -92,6 +92,13 @@ static void modelChecks(void) {
   ScrollEvent cb = { 1, 1, 0, 30.01 }, cc = { 1, 8, 0, 30.02 }, cm = { 1, 0, 1, 30.3 };
   scrollRoute(&s, &cb); scrollRoute(&s, &cc); scrollFingers(&s, 0, 30.05);
   check(scrollRoute(&s, &cm) == SCROLL_PASS, "model: a cancelled touch has no momentum");
+  // A trackpad scroll that ended without momentum (fingers stopped first),
+  // then later a momentum stream with no scroll before it: not the trackpad's.
+  scrollFingers(&s, 2, 40.0);
+  ScrollEvent tb = { 1, 1, 0, 40.01 }, te = { 1, 4, 0, 40.2 }, lm = { 1, 0, 1, 41.0 }, lm2 = { 1, 0, 2, 41.05 };
+  scrollRoute(&s, &tb); scrollFingers(&s, 0, 40.15); scrollRoute(&s, &te);
+  check(scrollRoute(&s, &lm) == SCROLL_PASS && scrollRoute(&s, &lm2) == SCROLL_PASS,
+        "model: momentum long after a trackpad scroll ended without one: passes");
 }
 
 int main(void) {

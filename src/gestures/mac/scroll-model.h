@@ -31,13 +31,17 @@ typedef struct {
   double lastTouch;      // when a trackpad last had two or more fingers on it
   int gesture;           // the phased scroll under way is a trackpad's: -1 not known yet, 0 no, 1 yes
   int momentum;          // the momentum under way follows a trackpad's scroll
+  double ended;          // when the last phased scroll ended (phase 4)
 } ScrollState;
 
 // Fingers may lift a moment before macOS's last touch-phase event arrives.
 #define SCROLL_TOUCH_GRACE 0.25
+// macOS's momentum begins right after the fingers' scroll ended; a momentum
+// that begins later is not that scroll's (a scroll that ended without one).
+#define SCROLL_MOMENTUM_GAP 0.3
 
 static inline void scrollStateInit(ScrollState *s) {
-  s->fingers = 0; s->lastTouch = -1e9; s->gesture = -1; s->momentum = 0;
+  s->fingers = 0; s->lastTouch = -1e9; s->gesture = -1; s->momentum = 0; s->ended = -1e9;
 }
 
 // A trackpad's frame: n fingers touching at time now.
@@ -57,10 +61,11 @@ static inline int scrollRoute(ScrollState *s, const ScrollEvent *e) {
     s->momentum = 0;
     int route = s->gesture == 1 ? SCROLL_TOUCH : SCROLL_PASS;
     if (e->phase == 8) s->gesture = -1;          // cancelled: no momentum follows
+    if (e->phase == 4) s->ended = e->now;
     return route;
   }
   if (e->momentum) {
-    if (e->momentum == 1) s->momentum = s->gesture == 1;
+    if (e->momentum == 1) s->momentum = s->gesture == 1 && e->now - s->ended <= SCROLL_MOMENTUM_GAP;
     int route = s->momentum ? SCROLL_MOMENTUM : SCROLL_PASS;
     if (e->momentum == 3) { s->momentum = 0; s->gesture = -1; }
     return route;
