@@ -107,6 +107,7 @@ virgl_vertex_unused_patch="$native_dir/patches/virgl-vertex-unused-first-input.p
 virgl_memory_budget_patch="$native_dir/patches/virgl-resource-memory-budget.patch"
 virgl_queue_flush_patch="$native_dir/patches/virgl-control-queue-flush.patch"
 virgl_venus_robust_patch="$native_dir/patches/virgl-venus-robust-buffer-access.patch"
+virgl_budget_loss_patch="$native_dir/patches/virgl-resource-budget-context-loss.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -161,6 +162,7 @@ virgl_vertex_unused_patch_sha256=1c424509f19ebcd23c17a8fdb1984ddaa64e90e682959d5
 virgl_memory_budget_patch_sha256=c8068ca79738984e8c1205fc4eea73956de44ce92a98148bca50ee19e304c868
 virgl_queue_flush_patch_sha256=7f468d955d47cfbf9df75578efddfab0f36256b9b092c8e992f6b78faf67991b
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
+virgl_budget_loss_patch_sha256=cc4e339863d57ce9343de0b1eb54ec6730eeaa7a94e40e676d6a4e24c484bddb
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
@@ -808,6 +810,9 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_queue_flush_patch"
 # OmacVM: Venus devices always get robust buffer access where the host device has it.
 verify_file_sha "Venus robust buffer access" "$virgl_venus_robust_patch" "$virgl_venus_robust_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_venus_robust_patch"
+# OmacVM: a resource the budget refused loses (and tells) the context that made it.
+verify_file_sha "Budget context loss" "$virgl_budget_loss_patch" "$virgl_budget_loss_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_budget_loss_patch"
 # Test runtimes only (tests/graphics/context-loss.sh): refuse marked shaders on demand.
 if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   log "Adding the test-only shader fault hook (OMACVM_RUNTIME_TEST_HOOKS=1)"
