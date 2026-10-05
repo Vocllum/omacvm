@@ -60,6 +60,12 @@ elif [[ $mon == 1160x768* ]]; then bad "display" "$mon: still the firmware mode 
 else ok "display" "$mon"; fi
 bg=$H/.local/state/omarchy/current/background
 if [[ -L $bg && ! -e $bg ]]; then bad "desktop background" "$(readlink "$bg") is missing: omacvm apply, then log in again"; fi
+if [[ $TYPE == app ]]; then
+  # Which UEFI firmware OmacVM.app started the VM with (SMBIOS BIOS version).
+  fw=$(cat /sys/class/dmi/id/bios_version 2>/dev/null)
+  if [[ $fw == *-omacvm ]]; then ok "firmware" "$fw (Omarchy boot logo)"
+  else skip "firmware" "${fw:-unknown}: QEMU's own (TianoCore logo), from an older OmacVM.app or OMACVM_FIRMWARE=qemu"; fi
+fi
 
 section "The Mac in the bar (Bridge)"
 if [[ $BRIDGE == on ]]; then
