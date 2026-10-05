@@ -12,8 +12,11 @@
  * border and across a shared display edge (mouse and trackpad sized steps);
  * the same event handed over twice moves it once; the Mac's cursor never gets
  * within the gap of a corner or the Dock's edge; it is put back at the
- * pointer's place when the guard lets go. And the old guard (a warp on every
- * event) is shown to race: its steps add up.
+ * pointer's place when the guard lets go; events queued before the let-go
+ * don't jump back to the held cursor; with the Mac's cursor as the visible
+ * pointer (follow) it follows at the same speed; the guard's place maps into
+ * our windows (top row, notch strip, externals). And the old guard (a warp
+ * on every event) is shown to race: its steps add up.
  *
  * cc -Wall -Werror -I<qemu>/ui test-pointer-guard.c -o t && ./t
  */
@@ -158,6 +161,16 @@ static void run_steps(Mac *m, OmacVMGuard *g, int n, double ax, double ay,
               "%s: step %d to %.3f,%.3f, expected %.3f,%.3f (held %d)",
               what, i, gx, gy, ex, ey, g->held);
         check_cursor(m, what);
+        if (g->follow && g->held) {
+            /* The visible cursor is where the pointer is (one event behind at most). */
+            double tx = gx, ty = gy;
+            int d = omacvm_guard_display_at(&m->s, tx, ty);
+
+            omacvm_guard_fit(&m->s, d, &tx, &ty, OMACVM_GUARD_GAP);
+            CHECK(fabs(m->x - tx) <= fabs(ax) + 1 && fabs(m->y - ty) <= fabs(ay) + 1,
+                  "%s: step %d: the shown cursor at %.1f,%.1f, the pointer at %.1f,%.1f",
+                  what, i, m->x, m->y, gx, gy);
+        }
         px = gx;
         py = gy;
     }
@@ -287,6 +300,168 @@ int main(void)
         m = mac_at(&macbook, 1, &below, 1, 100, 300);
         run_steps(&m, &g, 130, 0, -2.5, 0, "up into the strip");
         CHECK(!g.held && m.attached, "strip: still held");
+    }
+
+    /*
+     * Events made while held but handled after the let-go (queued) are at the
+     * held cursor's place: they move the pointer by their delta, no jump back
+     * to that place (review of RC5: 1526 -> 1700 -> 1524 there).
+     */
+    for (int follow = 0; follow < 2; follow++) {
+        double max_step = 0, ox, oy;
+
+        memset(&g, 0, sizeof(g));
+        g.follow = follow;
+        m = mac_at(&macbook, 1, &macbook, 1, 1700, 260);
+        run_steps(&m, &g, 40, 0, -2, 0, "up into the top-right zone");
+        CHECK(g.held, "queued after let-go: not held");
+        run_steps(&m, &g, 85, -2, 0, 0, "left to the zone's border");
+        CHECK(g.held && g.x == 1530, "queued after let-go: pointer %.1f,%.1f", g.x, g.y);
+        ox = g.x;
+        oy = g.y;
+        {
+            Ev e[4];
+
+            e[0] = mac_motion(&m, -3, 0);   /* takes it out of the zone */
+            e[1] = mac_motion(&m, -2, 0);   /* made before the let-go */
+            e[2] = mac_motion(&m, -2, 0);
+            for (int i = 0; i < 3; i++) {
+                handle(&m, &g, &e[i], &gx, &gy);
+                CHECK(!g.held, "queued after let-go: held again at event %d (%.1f,%.1f)",
+                      i, gx, gy);
+                max_step = fmax(max_step, fmax(fabs(gx - ox), fabs(gy - oy)));
+                ox = gx;
+                oy = gy;
+            }
+            CHECK(gx == 1523 && gy == oy, "queued after let-go: pointer %.1f,%.1f", gx, gy);
+            for (int i = 0; i < 50; i++) {
+                e[3] = mac_motion(&m, -2, 0);
+                handle(&m, &g, &e[3], &gx, &gy);
+                max_step = fmax(max_step, fmax(fabs(gx - ox), fabs(gy - oy)));
+                ox = gx;
+                oy = gy;
+            }
+        }
+        CHECK(max_step <= 3 && !g.held && m.attached,
+              "queued after let-go (follow %d): a step of %.1f points", follow, max_step);
+    }
+
+    /* Follow: let go while a warp is in flight; the queued events are at the place before it. */
+    {
+        Ev e[3];
+
+        memset(&g, 0, sizeof(g));
+        g.follow = true;
+        m = mac_at(&macbook, 1, &macbook, 1, 1700, 260);
+        run_steps(&m, &g, 40, 0, -2, 0, "follow: up into the top-right zone");
+        run_steps(&m, &g, 84, -2, 0, 0, "follow: left near the zone's border");
+        CHECK(g.held && g.x == 1532, "follow, in flight: pointer %.1f,%.1f", g.x, g.y);
+        e[0] = mac_motion(&m, -2, 0);   /* still in the zone: a follow warp */
+        e[1] = mac_motion(&m, -3, 0);   /* out of it, made before that warp */
+        e[2] = mac_motion(&m, -2, 0);
+        for (int i = 0; i < 3; i++) {
+            handle(&m, &g, &e[i], &gx, &gy);
+        }
+        CHECK(!g.held && gx == 1525, "follow, in flight: pointer %.1f,%.1f held %d",
+              gx, gy, g.held);
+    }
+
+    /* The Mac's cursor shown (show-cursor=on): it follows, at the same speed. */
+    memset(&g, 0, sizeof(g));
+    g.follow = true;
+    m = mac_at(&macbook, 1, &macbook, 1, 1300, 450);
+    run_steps(&m, &g, 200, 3, -2.5, 0, "follow: to the top-right corner");
+    CHECK(g.held && g.x == 1727 && g.y == 0, "follow: corner %.1f,%.1f", g.x, g.y);
+    CHECK(m.x == 1727 - OMACVM_GUARD_GAP && m.y == OMACVM_GUARD_GAP,
+          "follow: shown cursor at %.1f,%.1f, not the gap off the corner", m.x, m.y);
+    run_steps(&m, &g, 150, -4, 0, 0, "follow: along the top edge, out of the zone");
+    memset(&g, 0, sizeof(g));
+    g.follow = true;
+    m = mac_at(&macbook, 1, &macbook, 1, 300, 1000);
+    run_steps(&m, &g, 2, 0, 1, 1, "follow: into the Dock zone, twice each");
+    run_steps(&m, &g, 600, 2.5, 0.2, 1, "follow: along the Dock's edge, twice each");
+    memset(&g, 0, sizeof(g));
+    g.follow = true;
+    m = mac_at(&macbook, 1, &macbook, 1, 300, 850);
+    for (int k = 0; k < 3; k++) {
+        run_steps(&m, &g, 400, 0, 0.37, 0, "follow: trackpad into the Dock zone");
+        run_steps(&m, &g, 400, 0.05, -0.37, 0, "follow: trackpad out of it");
+    }
+    memset(&g, 0, sizeof(g));
+    g.follow = true;
+    m = mac_at(two, 2, two, 2, 1500, 100);
+    run_steps(&m, &g, 200, 2, -1, 0, "follow: over the top-right corner to the external");
+    /* Follow with a queued event: one warp in flight, its distance taken out once. */
+    memset(&g, 0, sizeof(g));
+    g.follow = true;
+    m = mac_at(&macbook, 1, &macbook, 1, 300, 1000);
+    run_steps(&m, &g, 3, 0, 1, 0, "follow: into the Dock zone");
+    {
+        Ev e1 = mac_motion(&m, 5, 0);
+        Ev e2 = mac_motion(&m, 5, 0);   /* made before the warp e1 asks for */
+        double x0 = g.x;
+
+        handle(&m, &g, &e1, &gx, &gy);
+        handle(&m, &g, &e2, &gx, &gy);
+        CHECK(gx == x0 + 10, "follow, queued: pointer %.1f, expected %.1f", gx, x0 + 10);
+    }
+    run_steps(&m, &g, 100, 5, 0, 0, "follow: after the queued event");
+
+    /*
+     * The guard's place in our windows (ui/cocoa.m sends it to the guest from
+     * there): the top row counts (the guard stops the pointer on it; RC5 sent
+     * the held cursor's place instead), AppKit's frames convert to the
+     * guard's space, and a place in none of them is -1 (no position sent).
+     */
+    {
+        const double top = 1117;    /* NSMaxY of the main display's frame */
+        OmacVMRect wins[3];
+        OmacVMGuardScreens s;
+        double wx, wy;
+        int i;
+
+        /* The MacBook below the notch strip, an external above to the right. */
+        wins[0] = omacvm_guard_rect_from_cocoa(top, 0, 0, 1728, 1085);
+        wins[1] = omacvm_guard_rect_from_cocoa(top, 1728, 237, 1920, 1080);
+        /* A second MacBook-style window over the whole display. */
+        wins[2] = omacvm_guard_rect_from_cocoa(top, -1728, 0, 1728, 1117);
+        CHECK(wins[0].x == 0 && wins[0].y == 32 && wins[0].h == 1085,
+              "frame below the notch: %.0f,%.0f %.0fx%.0f", wins[0].x, wins[0].y,
+              wins[0].w, wins[0].h);
+        CHECK(wins[1].x == 1728 && wins[1].y == -200, "external frame: %.0f,%.0f",
+              wins[1].x, wins[1].y);
+        memset(&s, 0, sizeof(s));
+        s.ours = wins;
+        s.nours = 3;
+
+        i = omacvm_guard_window_point(&s, 1727, 32, &wx, &wy);
+        CHECK(i == 0 && wx == 1727 && wy == 1085,
+              "top row below the notch: window %d at %.1f,%.1f", i, wx, wy);
+        i = omacvm_guard_window_point(&s, 1727, 31.5, &wx, &wy);
+        CHECK(i == -1, "the notch strip is not ours: window %d", i);
+        i = omacvm_guard_window_point(&s, 1728 + 1919, -200, &wx, &wy);
+        CHECK(i == 1 && wx == 1919 && wy == 1080,
+              "external top-right corner: window %d at %.1f,%.1f", i, wx, wy);
+        i = omacvm_guard_window_point(&s, 1728, 879, &wx, &wy);
+        CHECK(i == 1 && wx == 0 && wy == 1, "external bottom row: window %d at %.1f,%.1f",
+              i, wx, wy);
+        i = omacvm_guard_window_point(&s, 1728, 880, &wx, &wy);
+        CHECK(i == -1, "below the external: window %d", i);
+        i = omacvm_guard_window_point(&s, -1728, 0, &wx, &wy);
+        CHECK(i == 2 && wx == 0 && wy == 1117, "top-left corner: window %d at %.1f,%.1f",
+              i, wx, wy);
+        i = omacvm_guard_window_point(&s, 0, 1116, &wx, &wy);
+        CHECK(i == 0 && wx == 0 && wy == 1, "bottom-left: window %d at %.1f,%.1f", i, wx, wy);
+
+        /* Where the guard stops a pointer pushed up into a top corner maps there. */
+        memset(&g, 0, sizeof(g));
+        m = mac_at(two, 2, wins, 2, 3500, 100);
+        m.s.ours = wins;
+        run_steps(&m, &g, 200, 2, -2, 0, "external: into its top-right corner");
+        i = omacvm_guard_window_point(&m.s, g.x, g.y, &wx, &wy);
+        CHECK(g.held && i == 1 && wx == 1919 && wy == 1080,
+              "external corner: pointer %.1f,%.1f -> window %d at %.1f,%.1f",
+              g.x, g.y, i, wx, wy);
     }
 
     /*

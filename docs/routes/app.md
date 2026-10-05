@@ -377,7 +377,9 @@ window per guest screen:
   while the VM has the pointer the Mac's cursor never gets onto a screen
   corner or the Dock's edge: within 200 points of them it is detached and
   stays put, and the guest's pointer moves on by the mouse's own motion
-  (`omacvm-cocoa-fullscreen-edges.patch`, maths in
+  (VMs that show the Mac's cursor instead of the guest's, `show-cursor=on`:
+  the cursor follows the guest's pointer, still kept off the corners and
+  the Dock's edge) (`omacvm-cocoa-fullscreen-edges.patch`, maths in
   `omacvm-cocoa-pointer-guard.patch`, unit test
   `app/runtime/Tests/display/test-pointer-guard.sh`). The pointer moves the
   same there as anywhere else. The app's setting "Keep the Dock and hot
