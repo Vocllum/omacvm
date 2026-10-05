@@ -28,8 +28,8 @@ Each app has its own page: [OmacVM.app](routes/app.md), [UTM](routes/utm.md),
 | CPU, one core: Geekbench 7 | **97 %** | 90 % | 93 % | **97 %** |
 | Web apps: Speedometer 3.1 | 70 % | 52 % | **71 %** | 67 % |
 | Animations in the browser: MotionMark 1.3.1 | no stable result | no stable result | **40 %** | no stable result |
-| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | no full-screen run yet · 22 % | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
-| 3D: glmark2 (score) | 1017 | 964 | 1813 | **7306** |
+| GPU, share of the Mac: Basemark Web 3.0 · WebGL Aquarium | 82 % · 18 % (2.9.0 RC, in a window, another VM running; 2.6.0 full screen: Aquarium 22 %) | 67 % · 26 % | **78 % · 38 %** | 75 % · 25 % |
+| 3D: glmark2 (score) | 1017 (2.9.0 RC in a window: 2856) | 964 | 1813 | **7306** |
 | **Graphics and video** | | | | |
 | GPU path | virgl | virgl | vmwgfx, with a Hyprland fix OmacVM builds | virgl |
 | GPU in Chrome, Chromium, Brave, Firefox | ✓ | ✓ | ✓ | ✓ |
