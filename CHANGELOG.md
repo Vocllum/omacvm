@@ -30,6 +30,13 @@ in more words.
   there now comes with the gestures feature. `omacvm apply` stops the service
   in VMs that have gestures off.
 
+- OmacVM.app keeps its VMs in `~/OmacVM`, one folder per VM (Spotlight skips
+  it), and installs itself in `~/Applications`. VMs in the old place
+  (`~/Library/Application Support/OmacVM/VMs`) stay there and keep working
+  while `~/OmacVM` does not exist; a folder picked in the app still wins.
+  `omacvm` finds the app in `~/Applications` or `/Applications` and the VMs
+  the same way as the app.
+
 ## 2.8.0
 
 - OmacVM.app uses every Mac display in full screen: a window (in its own
