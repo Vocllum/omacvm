@@ -144,7 +144,7 @@ info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i
 # helper_of FEATURE: the Mac helper it needs built (empty: none).
 helper_of() {
   case $1 in
-    bridge) echo "OmacVM Bridge" ;;
+    bridge|control-centre) echo "OmacVM Bridge" ;;   # the control centre asks the Mac through it
     camera|battery) [[ $TYPE == utm || $TYPE == fusion ]] && echo "OmacVM Bridge" ;;
     gestures|scroll-momentum) echo "OmacVM Gestures" ;;
     omanotch) echo Omanotch ;;
@@ -193,7 +193,7 @@ if (( MAC )); then
       failed_part "$(mac_helper_feature "$stop")" "$stop did not build on the Mac" mac
       die "$stop did not build on the Mac (see above); the VM was not changed. On the Mac, omacvm update tries it again"
     fi
-    (( ${#others[@]} )) && info "not built on the Mac: $(printf '%s, ' "${others[@]}" | sed 's/, $//') (the one installed before keeps running; omacvm update tries again). The VM side goes on."
+    (( ${#others[@]} )) && info "not built on the Mac: $(printf '%s, ' "${others[@]}" | sed 's/, $//') (after a failed build the one installed before keeps running; omacvm update tries again). The VM side goes on."
   elif (( mrc )); then
     rm -f "$MAC_FAILED"
     failed_part "" "the Mac side did not install" mac

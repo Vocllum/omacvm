@@ -48,4 +48,14 @@ inst --omanotch > /dev/null
 echo "// changed" >> "$T/src/omanotch/mac/install.sh"
 n=$(runs omanotch)
 expect "changed sources: tried again with --skip-failed" "5 $((n + 1))" "$(inst --omanotch --skip-failed) $(runs omanotch)"
+# apply: the helper each feature needs (a run that turns it on stops when
+# that helper did not build).
+eval "$(sed -n '/^helper_of() {/,/^}/p' "$R/src/cmd/apply.sh")"
+TYPE=parallels
+expect "helper of bridge" "OmacVM Bridge" "$(helper_of bridge)"
+expect "helper of control-centre" "OmacVM Bridge" "$(helper_of control-centre)"
+expect "helper of camera on Parallels: none" "" "$(helper_of camera)"
+TYPE=utm
+expect "helper of camera on UTM" "OmacVM Bridge" "$(helper_of camera)"
+expect "helper of scroll-momentum" "OmacVM Gestures" "$(helper_of scroll-momentum)"
 exit $fail
