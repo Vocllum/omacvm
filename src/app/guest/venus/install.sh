@@ -57,7 +57,10 @@ esac
 # The loader and the tools omacvm check uses (small; also when Mesa is built).
 pacman -S --needed --noconfirm vulkan-icd-loader vulkan-tools ocl-icd clinfo >/dev/null 2>&1 ||
   echo "OmacVM Venus extras: vulkan-tools/clinfo not installed (omacvm check cannot test Vulkan)"
-STAMP="$MESA_VERSION $(cat patches/*.patch | sha256sum | cut -c1-16)"
+# Rusticl and Zink link the distro's LLVM: a new LLVM major version (an Arch
+# update) needs a rebuild, which the next omacvm apply does.
+llvm=$(pacman -Q llvm-libs 2>/dev/null | awk '{ split($2, v, "."); print v[1] }')
+STAMP="$MESA_VERSION $(cat patches/*.patch | sha256sum | cut -c1-16) llvm-${llvm:-none}"
 if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
   pacman -S --needed --noconfirm meson ninja pkgconf python-mako python-yaml python-packaging \
     glslang spirv-tools spirv-llvm-translator llvm clang libclc rust rust-bindgen cbindgen \
