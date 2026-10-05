@@ -1,7 +1,9 @@
 # 0022: WebGPU and OpenCL on Venus
 
-Status: accepted, built (`webgpu-compute`). Firefox: WebGPU on by default in
-Venus VMs. Chromium/Chrome: WebGPU from a separate launcher. OpenCL: rusticl.
+Status: accepted, built (`webgpu-compute`); for users the feature `vulkan`
+(`omacvm enable vulkan`, off by default, OmacVM.app only; `gpu-next`, 3.0.0).
+Firefox: WebGPU on by default in Venus VMs. Chromium/Chrome: WebGPU from a
+separate launcher. OpenCL: rusticl.
 Partly replaces 0013's "rusticl waits for KosmicKrisp". (First written as
 0016; renumbered because other branches use 0016-0021.)
 
@@ -61,9 +63,11 @@ What we found (track notes `webgpu-compute`):
 Option 3. Option 1 leaves macOS 15 users without all of it; option 4 is a
 large host project and would still need option 3's semaphores.
 
-`src/app/guest/venus/install.sh` runs from the app's guest install when
-the VM has Venus (three capsets and a host-visible region in virtio-gpu's
-debugfs). It builds Mesa 26.2.4 (sha256-pinned) into `/opt/omacvm-mesa`
+`src/app/guest/venus/install.sh` runs from the guest install when the VM
+has the feature `vulkan` (`omacvm enable vulkan`; apply also writes the VM
+folder's `vulkan` file, from which the app starts that VM with Venus).
+Run by hand it acts only when the VM has Venus (three capsets and a
+host-visible region in virtio-gpu's debugfs). It builds Mesa 26.2.4 (sha256-pinned) into `/opt/omacvm-mesa`
 (venus + zink + rusticl, no GL: virgl keeps serving GL) with:
 
 - `mesa-zink-moltenvk-no-push-descriptors.patch`,

@@ -103,7 +103,7 @@ on CGL, not on ANGLE.
 | Blob alignment for 16 KiB pages | built: `gpu-native`, `gpu-venus` | `qemu-virtio-gpu-blob-alignment.patch` |
 | Venus on MoltenVK | built: `gpu-venus`, merged into `gpu-native`, hidden switch | see section 6 |
 | KosmicKrisp on macOS 26 | planned | ICD choice already in `virgl-darwin-vulkan-beside.patch` |
-| OpenCL (rusticl on Zink), WebGPU in Firefox and Chromium | built: `webgpu-compute`, Venus VMs | section 6, ADR 0022 |
+| OpenCL (rusticl on Zink), WebGPU in Firefox and Chromium | built: `webgpu-compute`; feature `vulkan` (`gpu-next`, opt-in) | section 6, ADR 0022 |
 | Zink as GL driver, ANGLE-on-Vulkan in Chrome | blocked on MoltenVK (GL 2.1, no `VK_EXT_provoking_vertex`) | - |
 | VideoToolbox decode | built: `video-decode` | `virgl-videotoolbox-decode.patch` |
 | One window per display | built: `app-displays` | `omacvm-cocoa-displays.patch` |
@@ -402,10 +402,13 @@ With the sync thread's fences (`gpu-native`) the same runtime gives about
                     vkr -> MoltenVK -> Metal
 ```
 
-- `src/app/guest/venus/install.sh`, called by the app's guest install,
-  does nothing without Venus (it reads the capset count and the host
-  visible region from virtio-gpu's debugfs). With Venus it builds the
-  pinned Mesa once (stamp: version + patch hash), registers
+- The feature `vulkan` (`omacvm enable vulkan --vm NAME`, off by default,
+  experimental): apply writes the VM folder's `vulkan` file, and the app
+  starts that VM with `blob=true,venus=true,hostmem=4G`; the guest install
+  runs `src/app/guest/venus/install.sh --force` (`--remove` when the
+  feature goes off). Run by hand without `--force` the script does nothing
+  without Venus (it reads the capset count and the host visible region
+  from virtio-gpu's debugfs). It builds the pinned Mesa once (stamp: version + patch hash), registers
   `/etc/vulkan/icd.d/omacvm_venus_icd.json` and
   `/etc/OpenCL/vendors/omacvm-rusticl.icd`, writes
   `/etc/environment.d/90-omacvm-venus.conf` (`RUSTICL_ENABLE=zink`,
@@ -511,9 +514,10 @@ falls back and logs once.
 | `OMACVM_GL_COLOR=native` | sRGB | untagged surfaces (old colours, oversaturated on P3) | built (`pacing-hdr`) |
 | `OMACVM_GL_HDR=1` | off (the app sets it only with an EDR display) | a 10-bit scanout is BT.2100 PQ: tag PQ, EDR on | built (`pacing-hdr`) |
 | `omacvm-virtio-gpu-build` (guest, root) | not installed | guest virtio-gpu with 10-bit planes; `--remove` goes back | built (`pacing-hdr`) |
-| `defaults write org.omacvm.app venus -bool true` | false | Venus device options | built (`gpu-venus`) |
+| `omacvm enable vulkan` (feature, per VM) | off | the VM folder's `vulkan` file: Venus device options for that VM; OmacVM's Mesa in the VM | built (`gpu-next`) |
+| `defaults write org.omacvm.app venus -bool true` | false | Venus device options for every VM (development) | built (`gpu-venus`) |
 | `OMACVM_VULKAN_DRIVER` | by macOS version | force an ICD file | built |
-| Guest: `src/app/guest/venus/install.sh` (`--remove`) | only on Venus VMs | OmacVM's Mesa for Vulkan, OpenCL (rusticl), Firefox WebGPU | built (`webgpu-compute`) |
+| Guest: `src/app/guest/venus/install.sh` (`--force`, `--remove`) | with the feature `vulkan` | OmacVM's Mesa for Vulkan, OpenCL (rusticl), Firefox WebGPU | built (`webgpu-compute`, `gpu-next`) |
 | `OMACVM_VIDEO_DECODE=0` | on | no video caps offered; guest decodes in software | built (`video-decode`) |
 | `OMACVM_VIDEO_AV1=1` | set by the app when the VM has the shim | offer AV1 | built |
 | `OMACVM_VIDEO_NO_VP9`, `OMACVM_VIDEO_NO_HEVC` | off | hide one codec | built |
