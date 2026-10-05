@@ -101,12 +101,50 @@ Include = /etc/pacman.d/mirrorlist
 [aur]
 Include = /etc/pacman.d/mirrorlist
 EOF
-pacstrap -C /root/pacman.alarm.conf /mnt base base-devel linux-aarch64 linux-aarch64-headers archlinuxarm-keyring \
-  btrfs-progs dosfstools grub efibootmgr openssh sudo git networkmanager nano vim man-db 2>&1 | tail -3
+# pacstrap's full output goes to $PACLOG (and later into the new system's
+# /var/log); on screen only its tail. pacman's "failed to commit transaction
+# (unexpected error)" says nothing: the cause is in the lines above it, so on a
+# failure those are shown. One retry after a fresh database sync covers a
+# flaky mirror or network.
+PACLOG=/root/pacstrap.log
+PKGS=(base base-devel linux-aarch64 linux-aarch64-headers archlinuxarm-keyring
+  btrfs-progs dosfstools grub efibootmgr openssh sudo git networkmanager nano vim man-db)
+pacstrap_run() {   # try number; output to $PACLOG.try, appended to $PACLOG
+  local rc=0
+  pacstrap -C /root/pacman.alarm.conf /mnt "${PKGS[@]}" > "$PACLOG.try" 2>&1 || rc=$?
+  { echo "---- pacstrap, try $1, exit $rc ----"; cat "$PACLOG.try"; } >> "$PACLOG"
+  return "$rc"
+}
+pacstrap_errors() {
+  local f=$PACLOG.try n
+  echo "---- pacstrap errors (full output: $PACLOG in the live system) ----"
+  grep '^error:' "$f" | awk '!seen[$0]++' | head -20 || true
+  n=$(grep -n 'failed to commit transaction' "$f" | tail -1 | cut -d: -f1 || true)
+  if [[ -n $n ]]; then
+    echo "---- the 20 lines before \"failed to commit transaction\" ----"
+    sed -n "$(( n > 20 ? n - 20 : 1 )),$(( n - 1 ))p" "$f"
+  elif ! grep -q '^error:' "$f"; then
+    tail -20 "$f"
+  fi
+  echo "----"
+}
+: > "$PACLOG"
+if ! pacstrap_run 1; then
+  pacstrap_errors
+  log "pacstrap again, after a fresh package database sync"
+  { echo "---- pacman -Syy ----"; pacman --config /root/pacman.alarm.conf -r /mnt -Syy --noconfirm 2>&1; } >> "$PACLOG" ||
+    echo "WARNING: the database sync failed too (see $PACLOG)"
+  if ! pacstrap_run 2; then
+    pacstrap_errors
+    die "pacstrap failed twice; the cause is in the error lines above"
+  fi
+fi
+tail -3 "$PACLOG.try"
 cp /root/pacman.alarm.conf /mnt/etc/pacman.conf
 sed -i 's/^\[options\]/[options]\nColor\nVerbosePkgLists/' /mnt/etc/pacman.conf
 cp /etc/pacman.d/mirrorlist /mnt/etc/pacman.d/mirrorlist
 genfstab -U /mnt > /mnt/etc/fstab
+install -m644 "$PACLOG" /mnt/var/log/omacvm-pacstrap.log
 
 log "base system: $OMA_TZ, $OMA_LANG, keyboard $OMA_XKB_LAYOUT${OMA_XKB_VARIANT:+ ($OMA_XKB_VARIANT)}, user $OMA_USER"
 install -m600 /root/omacvm.env /mnt/root/omacvm.env
