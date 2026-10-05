@@ -253,9 +253,37 @@ def mac_known(omacvm: str) -> Known:
     # ("Anna's AirPods", report.device_owners).
     for kind, v in mac_bt_values(run(["system_profiler", "SPBluetoothDataType", "-json"], 20)):
         k.add(kind, v)
-    for line in run(["networksetup", "-listpreferredwirelessnetworks", "en0"], 10).splitlines()[1:]:
-        k.add("wifi", line.strip())
+    k.add("wifi", *mac_wifi_names())
     return k
+
+
+WIFI_PORTS = {"wi-fi", "wlan", "airport", "wifi"}
+
+
+def mac_wifi_names() -> list:
+    """The Wi-Fi networks this Mac remembers, from its Wi-Fi device: en0 on a
+    MacBook, en1 on a Mac mini, Studio or iMac (en0 is Ethernet there). The
+    device comes from networksetup's port list ("Wi-Fi", "WLAN" in German);
+    with no port of those names, every device is asked and only a Wi-Fi one
+    answers with networks."""
+    devs, wifi = [], []
+    port = ""
+    for line in run(["networksetup", "-listallhardwareports"], 10).splitlines():
+        if line.startswith("Hardware Port:"):
+            port = line.split(":", 1)[1].strip()
+        elif line.startswith("Device:"):
+            dev = line.split(":", 1)[1].strip()
+            if re.fullmatch(r"[a-z]+[0-9]+", dev):
+                (wifi if port.casefold() in WIFI_PORTS else devs).append(dev)
+    names = []
+    for dev in (wifi or devs)[:12]:
+        lines = run(["networksetup", "-listpreferredwirelessnetworks", dev], 10).splitlines()
+        if not lines or not lines[0].startswith("Preferred networks on"):
+            continue   # "en0 is not a Wi-Fi interface."
+        for line in lines[1:]:
+            if line.strip() and line.strip() not in names:
+                names.append(line.strip())
+    return names
 
 
 def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "") -> list:

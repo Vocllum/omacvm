@@ -7,8 +7,10 @@ Redaction, in this order:
     first names, host names (and the owner in "Anna's MacBook Pro"), VM
     names, Wi-Fi names and BSSIDs, Bluetooth names and addresses, the Bridge
     token, home folders.
- 2. Patterns: an owner's name before a device word ("Anna's AirPods", known
-    or not), PEM blocks, SSH keys, bearer/Basic/GitHub tokens, key=value
+ 2. Patterns: the names in the Bridge's own log lines (its connected
+    Bluetooth devices, the Wi-Fi name after ssid=, ...), an owner's name with
+    a device word ("Anna's AirPods", "AirPods von Anna", "iPhone de Jean-Luc",
+    "MacBook-Pro-von-Anna", known or not), PEM blocks, SSH keys, bearer/Basic/GitHub tokens, key=value
     and "--passphrase value" secrets, e-mail
     addresses, hardware addresses, UUIDs, serial numbers, IPv4/IPv6
     addresses (the Mac's VM-network addresses get a label), long hex and
@@ -70,6 +72,12 @@ class Known:
             # and the owner in a device or Mac name ("Zorro's AirPods",
             # "Zorro's MacBook Pro": "Zorro", a person's name, also where it
             # stands alone). Of a host name only its owner.
+            if kind in ("bt", "host") and re.search(r"\b" + DEVICE_WORDS, v, re.IGNORECASE):
+                # "Mac mini von Gilles", "iPhone de Jean-Luc", "MacBook-Pro-von-Dana"
+                for m in OWNER_AFTER.finditer(v):
+                    part = m.group(1) or m.group(2)
+                    if len(part) >= 2 and part.casefold() not in COMMON and not product_only(part) and not self.has(part):
+                        self.user.append(part)
             if kind in ("user", "bt", "host"):
                 for word in re.split(r"[\s_]+", v):
                     owner = POSSESSIVE.match(word)
@@ -94,7 +102,14 @@ class Known:
 # Words in device and person names that are not personal on their own.
 COMMON = {"airpods", "pro", "max", "macbook", "magic", "keyboard", "mouse", "trackpad", "iphone", "ipad",
           "the", "and", "von", "van", "der", "mini", "air", "studio", "imac", "headphones", "speaker",
-          "apple", "logitech", "bose", "sony", "beats", "my", "your", "new", "old", "work", "home"}
+          "apple", "logitech", "bose", "sony", "beats", "my", "your", "new", "old", "work", "home",
+          # OmacVM's own parts and words in its logs ("the guest's Mouse",
+          # "Bridge's Mac helper", "OmacVM Gestures' Trackpad")
+          "guest", "host", "bridge", "gestures", "hyprland", "wayland", "kernel", "system", "device", "devices",
+          "bluetooth", "wifi", "wi-fi", "network", "user", "this", "that", "its", "every", "other", "default",
+          "windows", "settings", "camera", "display", "screen", "audio", "battery", "clock", "notch", "control",
+          "centre", "center", "update", "helper", "helpers", "today", "everyone", "nobody", "someone",
+          "desktop", "tools", "python", "textual", "swift", "mesa", "virgl", "metal", "venus", "apps", "app"}
 
 
 # Names of the products OmacVM works with, and the defaults they come with
@@ -206,24 +221,143 @@ PATTERNS = [
 # The owner in a device name nobody told us about ("Anna's AirPods" when the
 # Bridge is down, or a guest's device): "<user>'s AirPods". Also macOS's host
 # name form ("Annas-MacBook-Pro").
-DEVICE_WORDS = r"(?:AirPods|iPhone|iPad|MacBook|iMac|Mac|Magic|Keyboard|Mouse|Trackpad|Watch|Beats|HomePod|AirTag|Pencil)"
+# Apple's and others' (headphones, phones, game pads ...).
+DEVICE_WORDS = (r"(?:AirPods|iPhone|iPad|MacBook|iMac|Mac|Magic|Keyboard|Mouse|Trackpad|Watch|Beats|HomePod|AirTag|Pencil"
+                r"|Galaxy|Buds|Pixel|Phone|Tablet|Laptop|PC|Computer|Headphones|Headset|Earbuds|Earphones|Speaker"
+                r"|Soundbar|Controller|Gamepad|Pen|Band|Fitbit|Garmin|Surface|ThinkPad|Xbox|DualSense|DualShock"
+                r"|Joy-Con|Bose|Sony|Jabra|JBL|Sennheiser|Logitech|Keychron|Kindle|Echo|OnePlus|Xiaomi|Huawei"
+                r"|Marshall|Soundcore|TV|Car)")
 DEVICE_OWNER = re.compile(r"(?<![\w<'])([^\W\d_][\w.-]*?)'s?(?=[\s_-]+" + DEVICE_WORDS + r"\b)", re.IGNORECASE)
+# Any "<Name>'s <Word>" with a capital name and a capital (or number) word
+# after it ("Dana's Galaxy Buds"): a name is likely. Our own words stay (COMMON).
+POSSESSIVE_ANY = re.compile(r"(?<![\w<'])([^\W\d_][\w.-]*?)'s?(?=[ \t]+(?:[^\W\d_a-z]|\d))")
+# The same without the apostrophe ("Annas iPhone", Nordic and German style):
+# only before a personal device.
+GENITIVE_S = re.compile(r"(?<![\w<'])([^\W\d_][^\W\d_]+?)s(?=[ \t]+(?:AirPods|iPhone|iPad|MacBook|iMac|Apple Watch"
+                        r"|Watch|HomePod|AirTag|Galaxy|Pixel|Buds|Headphones)\b)")
 HOST_OWNER = re.compile(r"(?<![\w<-])([A-Z][^\W\d_]+?)s?(?=-(?:MacBook|iMac|Mac-mini|Mac-Studio|Mac-Pro|iPhone|iPad)\b)")
+# macOS in other languages names a device after its owner the other way round:
+# "AirPods von Dana", "iPhone de Jean-Luc", "AirPods di Marco", "iPad van Jan",
+# and its host name "MacBook-Pro-von-Dana"; French also "iPhone d'Anne".
+PREPS = r"(?:von|vom|van|de|di|du|da|do|del|della|des|af|av|fra)"
+# Words that also come up in English after a device ("AirPods do not ..."):
+# there the name must start with a capital.
+PREPS_CAPITAL = {"de", "da", "do"}
+NAME = r"[^\W\d_][\w'-]*"
+OWNER_SPACED = re.compile(r"\b(" + DEVICE_WORDS + r"(?:[ \t]+(?!" + PREPS + r"[ \t])[\w().+]+){0,3}?)[ \t]+(" + PREPS +
+                          r")[ \t]+(" + NAME + r")(?:[ \t]+(" + NAME + r"))?", re.IGNORECASE)
+OWNER_HYPHEN = re.compile(r"\b(" + DEVICE_WORDS + r"(?:-(?!" + PREPS + r"-)[A-Za-z0-9]+){0,3}?)-(" + PREPS +
+                          r")-([^\W\d_][\w-]*)", re.IGNORECASE)
+OWNER_ELIDED = re.compile(r"\b(" + DEVICE_WORDS + r"(?:[ \t]+[\w().+]+){0,3}?)[ \t]+d'(" + NAME + r")", re.IGNORECASE)
+# The owner in a Mac or device name we know ("Mac mini von Gilles"): for Known.add.
+OWNER_AFTER = re.compile(r"(?:^|[\s_-])" + PREPS + r"[\s_-]+([^\W\d_][\w'-]*)|(?:^|\s)d'([^\W\d_][\w-]*)", re.IGNORECASE)
 
 
 def device_owners(text: str) -> tuple[str, int]:
     n = 0
 
+    def plain(w: str) -> bool:
+        return (w.casefold() in COMMON or (w + "s").casefold() in COMMON or product_only(w)
+                or product_only(w + "s"))
+
     def owner(m: re.Match) -> str:
         nonlocal n
         w = m.group(1)
-        if w.casefold() in COMMON or product_only(w) or product_only(w + "s"):
+        if plain(w):
             return m.group(0)
         n += 1
         return "<user>" + m.group(0)[len(w):]
+
+    def capital_owner(m: re.Match) -> str:
+        return owner(m) if m.group(1)[0].isupper() else m.group(0)
+
+    def after(m: re.Match) -> str:
+        nonlocal n
+        dev, prep, name = m.group(1), m.group(2), m.group(3)
+        second = m.group(4) if m.lastindex and m.lastindex >= 4 else None
+        if plain(name) or (prep.casefold() in PREPS_CAPITAL and not name[0].isupper()):
+            return m.group(0)
+        n += 1
+        out = m.group(0)[:m.start(3) - m.start(0)] + "<user>"
+        # A second name ("von Anna Maria"), when it is one.
+        if second and second[0].isupper() and not plain(second) and not re.fullmatch(DEVICE_WORDS, second, re.I):
+            return out
+        return out + m.group(0)[m.end(3) - m.start(0):]
+
+    def elided(m: re.Match) -> str:
+        nonlocal n
+        if plain(m.group(2)):
+            return m.group(0)
+        n += 1
+        return m.group(0)[:m.start(2) - m.start(0)] + "<user>"
+    text = OWNER_HYPHEN.sub(after, text)
+    text = OWNER_SPACED.sub(after, text)
+    text = OWNER_ELIDED.sub(elided, text)
     text = DEVICE_OWNER.sub(owner, text)
+    text = POSSESSIVE_ANY.sub(capital_owner, text)
+    text = GENITIVE_S.sub(capital_owner, text)
     text = HOST_OWNER.sub(owner, text)
     return text, n
+
+
+# The Bridge's own log lines (bridge/mac): their names go whole, whatever
+# language or form they have.
+QUOTED = re.compile(r'"(?:[^"\\\n]|\\.)*"')
+BRIDGE_CONNECTED = re.compile(r"(\bconnected=)\[([^\n]*\]|[^\n]*$)", re.M)     # bluetooth: connected=["...", "..."]
+BRIDGE_SSID = re.compile(r"(\bssid=)(?!<[a-z][a-z0-9-]*>(?:[ \t]|$))(?!null\b)([^\n]+?)(?=[ \t]+ch=|$)", re.M)
+BRIDGE_PASSWORD = re.compile(r"(Wi-Fi password for )(?!<wifi>)(.+?)( requested by )")
+BRIDGE_BT_ACTION = re.compile(r"(/bluetooth/(?:connect|disconnect|forget) from \S+(?: failed)?: )([^\n]+)")
+BRIDGE_BT_SAID = (("connected ", ""), ("disconnected ", ""), ("forgot ", ""), ("", " already connected"),
+                  ("", " not connected"), ("", " did not connect (is it on and in range?)"), ("", " did not disconnect"))
+BRIDGE_VM = re.compile(r"(\bcontrol: \S+ \S+ from \S+ \()(?!-\))(?!<vm>\))([^\n]+?)(\): \d{3}\b)")
+
+
+def bridge_lines(text: str) -> tuple[str, dict]:
+    counts: dict = {}
+
+    def bump(kind: str) -> None:
+        counts[kind] = counts.get(kind, 0) + 1
+
+    def connected(m: re.Match) -> str:
+        inner = m.group(2)
+        if inner.strip() in ("]", ""):
+            return m.group(0)
+        items = QUOTED.findall(inner)
+        if items and QUOTED.sub("", inner).strip(" ,]") == "":
+            for _ in items:
+                bump("bt")
+            return m.group(1) + "[" + ", ".join("<bt-device>" for _ in items) + "]"
+        bump("bt")
+        return m.group(1) + "[<bt-device>]"
+
+    def ssid(m: re.Match) -> str:
+        bump("wifi")
+        return m.group(1) + "<wifi>"
+
+    def action(m: re.Match) -> str:
+        said = m.group(2)
+        for head, tail in BRIDGE_BT_SAID:
+            if said.startswith(head) and said.endswith(tail) and len(said) > len(head) + len(tail):
+                name = said[len(head):len(said) - len(tail)]
+                if name in ("?", "<bt-device>", "the device"):
+                    return m.group(0)
+                bump("bt")
+                return m.group(1) + head + "<bt-device>" + tail
+        return m.group(0)
+
+    def vm(m: re.Match) -> str:
+        bump("vm")
+        return m.group(1) + "<vm>" + m.group(3)
+
+    def password(m: re.Match) -> str:
+        bump("wifi")
+        return m.group(1) + "<wifi>" + m.group(3)
+    text = BRIDGE_CONNECTED.sub(connected, text)
+    text = BRIDGE_SSID.sub(ssid, text)
+    text = BRIDGE_PASSWORD.sub(password, text)
+    text = BRIDGE_BT_ACTION.sub(action, text)
+    text = BRIDGE_VM.sub(vm, text)
+    return text, counts
 
 
 # Base64 runs of 40 or more: only with digits and both cases, so a long path
@@ -256,6 +390,10 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
     # Keys and e-mail addresses whole, before their parts match a name.
     for kind, rx, repl in PATTERNS[:3]:
         text, n = rx.subn(repl, text)
+        bump(kind, n)
+    # The names in the Bridge's own log lines, known or not.
+    text, c = bridge_lines(text)
+    for kind, n in c.items():
         bump(kind, n)
     # 1. Known values, longest first over all kinds (a VM named after its user).
     for kind, v in sorted(known.items(), key=lambda kv: len(kv[1]), reverse=True):

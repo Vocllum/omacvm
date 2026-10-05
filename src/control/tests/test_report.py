@@ -224,7 +224,7 @@ def test_device_owner_without_known_values():
     device word goes by its form alone; product and plain words stay."""
     k = R.Known()
     for line, want in [
-        ("/bluetooth/connect from 10.211.55.9: connected Anna’s AirPods", "connected <user>'s AirPods"),
+        ("bluetoothd: Anna’s AirPods connected", "<user>'s AirPods connected"),
         ("Anna's iPhone paired", "<user>'s iPhone paired"),
         ("James' Magic Keyboard", "<user>' Magic Keyboard"),
         ("host Annas-MacBook-Pro.local", "host <user>s-MacBook-Pro.local"),
@@ -306,3 +306,156 @@ def test_mac_known_without_bridge(monkeypatch):
     for name in ("Al ", "Testmann", "Cleo", "Bea", "Living Room", "11:22:33", "Dana"):
         assert name not in out, (name, out)
     assert "No such key" not in " ".join(v for _, v in k.items())
+
+
+# ---- review round 4: names in other languages, the Bridge's own lines, Wi-Fi on en1 ----
+
+BRIDGE_LOG = """\
+2026-10-05 05:01:02 omacvm-bridge: bluetooth (tick): power=1 permission=allowed connected=["AirPods Pro von Dana", "iPhone de Jean-Luc", "Dana's Galaxy Buds", "Cuffie di Marco", "Koptelefoon van Jan"]
+2026-10-05 05:01:03 omacvm-bridge: bluetooth (events): power=1 permission=allowed connected=[]
+2026-10-05 05:01:04 omacvm-bridge: wifi (event): power=1 connected=1 ssid=Zuhause Dana ch=36/5GHz rssi=-51
+2026-10-05 05:01:05 omacvm-bridge: wifi (tick): power=1 connected=1 ssid=Sunrise_5GHz_2A1B3C ch=6/2GHz rssi=-60
+2026-10-05 05:01:06 omacvm-bridge: wifi (tick): power=1 connected=0 ssid=<null> ch=- rssi=<null>
+2026-10-05 05:01:07 omacvm-bridge: wifi (tick): power=1 connected=1 ssid=Chez Jean-Luc ch=11/2GHz rssi=-70
+2026-10-05 05:01:08 omacvm-bridge: /bluetooth/connect from 10.211.55.5: connected Casque de Jean-Luc
+2026-10-05 05:01:09 omacvm-bridge: /bluetooth/disconnect from 10.211.55.5: Thuis Speaker Jan not connected
+2026-10-05 05:01:10 omacvm-bridge: /bluetooth/connect from 10.211.55.5 failed: Écouteurs Zoé did not connect (is it on and in range?)
+2026-10-05 05:01:11 omacvm-bridge: Wi-Fi password for Casa di Marco requested by 10.211.55.5: granted
+2026-10-05 05:01:12 omacvm-bridge: control: GET /omacvm/status from 10.211.55.5 (Dana's Omarchy): 200
+2026-10-05 05:01:13 omacvm-bridge: control: GET /omacvm/hello from 10.211.55.7 (-): 200
+2026-10-05 05:01:14 omacvm-bridge: /bluetooth/connect from 10.211.55.5: the device did not connect (is it on and in range?)
+"""
+
+
+def test_bridge_log_names_go_whole():
+    """The Bridge is down, so nothing is known: its own lines still lose every
+    device name, Wi-Fi name and VM name, in any language."""
+    out, counts = R.redact(BRIDGE_LOG, R.Known())
+    for gone in ("Dana", "Jean", "Luc", "Marco", "Jan", "Galaxy", "Zuhause", "Sunrise", "2A1B3C", "Chez", "Casque",
+                 "Thuis", "Zoé", "Écouteurs", "Casa", "Omarchy", "Koptelefoon", "Cuffie"):
+        assert gone not in out, (gone, out)
+    assert "connected=[<bt-device>, <bt-device>, <bt-device>, <bt-device>, <bt-device>]" in out
+    assert "connected=[]" in out
+    assert "ssid=<wifi> ch=36/5GHz rssi=-51" in out and "ssid=<null> ch=-" in out
+    assert "connected <bt-device>" in out and "<bt-device> not connected" in out
+    assert "<bt-device> did not connect (is it on and in range?)" in out
+    assert "Wi-Fi password for <wifi> requested by" in out
+    assert "(<vm>): 200" in out and "(-): 200" in out
+    assert "the device did not connect" in out
+    assert counts["bt"] == 8 and counts["wifi"] == 4 and counts["vm"] == 1
+
+
+def test_bridge_lines_known_values_too():
+    """With the names known as well, nothing breaks and the gate passes."""
+    k = R.Known()
+    k.add("wifi", "Zuhause Dana")
+    k.add("bt", "AirPods Pro von Dana")
+    out, _ = R.redact(BRIDGE_LOG, k)
+    R.gate(out, k)
+    assert "ssid=<wifi> ch=36" in out
+
+
+def test_bridge_list_without_its_end():
+    out, _ = R.redact('bluetooth (tick): power=1 permission=allowed connected=["AirPods von Dana", "iPh', R.Known())
+    assert "Dana" not in out and "connected=[<bt-device>]" in out
+
+
+@pytest.mark.parametrize("line,gone", [
+    ("AirPods von Dana verbunden", "Dana"),                    # DE
+    ("AirPods Pro von Dana connected", "Dana"),
+    ("Mac mini von Gilles ist bereit", "Gilles"),
+    ("Apple Watch von Dana Müller", "Müller"),
+    ("iPhone de Jean-Luc connecté", "Jean"),                   # FR
+    ("iPhone d’Anne connecté", "Anne"),
+    ("MacBook Air de Zoé", "Zoé"),
+    ("AirPods di Marco connessi", "Marco"),                    # IT
+    ("iPad del Marco", "Marco"),
+    ("iPhone van Jan verbonden", "Jan"),                       # NL
+    ("AirPods van Sanne", "Sanne"),
+    ("host MacBook-Pro-von-Dana.local", "Dana"),               # host name forms
+    ("host Mac-mini-von-Gilles.local", "Gilles"),
+    ("host iPhone-de-Jean-Luc", "Luc"),
+    ("host MacBook-Air-van-Jan", "Jan"),
+    ("Dana's Galaxy Buds connected", "Dana"),                  # not Apple
+    ("Dana's Headphones", "Dana"),
+    ("Dana's WH-1000XM5", "Dana"),
+    ("Annas iPhone", "Anna"),
+])
+def test_device_owner_in_other_languages(line, gone):
+    out, counts = R.redact(line, R.Known())
+    assert gone not in out and counts.get("user", 0) >= 1, out
+
+
+@pytest.mark.parametrize("line", [
+    "AirPods do not connect", "the Mac de facto", "iPhone da capo", "Magic Keyboard von Apple",
+    "the guest's Mouse", "Bridge's Mac helper", "Hyprland's Mouse input", "OmacVM Gestures' Trackpad",
+    "Apple's Magic Mouse", "the Mac's Bluetooth", "OmacVM's Bridge", "Omarchy's Settings", "Gestures Trackpad on",
+    "Settings iPhone", "Parallels Desktop's Tools", "MacBook Pro (16-inch) M4 Max", "macOS 26's menu",
+])
+def test_device_owner_plain_text_stays(line):
+    assert R.redact(line, R.Known())[0] == line
+
+
+def test_known_mac_name_in_other_languages_gives_its_owner():
+    k = R.Known()
+    k.add("user", "tester")
+    k.add("host", "Mac mini von Gilles", "Mac-mini-von-Gilles")
+    k.add("bt", "iPhone de Jean-Luc")
+    out, _ = R.redact("Gilles said hi; Jean-Luc too; host Mac-mini-von-Gilles.local", k)
+    R.gate(out, k)
+    assert "Gilles" not in out and "Jean-Luc" not in out
+
+
+def test_wifi_device_from_hardware_ports(monkeypatch):
+    """Wi-Fi is en1 on a Mac mini, Studio or iMac (en0 is Ethernet): the
+    names come from the Wi-Fi port networksetup lists, in any language."""
+    from omacvm_cc import collect
+    ports = ("Hardware Port: Ethernet\nDevice: en0\nEthernet Address: 11:22:33:44:55:66\n\n"
+             "Hardware Port: Thunderbolt Bridge\nDevice: bridge0\nEthernet Address: N/A\n\n"
+             "Hardware Port: WLAN\nDevice: en1\nEthernet Address: 11:22:33:44:55:67\n")
+    calls = []
+
+    def fake_run(cmd, timeout=10.0):
+        calls.append(cmd)
+        if cmd[:2] == ["networksetup", "-listallhardwareports"]:
+            return ports
+        if cmd[:2] == ["networksetup", "-listpreferredwirelessnetworks"]:
+            if cmd[2] == "en1":
+                return "Preferred networks on en1:\n\tZuhause Dana\n\tSunrise_5GHz_2A1B3C\n"
+            return f"{cmd[2]} is not a Wi-Fi interface.\n** Error: Error obtaining wireless information.\n"
+        return ""
+    monkeypatch.setattr(collect, "run", fake_run)
+    assert collect.mac_wifi_names() == ["Zuhause Dana", "Sunrise_5GHz_2A1B3C"]
+    assert ["networksetup", "-listpreferredwirelessnetworks", "en0"] not in calls
+
+    # No port called Wi-Fi/WLAN/AirPort (a language we do not know): every
+    # device is asked, and only a Wi-Fi one answers with networks.
+    ports2 = ports.replace("WLAN", "Réseau sans fil")
+    monkeypatch.setattr(collect, "run", lambda cmd, timeout=10.0: ports2 if cmd[1] == "-listallhardwareports" else fake_run(cmd))
+    assert collect.mac_wifi_names() == ["Zuhause Dana", "Sunrise_5GHz_2A1B3C"]
+
+
+def test_mac_report_bridge_down_planted_names(monkeypatch):
+    """omacvm report on a Mac mini (Wi-Fi on en1) with the Bridge down and
+    system_profiler listing nothing: the Bridge log's names in DE/FR/IT/NL
+    all go, and the report passes the gate."""
+    from omacvm_cc import collect, bridge
+    outs = {"id": "Gilles Tester", "dscl": "No such key: FirstName", "scutil": "Mac mini von Gilles",
+            "system_profiler": "{}"}
+
+    def fake_run(cmd, timeout=10.0):
+        if cmd[:2] == ["networksetup", "-listallhardwareports"]:
+            return "Hardware Port: Ethernet\nDevice: en0\n\nHardware Port: Wi-Fi\nDevice: en1\n"
+        if cmd[:2] == ["networksetup", "-listpreferredwirelessnetworks"]:
+            return "Preferred networks on en1:\n\tThuis van Jan\n" if cmd[2] == "en1" else "en0 is not a Wi-Fi interface.\n"
+        return outs.get(cmd[0], "")
+    monkeypatch.setattr(collect, "run", fake_run)
+
+    def down(self, *a, **kw):
+        raise OSError("connection refused")
+    monkeypatch.setattr(bridge.Bridge, "call", down)
+    k = collect.mac_known("/nonexistent/omacvm")
+    log = BRIDGE_LOG + "2026-10-05 05:02:00 omacvm-bridge: wifi (tick): power=1 connected=1 ssid=Thuis van Jan ch=1/2GHz rssi=-40\n"
+    rep = R.build([("Logs", log + "Gilles opened it on Mac-mini-von-Gilles.local\n")], k, "Gilles' problem")
+    for gone in ("Gilles", "Dana", "Jean", "Marco", "Jan", "Zuhause", "Sunrise", "Thuis", "Chez", "Casa", "Galaxy"):
+        assert gone not in rep.text + rep.title, (gone, rep.text)
