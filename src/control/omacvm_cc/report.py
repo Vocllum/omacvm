@@ -63,11 +63,18 @@ class Known:
                 continue
             if len(v) >= 2 and not self.has(v):
                 lst.append(v)
-            # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann").
-            if kind in ("user", "bt") and " " in v:
-                for part in v.replace("'s", " ").split():
-                    if len(part) >= 3 and part.lower() not in COMMON and not product_only(part) and not self.has(part):
-                        lst.append(part)
+            # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann"),
+            # and the owner in a device name ("Zorro's AirPods": "Zorro", a
+            # person's name, also where it stands alone).
+            if kind in ("user", "bt"):
+                for word in re.split(r"[\s_]+", v):
+                    owner = POSSESSIVE.match(word)
+                    part, k = (owner.group(1), "user") if owner else (word.strip("-"), kind)
+                    if " " not in v and not owner:
+                        continue   # a one-word value is in already
+                    if len(part) >= (2 if owner else 3) and part.casefold() not in COMMON and not product_only(part) \
+                            and not self.has(part):
+                        getattr(self, k).append(part)
 
     def has(self, v: str) -> bool:
         return any(v.casefold() == w.casefold() for _, w in self.items())
@@ -96,17 +103,45 @@ def product_only(v: str) -> bool:
     return bool(words) and all(w in PRODUCT for w in words)
 
 
+# A name with "'s" ("Zorro's", after norm() made every apostrophe plain).
+POSSESSIVE = re.compile(r"^(.+?)'s?$", re.IGNORECASE)
+# Apostrophes macOS and others put in device names ("Zorro’s AirPods").
+APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u2032": "'", "\uff07": "'", "`": "'"})
+UESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+
+
 def norm(s: str) -> str:
-    """NFKC: full-width and other look-alike forms become plain letters."""
-    return unicodedata.normalize("NFKC", s)
+    """NFKC (full-width and other look-alike forms become plain letters),
+    JSON's \\uXXXX escapes decoded ("Zorro\\u2019s" in a log line is
+    "Zorro's"), every apostrophe a plain one."""
+    def esc(m: re.Match) -> str:
+        c = int(m.group(1), 16)
+        return chr(c) if c >= 0x20 and not 0xD800 <= c <= 0xDFFF else m.group(0)   # no control characters
+    s = UESCAPE.sub(esc, s)
+    return unicodedata.normalize("NFKC", s).translate(APOSTROPHES)
+
+
+def variants(v: str) -> list:
+    """V as it may be written in a log: as is, URL-encoded ("Zorro%20Home",
+    "Zorro+Home"), with _ or - for spaces."""
+    import urllib.parse as up
+    out = [v]
+    for w in (up.quote(v, safe=""), up.quote_plus(v, safe=""), v.replace(" ", "_"), v.replace(" ", "-")):
+        if w not in out:
+            out.append(w)
+    return out
 
 
 def _value_re(v: str) -> re.Pattern:
-    """Short values (< 4) only as whole words: "pi" must not eat "pipewire"."""
+    """Short values (< 4) only as whole words: "pi" must not eat "pipewire".
+    Never inside a label already put in ("User" in "<user>")."""
     e = re.escape(v)
     if len(v) < 4:
         e = r"(?<![A-Za-z0-9])" + e + r"(?![A-Za-z0-9])"
-    return re.compile(e, re.IGNORECASE)
+    return re.compile(r"(?<!<)" + e + r"(?![\w-]*>)", re.IGNORECASE)
+
+
+LABEL = re.compile(r"<[a-z][a-z0-9-]*>")
 
 
 PATTERNS = [
@@ -114,11 +149,18 @@ PATTERNS = [
     ("key", re.compile(r"\b(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)\s+[A-Za-z0-9+/=]{16,}(?:\s+\S+)?"), "<ssh-key>"),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
     ("secret", re.compile(r"(?i)\b(Bearer)\s+[^\s\"']+"), r"\1 <secret>"),
-    ("secret", re.compile(r"(?i)\b((?:[a-z_]*_)?(?:token|password|passwd|secret|psk|api_?key|key))(\"?\s*[=:]\s*\"?)(?!<)([^\s\"',;}]+)"),
-     r"\1\2<secret>"),
+    # name = value, name: value, "name": "value", 'name': 'value' (YAML, INI,
+    # JSON, Python): the value goes, quoted (also with spaces) or not.
+    ("secret", re.compile(r"""(?i)\b(?P<name>(?:[a-z0-9]*[_-])*(?:token|password|passwd|pass|pwd|passphrase|secret|psk|api_?key|key|credentials?))"""
+                          r"""(?P<sep>["']?\s*[=:]\s*)(?:"(?P<dq>[^"\n]+)"|'(?P<sq>[^'\n]+)'|(?P<bare>(?!<)[^\s"',;}]+))"""),
+     lambda m: m.group(0) if (m.group("dq") or m.group("sq")) == "<secret>" else
+     m.group("name") + m.group("sep") + ('"' if m.group("dq") is not None else "'" if m.group("sq") is not None else "")
+     + "<secret>" + ('"' if m.group("dq") is not None else "'" if m.group("sq") is not None else "")),
     ("serial", re.compile(r"(?i)(IOPlatformSerialNumber\"?\s*=?\s*\"?|Serial Number(?: \(system\))?:\s*)([A-Z0-9]{6,})"), r"\1<serial>"),
     ("uuid", re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<uuid>"),
     ("hw", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<hw-addr>"),
+    # BlueZ writes them with _ (dev_30_7A_D2_32_1E_AE).
+    ("hw", re.compile(r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{2}_){5}[0-9A-Fa-f]{2}(?![0-9A-Fa-f])"), "<hw-addr>"),
     ("hw", re.compile(r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b"), "<hw-addr>"),
     # Without separators (Parallels writes MACs so: 001C42EE41A6): with the
     # VM apps' own prefixes, or right after a word that says it is one. Not any
@@ -133,7 +175,8 @@ PATTERNS = [
 B64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}")
 # An address may end a sentence ("connect to 192.168.1.20."): only a digit, or
 # a dot and a digit (a longer dotted number), ends the match early.
-IPV4 = re.compile(r"(?<!\d)(?<!\d\.)((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?!\d)(?!\.\d)")
+# Octets with leading zeros too (010.211.055.032).
+IPV4 = re.compile(r"(?<!\d)(?<!\d\.)((?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|[01]?\d?\d)){3})(?!\d)(?!\.\d)")
 IPV6 = re.compile(r"(?<![0-9A-Fa-f:])((?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,6}(?::[0-9A-Fa-f]{1,4}){1,6})(?![0-9A-Fa-f:])")
 HOMES = re.compile(r"(/Users|/home)/(?!<)[^/\s:'\"]+")
 TIME_LIKE = re.compile(r"^\d{1,2}(?::\d{2}){1,2}$")
@@ -160,8 +203,9 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
         bump(kind, n)
     # 1. Known values, longest first over all kinds (a VM named after its user).
     for kind, v in sorted(known.items(), key=lambda kv: len(kv[1]), reverse=True):
-        text, n = _value_re(v).subn(LABELS[kind], text)
-        bump(kind, n)
+        for w in variants(v):
+            text, n = _value_re(w).subn(LABELS[kind], text)
+            bump(kind, n)
     # 2. Patterns.
     for kind, rx, repl in PATTERNS[3:]:
         text, n = rx.subn(repl, text)
@@ -202,15 +246,19 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
 
 
 def gate(text: str, known: Known) -> None:
-    """Refuse when any known value survived (NFKC and case folded)."""
-    t = unicodedata.normalize("NFKC", text).casefold()
+    """Refuse when any known value survived (normalised as norm(), case
+    folded, also URL-encoded)."""
+    import urllib.parse as up
+    t = LABEL.sub(" ", norm(text)).casefold()                      # the labels put in are no survivors
+    t2 = LABEL.sub(" ", norm(up.unquote_plus(text))).casefold()
     for kind, v in known.items():
-        w = unicodedata.normalize("NFKC", v).casefold()
-        if len(w) < 4:
-            if re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", t):
+        w = norm(v).casefold()
+        for x in (t, t2):
+            if len(w) < 4:
+                if re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", x):
+                    raise RedactionFailed(kind)
+            elif w in x:
                 raise RedactionFailed(kind)
-        elif w in t:
-            raise RedactionFailed(kind)
 
 
 def taken_out(counts: dict) -> str:

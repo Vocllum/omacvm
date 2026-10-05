@@ -145,3 +145,61 @@ def test_mac_addresses_without_separators():
 def test_short_commit_hashes_stay():
     t = "OmacVM: the release (1b5c3f3a9e01) and 0123456789ab"
     assert R.redact(t, R.Known())[0] == t
+
+
+def test_device_owner_names_in_every_spelling():
+    # The VM's user is not the Mac owner: only the Bluetooth names know "Gilles".
+    k = R.Known()
+    k.add("user", "tester", "Test User")
+    k.add("bt", "Gilles\u2019s AirPods Pro", "Gilles's Magic Keyboard", "Anna\u2018s iPhone", "Jo\u02bcs Mouse")
+    text = ("connected: Gilles\u2019s AirPods Pro; also Gilles's AirPods Pro and Gilles's Magic Keyboard\n"
+            'json "name": "Gilles\\u2019s AirPods Pro", "owner": "\\u0047illes"\n'
+            "hello Gilles, Anna and Jo; GILLES\u2019S stuff\n")
+    out, _ = R.redact(text, k)
+    R.gate(out, k)
+    for name in ("Gilles", "gilles", "Anna", "Jo\u02bcs", "Jo's"):
+        assert name not in out, (name, out)
+    assert "<bt-device>" in out and "<user>" in out
+
+
+def test_gate_sees_escapes_and_curly_apostrophes():
+    k = R.Known()
+    k.add("bt", "Gilles\u2019s AirPods")
+    for leak in ("Gilles\\u2019s", "GILLES", "Gilles%27s", "Gill\\u0065s"):
+        with pytest.raises(R.RedactionFailed):
+            R.gate(leak, k)
+
+
+@pytest.mark.parametrize("line,kept", [
+    ("password: 'hunter2'", "password: '<secret>'"),
+    ('password: "hunter 2 with spaces"', 'password: "<secret>"'),
+    ("pass='x'", "pass='<secret>'"),
+    ('"password": "hunter2"', '"password": "<secret>"'),
+    ("{'api_key': 'abc123'}", "{'api_key': '<secret>'}"),
+    ("[wifi]\npsk = 'Zorro PSK'", "[wifi]\npsk = '<secret>'"),
+    ("db_password = s3cr3t", "db_password = <secret>"),
+    ("auth-token: abc", "auth-token: <secret>"),
+    ("credentials: 'x y'", "credentials: '<secret>'"),
+])
+def test_quoted_secrets(line, kept):
+    out, counts = R.redact(line, R.Known())
+    assert out == kept and counts.get("secret") == 1
+
+
+def test_secret_words_inside_other_words_stay():
+    for line in ("keyboard: us", "passes=3", "bypass: on", "monkey: 1"):
+        assert R.redact(line, R.Known())[0] == line
+
+
+def test_bluez_percent_encoded_and_zero_padded():
+    k = R.Known()
+    k.add("wifi", "Goetsch Home")
+    out, _ = R.redact("dev_30_7A_D2_32_1E_AE paired; ssid Goetsch%20Home / Goetsch+Home / Goetsch_Home; "
+                      "peer 010.211.055.032 and 192.168.001.010.", k)
+    R.gate(out, k)
+    assert "30_7A" not in out and "Goetsch" not in out and "055" not in out and "001.010" not in out
+    assert "<hw-addr>" in out and out.count("<wifi>") == 3
+
+
+def test_escapes_of_control_characters_stay_escaped():
+    assert R.redact("ESC \\u001b[0m", R.Known())[0] == "ESC \\u001b[0m"
