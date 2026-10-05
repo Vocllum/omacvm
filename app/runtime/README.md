@@ -113,6 +113,12 @@ commit 82927e9. Changes here:
   (the guest's dumb buffers: console, plymouth, dumb screens and cursors)
   with the SCANOUT bind, so the budget's screen reserve covers them; the
   build checks the patched source
+- `patches/qemu-cocoa-idle-refresh.patch`: QEMU's refresh tick (every 8 ms on
+  a 120 Hz display, for every output) slows to 500 ms after a second without
+  a display update and comes back with the next one. virtio-gpu pushes its
+  frames, so nothing needed the tick on an idle desktop; it woke QEMU 60-120
+  times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. Numbers:
+  the idle-power PR
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
