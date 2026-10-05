@@ -121,10 +121,7 @@ macos=$(sw_vers -productVersion 2>/dev/null)
 (( YES )) || { : < "$TTY"; } 2>/dev/null || usage "the setup questions need a terminal (or pass --yes and the answers as options, see --help)"
 onoff() { (( $1 )) && echo on || echo off; }
 
-mac_cores=$(sysctl -n hw.ncpu)
-mac_perf=$(sysctl -n hw.perflevel0.physicalcpu 2>/dev/null || echo "$mac_cores")
-mac_eff=$(sysctl -n hw.perflevel1.physicalcpu 2>/dev/null || echo 0)
-mac_mem_gb=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+mac_specs
 # Free space as Finder counts it (macOS frees caches and purgeable files when
 # needed; df leaves those out), else df's.
 free_gb=$(swift -e 'import Foundation; let v = try? URL(fileURLWithPath: NSHomeDirectory()).resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]); print((v?.volumeAvailableCapacityForImportantUsage ?? 0) / 1_000_000_000)' 2>/dev/null)
@@ -157,7 +154,7 @@ if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels, utm, fusion or app"
   # OmacVM.app first: the README recommends it.
   ui_select pick "Where should Omarchy run?" 0 \
-    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · one display" \
+    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · every display" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
     "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it" \
     "Parallels Desktop|near-native speed, every display · paid"

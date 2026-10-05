@@ -28,7 +28,9 @@ each file taken from them:
   `src/utm/guest/90-omacvm-utm.conf` comes from it.
 - **Omarchy** (github.com/basecamp/omarchy), MIT, (c) David Heinemeier Hansson:
   the bar widgets in `src/bridge/plugins` and `src/workspaces/plugins` are
-  derived from Omarchy's own, each with its `LICENSE`; the icon
+  derived from Omarchy's own, each with its `LICENSE`; OmacVM.app's display
+  widget (`src/app/guest/monitor-widget`) is built in the VM from the
+  installed Omarchy's own display panel, with its `LICENSE`; the icon
   (`src/icon/omacvm.svg`) uses Omarchy's mark; OmacVM.app's boot logo is
   Omarchy's `logo.svg`.
 - **Omanotch** (`src/omanotch/`) has its own README and licence.

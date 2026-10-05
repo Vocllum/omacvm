@@ -3,6 +3,59 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 2.8.0
+
+- OmacVM.app uses every Mac display in full screen: a window (in its own
+  Space) and an Omarchy output per display, at its resolution, scale and
+  refresh rate, placed as in macOS's arrangement, with plugging in and out
+  live. "Use external displays" in Omarchy's display panel keeps full screen
+  on one display. Tested on a real external monitor next to a MacBook with a
+  notch, and on virtual displays.
+- OmacVM.app in full screen on a Mac with a notch: Omarchy gets the window's
+  real size (1728x1080 points on a 14-inch MacBook Pro, was 1728x1085). The
+  picture is no longer squeezed and the pointer lands where it is on the Mac
+  (it was up to 5 points off at the bottom).
+- OmacVM.app in full screen: the Dock no longer comes up at the edge of an
+  external display. Near a screen corner the Mac's cursor is held 3 points
+  short of it; whether that keeps macOS hot corners from firing is not
+  confirmed yet (in tests with simulated mouse motion they still fired).
+- Cmd-drag moves an Omarchy window from one Mac display to another; a held
+  modifier key is no longer let go when the pointer crosses to another
+  display's window.
+- Omanotch with external displays: the strip and its bar stay on the
+  MacBook whichever display holds the main window (OmacVM.app tells the VM
+  which output is the built-in display). Before, with the main window on an
+  external display, the MacBook showed two bars.
+- OmacVM.app: displays no longer come up black (dark grey, no wallpaper, no
+  bar) after a start or reboot, about one boot in six with two displays.
+  QEMU refused the memory of a large texture (Omarchy's wallpaper, 81 MB)
+  when the VM's memory was fragmented, and the shell lost its GPU context.
+  It also happened with one display, less often, in earlier versions.
+  The VM now also checks what each display really shows and restarts the
+  shell once if one stays grey; omacvm check says "desktop" and, on the Mac,
+  "GPU contexts".
+- Omanotch's wallpaper is decoded at the display's size (about a third of
+  the memory per display on a MacBook, so UTM's QEMU, which keeps the old
+  limit, no longer refuses it up to about a 4K display; a 6K display's
+  upload is still too big for it), and its bar and wallpaper follow their
+  output when it moves in the layout.
+- Omanotch: after a shell restart the bar is parked under the strip again
+  within seconds; before, the MacBook could show two bars.
+- Per-display workspaces handle more than two displays (Virtual-3 gets
+  21..30, and so on), and several workspaces of an unplugged display all
+  come back when it returns. Tested on OmacVM.app; Parallels and Fusion use
+  the same file.
+- Change the CPUs and memory of an existing VM: `omacvm resources --vm NAME`
+  with `--resources low|balanced|high|best`, `--cpus N` or `--memory-gb N`
+  (also in the `omacvm` menu). The same tiers and limits as the build, on
+  every route: Parallels (`prlctl set`, or its settings file on Standard),
+  UTM, VMware Fusion (graphics memory goes down with the memory when it would
+  no longer fit) and OmacVM.app. The VM must be stopped, except on
+  OmacVM.app, which takes the change at its next start. A name used in two
+  apps needs `--vm-type`.
+- OmacVM.app: a Resources picker in the VM's window, with the create
+  screen's tiers; it applies on the next start.
+
 ## 2.7.1
 
 Security and crash fixes for OmacVM.app's GPU (a VM could restart the Mac),
