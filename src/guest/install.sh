@@ -45,7 +45,10 @@ while (( $# )); do
   esac
 done
 [[ -n $U ]] && id "$U" >/dev/null || { echo "guest/install.sh: --user must be the desktop user" >&2; exit 2; }
-log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+log() { LAST_STEP=$*; printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+# A run that stops says where (apply shows it as what failed).
+LAST_STEP="the start"; REPORTED=""
+trap 'rc=$?; (( rc == 0 || rc == 2 )) || [[ -n $REPORTED ]] || echo "guest/install.sh: failed during: $LAST_STEP" >&2' EXIT
 # want FEATURE: this run installs that feature's part (all of them, or --only).
 want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }
 system() { [[ -z $ONLY ]]; }   # the steps that are no feature's
@@ -456,7 +459,7 @@ printf 'initramfs %s\ngrub %s\n' "$init_ok" "$grub_ok" | install -Dm644 /dev/std
 for f in ${SOFT[@]+"${SOFT[@]}"}; do
   if [[ $STRICT == ",all," || $STRICT == *",$f,"* ]]; then
     echo "guest/install.sh: $f was not set up (see above)" >&2
-    exit 1
+    REPORTED=1; exit 1
   fi
 done
 log "OmacVM guest side installed for $U (reboot to apply everything)"

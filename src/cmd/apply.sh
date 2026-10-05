@@ -11,11 +11,15 @@
 # asked once whether it gets it, yes with --yes or without a terminal).
 # --no-mac leaves the Mac side alone.
 # --reinstall FEATURE: repairs that feature only (its Mac helper is built
-# again, its VM part installed again); the features stay as they are.
+# again, its VM part installed again); the features stay as they are. A VM
+# with another OmacVM version than this Mac gets all of this one (with that
+# feature installed again).
 # --transaction (the control centre's jobs): the new OmacVM goes into the VM
-# beside the old one; if the VM side fails (also a part that would only be
-# logged otherwise), the old one and the VM's earlier features come back and
-# the run ends with exit code 4.
+# beside the old one; if the VM side fails, the old one and the VM's earlier
+# features come back and the run ends with exit code 4. A part that would
+# only be logged otherwise fails the run too when it belongs to the job: the
+# features switched or repaired, or for an update the parts it changes (by
+# /etc/omacvm/installed.json); other parts keep being only logged.
 # VM: the one named Omarchy, else the only running one. A stopped VM is
 # started. User: the VM's desktop user. Key: ~/.ssh/omacvm. Keyboard: the
 # Mac's current layout. Display (UTM, Fusion): the Mac's built-in display below
@@ -96,6 +100,7 @@ probe=$(vm_probe "$IP")
 [[ -n $U ]] || U=$(sed -n 's/^OMACVM_USER=//p' <<<"$probe")
 [[ -n $U ]] || die "no desktop user in '$VM' (pass --user NAME)"
 had=$(sed -n 's/^OMACVM_VERSION=//p' <<<"$probe")
+now=$(cat "$R/src/VERSION")
 
 # ---------- the features it gets ----------
 features_read_env "$probe"
@@ -229,23 +234,74 @@ guest_install() {
   gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB' --vm-type $TYPE ${MODE:+--display $MODE}$fargs$GI_ARGS" < /dev/null
 }
 step vm "the VM side"
-# A repair installs only those features' parts again.
-(( ${#REINSTALL[@]} )) && GI_ARGS+=" --only $(IFS=,; echo "${REINSTALL[*]}")"
-# A job fails also when a part of what it changes was only logged as not set up.
-if (( TRANSACTION )); then
-  if (( ${#REINSTALL[@]} )); then GI_ARGS+=" --strict $(IFS=,; echo "${REINSTALL[*]}")"
-  elif (( ${#SETN[@]} )); then GI_ARGS+=" --strict $(IFS=,; echo "${SETN[*]}")"
-  else GI_ARGS+=" --strict all"; fi
+# A repair installs only those features' parts again (all of OmacVM when the
+# VM has another version: its other parts would not match the new copy).
+ONLY=""
+if (( ${#REINSTALL[@]} )); then
+  if [[ -n $had && $had != "$now" ]]; then
+    info "'$VM' has OmacVM $had: all of OmacVM $now goes in, $(IFS=,; echo "${REINSTALL[*]}") installed again"
+  else
+    ONLY=$(IFS=,; echo "${REINSTALL[*]}"); GI_ARGS+=" --only $ONLY"
+  fi
 fi
-if ! guest_install "${FV[@]}"; then
+# changed_features: the features whose part the VM has another digest of (its
+# /etc/omacvm/installed.json); none when it does not say.
+changed_features() {
+  local inst
+  inst=$(gssh "$IP" "cat /etc/omacvm/installed.json 2>/dev/null" < /dev/null) || inst=""
+  [[ -n $inst ]] || return 0
+  "$R/src/release/manifest.py" digests --src "$R/src" | python3 -c '
+import json, sys
+new = json.load(sys.stdin)["parts"]
+try:
+    old = json.loads(sys.argv[1]).get("parts") or {}
+except ValueError:
+    sys.exit(0)
+feats = set(sys.argv[2].split())
+print(",".join(sorted(k for k, v in new.items() if k in feats and (old.get(k) or {}).get("digest") != v["digest"])))
+' "$inst" "${FN[*]}"
+}
+# A job fails also when a part that belongs to it was only logged as not set
+# up: what it switches or repairs; for an update, the parts it changes. Parts
+# that only failed quietly before keep doing so (an update never gets stuck
+# on a part it does not touch).
+if (( TRANSACTION )); then
+  if (( ${#REINSTALL[@]} )); then strict=$(IFS=,; echo "${REINSTALL[*]}")
+  elif (( ${#SETN[@]} )); then strict=$(IFS=,; echo "${SETN[*]}")
+  else strict=$(changed_features) || strict=""; fi
+  [[ -z $strict ]] || GI_ARGS+=" --strict $strict"
+fi
+# What the guest said, to name what failed.
+GI_LOG=$(mktemp -t omacvm-apply); trap 'rm -f "$GI_LOG"' EXIT
+what_failed() {
+  local l part=""
+  l=$(sed "s/"$'\033'"\[[0-9;]*m//g" "$GI_LOG" | grep -E '^guest/install\.sh: ' | tail -1) || l=""
+  if [[ $l =~ ^guest/install\.sh:\ ([a-z][a-z0-9-]*)\ was\ not\ set\ up ]] && feature_index "${BASH_REMATCH[1]}" >/dev/null; then
+    part=${BASH_REMATCH[1]}
+    failed_part "$part" "${FTITLE[$(feature_index "$part")]} was not set up"
+  elif [[ $l =~ ^guest/install\.sh:\ failed\ during:\ (.*)$ ]]; then
+    failed_part "" "the VM side stopped at: ${BASH_REMATCH[1]}"
+  else
+    l=$(sed "s/"$'\033'"\[[0-9;]*m//g" "$GI_LOG" | grep -v '^[[:space:]]*$' | tail -1) || l=""
+    failed_part "" "${l:-the VM side failed}"
+  fi
+}
+if ! guest_install "${FV[@]}" 2>&1 | tee "$GI_LOG"; then
+  what_failed
   if (( TRANSACTION )) && [[ -n $had ]] && gssh "$IP" "test -d $S.old" < /dev/null; then
     step rollback "back to what '$VM' had"
     log "the VM side failed: back to the OmacVM and the features '$VM' had"
     gssh "$IP" "set -e; rm -rf $S.failed; mv $S $S.failed; mv $S.old $S; rm -rf $S.failed" < /dev/null ||
       die "the VM side failed, and going back failed too: run omacvm apply --vm \"$VM\" again"
-    GI_ARGS=""; KNOWN=$(gssh "$IP" "grep -v '^#' $S/features.tsv | cut -f1" < /dev/null) || KNOWN=""
+    KNOWN=$(gssh "$IP" "grep -v '^#' $S/features.tsv | cut -f1" < /dev/null) || KNOWN=""
+    # A repair of the same version changed only those parts: only they go back.
+    GI_ARGS=""; [[ -n $ONLY ]] && GI_ARGS=" --only $ONLY"
     guest_install "${PREV[@]}" || die "the VM side failed, and going back failed too: run omacvm apply --vm \"$VM\" again"
-    echo "omacvm apply: rolled back: '$VM' has its earlier OmacVM and features again (the step that failed is above)" >&2
+    if [[ $had != "$now" ]]; then
+      echo "omacvm apply: rolled back: '$VM' has OmacVM $had and its features again; this Mac keeps OmacVM $now. To go on: turn off or repair what failed, or omacvm apply --vm \"$VM\" again" >&2
+    else
+      echo "omacvm apply: rolled back: '$VM' has its features from before again (what failed is above)" >&2
+    fi
     exit 4
   fi
   gssh "$IP" "rm -rf $S.old" < /dev/null || true
@@ -276,5 +332,4 @@ if [[ $TYPE == parallels ]]; then
     parallels_shortcuts_alert
   fi
 fi
-now=$(cat "$R/src/VERSION")
 log "done$( [[ -n $had && $had != "$now" ]] && echo " (OmacVM $had -> $now)"): kernel, memory and keyboard changes apply after a reboot of the VM"

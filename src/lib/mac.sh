@@ -14,6 +14,34 @@ step() {   # NAME TEXT
   printf '{"omacvm_progress": 1, "step": "%s", "n": %d, "of": %d, "text": "%s"}\n' "$1" "$OMA_STEP" "$OMA_STEPS" "$t"
 }
 
+# failed_part PART TEXT: what failed in a job (PART a feature, or empty), for
+# the person and, as a JSON line, for the control centre.
+failed_part() {
+  local t
+  t=$(printf '%s' "$2" | tr '\000-\037' ' ' | cut -c1-160)
+  info "what failed: $t"
+  [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
+  t=${t//\\/\\\\}; t=${t//\"/\\\"}
+  printf '{"omacvm_failed": 1, "part": "%s", "text": "%s"}\n' "$1" "$t"
+}
+
+# cli_for_bridge OMACVM: true when OMACVM (a checkout's omacvm, resolved) is
+# the one the omacvm command runs: install.sh links it into one of these. So
+# another clone or worktree that runs src/mac/install.sh never becomes what
+# the Bridge runs (and moves on an update). No omacvm command at all (a clone
+# run as ./omacvm): true. OMACVM_SET_CLI=1: true. OMACVM_CLI_LINKS: the links
+# to look at, for tests.
+cli_for_bridge() {
+  local b links=0
+  [[ ${OMACVM_SET_CLI:-} == 1 ]] && return 0
+  for b in ${OMACVM_CLI_LINKS:-/opt/homebrew/bin/omacvm /usr/local/bin/omacvm $HOME/.local/bin/omacvm}; do
+    [[ -e $b || -L $b ]] || continue
+    links=1
+    [[ $(realpath "$b" 2>/dev/null) == "$1" ]] && return 0
+  done
+  (( ! links ))
+}
+
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
