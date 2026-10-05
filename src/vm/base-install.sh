@@ -121,8 +121,10 @@ pacstrap_errors() {
   grep '^error:' "$f" | awk '!seen[$0]++' | head -20 || true
   n=$(grep -n 'failed to commit transaction' "$f" | tail -1 | cut -d: -f1 || true)
   if [[ -n $n ]]; then
-    echo "---- the 20 lines before \"failed to commit transaction\" ----"
-    sed -n "$(( n > 20 ? n - 20 : 1 )),$(( n - 1 ))p" "$f"
+    # pacman prints the cause before that line (signatures, extraction) or
+    # after it (conflicting files): show 20 lines before and 10 after.
+    echo "---- around \"failed to commit transaction\" ----"
+    sed -n "$(( n > 20 ? n - 20 : 1 )),$(( n + 10 ))p" "$f"
   elif ! grep -q '^error:' "$f"; then
     tail -20 "$f"
   fi
