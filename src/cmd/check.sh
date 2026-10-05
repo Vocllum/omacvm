@@ -204,6 +204,7 @@ if [[ $BRIDGE == on ]]; then
   case $pm in
     "") ;;   # a Bridge from before it said so
     *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
+    *"Input Monitoring MISSING"*) warn "Bridge permissions" "Input Monitoring is off for OmacVM Bridge: the brightness keys do nothing with a VM in front (System Settings > Privacy & Security > Input Monitoring)" ;;
     *) ok "Bridge permissions" "${pm#permissions: }" ;;
   esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
@@ -246,7 +247,7 @@ fi
 # VM (switched off meanwhile), kept by the user's choice, or a fallback.
 if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
   if grep -q 'macOS shortcuts stay with macOS' "$miclog"; then
-    skip "macOS shortcuts" "stay with macOS (defaults write org.omacvm.app macShortcuts -bool true)"
+    skip "macOS shortcuts" "stay with macOS (the default; experimental, all to the VM: defaults write org.omacvm.app macShortcuts -bool false)"
   elif grep -q "macOS's switch for them was not found\|macOS shortcuts .*FAILED" "$miclog"; then
     warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
   elif grep -q 'macOS shortcuts off' "$miclog"; then
@@ -283,7 +284,7 @@ if [[ $GESTURES == on ]]; then
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
       g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
       [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
-      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
+      if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "on (trackpad only): a trackpad's scrolling goes to this VM in full screen, mice scroll one to one"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
     fi
     # The helper listens only once it has its permissions, so a later
