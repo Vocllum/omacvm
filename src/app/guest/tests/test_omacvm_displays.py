@@ -6,6 +6,7 @@
 import importlib.machinery
 import importlib.util
 import pathlib
+import sys
 import unittest
 from unittest import mock
 
@@ -381,6 +382,9 @@ class ConfigWatchTest(unittest.TestCase):
             w = od.ConfigWatch(folder)
             self.assertTrue(folder.is_dir())
             if not w.ok:
+                # The guest is Linux: there a missing watch is a bug (CI runs
+                # this on Linux too). Elsewhere the agent's fallback is all there is.
+                self.assertNotEqual(sys.platform, "linux", "no inotify watch on Linux")
                 self.skipTest("no inotify here (the agent looks once a second)")
             self.assertEqual(select.select([w], [], [], 0)[0], [])
             conf = folder / "displays.conf"

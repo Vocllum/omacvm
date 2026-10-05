@@ -46,6 +46,7 @@ class Clipboard(unittest.TestCase):
         fd = clipboard.exit_fd(child.pid)
         if fd is None:
             child.wait()
+            self.assertNotEqual(sys.platform, "linux", "no pidfd on Linux")   # the guest has one
             self.skipTest("no pidfd here (the agent looks once a second)")
         try:
             self.assertEqual(select.select([fd], [], [], 5)[0], [fd])
