@@ -71,3 +71,6 @@ jobs:
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
+
+      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
+        run: src/tests/app-notch.sh

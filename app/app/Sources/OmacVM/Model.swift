@@ -354,20 +354,30 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// Full screen also covers the strip beside the notch; Omarchy's bar goes
-    /// there. Off by default: that full screen has no Space of its own (macOS
-    /// keeps full-screen Spaces below the notch).
+    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
+    /// user switched it off.
     static var useNotch: Bool {
-        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
+        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
+        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
+    }
+    /// What a VM start gets: off on a Mac without a notch.
+    static var notchActive: Bool {
+        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
     }
 }
 
 extension Mac {
-    /// The built-in display has a camera housing.
-    static var hasNotch: Bool {
-        NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+    /// The built-in display, when it has a camera notch. Asked at run time
+    /// from the display itself (no model list); nil with the lid closed, on a
+    /// Mac without a notch, or at a resolution that ends below the notch.
+    static var notchScreen: NSScreen? {
+        NSScreen.screens.first { s in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+                  CGDisplayIsBuiltin(id) != 0 else { return false }
+            return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
+        }
     }
+    static var hasNotch: Bool { notchScreen != nil }
 
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs

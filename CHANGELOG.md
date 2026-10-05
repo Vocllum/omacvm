@@ -89,6 +89,10 @@ in more words.
   while `~/OmacVM` does not exist; a folder picked in the app still wins.
   `omacvm` finds the app in `~/Applications` or `/Applications` and the VMs
   the same way as the app.
+- OmacVM.app: "Use the notch for the menu bar" is on by default (Omarchy's
+  bar beside the notch in full screen). It shows only on a Mac whose
+  built-in display has a notch, checked again when displays change; if you
+  switched it off before, it stays off.
 
 ## 2.8.0
 
