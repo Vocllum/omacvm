@@ -101,15 +101,8 @@ def notify() -> int:
     c.updates = u
     c.local.save_cache(updates=u)
     c.write_attention(c.rows())
-    if not u.get("checks_enabled", True) or not m:
-        return 0
-
-    def ver(v):
-        try:
-            return tuple(int(x) for x in str(v).split("."))
-        except ValueError:
-            return ()
-    if ver(m.get("version")) <= ver(c.local.version):
+    # Forward only: never a notice for a release older than this VM or the Mac.
+    if not u.get("checks_enabled", True) or not m or not c.update_offered():
         return 0
     seen = os.path.join(os.path.dirname(cache_file()), "notified")
     try:

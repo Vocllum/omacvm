@@ -66,6 +66,8 @@ class Job:
     step: int = 0
     of: int = 0
     text: str = ""
+    failed_part: str = ""   # the feature whose part failed (failed, rolled-back)
+    mac_omacvm: str = ""    # update: the Mac's OmacVM after the job
 
     @property
     def active(self) -> bool:
@@ -182,6 +184,29 @@ def status_of(f: Feature, on: bool, avail: Avail | None, checks: list[Check] | N
         c = failed[0]
         return Status.FAILING, f"{c.name}: {c.detail}" if c.detail else c.name
     return Status.WORKS, ""
+
+
+def version_tuple(v) -> tuple | None:
+    """"2.9.1" -> (2, 9, 1); None for anything else ("1.x", "?")."""
+    parts = str(v or "").split(".")
+    if not 1 <= len(parts) <= 4 or not all(p.isdigit() for p in parts):
+        return None
+    t = [int(p) for p in parts]
+    return tuple(t + [0] * (4 - len(t)))
+
+
+def update_offered(release, vm, mac=None) -> bool:
+    """An update is offered only forward: the release is newer than this VM's
+    OmacVM (one without a version counts as older) and not older than the
+    Mac's (the Mac never goes back either)."""
+    r = version_tuple(release)
+    if r is None:
+        return False
+    v = version_tuple(vm)
+    if v is not None and r <= v:
+        return False
+    m = version_tuple(mac) if mac else None
+    return m is None or r >= m
 
 
 def part_changed(name: str, installed: dict, offer: dict) -> bool:

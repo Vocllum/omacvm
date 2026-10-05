@@ -275,7 +275,7 @@ def test_rolled_back_says_what_next(world):
             a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
             await pilot.press("r")
             assert await settle(pilot, lambda: bool(a.last_result))
-            assert a.last_result == ("Repair The Mac's clock: failed, this VM went back to its features from before "
+            assert a.last_result == ("Repair The Mac's clock: failed. This VM went back to its features from before "
                                      "(r tries again; ! reports the problem).")
             assert a.banner() == a.last_result
             body = [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1]
@@ -297,8 +297,12 @@ def test_step_n_of_m_while_running(world):
     asyncio.run(go())
 
 
-def test_update_first_offers_u(world):
+@pytest.mark.parametrize("release,want", [("2.9.1", "u updates this VM"),
+                                           (None, "on the Mac, omacvm apply --vm NAME brings this VM up to it")])
+def test_update_first_offers_u(world, release, want):
     world.refuse_jobs = (409, "update-first", "the Mac has OmacVM 2.9.1, this VM 2.7.0: update first")
+    if release:
+        world.manifest = {"version": release, "parts": {}}
     seen = []
 
     async def go():
@@ -311,7 +315,7 @@ def test_update_first_offers_u(world):
             from textual.widgets import DataTable
             a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
             await pilot.press("space")
-            assert await settle(pilot, lambda: any("u updates this VM" in m for m in seen))
+            assert await settle(pilot, lambda: any(want in m for m in seen)), seen
     asyncio.run(go())
 
 
@@ -333,14 +337,16 @@ def test_still_asking_the_mac(world):
     asyncio.run(go())
 
 
-def test_every_mac_request_carries_the_vm_key(world):
+def test_every_mac_request_is_signed_and_the_key_never_sent(world):
     async def go():
         a = app()
         async with a.run_test(size=(110, 30)) as pilot:
             assert await settle(pilot, lambda: a.c.linked and a.c.mac_status is not None)
     asyncio.run(go())
     from fakes import VM_KEY
-    assert world.vm_keys and all(k == VM_KEY for k in world.vm_keys)
+    assert world.signed and all(ok for _, ok in world.signed)
+    for headers, body in world.headers_seen:
+        assert VM_KEY not in " ".join(headers.values()) and VM_KEY.encode() not in body
 
 
 def test_report_has_no_personal_data(world, monkeypatch):
@@ -371,4 +377,121 @@ def test_details_and_back(world):
             await pilot.pause(0.1)
             assert isinstance(a.screen, FeaturesScreen)
             await pilot.press("q")
+    asyncio.run(go())
+
+
+def test_rollback_says_which_part_failed(world):
+    world.job_end = ("rolled-back", "the Mac's clock was not set up")
+    world.job_extra = {"failed_part": "mac-clock"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
+            await pilot.press("r")
+            assert await settle(pilot, lambda: bool(a.last_result))
+            assert a.last_result.startswith("Repair The Mac's clock: the Mac's clock was not set up. This VM went back")
+    asyncio.run(go())
+
+
+def test_failed_update_says_the_mac_kept_it_and_the_way_out(world, monkeypatch, tmp_path):
+    """The update's camera part failed: the Mac keeps 2.9.1, the VM went back;
+    turning the part off or repairing it is the way on (the Mac allows both)."""
+    import base64
+    with open(os.environ["OMACVM_ENV"], "a") as f:
+        f.write("OMACVM_VM_NAME_B64=" + base64.b64encode(b"My Omarchy").decode() + "\n")
+    world.manifest = {"version": "2.9.1", "parts": {"camera": {"digest": "sha256:" + "c" * 64, "release": "2.9.1"}}}
+    world.job_end = ("rolled-back", "camera was not set up")
+    world.job_extra = {"failed_part": "camera", "mac_omacvm": "2.9.1"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
+            await pilot.press("u")
+            await pilot.pause(0.2)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            r = a.last_result
+            assert r.startswith("Update: camera was not set up. The Mac keeps OmacVM 2.9.1; "
+                                "this VM went back to OmacVM 2.7.0 and its features."), r
+            assert "Turn The Mac's camera off (space) or repair it (r)" in r
+            assert "omacvm apply --vm 'My Omarchy'" in r
+    asyncio.run(go())
+
+
+def test_update_of_core_only_shows_progress_in_the_banner(world):
+    world.manifest = {"version": "2.9.1", "parts": {"core": {"digest": "sha256:" + "e" * 64, "release": "2.9.1"}}}
+    world.job_polls_to_end = 6
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
+            assert not any(r.update for r in a.rows)      # no feature row changes
+            await pilot.press("u")
+            await pilot.pause(0.2)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: "(2/4)" in a.banner())
+            assert a.banner() == "Update: the VM side (2/4)"
+            assert not any(r.status.value == "busy" for r in a.rows)
+    asyncio.run(go())
+
+
+def test_lost_job_names_the_right_mac_command(world, monkeypatch):
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "LOST_AFTER", 2)
+    world.job_polls_fail = True
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen), 12)
+            assert "omacvm features --vm NAME" in a.last_result and "omacvm status" not in a.last_result
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("vm,mac,release,offered", [
+    ("2.7.0", "2.7.0", "2.9.1", True),
+    ("2.9.1", "2.9.1", "2.9.0", False),   # a dev checkout ahead of the release
+    ("2.9.0", "2.9.1", "2.9.0", False),   # the Mac ahead of the release
+    ("2.9.0", "2.9.2", "2.9.1", False),   # it would take the Mac back
+    ("2.9.0", "2.9.1", "2.9.1", True),    # after an update that went back in the VM
+    ("1.x", "2.9.1", "2.9.1", True),
+])
+def test_never_a_downgrade(world, vm, mac, release, offered):
+    from omacvm_cc import state as S
+    assert S.update_offered(release, vm, mac) is offered
+
+
+def test_a_release_older_than_the_vm_shows_nothing(world):
+    world.manifest = {"version": "2.6.0", "parts": {"gestures": {"digest": "sha256:" + "c" * 64, "release": "2.6.0"}}}
+    world.version = "2.6.0"
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.updates is not None and a.c.updates.get("manifest"))
+            await pilot.pause(0.1)
+            assert not a.c.update_offered() and not any(r.update for r in a.rows)
+            assert "update" not in a.subtitle()
+            assert not any(r.update for r in a.c.rows(with_updates=True))
+            await pilot.press("u")
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert not isinstance(a.screen, ConfirmScreen)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+            await pilot.press("U")
+            await pilot.pause(0.2)
+            from textual.widgets import Static
+            body = str(a.screen.query_one("#body", Static).render())
+            assert "Up to date" in body and "→" not in body
     asyncio.run(go())

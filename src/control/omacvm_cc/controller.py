@@ -121,9 +121,23 @@ class Controller:
         age = iso_age((self.updates or {}).get("checked_at"))
         return age is not None and age < FRESH_SECONDS
 
-    def offer(self) -> dict:
+    def manifest(self) -> dict | None:
         m = (self.updates or {}).get("manifest")
-        parts = m.get("parts") if isinstance(m, dict) else None
+        return m if isinstance(m, dict) else None
+
+    def mac_version(self) -> str:
+        return str((self.updates or {}).get("omacvm") or (self.hello.omacvm if self.hello else "") or "")
+
+    def update_offered(self) -> bool:
+        """The release is newer than this VM's OmacVM and not older than the
+        Mac's: never a downgrade (a dev checkout, a Mac ahead of the release)."""
+        m = self.manifest()
+        return m is not None and S.update_offered(m.get("version"), self.local.version, self.mac_version())
+
+    def offer(self) -> dict:
+        """The release's parts, only when it is an update for this VM."""
+        m = self.manifest()
+        parts = m.get("parts") if m and self.update_offered() else None
         return parts if isinstance(parts, dict) else {}
 
     def rows(self, with_updates: bool | None = None) -> list[S.Row]:
@@ -150,7 +164,8 @@ class Controller:
     def _job(self, d: dict) -> S.Job:
         j = S.Job(id=str(d.get("id", "")), action=str(d.get("action", "")),
                   features=tuple(str(x) for x in d.get("features") or ()), state=str(d.get("state", "running")),
-                  step=int(d.get("step") or 0), of=int(d.get("of") or 0), text=str(d.get("text", "")))
+                  step=int(d.get("step") or 0), of=int(d.get("of") or 0), text=str(d.get("text", "")),
+                  failed_part=str(d.get("failed_part") or ""), mac_omacvm=str(d.get("mac_omacvm") or ""))
         self.jobs[j.id] = j
         self.job_lines[j.id] = [str(x) for x in d.get("lines") or []]
         return j
@@ -160,6 +175,14 @@ class Controller:
 
     def poll(self, job_id: str) -> S.Job:
         return self._job(self.bridge.job(job_id))
+
+    def vm_name(self) -> str:
+        """This VM's name in its app (from omacvm apply), "" if not known."""
+        import base64
+        try:
+            return base64.b64decode(self.local.env.get("OMACVM_VM_NAME_B64", ""), validate=True).decode("utf-8")
+        except ValueError:
+            return ""
 
     def lose(self, job_id: str) -> S.Job:
         """The Mac stopped answering about a job: it ends here as failed (it

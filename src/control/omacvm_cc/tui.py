@@ -370,10 +370,15 @@ class UpdatesScreen(Screen):
         all_rows = app.c.rows(with_updates=True)
         rows = [r for r in all_rows if r.update]
         if m:
-            mac = u.get("omacvm") or (app.c.hello.omacvm if app.c.hello else "?")
+            mac = app.c.mac_version() or "?"
             vm = app.c.local.version
-            if not rows and mac == m.get("version"):
-                t.append(f"Up to date: OmacVM {m.get('version')}.\n", style="green")
+            if not app.c.update_offered():
+                # Never a downgrade: a VM or Mac ahead of the release has nothing to install.
+                newer = [f"this VM has {vm}" if vm != m.get("version") else "",
+                         f"the Mac has {mac}" if mac not in (m.get("version"), "?") else ""]
+                ahead = ", ".join(x for x in newer if x)
+                t.append(f"Up to date: OmacVM {m.get('version')} is the latest release"
+                         + (f" ({ahead})" if ahead else "") + ".\n", style="green")
             else:
                 who = "the Mac and this VM" if mac != m.get("version") else "this VM"
                 t.append(f"OmacVM {vm} → {m.get('version')}", style="bold")
@@ -615,6 +620,11 @@ class ControlCentre(App):
 
     def banner(self) -> str:
         c = self.c
+        j = c.active_job()
+        if j is not None and not any(r.status is S.Status.BUSY for r in self.rows):
+            # A job no row shows (an update of OmacVM's own scripts or the app): here.
+            step = f" ({j.step}/{j.of})" if j.of else ""
+            return f"{self.describe(j.action, list(j.features))}: {j.text or 'starting'}{step}"
         if self.last_result:
             return self.last_result
         if c.mac_error is None:
@@ -651,14 +661,30 @@ class ControlCentre(App):
         return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names} on",
                 "disable": f"{names} off"}.get(action, action)
 
-    def next_step(self, action: str, state: str) -> str:
-        """What the person can do after a job that did not work."""
+    def on_the_mac(self, command: str) -> str:
+        """An omacvm command for this VM, to run on the Mac."""
+        import shlex
+        name = self.c.vm_name()
+        return f"omacvm {command} --vm {shlex.quote(name) if name else 'NAME'}"
+
+    def outcome(self, what: str, action: str, job: S.Job) -> str:
+        """The banner after a job that did not work: what failed, where the VM
+        and the Mac are now, what to do next."""
         again = {"enable": "space tries again", "disable": "space tries again", "reinstall": "r tries again",
                  "update": "u tries again"}.get(action, "")
-        if state == "rolled-back":
-            what = "its OmacVM and features" if action == "update" else "its features"
-            return f"this VM went back to {what} from before ({again}; ! reports the problem)."
-        return f"on the Mac, omacvm apply puts this VM right ({again}; ! reports the problem)."
+        titles = {f.name: f.title for f in self.c.local.features}
+        part = titles.get(job.failed_part, "")
+        failed = job.text.strip().rstrip(".") if job.text and "rolled back" not in job.text else ""
+        head = f"{what}: {failed}." if failed else f"{what}: failed."
+        if job.state == "rolled-back" and action == "update":
+            mac = f"OmacVM {job.mac_omacvm}" if job.mac_omacvm else "the new OmacVM"
+            way = (f"Turn {part} off (space) or repair it (r) to go on, or u tries again"
+                   if part else "u tries again")
+            return (f"{head} The Mac keeps {mac}; this VM went back to OmacVM {self.c.local.version} and its features. "
+                    f"{way}; on the Mac: {self.on_the_mac('apply')}. ! reports the problem.")
+        if job.state == "rolled-back":
+            return f"{head} This VM went back to its features from before ({again}; ! reports the problem)."
+        return f"{head} On the Mac, {self.on_the_mac('apply')} puts this VM right ({again}; ! reports the problem)."
 
     def toggle(self, r: S.Row) -> None:
         if r.status is S.Status.UNAVAILABLE:
@@ -690,9 +716,13 @@ class ControlCentre(App):
             self.run_job("reinstall", [r.feature.name])   # that feature only (apply --reinstall)
 
     def install_update(self) -> None:
-        m = (self.c.updates or {}).get("manifest")
-        if not isinstance(m, dict):
+        m = self.c.manifest()
+        if m is None:
             self.notify("no update known: U, then c checks", severity="warning")
+            return
+        if not self.c.update_offered():
+            self.notify(f"nothing newer to install: the latest release is OmacVM {m.get('version')}, "
+                        f"this VM has {self.c.local.version}", severity="warning")
             return
         if not self.c.checks_enabled and not self.c.manifest_fresh():
             # Checks off: no prompts, and nothing installed from a result that may be old.
@@ -715,7 +745,10 @@ class ControlCentre(App):
         except BridgeError as e:
             msg = str(e)
             if e.code == "update-first":
-                msg = "the Mac has a newer OmacVM: u updates this VM first"
+                msg = ("the Mac has a newer OmacVM: u updates this VM first" if self.c.update_offered() else
+                       f"the Mac has a newer OmacVM: on the Mac, {self.on_the_mac('apply')} brings this VM up to it")
+            elif e.code == "mac-older":
+                msg = "this VM has a newer OmacVM than the Mac: run omacvm update on the Mac first"
             elif e.code == "stale-update":
                 msg = "update checks are off and the last result may be old: U, then c checks now"
             self.call_from_thread(self.notify, f"{what}: {msg}", severity="error", timeout=8)
@@ -740,11 +773,10 @@ class ControlCentre(App):
             self.call_from_thread(self.notify, f"{what}: done", timeout=6)
         elif lost:
             self.last_result = (f"{what}: the Mac stopped answering about it (it may still finish there; "
-                                "omacvm status on the Mac shows it).")
+                                f"on the Mac, {self.on_the_mac('features')} shows how it went).")
             self.call_from_thread(self.ask_retry, action, features, self.last_result)
         else:
-            head = "failed, " if job.state == "rolled-back" else "failed: " + job.text.rstrip(".") + ". "
-            self.last_result = f"{what}: {head}{self.next_step(action, job.state)}"
+            self.last_result = self.outcome(what, action, job)
             self.call_from_thread(self.notify, self.last_result, severity="error", timeout=12)
         if action == "disable" and "control-centre" in features and job.state == "done":
             self.call_from_thread(self.exit)
