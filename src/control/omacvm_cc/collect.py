@@ -241,7 +241,7 @@ def mac_known(omacvm: str) -> Known:
     # Wi-Fi and Bluetooth names, from this Mac's Bridge (only after its proof,
     # as from a VM: on 127.0.0.1 any Mac program could listen in its place).
     from .bridge import Bridge
-    b = Bridge({}, "", token_file=tok, url="http://127.0.0.1:47831")
+    b = Bridge({}, "", token_file=tok, url=os.environ.get("OMACVM_BRIDGE_URL", "http://127.0.0.1:47831"))
     for path, fn in (("/state", wifi_values), ("/scan?cached=1", scan_values), ("/bluetooth", bt_values)):
         try:
             for kind, v in fn(b.call("GET", path, timeout=4.0)):
