@@ -512,7 +512,11 @@ class Agent:
             return
         problems = undrawn_outputs()
         if not problems:
+            # A good look ends a repair: the same outputs going grey again
+            # later is a new problem, not "a restart does not help".
             self.suspect = None
+            self.repaired_for = []
+            self.said = []
             return
         if not self.suspect or self.suspect[0] != problems:
             self.suspect = (problems, now)
