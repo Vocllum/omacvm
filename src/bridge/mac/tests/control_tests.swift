@@ -365,6 +365,18 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     g3.leaveSlow("vm parallels/A")
     expect(g3.enterSlow("vm parallels/A"), "one ended: another")
 
+    // ---- a key that does not match: look again (final review point 3) ----
+    var c3 = VMListCache()
+    _ = c3.shouldRefresh(known: false, now: t0); _ = c3.finished([vmA], now: t0)
+    expect(!c3.keyMismatch(now: t0 + 2), "a list just made: no run")
+    expect(c3.keyMismatch(now: t0 + 10), "older: a run")
+    expect(!c3.keyMismatch(now: t0 + 11), "one at a time")
+    _ = c3.finished([vmB], now: t0 + 13)
+    expect(!c3.keyMismatch(now: t0 + 40), "at most once a minute")
+    expect(c3.keyMismatch(now: t0 + 71), "a minute later: again")
+    _ = c3.finished([vmB], now: t0 + 72)
+    expect(c3.shouldRefresh(known: false, now: t0 + 73), "its own minute: unknown addresses still look")
+
     }
 
     print("control policy: \(passed) passed, \(failures) failed")

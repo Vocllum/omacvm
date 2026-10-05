@@ -226,13 +226,13 @@ final class Control {
       }
       switch vmForApp(name, vmList(cli) { if case .success = vmForApp(name, $0) { return true }; return false }) {
       case .success(let v): vm = v
-      case .failure(let e): return refuse(lookingAgain(e))
+      case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
       if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli) { if case .success = vmForPeer(peer, $0) { return true }; return false }) {
       case .success(let v): vm = v
-      case .failure(let e): return refuse(lookingAgain(e))
+      case .failure(let e): return refuse(lookingAgain(e), looking(e))
       }
       vmName = vm.name
       // Each VM's requests are limited on their own: one VM cannot crowd out another.
@@ -250,6 +250,12 @@ final class Control {
       case .success(let nonce): signer = (key!.trimmingCharacters(in: .whitespacesAndNewlines), nonce)
       case .failure(let f):
         if let n = f.nonce, let k = key { signer = (k.trimmingCharacters(in: .whitespacesAndNewlines), n) }
+        if f.error.code == "vm-key" || f.error.code == "no-vm-key" {
+          // The list may be old: the VM it has here stopped and this one took
+          // its address. Look again (rate-limited); the VM asks again meanwhile.
+          let e = keyMismatch(f.error, cli)
+          return refuse(e, looking(e))
+        }
         return refuse(f.error, f.macTime.map { ["mac_time": Int($0)] } ?? [:])
       }
     }
@@ -374,7 +380,27 @@ final class Control {
   /// An unknown VM while a run is going: say it is being looked for.
   private func lookingAgain(_ e: PolicyError) -> PolicyError {
     guard e.code == "unknown-vm", q.sync(execute: { vms.running }) else { return e }
-    return PolicyError(e.status, e.code, e.message + " (the Mac is looking at its VMs again: try in a moment)")
+    return PolicyError(e.status, e.code, e.message + lookingText)
+  }
+
+  private let lookingText = " (the Mac is looking at its VMs again: try in a moment)"
+
+  /// "looking": true in the answer while a run goes: the VM asks again.
+  private func looking(_ e: PolicyError) -> [String: Any] {
+    e.message.hasSuffix(lookingText) ? ["looking": true] : [:]
+  }
+
+  /// A key that does not match the VM the list has at this address: look
+  /// again (VMListCache.keyMismatch says when); while a run goes, say so
+  /// instead of sending the person to omacvm apply.
+  private func keyMismatch(_ e: PolicyError, _ cli: String) -> PolicyError {
+    let (start, running) = q.sync { () -> (Bool, Bool) in
+      let s = vms.keyMismatch(now: Date())
+      return (s, vms.running)
+    }
+    if start { refreshVMs(cli) }
+    guard running else { return e }
+    return PolicyError(e.status, e.code, "this VM's key does not match the VM the Mac had at this address" + lookingText)
   }
 
   /// For the connection limits (server.swift): the VM at this address, when

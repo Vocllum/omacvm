@@ -30,8 +30,9 @@ from .local import log_tail
 # Job polls (one a second) that may fail in a row before the job counts as
 # lost: an update restarts the Bridge, which takes a while.
 LOST_AFTER = 120
-# A VM the Mac does not list yet (it just started, or the Bridge did): the
-# Mac looks at its VMs again in the background (for an unknown address at
+# A VM the Mac does not list yet (it just started, or the Bridge did), or
+# one whose address the list still gives a stopped VM (a key that does not
+# match, "looking"): the Mac looks at its VMs again in the background (at
 # most once a minute, and a run can take a while), so ask again for 100 s.
 UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
 
@@ -581,7 +582,7 @@ class ControlCentre(App):
         worker = get_current_worker()
         for _ in range(UNKNOWN_TRIES):
             self.c.refresh_mac()
-            if not self.c.vm_unknown() or worker.is_cancelled:
+            if not self.c.mac_looking() or worker.is_cancelled:
                 break
             self.call_from_thread(self.refresh_all)
             time.sleep(UNKNOWN_WAIT)

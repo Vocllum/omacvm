@@ -49,6 +49,8 @@ class FakeMac:
         self.clock_skew = 0               # the fake Mac's clock minus the real one
         self.hello_delay = 0.0
         self.unknown_for = 0              # this many status requests get 409 unknown-vm (a VM just started)
+        self.stale_for = 0                # this many status requests get 403 vm-key, looking (an old VM list)
+        self.stale_looking = True         # False: the Mac is not looking (a key that is really wrong)
         self.nonces: set = set()
         fake = self
 
@@ -82,8 +84,15 @@ class FakeMac:
                 ok = len(f) == 4 and f[0] == "1" and f[1].lstrip("-").isdigit() and hmac.compare_digest(
                     request_mac(VM_KEY, self.command, p, int(f[1]), f[2], self.headers.get("X-OmacVM-Proto") or "", raw), f[3])
                 fake.signed.append((p, ok))
+                if ok and p == "/omacvm/status" and fake.stale_for > 0:
+                    fake.stale_for -= 1
+                    ok = False
                 if not ok:
-                    self.send(403, {"error": "this VM's control centre key does not match", "code": "vm-key"})
+                    a = {"error": "this VM's control centre key does not match: omacvm apply on the Mac", "code": "vm-key"}
+                    if fake.stale_looking and p == "/omacvm/status":
+                        a = {"error": "this VM's key does not match the VM the Mac had at this address (the Mac is "
+                                      "looking at its VMs again: try in a moment)", "code": "vm-key", "looking": True}
+                    self.send(403, a)   # unsigned: the Mac cannot sign with a key that does not match
                     return False
                 self.nonce = f[2]
                 now = int(time.time()) + fake.clock_skew

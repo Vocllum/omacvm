@@ -521,6 +521,20 @@ struct VMListCache {
     return true
   }
 
+  /// A request from a VM the list has at this address did not prove with
+  /// that VM's key: the list may be old (that VM stopped, another took its
+  /// address). True when the caller starts a run now: when the list is at
+  /// least `mismatchAge` old, at most once a minute (any guest can send bad keys).
+  static let mismatchAge: Double = 5
+  private var mismatchAt = Date.distantPast
+  mutating func keyMismatch(now: Date) -> Bool {
+    guard !running, now.timeIntervalSince(failedAt) >= Self.afterFailure, now.timeIntervalSince(at) >= Self.mismatchAge,
+          now.timeIntervalSince(mismatchAt) >= Self.unknownEvery else { return false }
+    mismatchAt = now
+    running = true
+    return true
+  }
+
   /// A job of this VM ended. `version`: the OmacVM it has now when the job
   /// worked (the Mac's), so the next request does not see the old one while
   /// the run goes. True when the caller starts a run now.

@@ -638,3 +638,45 @@ def test_vm_the_mac_does_not_list_yet_asks_again(world, monkeypatch):
             assert await settle(pilot, lambda: a.c.linked and a.c.mac_status is not None, 10)
             assert sum(1 for m, p, _ in world.requests if p == "/omacvm/status") == 3
     asyncio.run(go())
+
+
+def test_old_vm_list_on_the_mac_asks_again(world, monkeypatch):
+    """Final review point 3: the Mac's list still has a stopped VM at this
+    VM's address, so the key does not match; the Mac looks again ("looking")
+    and the control centre asks again with that message, not "omacvm apply"."""
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "UNKNOWN_WAIT", 0.2)
+    world.stale_for = 2
+    seen = []
+
+    async def go():
+        a = app()
+        orig = a.c.refresh_mac
+
+        def spy():
+            orig()
+            if a.c.mac_error is not None:
+                seen.append((a.c.mac_error.code, str(a.c.mac_error), a.c.mac_looking()))
+        a.c.refresh_mac = spy
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.mac_status is not None, 10)
+            assert sum(1 for m, p, _ in world.requests if p == "/omacvm/status") == 1
+    asyncio.run(go())
+    assert len(seen) == 2 and all(code == "vm-key" and looking and "looking at its VMs again" in msg
+                                  for code, msg, looking in seen), seen
+
+
+def test_wrong_key_without_looking_is_not_asked_again(world, monkeypatch):
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "UNKNOWN_WAIT", 0.2)
+    world.stale_for, world.stale_looking = 50, False
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.mac_error is not None, 10)
+            await pilot.pause(1.0)
+            assert a.c.mac_error.code == "vm-key" and not a.c.mac_looking()
+            assert "omacvm apply" in a.c.mac_problem()
+            assert sum(1 for p, ok in world.signed if p == "/omacvm/status") == 1
+    asyncio.run(go())

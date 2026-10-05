@@ -56,9 +56,10 @@ ANSWER_MAX = 1 << 20
 
 
 class BridgeError(Exception):
-    def __init__(self, kind: str, message: str, status: int = 0, code: str = ""):
+    def __init__(self, kind: str, message: str, status: int = 0, code: str = "", looking: bool = False):
         super().__init__(message)
         self.kind, self.status, self.code = kind, status, code
+        self.looking = looking   # the Mac is looking at its VMs again: ask again in a moment
 
 
 @dataclass(frozen=True)
@@ -209,7 +210,7 @@ class Bridge:
             raise BridgeError("old", "the Mac's OmacVM has no control centre yet: run omacvm update on the Mac", status)
         if status == 401:
             raise BridgeError("unproven", "the Mac refused this VM's token: omacvm apply on the Mac", status)
-        raise BridgeError("refused", msg, status, str(answer.get("code", "")))
+        raise BridgeError("refused", msg, status, str(answer.get("code", "")), answer.get("looking") is True)
 
     def _http(self, method: str, path: str, obj: dict | None, timeout: float, retried: bool = False) -> tuple[int, dict]:
         self.prove(min(timeout, 3.0))

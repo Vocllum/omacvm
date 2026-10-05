@@ -304,7 +304,11 @@ Which VM asked comes from `omacvm vms --json`, cached: a request never waits
 for it. It is read again in the background, one run at a time, when the list
 is a minute old, after a job, and for an address the list does not have (a
 VM that just started) at most once a minute, since any guest can add
-addresses.
+addresses. Also when a request does not prove with the key of the VM the
+list has at its address (that VM stopped and another took the address): at
+most once a minute, when the list is 5 s old or more; the 403 then says
+"looking" (`"looking": true`) and the VM asks again instead of telling the
+person to run `omacvm apply`.
 
 Connections being handled: every VM the list knows, and 127.0.0.1 (this Mac:
 OmacVM.app's relay and its guests), has 4 places of its own; past them it
