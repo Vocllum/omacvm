@@ -62,7 +62,7 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
   pacman -S --needed --noconfirm meson ninja pkgconf python-mako python-yaml python-packaging \
     glslang spirv-tools spirv-llvm-translator llvm clang libclc rust rust-bindgen cbindgen \
     libdrm wayland wayland-protocols libx11 libxext libxrandr libxshmfence libxxf86vm \
-    ocl-icd zstd expat >/dev/null 2>&1
+    ocl-icd zstd expat >/dev/null 2>&1 || { echo "OmacVM Venus extras: pacman could not install Mesa's build tools"; exit 1; }
   B=/var/cache/omacvm/mesa-build; rm -rf "$B"; mkdir -p "$B"
   curl -fsSL -o "$B/mesa.tar.xz" "https://archive.mesa3d.org/mesa-$MESA_VERSION.tar.xz"
   echo "$MESA_SHA256  $B/mesa.tar.xz" | sha256sum -c --quiet
@@ -73,8 +73,9 @@ if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
   meson setup "$S/build" "$S" --prefix="$PREFIX" -Dbuildtype=release \
     -Dvulkan-drivers=virtio -Dgallium-drivers=zink -Dgallium-rusticl=true -Dllvm=enabled \
     -Dplatforms=wayland,x11 -Dopengl=false -Dgles1=disabled -Dgles2=disabled -Degl=disabled \
-    -Dglx=disabled -Dgbm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled >/dev/null
-  ninja -C "$S/build" install >/dev/null
+    -Dglx=disabled -Dgbm=disabled -Dvideo-codecs= -Dvalgrind=disabled -Dlibunwind=disabled \
+    > "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; exit 1; }
+  ninja -C "$S/build" install >> "$B/build.log" 2>&1 || { tail -30 "$B/build.log"; exit 1; }
   echo "$STAMP" > "$PREFIX/omacvm-mesa-version"
   rm -rf "$B"
 fi
@@ -89,9 +90,8 @@ cat > "$ENVF" <<CONF
 RUSTICL_ENABLE=zink
 VK_LOADER_DRIVERS_DISABLE=virtio_icd.json
 CONF
-if [[ -d /usr/lib/firefox ]]; then
-  install -Dm644 omacvm-webgpu.js "$FFPREF"
-fi
+# Also before Firefox is installed (as the app's video pref): it reads it once it is.
+install -Dm644 omacvm-webgpu.js "$FFPREF"
 install -Dm755 omacvm-chromium-webgpu "$LAUNCH"
 ln -sf omacvm-chromium-webgpu "$LAUNCH2"
 [[ -x /usr/bin/chromium ]] && install -Dm644 omacvm-chromium-webgpu.desktop "$DESK"
