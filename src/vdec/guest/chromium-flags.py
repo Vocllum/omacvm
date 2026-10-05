@@ -13,9 +13,10 @@ launcher reads /etc/chromium-flags.conf, then ~/.config/chromium-flags.conf
 the user's file (several flags may share a line), or into a new line with
 /etc's last list plus the value when the user's file has none. A marker in
 ~/.local/state/omacvm remembers what was added, so "off" never removes what
-the user set. Written in place (a linked file stays a link).
-check: exit 0 when Chromium would get both."""
-import json, os, pwd, re, sys
+the user set. Files are replaced whole (a temporary file, then a rename), so
+Chromium never reads half a file; a linked file stays a link (its target is
+replaced). check: exit 0 when Chromium would get both."""
+import json, os, pwd, re, sys, tempfile
 
 ADD = {"--enable-features=": "AcceleratedVideoDecoder",
        "--load-extension=": "/usr/local/share/omacvm/chromium-no-av1"}
@@ -57,12 +58,35 @@ def effective(switch):
     return []
 
 
-def write(path, ls):
+def write(path, text):
+    """Replaces PATH's content atomically. A link is followed: its target is
+    replaced and the link kept. Keeps the file's mode (a new file: the umask's)."""
+    path = os.path.realpath(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a+") as f:   # in place: a link stays a link
-        f.seek(0)
-        f.truncate()
-        f.write("".join(l + "\n" for l in ls))
+    try:
+        mode = os.stat(path).st_mode & 0o7777
+    except FileNotFoundError:
+        umask = os.umask(0o22)
+        os.umask(umask)
+        mode = 0o666 & ~umask
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".omacvm-")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def write_lines(path, ls):
+    write(path, "".join(l + "\n" for l in ls))
 
 
 def load_mark():
@@ -89,10 +113,8 @@ def on():
             mark[switch] = "line " + ls[-1]
         changed = True
     if changed:
-        write(USER_FILE, ls)
-        os.makedirs(os.path.dirname(MARK), exist_ok=True)
-        with open(MARK, "w") as f:
-            json.dump(mark, f)
+        write_lines(USER_FILE, ls)
+        write(MARK, json.dumps(mark))
 
 
 def off():
@@ -114,7 +136,7 @@ def off():
             ls[i] = (ls[i][:m.start()] + (switch + ",".join(rest) if rest else "") + ls[i][m.end():]).rstrip()
             if not ls[i].strip():
                 del ls[i]
-    write(USER_FILE, ls)
+    write_lines(USER_FILE, ls)
     os.remove(MARK)
 
 
