@@ -20,7 +20,9 @@ trackpad. Then:
 - the Mac's pointer is hidden wherever the VM window is what a click would hit
   (the guest draws its own pointer), and shown over anything else (the
   Omanotch strip, the Dock, menus, another display);
-- on UTM, Cmd shortcuts reach the guest as Super (a virtual keyboard).
+- on UTM, VMware Fusion and OmacVM.app, Cmd shortcuts reach the guest as Super (a virtual
+  keyboard). With the gestures feature off, the VM's daemon is off too (no link to the Mac's
+  Gestures at all), and so is this.
 
 **⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification); it
 re-arms when you come back to the full-screen VM, or press the combo again.
@@ -39,7 +41,7 @@ tuning log in `docs/experiments/trackpad-scrolling.md`.
 
 | Part | Where |
 |---|---|
-| Mac helper | `mac/omacvm-gestures.c` (+ `mac/scroll_ns.m`): the built-in trackpad, else an external Magic Trackpad (MultitouchSupport also lists Magic Mice: told apart by a surface at least 100 mm wide); without either keys-only, checking every 10 s → `~/Applications/OmacVMGestures.app` (`org.omacvm.gestures`), LaunchAgent `org.omacvm.gestures`, log `~/Library/Logs/omacvm-gestures.log`. Listens on `10.211.55.2:47830`, `192.168.64.1:47830` and port 47830 of the `.1` of VMware Fusion's NAT network. Needs Accessibility + Input Monitoring. Options: `--keys-only` (no trackpad for any VM), `-v`, `--record` (`~/Library/Logs/omacvm-input.tsv`, Glide analysis) |
+| Mac helper | `mac/omacvm-gestures.c` (+ `mac/scroll_ns.m`): the built-in trackpad, else an external Magic Trackpad (MultitouchSupport also lists Magic Mice: told apart by a surface at least 100 mm wide); without either keys-only, checking every 10 s → `~/Applications/OmacVMGestures.app` (`org.omacvm.gestures`), LaunchAgent `org.omacvm.gestures`, log `~/Library/Logs/omacvm-gestures.log`. Listens on `10.211.55.2:47830`, `192.168.64.1:47830`, port 47830 of the `.1` of VMware Fusion's NAT network, `127.0.0.1:47830` and `192.168.77.1:47830` (OmacVM.app, its fast network: those clients count as the app's). Needs Accessibility + Input Monitoring. Options: `--keys-only` (no trackpad for any VM), `-v`, `--record` (`~/Library/Logs/omacvm-input.tsv`, Glide analysis) |
 | Guest daemon | `guest/omacvm-gestures` → `/usr/local/bin/omacvm-gestures` (python-evdev, root), `guest/omacvm-gestures.service` (systemd, reads `/etc/omacvm/env`). Creates "Apple Inc. Magic Trackpad (OmacVM)" (Apple vendor id) and, on UTM, "OmacVM keyboard (Mac shortcuts)"; connects to the Mac. Glide settings: `OMACVM_GLIDE_*` (defaults = the tuned values) |
 | Its Hyprland settings ("Glide" in the code) | `guest/glide.sh <user> on\|off` → `~/.config/hypr/omacvm_glide.lua` (required from `hyprland.lua`), `--disable-smooth-scrolling` for Chromium/Chrome |
 | Hyprland | `~/.config/hypr/input.lua`: `hl.gesture({ fingers = 3/4, direction = "horizontal", action = "workspace" })` |

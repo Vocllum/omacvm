@@ -111,12 +111,14 @@ extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1
 // The Mac's address on each VM network: Parallels' shared network, UTM's
 // shared network (vmnet), VMware Fusion's NAT network (vmnet8: Fusion picks
 // its subnet at install time, the Mac is .1; empty without Fusion) and
-// OmacVM.app (QEMU's user network reaches the Mac's 127.0.0.1). One listener
-// per address; never 0.0.0.0.
-static char listenAddrs[4][16] = { "10.211.55.2", "192.168.64.1", "", "127.0.0.1" };
+// OmacVM.app (QEMU's user network reaches the Mac's 127.0.0.1; its fast
+// network, src/net/mac, is 192.168.77.0/24). One listener per address; never
+// 0.0.0.0.
+static char listenAddrs[5][16] = { "10.211.55.2", "192.168.64.1", "", "127.0.0.1", "192.168.77.1" };
 #define NET_UTM 1
 #define NET_FUSION 2
 #define NET_APP 3
+#define NET_APP_FAST 4   // its clients count as NET_APP's
 
 // The first VNET_8_HOSTONLY_SUBNET line, and only a private address (as
 // fusion_host in src/lib/mac.sh and the Bridge read it). Fusion installed
@@ -133,7 +135,7 @@ static void readFusionHost(void) {
       int priv = (h >> 24) == 10 || (h >> 20) == 0xAC1 || (h >> 16) == 0xC0A8;
       char host[16];
       snprintf(host, sizeof host, "%u.%u.%u.1", h >> 24, (h >> 16) & 255, (h >> 8) & 255);
-      if (priv && strcmp(host, listenAddrs[0]) && strcmp(host, listenAddrs[NET_UTM])) {
+      if (priv && strcmp(host, listenAddrs[0]) && strcmp(host, listenAddrs[NET_UTM]) && strcmp(host, listenAddrs[NET_APP_FAST])) {
         // Other threads test the first byte: set it last.
         memcpy(listenAddrs[NET_FUSION] + 1, host + 1, sizeof host - 1);
         __sync_synchronize();
@@ -727,10 +729,16 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
   int slot = -1;
   // The same VM reconnecting replaces its old connection. OmacVM.app's VMs
   // all come from 127.0.0.1 (QEMU's user network): there the name tells them
-  // apart, or two running VMs would keep pushing each other out.
+  // apart, or two running VMs would keep pushing each other out. An app VM
+  // the app moved between its fast network and the user network comes back
+  // from another address: its name tells it is the same VM (its old
+  // connection may not have noticed yet that its path is gone).
   int loopback = !strncmp(ip, "127.", 4);
   for (int i = 0; i < MAX_CLIENTS; i++)
-    if (clients[i].fd >= 0 && !strcmp(clients[i].ip, ip) && (!loopback || !strcmp(clients[i].name, name))) {
+    if (clients[i].fd >= 0 &&
+        ((!strcmp(clients[i].ip, ip) && (!loopback || !strcmp(clients[i].name, name))) ||
+         (net == NET_APP && clients[i].net == NET_APP && name[0] && !strcmp(clients[i].name, name)))) {
+      if (strcmp(clients[i].ip, ip)) logf_("guest %s now comes from %s: its old connection closed", clients[i].ip, ip);
       close(clients[i].fd); slot = i; break;
     }
   for (int i = 0; slot < 0 && i < MAX_CLIENTS; i++) if (clients[i].fd < 0) slot = i;
@@ -739,8 +747,9 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
   clients[slot].gestures = gestures != 0; clients[slot].glide = glide != 0;
   snprintf(clients[slot].ip, sizeof clients[slot].ip, "%s", ip);
   snprintf(clients[slot].name, sizeof clients[slot].name, "%s", name);
-  logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s)", ip, gestures ? "on" : "off",
-        glide ? "on" : "off", name[0] ? ", VM \"" : "", name, name[0] ? "\"" : "");
+  logf_("guest connected: %s (gestures %s, scroll momentum %s%s%s%s%s)", ip, gestures ? "on" : "off",
+        glide ? "on" : "off", name[0] ? ", VM \"" : "", name, name[0] ? "\"" : "",
+        net == NET_APP && strncmp(ip, "127.", 4) ? ", OmacVM.app on its fast network" : "");
   retargetLocked(capturing);
   int front = clients[slot].target;
   pthread_mutex_unlock(&sendLock);
@@ -755,6 +764,20 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
   if (nat) CFRelease(nat);
   n = snprintf(b, sizeof b, "O %d %d %d\n", natural, tpW, tpH);
   send(c, b, (size_t)n, MSG_NOSIGNAL);
+}
+
+// A guest whose path went away (OmacVM.app moved it to another network, a
+// VM that was killed) is noticed in about KA_IDLE + KA_INTVL * KA_CNT seconds,
+// not after TCP's minutes: the next send to it fails and drops it.
+#define KA_IDLE 5
+#define KA_INTVL 2
+#define KA_CNT 3
+static void keepalive(int c) {
+  int on = 1, idle = KA_IDLE, intvl = KA_INTVL, cnt = KA_CNT;
+  setsockopt(c, SOL_SOCKET, SO_KEEPALIVE, &on, sizeof on);
+  setsockopt(c, IPPROTO_TCP, TCP_KEEPALIVE, &idle, sizeof idle);
+  setsockopt(c, IPPROTO_TCP, TCP_KEEPINTVL, &intvl, sizeof intvl);
+  setsockopt(c, IPPROTO_TCP, TCP_KEEPCNT, &cnt, sizeof cnt);
 }
 
 // Each connection's handshake runs in its own thread, so a peer that connects
@@ -803,7 +826,9 @@ static void *greet(void *arg) {
   }
   if (ok) {
     base64Name(name64, name, sizeof name);
-    addClient(c, g.net, ip, gestures, glide, name);
+    // OmacVM.app's VMs on its fast network are the app's (its window in
+    // front), whichever address they came in on.
+    addClient(c, g.net == NET_APP_FAST ? NET_APP : g.net, ip, gestures, glide, name);
   } else {
     // A refused daemon tries again every 2 s; only the log line is throttled.
     // Keeping its socket open instead would not save anything: a daemon from
@@ -845,6 +870,7 @@ static void *serverThread(void *arg) {
       if (c < 0) break;
       setsockopt(c, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
       setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
+      keepalive(c);
       struct greetArg *g = malloc(sizeof *g);
       if (!g || __sync_add_and_fetch(&greeting, 1) > MAX_GREETING) {
         if (g) { __sync_fetch_and_sub(&greeting, 1); free(g); }

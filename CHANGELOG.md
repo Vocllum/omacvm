@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## Unreleased
+## 2.9.0 (unreleased)
 
 - OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
   of 1.5 ms, so light 3D work runs two to three and a half times as fast
@@ -54,6 +54,34 @@ in more words.
   list in one process 22,445 to 43,125 cases; the WebGL conformance pages in
   one Chrome 430 to 776 (WebGL 1) and 97 to 959 (WebGL 2), because one
   refused shader no longer breaks every page after it.
+- Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
+  Firefox's 16). Past that, a video decodes on the CPU instead of playing
+  black (the VM's VA-API driver knows the Mac's limit). The copy of each
+  decoded picture can no longer be dropped by the app's own graphics state.
+- Video encoding on the Mac's media engine: apps in the VM that encode H.264
+  or HEVC through VA-API use it instead of the VM's CPU (FFmpeg's
+  `h264_vaapi`/`hevc_vaapi`, OBS Studio's VAAPI encoders). Google Chrome's
+  and Brave's WebRTC encoder (camera and screen sharing) is on by default.
+  FFmpeg 1080p uses 6 to 8 times less Mac CPU than x264/x265. 8 encoders at
+  once per VM, 12 at most. `OMACVM_VIDEO_NO_ENCODE=1` in QEMU's environment
+  turns it off.
+- Fast network for OmacVM.app, experimental and off by default:
+  `omacvm enable fast-network --vm NAME` puts the VM on macOS's own VM
+  network (vmnet, as Parallels and UTM) through a small system service,
+  `omacvm-netd`, that asks for your password once. On a Mac mini, VM to Mac
+  7.2 instead of 3.0 Gbit/s with less CPU; Mac to VM is lower than the user
+  network (9.5 against 12.2 Gbit/s). Without the service the VM keeps QEMU's
+  user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
+  changes, several VMs at once, Omanotch over it.
+- Trackpad gestures off now means the VM's Gestures service is off on every
+  route. On UTM, VMware Fusion and OmacVM.app it used to keep running for
+  the Cmd shortcuts and connected to the Mac's Gestures anyway; Cmd as Super
+  there now comes with the gestures feature. `omacvm apply` stops the service
+  in VMs that have gestures off.
+- Prebuilt VMs: the image's manifest is checked before use. A bad value in a
+  manifest (for example a disk size with a command in it) could run that
+  command on the Mac; now such a manifest is refused and the VM is built here
+  instead.
 
 ## 2.8.0
 

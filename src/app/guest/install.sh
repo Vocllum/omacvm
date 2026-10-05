@@ -7,6 +7,8 @@
 #  * the QEMU guest agent
 #  * video decoding on the Mac's media engine (VA-API: vainfo, a driver shim
 #    so Firefox gets NV12 surfaces, Firefox's VA-API switch)
+#  * video encoding on it: Chrome's and Brave's VA-API encoder for WebRTC
+#    (browser-video-encode.py)
 #  * every Mac display in full screen (omacvm-displays; the switch
 #    "Use external displays" in the bar's display menu)
 #  * HDR's 10-bit virtio-gpu module builder (not built until the user asks)
@@ -70,4 +72,12 @@ else
 fi
 rm -rf "$T"
 install -Dm644 omacvm-app-video.js /usr/lib/firefox/defaults/pref/omacvm-app-video.js
-echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding"
+# Video encoding on the Mac's media engine (FFmpeg's h264_vaapi/hevc_vaapi need
+# nothing): Chrome's and Brave's WebRTC encoder, when this app offers encoding.
+if vainfo --display drm 2>/dev/null | grep -q VAEntrypointEncSlice; then
+  python3 browser-video-encode.py "$U" on
+  echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding and encoding"
+else
+  python3 browser-video-encode.py "$U" off
+  echo "OmacVM.app: display sync, every Mac display, guest agent, video decoding"
+fi
