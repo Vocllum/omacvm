@@ -13,13 +13,19 @@ final class BrightnessKeys {
   private var keyboards = HIDKeyboards()
   private var maps: [UInt64: [UInt32: UInt32]] = [:]   // per keyboard (registry id)
   private var said: String?
+  private var asked = false
   var onKey: ((MediaKey) -> Void)?
 
   /// Opens once Input Monitoring is granted (asked every 2 s with the media
-  /// keys); what is missing is logged once.
+  /// keys); not decided yet: macOS asks the user once. What is missing is
+  /// logged once.
   func ensure() {
     guard manager == nil else { return }
     let access = IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)
+    if access == kIOHIDAccessTypeUnknown && !asked {
+      asked = true
+      _ = IOHIDRequestAccess(kIOHIDRequestTypeListenEvent)
+    }
     guard access == kIOHIDAccessTypeGranted else {
       say("brightness keys: Input Monitoring for OmacVM Bridge is \(access == kIOHIDAccessTypeDenied ? "off" : "not decided yet"): "
           + "with a VM in front they do nothing (System Settings > Privacy & Security > Input Monitoring)")
