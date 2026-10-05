@@ -9,6 +9,11 @@
 #    within seconds, on keepalive, and the Mac drops its old connection.
 # 3. The default gateway: the card with a link, lowest metric, the same in
 #    Gestures, the Bridge client and the guest check.
+# 4. The event tap is created again when another OmacVM VM (a new QEMU, whose
+#    own tap sits ahead of ours) comes to the front, and when macOS invalidated
+#    it; a failed re-creation keeps the old tap and is logged once (test-tap.c).
+# 5. Ctrl+Option+Cmd+Esc: in the VM back to the app from before (its Space), in
+#    macOS back into the last full-screen VM (test-escape.c, nothing activated).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d); trap 'kill ${PIDS:-} 2>/dev/null || true; rm -rf "$T"' EXIT
@@ -164,4 +169,18 @@ expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
 expect "$T/out2" "live App VM 127.0.0.1"         # one connection: the old one was dropped
 reject "$T/out2" "live App VM 192.168.77.2"
+# 4. The event tap after a VM app (re)starts.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-tap" "$HERE/test-tap.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-tap" > "$T/tap" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/tap"
+n=$(grep -c "cannot create the event tap again" "$T/tap" || true)
+if [[ $n == 1 ]]; then echo "ok   a failed re-creation is logged once (two tries)"; else echo "FAIL logged $n times" >&2; fail=1; fi
+# 5. The escape combo's way out and back.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-escape" "$HERE/test-escape.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-escape" > "$T/escape" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/escape"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }

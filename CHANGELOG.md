@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- External display brightness (feature `external-brightness`, on): with the
+  VM in front on an external display, the Mac's brightness keys set that
+  display over DDC/CI, in macOS's 16 steps (Option: 64), with Omarchy's
+  popup. A Studio Display, Pro Display XDR or LG UltraFine goes through
+  macOS's own control. Omarchy's brightness keys, `omarchy brightness display` and its
+  monitor panel in the VM do the same through OmacVM Bridge. OmacVM.app also
+  in a window; Parallels, UTM and VMware Fusion in full screen. The built-in
+  display works as before, and so does a display without DDC/CI (`omacvm
+  check` names it and why).
+
 ## 2.9.0 (unreleased)
 
 A faster GPU path for OmacVM.app, frames on the display's refresh (120 Hz on
@@ -85,6 +97,17 @@ with the benchmark lock held.
   network (9.5 against 12.2 Gbit/s). Without the service the VM keeps QEMU's
   user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
   changes, several VMs at once, Omanotch over it.
+- ⌃⌥⌘ Esc in the full-screen VM now takes you straight back to macOS: the
+  app you were in before comes to the front with its Space, no swipe needed
+  (a mouse is enough). Pressed in macOS it takes you back into the VM, full
+  screen, with the trackpad and keys. Before, it only handed the trackpad
+  back. OmacVM.app, Parallels, UTM and VMware Fusion.
+- After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
+  working until the Mac's helpers were restarted: the new VM's own key tap
+  sat ahead of theirs. They now take the front place again whenever an
+  OmacVM VM comes to the front (Gestures fix by brianmerchant, #39).
+- OmacVM Bridge: Wi-Fi no longer flips between connected and disconnected
+  in Omarchy's bar on a Mac on Ethernet with Wi-Fi also on (Mac mini).
 - Trackpad gestures off now means the VM's Gestures service is off on every
   route. On UTM, VMware Fusion and OmacVM.app it used to keep running for
   the Cmd shortcuts and connected to the Mac's Gestures anyway; Cmd as Super
@@ -97,6 +120,27 @@ with the benchmark lock held.
 - The app carries the licence texts of MoltenVK and the Vulkan loader
   (Apache-2.0, with cereal and cJSON), and of KosmicKrisp in builds that
   have it.
+
+- OmacVM.app keeps its VMs in `~/OmacVM`, one folder per VM, and installs
+  itself in `~/Applications`. VMs in the old place
+  (`~/Library/Application Support/OmacVM/VMs`) stay there and keep working
+  while `~/OmacVM` does not exist; a folder picked in the app still wins.
+  `omacvm` finds the app in `~/Applications` or `/Applications` and the VMs
+  the same way as the app. Spotlight still lists the file names in
+  `~/OmacVM` (it never reads inside a VM disk); to hide them, add the folder
+  under System Settings › Spotlight › Search Privacy.
+
+- OmacVM.app in full screen: the pointer no longer races near the screen
+  corners and the Dock's edge (since 2.8.0 it got faster there with every
+  move, up to about 20 times). It now moves as macOS moves it everywhere,
+  and reaches Omarchy's own corners. The Mac's cursor still stays off the
+  corners and the Dock's edge. New setting "Keep the Dock and hot corners
+  away in full screen" (on by default); off gives macOS's own full screen.
+
+- OmacVM.app: "Use the notch for the menu bar" is on by default (Omarchy's
+  bar beside the notch in full screen). It shows only on a Mac whose
+  built-in display has a notch, checked again when displays change; if you
+  switched it off before, it stays off.
 
 ## 2.8.0
 

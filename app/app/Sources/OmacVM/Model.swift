@@ -16,14 +16,17 @@ enum Paths {
     static let appSupport = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/OmacVM")
 
-    /// The folder that holds the VM folders. The user can pick another one
-    /// (an external drive, say) in the setup.
+    /// The folder that holds the VM folders: ~/OmacVM unless the user
+    /// picked another one (an external drive, say) in the setup; see VMsFolder.
     static var vmsRoot: URL {
         if let custom = UserDefaults.standard.string(forKey: "vmsRoot"), !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        return appSupport.appendingPathComponent("VMs")
+        return defaultVMsRoot
     }
+    /// Decided once per launch: a ~/OmacVM made while a VM from the old place
+    /// runs must not move that VM's folder under the app.
+    private static let defaultVMsRoot = VMsFolder.resolve(custom: nil, home: VMsFolder.home)
 
     /// The app's resources: Contents/Resources in the app, the source tree when
     /// run with `swift run` (OMACVM_RESOURCES).
@@ -87,7 +90,7 @@ struct VMConfig: Equatable {
     var keyboard = "us"
     // Omanotch off: its released Mac app does not listen on 127.0.0.1 yet,
     // so an app VM (10.0.2.2) never reaches it.
-    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") idle-lock=on autologin=off thp-kernel=off"
+    var features = "bridge=on wallpaper=on gestures=on scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(Mac.hasBattery ? "on" : "off") external-brightness=on idle-lock=on autologin=off thp-kernel=off"
 
     var folder: URL { Paths.vmsRoot.appendingPathComponent(name) }
 
@@ -129,6 +132,7 @@ struct VMConfig: Equatable {
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
 
     func write() throws {
+        try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let text = """
@@ -350,20 +354,38 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
     }
-    /// Full screen also covers the strip beside the notch; Omarchy's bar goes
-    /// there. Off by default: that full screen has no Space of its own (macOS
-    /// keeps full-screen Spaces below the notch).
+    /// "Use the notch for the menu bar" (see NotchSetting): on unless the
+    /// user switched it off.
     static var useNotch: Bool {
-        get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
-        set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
+        get { NotchSetting.choice(stored: UserDefaults.standard.object(forKey: NotchSetting.key)) }
+        set { UserDefaults.standard.set(newValue, forKey: NotchSetting.key) }
+    }
+    /// What a VM start gets: off on a Mac without a notch.
+    static var notchActive: Bool {
+        NotchSetting.active(choice: useNotch, hasNotch: Mac.hasNotch)
+    }
+    /// Full screen hides the Dock and the menu bar on every display and keeps
+    /// the Mac's cursor off the screen corners and the Dock's edge, so neither
+    /// the Dock nor a hot corner comes up from inside the VM (QEMU's
+    /// immersive=on). Off: macOS's own full screen.
+    static var keepDockAway: Bool {
+        get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
     }
 }
 
 extension Mac {
-    /// The built-in display has a camera housing.
-    static var hasNotch: Bool {
-        NSScreen.screens.contains { $0.safeAreaInsets.top > 0 }
+    /// The built-in display, when it has a camera notch. Asked at run time
+    /// from the display itself (no model list); nil with the lid closed, on a
+    /// Mac without a notch, or at a resolution that ends below the notch.
+    static var notchScreen: NSScreen? {
+        NSScreen.screens.first { s in
+            guard let id = s.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID,
+                  CGDisplayIsBuiltin(id) != 0 else { return false }
+            return s.auxiliaryTopLeftArea != nil && s.safeAreaInsets.top > 0
+        }
     }
+    static var hasNotch: Bool { notchScreen != nil }
 
     /// A display that can show HDR (EDR headroom above SDR white: the XDR
     /// panel of a MacBook Pro, a Pro Display XDR, an HDR external). Macs

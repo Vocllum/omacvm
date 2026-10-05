@@ -11,21 +11,50 @@ final class Config {
   var captureKeys = true       // media keys go to the VM while it is full screen
   var menuBarIcon = true
   var keyboardLowSteps = true  // keyboard light: KeyboardLight.lowSteps below macOS's lowest step
+  var externalBrightness = true  // brightness keys set the external display a VM is on (external-brightness.swift)
+  var onExternalBrightness: (() -> Void)?   // external_brightness switched in the file
+  private var stamp: Date?
 
   init() {
-    guard let d = FileManager.default.contents(atPath: path),
-          let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { save(); return }
+    guard load() else { save(); return }
+    if !has("keyboard_low_steps") || !has("external_brightness") { save() }   // shows the switches in the file
+  }
+
+  private var object: [String: Any]? {
+    guard let d = FileManager.default.contents(atPath: path) else { return nil }
+    return try? JSONSerialization.jsonObject(with: d) as? [String: Any]
+  }
+
+  private func has(_ key: String) -> Bool { object?[key] != nil }
+
+  private func load() -> Bool {
+    stamp = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    guard let o = object else { return false }
     captureKeys = o["capture_keys"] as? Bool ?? captureKeys
     menuBarIcon = o["menu_bar_icon"] as? Bool ?? menuBarIcon
     keyboardLowSteps = o["keyboard_low_steps"] as? Bool ?? keyboardLowSteps
-    if o["keyboard_low_steps"] == nil { save() }   // shows the switch in the file
+    externalBrightness = o["external_brightness"] as? Bool ?? externalBrightness
+    return true
+  }
+
+  /// omacvm apply switches external_brightness in the file: taken without a restart.
+  func reloadIfChanged() {
+    let now = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
+    guard now != stamp else { return }
+    let was = externalBrightness
+    _ = load()
+    guard was != externalBrightness else { return }
+    log("config: external_brightness=\(externalBrightness)")
+    onExternalBrightness?()
   }
 
   func save() {
-    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps]
+    let o: [String: Any] = ["capture_keys": captureKeys, "menu_bar_icon": menuBarIcon, "keyboard_low_steps": keyboardLowSteps,
+                            "external_brightness": externalBrightness]
     if let d = try? JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys]) {
       FileManager.default.createFile(atPath: path, contents: d)
     }
+    stamp = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date
   }
 }
 
@@ -181,6 +210,11 @@ final class OSDEvents {
     }
   }
 
+  /// An external display's brightness changed (external-brightness.swift).
+  func externalBrightnessSet(_ value: Int, display: String, source: String) {
+    q.async { [self] in emit("brightness", value: value, muted: false, source: source, device: display) }
+  }
+
   func keyboardSet(source: String) {
     q.async { [self] in
       emit("keyboard", value: KeyboardLight.get().map(percent), muted: false, source: source, device: "Keyboard")
@@ -207,6 +241,8 @@ enum MediaKey: Int {   // NX_KEYTYPE_* (IOKit/hidsystem/ev_keymap.h)
 
 final class MediaKeys {
   private var tap: CFMachPort?
+  private var source: CFRunLoopSource?
+  private var rearm = TapRearm()
   private var askedAX = false
   private let work = DispatchQueue(label: "omacvm-bridge.keys")
   private(set) var vmFullScreen = false
@@ -221,47 +257,65 @@ final class MediaKeys {
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
+    // An app switch is checked at once, not up to 2 s later.
+    NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                      object: nil, queue: .main) { [weak self] _ in self?.check() }
     check()
   }
 
-  /// Creates the tap once Accessibility is granted; keeps it enabled.
+  /// Creates the tap once Accessibility is granted; keeps it enabled, and
+  /// creates it again when an OmacVM VM comes to the front (TapRearm) or
+  /// macOS invalidated it. Main thread.
   func check() {
+    config.reloadIfChanged()
+    let front = NSWorkspace.shared.frontmostApplication
+    let vm = front?.executableURL?.lastPathComponent == "OmacVM" ? front?.processIdentifier : nil
+    let again = rearm.front(vm)
     guard config.captureKeys else { return }
-    if let tap { if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }; return }
+    if let tap {
+      if !CFMachPortIsValid(tap) { install(again: "macOS invalidated it") }
+      else if again { install(again: "an OmacVM VM came to the front") }
+      else if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
+      return
+    }
     if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
       if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
     }
+    install(again: nil)
+  }
+
+  /// The new tap goes in before the old one is removed: no gap without one.
+  /// A failed re-creation keeps the old tap and is logged once.
+  private func install(again why: String?) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
     guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { mediaKeys.check() }
       return mediaKeys.handle(type, event) ? nil : Unmanaged.passUnretained(event)
-    }, userInfo: nil) else {
-      log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+    }, userInfo: nil), let s = CFMachPortCreateRunLoopSource(nil, t, 0) else {
+      if let why {
+        if rearm.failed() { log("media keys: cannot create the event tap again (\(why)); keeping the old one") }
+      } else {
+        log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+      }
       return
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, t, 0), .commonModes)
+    CFRunLoopAddSource(CFRunLoopGetMain(), s, .commonModes)
+    if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); CFRunLoopSourceInvalidate(source) }
+    if let tap { CFMachPortInvalidate(tap) }
     tap = t
-    log("media keys: event tap installed")
+    source = s
+    rearm.worked()
+    log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed")
   }
 
   /// Parallels (prl_client_app), UTM, VMware Fusion or OmacVM.app is frontmost and its VM window spans a whole
   /// display (it sits below the menu bar/notch strip, so allow a gap on top).
-  private func parallelsFullScreen() -> Bool {
-    guard let app = NSWorkspace.shared.frontmostApplication,
-          ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(app.executableURL?.lastPathComponent ?? ""),
-          let wins = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-    else { return false }
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
-    CGGetActiveDisplayList(16, &ids, &n)
-    let displays = ids.prefix(Int(n)).map { CGDisplayBounds($0) }
-    return wins.contains { w in
-      guard w[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier, w[kCGWindowLayer as String] as? Int == 0,
-            let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) else { return false }
-      return displays.contains { abs(r.width - $0.width) < 2 && r.height >= $0.height - 80 && abs(r.minX - $0.minX) < 2 }
-    }
+  private func parallelsFullScreen(_ front: FrontWindows) -> Bool {
+    guard ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(front.app?.executableURL?.lastPathComponent ?? "") else { return false }
+    return DisplayPick.spansOne(front.windows, VMScreens.displays().map(\.bounds))
   }
 
   /// Runs in the tap callback (main thread): true = swallow the event.
@@ -269,17 +323,31 @@ final class MediaKeys {
     guard config.captureKeys, type.rawValue == 14, let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
     let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
     guard var key = MediaKey(rawValue: code) else { return false }
-    vmFullScreen = parallelsFullScreen()
+    let front = FrontWindows()   // one copy of the window list for both questions below
+    vmFullScreen = parallelsFullScreen(front)
     // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
     // no keys of its own for it), Option + brightness keys = small steps.
     let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
     if shift && !option {
       if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
     }
+    // A VM in front on an external display: that display, if it can (else as before).
+    if key == .brightnessUp || key == .brightnessDown, let id = externalTarget(front) {
+      if down { externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
+      return true
+    }
     guard vmFullScreen, canApply(key) else { return false }   // macOS handles it as usual
     let fine = option
     if down { work.async { self.apply(key, fine: fine) } }   // key-up is swallowed too
     return true
+  }
+
+  /// The external display the VM in front is on (OmacVM.app also windowed,
+  /// Parallels, UTM and Fusion full screen), when its brightness can be set
+  /// (DDC/CI or an Apple display). Only cached answers: never waits here.
+  private func externalTarget(_ front: FrontWindows) -> CGDirectDisplayID? {
+    guard config.externalBrightness, let t = VMScreens.front(windowed: false, front), !t.display.builtin else { return nil }
+    return externalBrightness.method(t.display.id)?.works == true ? t.display.id : nil
   }
 
   private func canApply(_ key: MediaKey) -> Bool {

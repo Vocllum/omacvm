@@ -4,13 +4,14 @@ The short version is the grid at the top of the [README](../README.md).
 
 | Feature | What it does |
 |---|---|
-| **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own |
-| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc hands the trackpad back to macOS. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
+| **The bar beside the notch** | With [Omanotch](../src/omanotch/README.md), Omarchy's real bar moves into the black strip beside the MacBook's notch, and your windows get the full height of the screen. The bar is as tall as macOS's menu bar, or exactly as tall as the notch (`defaults write ch.gillesgoetsch.omanotch flush -bool true`). OmacVM.app does it on its own ("Use the notch for the menu bar", on by default) |
+| **Trackpad gestures** | Three- and four-finger swipes switch workspaces and pinch zooms while the VM is full screen; macOS's own Spaces swipe is off meanwhile. ⌃⌥⌘Esc takes you back to macOS, and from macOS back into the VM. The MacBook's trackpad, or a Magic Trackpad on a Mac mini, iMac or Studio |
 | **macOS-native scroll momentum** *(experimental, but awesome)* | Two-finger scrolling in every direction with your Mac's own acceleration and momentum, pinch included. Off unless you choose it ([how it works](#macos-native-scroll-momentum)) |
 | **The Mac's Wi-Fi in the bar** | Real network name and signal, nearby networks, and Omarchy's QR card to share the password (macOS asks you first). Joining a network and switching Wi-Fi stay on the Mac for now |
 | **The Mac's Bluetooth in the bar** | Omarchy's own Bluetooth panel for the Mac's devices: connect and disconnect them, battery levels (AirPods left, right and case), Bluetooth on and off, forget a device. Pairing a new one opens the Mac's Bluetooth settings |
 | **The Mac's audio in the bar** | Volume, mute, microphone, switching outputs (AirPods show up when they connect), with Omarchy's input meter |
 | **The Mac's camera** | Linux apps and video calls in the browser see the Mac's camera as *Mac Camera*. It is on, green light included, only while one of them uses it. Parallels passes the camera itself; on UTM, VMware Fusion and OmacVM.app OmacVM brings it ([how](how-it-works.md#the-mac-and-the-vm)). On UTM and Fusion it comes through OmacVM Bridge, which is then installed even with the Bridge turned off |
+| **External display brightness** | With the VM in front on an external display, the brightness keys set *that* display, over DDC/CI, in macOS's 16 steps (Option: small steps), with Omarchy's popup. So do Omarchy's own brightness keys, `omarchy brightness display` and its monitor panel in the VM. A Studio Display, Pro Display XDR or LG UltraFine goes through macOS's own control. OmacVM.app: also in a window; Parallels, UTM and VMware Fusion: in full screen. On the built-in display nothing changes. Some displays and connections have no DDC/CI (some Macs' HDMI ports, or DDC/CI switched off in the display's own menu): there the keys do what they did before, and `omacvm check` says so. Off: `omacvm disable external-brightness` ([how it works](#external-display-brightness)) |
 | **Media keys, Omarchy's popup** | Volume, mute and brightness keys drive the Mac and Omarchy shows its own on-screen display instead of macOS's. Shift with the brightness keys sets the Mac's keyboard light, with three dimmer steps below macOS's lowest, Option takes small steps, as in Omarchy |
 | **Displays that follow the Mac** | Native Retina resolution and 120 Hz ProMotion. On Parallels and VMware Fusion also every external display, in exactly the arrangement you set in macOS, with Omarchy's scaling menu kept |
 | **The GPU, in the desktop and the browsers** | Hyprland's animations, and pages and WebGL in Chromium, Chrome, Brave and Firefox, drawn by the Mac's GPU on every route (OmacVM fixes what each app gets wrong: [UTM](troubleshooting.md#14-utm-chrome-has-no-gpu-then-webgl-comes-out-empty), [Fusion](troubleshooting.md#2-fusion-browsers-draw-everything-in-software)) |
@@ -38,15 +39,51 @@ Put the VM in full screen for the trackpad gestures, the scroll momentum and
 the media keys. While it is full screen and in front, the Mac's trackpad
 gestures and ⌘ shortcuts go to Omarchy, and macOS's own Spaces swipe is off.
 
-**⌃⌥⌘ Esc** (Control + Option + Command + Escape) hands the trackpad back to
-macOS (Omarchy shows a notification), so you can swipe to your other Spaces.
-Press it again, or come back to the full-screen VM, to hand it to Omarchy
-again. Volume and brightness keys always change the Mac, with Omarchy's popup
-while you are in the VM.
+**⌃⌥⌘ Esc** (Control + Option + Command + Escape) in the VM takes you
+straight back to macOS: the trackpad and keys go back to macOS and the app
+you were in before the VM comes to the front, on its own Space. No swipe
+needed, so it works with a mouse too. Press **⌃⌥⌘ Esc** in macOS to go back
+into the VM: its Space comes back, full screen as before, and the VM has the
+trackpad and keys again. Coming back with a swipe or Mission Control works
+as well. If the app from before has quit, you land in Finder. Volume and
+brightness keys always change the Mac, with Omarchy's popup while you are in
+the VM.
 
 <p align="center">
   <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
 </p>
+
+## External display brightness
+
+macOS sets the brightness of its own displays only: the built-in one and
+Apple's Studio Display and Pro Display XDR, and the LG UltraFine. Most other monitors take it over
+DDC/CI, a small command channel in the display cable, which macOS does not
+use (apps like MonitorControl do). OmacVM Bridge does it for the display your
+VM is on:
+
+- **Which display.** The one the VM's window is in front on: under the
+  pointer when the VM covers several displays. OmacVM.app counts in a window
+  too; Parallels, UTM and VMware Fusion in full screen, as for the other media
+  keys. On the MacBook's own display the keys work as before.
+- **How.** It reads the display's level first, then steps in macOS's 16
+  steps (Option or Shift+Option: 64), and shows Omarchy's popup. Held keys
+  are sent at most every 50 ms, only the latest level, and the keys never wait
+  for the display.
+- **From the VM.** Omarchy drives an external monitor with `ddcutil`; OmacVM
+  puts a small `ddcutil` in the VM (`/usr/local/bin/ddcutil`) that asks the
+  Bridge instead: "set the brightness of the display this output is on, 0 to
+  100". The Bridge checks which display that is itself and only ever touches
+  an external display with a VM window on it: the VM never reaches the
+  display's I2C bus. Its writes go out at most every 250 ms (some displays
+  save the level on every write).
+- **What works where.** `omacvm check` lists each external display: DDC/CI,
+  its own control (Apple displays), or why not. No DDC/CI: on some Macs'
+  built-in HDMI ports (try USB-C or DisplayPort), through some docks, or when
+  DDC/CI is switched off in the display's own menu.
+- **Off.** `omacvm disable external-brightness` takes it out of the VM and,
+  through the Bridge's `config.json` (`external_brightness`), out of the
+  keys. Off means no DDC/CI at all: the Bridge then does not even read the
+  displays. The Bridge is one for all VMs, so the last `omacvm apply` decides.
 
 ## macOS-native scroll momentum
 

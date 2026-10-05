@@ -47,7 +47,7 @@ final class Runner {
             // QEMU's window code opens the others): the built-in and four more.
             // Venus (Vulkan) needs blobs and a host memory window for them.
             "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(Settings.venus ? ",blob=true,venus=true,hostmem=4G" : "")",
-            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
+            "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=\(Settings.keepDockAway ? "on" : "off"),swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
             "-object", "rng-random,id=rng0,filename=/dev/urandom",
@@ -65,7 +65,7 @@ final class Runner {
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+        if Settings.useNotch, let s = Mac.notchScreen {
             let k = s.backingScaleFactor
             let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
@@ -138,7 +138,7 @@ final class Runner {
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports: Omanotch, Gestures and Bridge (patched libslirp).
         env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
-        env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
+        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.

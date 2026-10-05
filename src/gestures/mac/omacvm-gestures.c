@@ -15,9 +15,11 @@
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
-// Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
-// Parallels becomes frontmost again. If this process dies, the event tap goes
-// with it and macOS gets its gestures back.
+// Ctrl+Option+Cmd+Esc in the full-screen VM hands everything back to macOS and
+// brings back the app that was in front before, with its Space; pressed in
+// macOS, it brings the last full-screen VM back (escape section below).
+// Capture re-arms by itself when the VM is in front again. If this process
+// dies, the event tap goes with it and macOS gets its gestures back.
 // Each VM says on connect what it wants (the handshake below). Capture
 // only covers a full-screen VM whose connected daemon wants the trackpad, so a
 // VM with gestures off (or not connected yet) leaves macOS its gestures.
@@ -152,6 +154,10 @@ static void readFusionHost(void) {
 
 static volatile int frontIsVM, escaped, capturing;
 static pid_t frontPid;   // the full-screen VM app in front, else 0
+// The escape combo's way out and back: the last app in front that was no VM
+// app, and the last full-screen VM, each with its front window.
+static pid_t otherPid, vmPid, appPid;   // appPid: the app in front at the last check
+static CGWindowID otherWin, vmWin;
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -162,9 +168,14 @@ static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
+static CFRunLoopSourceRef tapSource;
+static CGEventMask tapMask;
+static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u);
 static int verbose;
 int ns_event_type(CGEventRef e);  // scroll_ns.m
 void ns_on_app_activate(void (*f)(void));
+int ns_activate(pid_t pid);
+pid_t ns_finder_pid(void);
 static int trackpad = 1;          // 0 with --keys-only
 static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
@@ -332,7 +343,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
 }
 
 // ---- capture mode: frontmost app + full-screen VM window ----
-static int vmFullScreen(pid_t pid) {
+static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
   if (!wins) return 0;
   CGDirectDisplayID ds[16]; uint32_t nd = 0; CGGetActiveDisplayList(16, ds, &nd);
@@ -351,6 +362,24 @@ static int vmFullScreen(pid_t pid) {
       if (fabs(r.size.width - b.size.width) < 2 && r.size.height >= b.size.height - 80 &&
           fabs(r.origin.x - b.origin.x) < 2) { found = 1; break; }
     }
+    if (found) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, win);
+  }
+  CFRelease(wins);
+  return found;
+}
+
+// The app's front window on the current Space (the list is front to back), 0
+// for none (Finder with only the desktop).
+static CGWindowID frontWindow(pid_t pid) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  CGWindowID found = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && !found; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    if (owner == pid && layer == 0) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &found);
   }
   CFRelease(wins);
   return found;
@@ -392,31 +421,68 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
   if (win) CFRelease(win);
 }
 
-static void updateCapture(CFRunLoopTimerRef t, void *info) {
-  (void)info;
-  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
-  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  // Parallels' VM window, UTM's, or VMware Fusion's.
-  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
-          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
-          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
-  int front = net >= 0 && vmFullScreen(pid);
+// ---- the event tap: created again when a VM app starts after us ----
+// A new event tap goes to the head of the HID chain. QEMU's own one (OmacVM.app,
+// full grab) is created when the VM starts and then sits ahead of ours: it
+// sends the escape combo to the guest and returns nothing, so we never saw it
+// after OmacVM.app was restarted (brianmerchant, PR #39). So the tap is
+// created again whenever a different OmacVM VM comes to the front full screen,
+// and when macOS has invalidated it. The new tap goes in before the old one
+// is removed: no gap without one.
+static int installTap(void) {
+  CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
+  if (!newTap) return 0;
+  CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
+  if (!newSource) { CFMachPortInvalidate(newTap); CFRelease(newTap); return 0; }
+  CFRunLoopRef loop = CFRunLoopGetMain();
+  CFRunLoopAddSource(loop, newSource, kCFRunLoopCommonModes);
+  if (tapSource) {
+    CFRunLoopRemoveSource(loop, tapSource, kCFRunLoopCommonModes);
+    CFRunLoopSourceInvalidate(tapSource);
+    CFRelease(tapSource);
+  }
+  if (tapPort) { CFMachPortInvalidate(tapPort); CFRelease(tapPort); }
+  tapPort = newTap;
+  tapSource = newSource;
+  return 1;
+}
+
+// Main thread only. A failure (permission taken away) keeps the old tap and
+// is logged once until a re-creation works again.
+static void rearmTap(const char *why) {
+  static int failedLogged;
+  if (installTap()) {
+    logf_("event tap created again (%s)", why);
+    failedLogged = 0;
+  } else if (!failedLogged) {
+    logf_("cannot create the event tap again (%s): Accessibility or Input Monitoring taken away? Keeping the old one", why);
+    failedLogged = 1;
+  }
+}
+
+// What the capture check found (updateCapture, below): the front app's pid,
+// its VM network (-1: not a VM app), whether its VM window covers a display,
+// that window's title, the window, and whether the app is one the escape
+// combo may go back to (other). Main thread.
+static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
+  // Each OmacVM VM is its own QEMU process with its own tap: a different pid
+  // in front (frontPid is 0 while no VM is) may have put its tap ahead of ours.
+  if (front && net == NET_APP && pid != frontPid) rearmTap("an OmacVM VM came to the front");
   if (front) {
-    // Which of the app's VMs: its window title, on this check (every 0.2 s
-    // while a VM app is full screen in front) and on every app switch.
-    char title[sizeof frontTitle];
-    windowTitle(pid, title, sizeof title);
     pthread_mutex_lock(&sendLock);
     if (net != frontNet || strcmp(title, frontTitle)) {
       frontNet = net;
-      memcpy(frontTitle, title, sizeof frontTitle);
+      snprintf(frontTitle, sizeof frontTitle, "%s", title);
       retargetLocked(capturing);
     }
     pthread_mutex_unlock(&sendLock);
+    vmPid = pid; vmWin = win;
+  } else if (other) {
+    otherPid = pid; otherWin = win;
   }
+  appPid = pid;
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -426,7 +492,29 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
     if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
     sendState(now ? "on" : (front ? "esc" : "off"));
   }
-  if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+  if (tapPort && !CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
+  else if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+}
+
+static void updateCapture(CFRunLoopTimerRef t, void *info) {
+  (void)info;
+  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
+  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
+  // Parallels' VM window, UTM's, or VMware Fusion's.
+  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
+          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
+          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
+  CGWindowID win = 0;
+  int front = net >= 0 && vmFullScreen(pid, &win);
+  // Which of the app's VMs: its window title, on this check (every 0.2 s
+  // while a VM app is full screen in front) and on every app switch.
+  char title[sizeof frontTitle] = "";
+  if (front) windowTitle(pid, title, sizeof title);
+  // An app the escape combo may go back to: no VM app, not us, not the lock screen.
+  int other = net < 0 && pid > 0 && pid != getpid() && strcmp(name, "loginwindow");
+  if (other) win = frontWindow(pid);
+  frontChanged(pid, net, front, title, win, other);
+  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
 }
 
 // ---- the macOS pointer over the full-screen VM ----
@@ -564,6 +652,88 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
   if (val == 0) { sendKey(56, 0); sendKey(29, 0); sendKey(42, 0); sendKey(125, 0); }
 }
 
+// ---- the escape combo: out to the Space you came from, and back ----
+// Ctrl+Option+Cmd+Esc in the captured full-screen VM hands the trackpad and
+// keys back to macOS ("S esc", Omarchy lets go of held keys) and brings the
+// app that was in front before the VM to the front again: macOS then shows
+// its Space, so no swipe is needed (a mouse is enough). Pressed in macOS, it
+// brings the last full-screen VM to the front: its Space comes back, still
+// full screen, and the capture check captures again. If the VM did not leave
+// the front (macOS refused), the combo toggles capture there as before.
+enum { COMBO_PASS, COMBO_LEAVE, COMBO_CAPTURE, COMBO_ENTER };
+
+// haveVM: a full-screen VM to go back to, and its app is not the one in front
+// (a VM in a window keeps the combo, as before).
+static int comboAction(int vmFront, int esc, int haveVM) {
+  if (vmFront) return esc ? COMBO_CAPTURE : COMBO_LEAVE;
+  return haveVM ? COMBO_ENTER : COMBO_PASS;
+}
+
+static int alive(pid_t p) { return p > 0 && (kill(p, 0) == 0 || errno == EPERM); }
+
+// The app in front now (the capture check's way of asking).
+static pid_t frontNow(void) {
+  ProcessSerialNumber psn; pid_t pid = 0;
+  return GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr ? pid : 0;
+}
+
+// Brings the app with this window to the front. The window server's own call
+// (SkyLight, private; window managers use it) works from a background helper
+// and across Spaces; NSRunningApplication's activate is the fallback, and
+// the way for an app without a known window.
+typedef CGError (*SetFrontFn)(ProcessSerialNumber *, uint32_t, uint32_t);
+static int bringToFront(pid_t pid, CGWindowID win) {
+  static SetFrontFn setFront; static int looked;
+  if (!looked) {
+    looked = 1;
+    dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+    setFront = (SetFrontFn)dlsym(RTLD_DEFAULT, "_SLPSSetFrontProcessWithOptions");
+    if (!setFront) logf_("escape combo: no SkyLight front-window call, using NSRunningApplication");
+  }
+  ProcessSerialNumber psn;
+  if (win && setFront && GetProcessForPID(pid, &psn) == noErr && setFront(&psn, win, 0x200 /* user generated */) == kCGErrorSuccess)
+    return 1;
+  return ns_activate(pid);
+}
+
+// Seams for the offline test (test-escape.c).
+static int (*activateFn)(pid_t, CGWindowID) = bringToFront;
+static pid_t (*finderFn)(void) = ns_finder_pid;
+static double verifyAfter = 0.6;   // s; < 0: no check
+
+static void goTo(pid_t pid, CGWindowID win, const char *what) {
+  char name[64] = "";
+  proc_name(pid, name, sizeof name);
+  int ok = activateFn(pid, win);
+  logf_("escape combo: %s %s (pid %d, window %u)%s", what, name, pid, win, ok ? "" : ": macOS refused, trying again");
+  if (verifyAfter < 0) return;
+  // A moment later it must be in front; else the usual activation, once.
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    if (frontNow() == pid) return;
+    int again = ns_activate(pid);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      char who[64] = "";
+      proc_name(pid, who, sizeof who);
+      if (frontNow() == pid) logf_("escape combo: %s is in front (second try)", who);
+      else logf_("escape combo: %s did not come to the front (second try %s)", who, again ? "taken" : "refused");
+    });
+  });
+}
+
+// Out of the VM: to the app from before it, else Finder.
+static void leaveVM(void) {
+  if (alive(otherPid)) { goTo(otherPid, otherWin, "back to"); return; }
+  pid_t f = finderFn();
+  if (f > 0) goTo(f, 0, "back to (the app from before has quit)");
+  else logf_("escape combo: no app to go back to");
+}
+
+static void enterVM(void) { goTo(vmPid, vmWin, "back into the VM:"); }
+
+// The switch runs after the tap's callback has returned (it talks to the
+// window server; the callback must stay quick).
+static void later(void (*f)(void)) { dispatch_async(dispatch_get_main_queue(), ^{ f(); }); }
+
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
 static int swallowEscUp;
 
@@ -577,7 +747,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     CGEventFlags f = CGEventGetFlags(e);
     int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
-    if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
+    int act = kc == ESC_KEYCODE && combo ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid) : COMBO_PASS;
+    if (act == COMBO_PASS) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
         // UTM, VMware Fusion and OmacVM.app (without Accessibility for it) keep
         // Cmd shortcuts like Cmd+Space for macOS: in full screen they go to
@@ -604,10 +775,15 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo ignored: posted by pid %lld (%s), state %lld", srcPid, who, srcState);
       return e;
     }
-    escaped = !escaped;
-    capturing = frontIsVM && !escaped;
-    logf_("escape combo: capture %s", capturing ? "ON" : "off");
-    sendState(capturing ? "on" : "esc");
+    if (act == COMBO_ENTER) {
+      later(enterVM);
+    } else {
+      escaped = act == COMBO_LEAVE;
+      capturing = !escaped;
+      logf_("escape combo: capture %s", capturing ? "ON" : "off");
+      sendState(capturing ? "on" : "esc");
+      if (act == COMBO_LEAVE) later(leaveVM);
+    }
     swallowEscUp = 1;
     return NULL;
   }
@@ -636,7 +812,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn() && ns_event_type(e) == 30) {
+  if (!pinchSent && capturing && glideOn() &&
+      (type == 30 || (type == 29 && ns_event_type(e) == 30))) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
@@ -934,16 +1111,16 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
+  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
-  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
+  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
   // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
   // combo). Ask once, then wait for the grant instead of exiting, so launchd
   // does not restart us into a loop of prompts.
   CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
   CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   int asked = 0;
-  while (!(tapPort = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, m, tapCb, NULL))) {
+  while (!installTap()) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
       AXIsProcessTrustedWithOptions(opts);
@@ -954,7 +1131,6 @@ int main(int argc, char **argv) {
   }
   CFRelease(opts);
   if (asked) logf_("permissions granted");
-  CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(NULL, tapPort, 0), kCFRunLoopCommonModes);
 
   // The trackpad only now, with the permissions granted and the run loop about
   // to run: opened while still waiting, its frames were never taken, and on a

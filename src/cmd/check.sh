@@ -208,6 +208,25 @@ if [[ $BRIDGE == on ]]; then
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
   else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
+  # External displays: which ones the brightness keys set while the VM is on
+  # them (DDC/CI, an Apple display's own control), and why not.
+  # Asked only while the feature is on: the Bridge then reads each display over DDC/CI.
+  if [[ $(feat external_brightness on) != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
+  else
+    ex=""; declare -F bget >/dev/null && ex=$(bget /display/external)
+    if ! jq -e .displays <<<"$ex" >/dev/null 2>&1; then bad "external brightness" "the Bridge does not answer /display/external (omacvm update)"
+    elif [[ $(jq -r .enabled <<<"$ex") != true ]]; then skip "external brightness" "off on this Mac (external_brightness in $c)"
+    elif [[ $(jq '.displays | length' <<<"$ex") == 0 ]]; then skip "external brightness" "no external display connected"
+    else
+      while IFS=$'\t' read -r name method reason; do
+        case $method in
+          ddc) ok "brightness: $name" "DDC/CI: the brightness keys set it while the VM is in front on it" ;;
+          apple) ok "brightness: $name" "its own control: the brightness keys set it while the VM is in front on it" ;;
+          *) skip "brightness: $name" "not settable, $reason: the brightness keys stay as before there" ;;
+        esac
+      done < <(jq -r '.displays[] | [.name, .method, (.reason // "")] | @tsv' <<<"$ex")
+    fi
+  fi
 else skip "Bridge" "off (chosen at setup)"; fi
 # The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
 if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
@@ -370,10 +389,11 @@ if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
 fi
 if [[ $TYPE == app ]]; then
-  # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).
-  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 0)
-  if [[ $n == 1 ]]; then skip "notch strip (app)" "the app's full screen covers it (no Space of its own)"
-  elif [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
+  # (Omanotch then leaves the strip alone).
+  n=$(defaults read org.omacvm.app useNotch 2>/dev/null || echo 1)
+  if [[ ${notch:=$(swift "$R/src/display/mac-notch.swift" 2>/dev/null || echo none)} != notch ]]; then skip "notch strip (app)" "no notch on this Mac"
+  elif [[ $n == 1 ]]; then skip "notch strip (app)" "on: Omarchy's bar beside the notch (full screen has no Space of its own)"
   else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
