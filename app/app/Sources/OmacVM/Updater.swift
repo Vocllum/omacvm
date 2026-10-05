@@ -87,9 +87,27 @@ final class Updater: ObservableObject {
         if bundle.path.contains("/AppTranslocation/") {
             return "macOS runs this copy from a temporary place. Move \(Product.name) to Applications first."
         }
-        let parent = bundle.deletingLastPathComponent().path
-        if !FileManager.default.isWritableFile(atPath: parent) { return "\(Product.name) cannot write to \(parent)." }
+        if let p = writeProblem { return p }
         return nil
+    }
+
+    /// The bundle or its folder belongs to someone else (installed by root or
+    /// another admin): this copy cannot replace itself.
+    var writeProblem: String? {
+        UpdatePolicy.writeProblem(bundle: bundle).map {
+            "\(Product.name) cannot update itself here: \($0) (installed by another user or an administrator). Reinstall it as you to get updates."
+        }
+    }
+
+    /// Said once (window and log), not as a failed swap every week; again
+    /// only if the problem changes or comes back after it was fixed.
+    private func tellWriteProblemOnce() {
+        let key = "updateWriteProblemSaid"
+        guard let why = writeProblem else { UserDefaults.standard.removeObject(forKey: key); return }
+        guard enabled, UserDefaults.standard.string(forKey: key) != why else { return }
+        UserDefaults.standard.set(why, forKey: key)
+        notice = why
+        log(why)
     }
 
     private var lastCheck: Date? {
@@ -121,6 +139,7 @@ final class Updater: ObservableObject {
     func start() {
         trimLog()
         readSwapResult()
+        if publicKey != nil, notice == nil { tellWriteProblemOnce() }
         Task { await loadStaged() }
         // Not right away: a VM start or the first window comes first.
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkIfDue() }

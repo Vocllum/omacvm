@@ -20,6 +20,18 @@ public enum UpdatePolicy {
         case needsMacOS(String)
     }
 
+    /// Why the app at BUNDLE cannot be swapped by the user running it: the
+    /// swap renames the bundle out of its folder and back, which needs write
+    /// access to the folder and to the bundle itself (a bundle owned by root
+    /// or another admin in a writable /Applications fails the second).
+    public static func writeProblem(bundle: URL) -> String? {
+        let fm = FileManager.default
+        let parent = bundle.deletingLastPathComponent().path
+        if !fm.isWritableFile(atPath: parent) { return "\(parent) is not writable for you" }
+        if !fm.isWritableFile(atPath: bundle.path) { return "\(bundle.path) is not writable for you" }
+        return nil
+    }
+
     public static func offer(_ feed: Appcast, current: Version, skipped: String?, os: Version) -> Offer {
         guard current < feed.version else { return .upToDate }
         if let s = skipped.flatMap(Version.init), !(s < feed.version) { return .skipped }

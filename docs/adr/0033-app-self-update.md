@@ -136,5 +136,6 @@ update path itself is tested with test builds.
   copy).
 - Not covered: delta updates (a full zip, about 13 MB, at most once a week),
   an install that needs an administrator (the app only updates where it can
-  write, as it installs itself), copies run from a translocated or read-only
-  place (it says so).
+  write: the folder and the bundle itself, which the swap renames; a copy
+  owned by root or another admin says so once and checks nothing), copies run
+  from a translocated or read-only place (it says so).

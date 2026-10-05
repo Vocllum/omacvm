@@ -137,6 +137,18 @@ let unsigned = tmp.appendingPathComponent("unsigned")
 try! Data("#!/bin/sh\n".utf8).write(to: unsigned)
 expect(CodeCheck.problem(unsigned, requirement: CodeCheck.developerID()) != nil, "an unsigned file: refused")
 
+// Who may replace the bundle: its folder and the bundle itself writable
+let folder = tmp.appendingPathComponent("Applications")
+let mine = folder.appendingPathComponent("OmacVM.app")
+try! FileManager.default.createDirectory(at: mine, withIntermediateDirectories: true)
+expect(UpdatePolicy.writeProblem(bundle: mine) == nil, "own folder and bundle: can update")
+try! FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: mine.path)
+expect(UpdatePolicy.writeProblem(bundle: mine)?.contains("OmacVM.app is not writable") == true, "bundle not writable: says so")
+try! FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: mine.path)
+try! FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: folder.path)
+expect(UpdatePolicy.writeProblem(bundle: mine)?.contains("Applications is not writable") == true, "folder not writable: says so")
+try! FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path)
+
 // Processes from inside a bundle (a VM's QEMU)
 let fake = tmp.appendingPathComponent("Fake.app")
 let exe = fake.appendingPathComponent("Contents/MacOS/qemu")
