@@ -200,8 +200,20 @@ static int run_limit(void)
    check(make(T_2D, VIRGL_FORMAT_B8G8R8A8_UNORM, VIRGL_BIND_CURSOR, 64, 64, 1, 1, 0, 0) != 0,
          "and a cursor");
    check(tex2d(256, 256, 1) == 0, "an ordinary texture is still refused");
-   check(make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT, 8192, 8192, 1, 1, 0, 0) == 0,
-         "a screen past the reserve is refused");
+   /* the reserve's upper limit: 256 MB - 4K screen (33,177,600) - cursor (16,384) leaves
+    * 235,241,472 bytes = 8192x7179 BGRX exactly. Same bind and format both times, so
+    * only the budget can tell them apart (SCANOUT alone is refused as a bind) */
+   check(make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
+              8192, 7180, 1, 1, 0, 0) == 0,
+         "a screen one row past the reserve is refused");
+   uint32_t last = make(T_2D, VIRGL_FORMAT_B8G8R8X8_UNORM, VIRGL_BIND_SCANOUT | VIRGL_BIND_RENDER_TARGET,
+                        8192, 7179, 1, 1, 0, 0);
+   check(last != 0, "a screen that ends exactly at the reserve fits");
+   check(make(T_2D, VIRGL_FORMAT_B8G8R8A8_UNORM, VIRGL_BIND_CURSOR | VIRGL_BIND_RENDER_TARGET,
+              64, 64, 1, 1, 0, 0) == 0,
+         "with the reserve full, a cursor is refused too");
+   if (last)
+      virgl_renderer_resource_unref(last);
    if (scan)
       virgl_renderer_resource_unref(scan);
    unref(h, n);
