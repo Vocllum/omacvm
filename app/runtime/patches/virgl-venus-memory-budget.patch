@@ -41,8 +41,13 @@ OMACVM_GPU_MEMORY_MB=2048, tests/graphics/guest/vk-alloc.c, 256 MB blocks):
 synchronous, the 7th block (1902 MB in use with the desktop) gets
 VK_ERROR_OUT_OF_DEVICE_MEMORY and, after freeing, allocations work again; async,
 the app ends at vkFreeMemory and the VM, desktop and the next Vulkan app go on.
-Without the patch all 24 blocks (6 GB) are made. vk-alloc keep-fd (export,
-free, keep the dma-buf fd, again): see the PR for the numbers.
+Without the patch all 24 blocks (6 GB) are made. vk-alloc keepfd (make
+exportable, export the dma-buf fd, free, keep the fd; 256 MB blocks, same VM):
+with the first version of this patch all 24 blocks (6 GB) were kept past the
+2 GB budget; now the 7th is refused (1902 MB in use), and after the app ends
+the bytes come back. Guest Mesa (main) then crashes in vn_AllocateMemory: its
+memory report reads mem->base_bo of the failed export allocation (a guest
+Mesa bug in its error path, not fixed here).
 --- a/server/render_context.c
 +++ b/server/render_context.c
 @@ -9,6 +9,7 @@
