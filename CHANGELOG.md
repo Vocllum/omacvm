@@ -3,6 +3,14 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- OmacVM.app: a starting VM shows Omarchy's logo instead of QEMU's "Display
+  output is not active." until Omarchy draws, also after a restart and on
+  the other displays. The logo sits where the firmware's does, so the
+  hand-over does not move it. If Omarchy has shown nothing after 90 seconds,
+  a line under the logo says so and where the logs are.
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one

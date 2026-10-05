@@ -1,0 +1,352 @@
+From: OmacVM
+Subject: [PATCH] ui/cocoa: Omarchy's logo instead of "Display output is not active."
+
+What: until the guest shows a picture on an output, and when it switches the
+output off again (a reboot), the window shows Omarchy's logo, green on black,
+where the firmware draws it, instead of QEMU's placeholder text ("Display
+output is not active.", "Guest has not initialized the display (yet).").
+Also on the windows of the other displays. If the guest has shown nothing of
+its own 90 s of running time after it started (OMACVM_SPLASH_HINT_SECONDS), a
+line under the logo says Omarchy is taking long and where its logs are
+(OMACVM_LOGS, set by the launcher), and qemu.log gets a warning.
+OMACVM_BOOT_SPLASH=0 brings QEMU's text back. The main window's layer now
+draws again when the window changes size.
+
+Why: every start showed QEMU's text for a few seconds (before the firmware,
+and from GRUB until Linux draws), and every reboot for longer. It looked like
+an error but is just the guest getting ready.
+
+How: drawn in the window's GL layers, so UTM and the guest are not involved.
+The logo is the firmware's (boot-logo/make-logo-bmp.py logo.svg --rows, from
+Omarchy's logo.svg, MIT): an 81 x 19 texture with sharp cells, placed where
+the firmware's stretched frame has its logo (1920 x 1080 on a cold start,
+after a reboot the size of the guest's last picture, as virtio-gpu then
+reports), so the hand-over to the firmware does not move it.
+
+Upstream: OmacVM only (branding), not for QEMU.
+
+Test: Tests/display/test-boot-splash-cells.py (the build runs it): the cells
+in ui/cocoa.m make exactly the firmware's Logo.bmp of edk2-logo-omarchy.patch.
+The start, the hand-over and a reboot were checked with window screenshots
+(tracks/boot-splash in the work notes).
+
+--- a/ui/cocoa.m
++++ b/ui/cocoa.m
+@@ -43,6 +43,7 @@
+ #include "system/system.h"
+ #include "system/runstate.h"
+ #include "system/runstate-action.h"
++#include "system/reset.h"
+ #include "system/cpu-throttle.h"
+ #include "qapi/error.h"
+ #include "qapi/qapi-commands-block.h"
+@@ -222,6 +223,8 @@
+     self = [super init];
+     if (self) {
+         [self setAsynchronous:NO];
++        /* OmacVM: drawn again at the new size (the boot splash has no frames). */
++        [self setNeedsDisplayOnBoundsChange:YES];
+     }
+     return self;
+ }
+@@ -2975,8 +2978,250 @@
+ #endif
+ 
+     CGLDestroyContext(ctx);
++}
++
++/*
++ * OmacVM boot splash. Until the guest shows a picture on an output, and when
++ * it switches the output off again (a reboot), the window shows Omarchy's
++ * logo where the firmware draws it, not QEMU's "Display output is not
++ * active." The firmware's frame (the logo 405 x 95 in the middle) is
++ * stretched to the window, so the logo takes the same place here and does
++ * not move at the hand-over. The firmware draws at the size virtio-gpu
++ * reports: 1920 x 1080 (the launcher's xres/yres) on a cold start, after a
++ * reboot the window's own, as the guest did before; so the frame is taken to
++ * be as big as the last picture the guest showed. Outputs the firmware never
++ * draws on (the other displays) get square cells at their own size.
++ *
++ * When the guest has shown nothing of its own OMACVM_SPLASH_HINT_SECONDS
++ * (90) of running time after it started, a line under the logo says so and
++ * where the logs are, and qemu.log gets a warning. OMACVM_BOOT_SPLASH=0:
++ * QEMU's text, as before.
++ *
++ * Threads: the state below is used with the BQL (QEMU's thread, and the
++ * layers' draws on the main thread take it); the hint label is main thread.
++ */
++#define SPLASH_COLS 81
++#define SPLASH_ROWS 19
++
++/*
++ * Omarchy's logo.svg (github.com/basecamp/omarchy 6520ac7d, MIT, (c) David
++ * Heinemeier Hansson), one character per cell, the same cells as the
++ * firmware's logo: boot-logo/make-logo-bmp.py logo.svg --rows. The build
++ * checks that (Tests/display/test-boot-splash-cells.py).
++ */
++static const char omacvm_splash_cells[SPLASH_ROWS][SPLASH_COLS + 1] = {
++    ".................###.............................................................",
++    "..#####......###########......#######....#######....#######....#...#......#...#..",
++    ".#######....#############....########...########...########...##...##....##...##.",
++    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###...##...###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###...#....###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###........###...###..###...###",
++    "###...###..###...###...###.##########.#########...###.......###########.#########",
++    "###...###..###...###...###.##########.########....###......###########..#########",
++    "###...###..###...###...###..###...###..###........###........###...###........###",
++    "###...###..###...###...###..###...###.##########..###...#....###...###...##...###",
++    "###...###..###...###...###..###...###.##########..###...##...###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
++    "###...###..###...###...###..###...###..###...###..###...###..###...###..###...###",
++    ".#######....##...###...##...###...##...###...###..########...###...##....#######.",
++    "..#####......#...###...#....###...#....###...###..#######....###...#......#####..",
++    ".......................................###...##..................................",
++    ".......................................###...#...................................",
++};
++
++static int omacvm_splash_on = -1;       /* OMACVM_BOOT_SPLASH */
++static GLuint omacvm_splash_tex;        /* in gl_view_ctx's share group */
++static bool omacvm_guest_drew;          /* a GL scanout since the last reset */
++static int omacvm_frame_w = 1920;       /* the last picture of the guest's */
++static int omacvm_frame_h = 1080;
++static bool omacvm_splash_hint_up;
++static QEMUTimer *omacvm_splash_timer;
++static NSTextField *omacvm_splash_hint; /* main thread */
++
++static bool omacvm_splash_enabled(void)
++{
++    if (omacvm_splash_on < 0) {
++        const char *v = getenv("OMACVM_BOOT_SPLASH");
++        omacvm_splash_on = !(v && !strcmp(v, "0"));
++        info_report("cocoa: boot splash %s",
++                    omacvm_splash_on ? "on" : "off (OMACVM_BOOT_SPLASH=0)");
++    }
++    return omacvm_splash_on;
+ }
+ 
++/* An output without a picture of the guest's: none yet, or switched off. */
++static bool omacvm_splash_wanted(DisplayGLTextureBorrower borrow,
++                                 DisplaySurface *s)
++{
++#ifdef CONFIG_EGL
++    if (egl_surface) {
++        return false;   /* the logo's texture is in the CGL contexts */
++    }
++#endif
++    return !borrow && (!s || surface_is_placeholder(s)) &&
++           omacvm_splash_enabled();
++}
++
++/* With the BQL: the size of the frame the firmware would show on con. */
++static void omacvm_splash_frame(QemuConsole *con, int *fw, int *fh)
++{
++    const QemuUIInfo *info = con ? qemu_console_get_ui_info(con) : NULL;
++
++    *fw = omacvm_frame_w;
++    *fh = omacvm_frame_h;
++    if (con != dcl.con && info && info->width && info->height) {
++        *fw = info->width;
++        *fh = info->height;
++    }
++}
++
++/*
++ * With the BQL, in a CGL context that shares gl_view_ctx's objects: a w x h
++ * pixel output showing con.
++ */
++static void omacvm_splash_draw(QemuConsole *con, int w, int h, bool square)
++{
++    int fw, fh;
++
++    glClearColor(0, 0, 0, 1);
++    glClear(GL_COLOR_BUFFER_BIT);
++    if (!omacvm_splash_tex) {
++        static uint32_t px[SPLASH_ROWS * SPLASH_COLS];
++        for (int r = 0; r < SPLASH_ROWS; r++) {
++            for (int c = 0; c < SPLASH_COLS; c++) {
++                /* Omarchy green (#a8cd76) on black, as the firmware. */
++                px[r * SPLASH_COLS + c] = omacvm_splash_cells[r][c] == '#' ?
++                                          0xffa8cd76 : 0xff000000;
++            }
++        }
++        glGenTextures(1, &omacvm_splash_tex);
++        glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex);
++        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
++        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
++        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SPLASH_COLS, SPLASH_ROWS, 0,
++                     GL_BGRA, GL_UNSIGNED_INT_8_8_8_8_REV, px);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    }
++    /* One cell: 5 x 5 pixels of the firmware's frame. */
++    omacvm_splash_frame(con, &fw, &fh);
++    double cw = w * 5.0 / fw, ch = h * 5.0 / fh;
++    if (square) {
++        cw = ch = MIN(cw, ch);
++    }
++    int lw = MAX(1, (int)lround(SPLASH_COLS * cw));
++    int lh = MAX(1, (int)lround(SPLASH_ROWS * ch));
++
++    glViewport((w - lw) / 2, (h - lh) / 2, lw, lh);
++    glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex);
++    /* Sharp cells, whatever the zoom filter. */
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    qemu_gl_run_texture_blit(dgc.gls, false);
++    glViewport(0, 0, w, h);
++}
++
++/* Main thread: the hint under the logo of the main window (fh: frame height). */
++static void omacvm_splash_hint_show(bool show, int fh)
++{
++    if (!show) {
++        [omacvm_splash_hint removeFromSuperview];
++        return;
++    }
++    if (!omacvm_splash_hint) {
++        const char *logs = getenv("OMACVM_LOGS");
++        NSString *text = logs && *logs ?
++            [NSString stringWithFormat:@"Omarchy is taking long to start. Its logs: %@",
++             [[NSString stringWithUTF8String:logs] stringByAbbreviatingWithTildeInPath]] :
++            @"Omarchy is taking long to start. Its logs are in the VM's folder.";
++        omacvm_splash_hint = [[NSTextField labelWithString:text] retain];
++        [omacvm_splash_hint setFont:[NSFont monospacedSystemFontOfSize:13
++                                                                weight:NSFontWeightRegular]];
++        [omacvm_splash_hint setTextColor:[NSColor colorWithSRGBRed:0.66 green:0.69
++                                                              blue:0.84 alpha:1]];
++        [omacvm_splash_hint sizeToFit];
++        [omacvm_splash_hint setAutoresizingMask:NSViewMinXMargin | NSViewMaxXMargin |
++                                                NSViewMinYMargin | NSViewMaxYMargin];
++    }
++    NSRect b = [cocoaView bounds];
++    NSSize size = [omacvm_splash_hint frame].size;
++    /* Under the logo (95 of the frame's rows, in the middle). */
++    CGFloat y = b.size.height / 2 - b.size.height * 95 / MAX(fh, 95) / 2 - 32 - size.height;
++    [omacvm_splash_hint setFrame:NSMakeRect(floor((b.size.width - size.width) / 2),
++                                            floor(MAX(8, y)), size.width, size.height)];
++    if (![omacvm_splash_hint superview]) {
++        [cocoaView addSubview:omacvm_splash_hint];
++    }
++}
++
++static int omacvm_splash_hint_seconds(void)
++{
++    static int seconds;
++    if (!seconds) {
++        const char *v = getenv("OMACVM_SPLASH_HINT_SECONDS");
++        seconds = v && atoi(v) > 0 ? MIN(atoi(v), 3600) : 90;
++    }
++    return seconds;
++}
++
++/* QEMU's thread, BQL: the guest has run that long and shows nothing yet. */
++static void omacvm_splash_hint_timer(void *opaque)
++{
++    if (omacvm_guest_drew || !omacvm_splash_wanted(gl_scanout_borrow, surface)) {
++        return;
++    }
++    int fw, fh;
++
++    omacvm_splash_frame(dcl.con, &fw, &fh);
++    omacvm_splash_hint_up = true;
++    warn_report("cocoa: no picture from the guest %d s after it started",
++                omacvm_splash_hint_seconds());
++    dispatch_async(dispatch_get_main_queue(), ^{
++        omacvm_splash_hint_show(true, fh);
++    });
++}
++
++/* QEMU's thread, BQL: the main output changed. */
++static void omacvm_splash_update(void)
++{
++    if (gl_scanout_borrow) {
++        omacvm_guest_drew = true;
++    }
++    if (surface && !surface_is_placeholder(surface)) {
++        omacvm_frame_w = surface_width(surface);
++        omacvm_frame_h = surface_height(surface);
++    }
++    if (!omacvm_guest_drew && omacvm_splash_wanted(gl_scanout_borrow, surface)) {
++        /* Guest time: a paused VM is not slow to start. */
++        if (!omacvm_splash_timer) {
++            omacvm_splash_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
++                                               omacvm_splash_hint_timer, NULL);
++        }
++        if (!omacvm_splash_hint_up && !timer_pending(omacvm_splash_timer)) {
++            timer_mod(omacvm_splash_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) +
++                                           omacvm_splash_hint_seconds() * 1000LL);
++        }
++        return;
++    }
++    if (omacvm_splash_timer) {
++        timer_del(omacvm_splash_timer);
++    }
++    if (omacvm_splash_hint_up) {
++        omacvm_splash_hint_up = false;
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_splash_hint_show(false, 0);
++        });
++    }
++}
++
++/* A guest reset starts over: the hint counts again from the next splash. */
++static void omacvm_splash_reset(void *opaque)
++{
++    omacvm_guest_drew = false;
++}
++
+ static void cocoa_gl_update(DisplayChangeListener *dcl,
+                             int x, int y, int w, int h)
+ {
+@@ -2996,6 +3241,7 @@
+ 
+     cocoa_switch(dcl, new_surface);
+     gl_dirty = true;
++    omacvm_splash_update();
+ }
+ 
+ static void cocoa_gl_render(void)
+@@ -3073,6 +3319,8 @@
+             glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
+             cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
+         }
++    } else if (omacvm_splash_wanted(NULL, surface)) {
++        omacvm_splash_draw(dcl.con, size.width, size.height, false);
+     } else {
+         glBindTexture(GL_TEXTURE_2D, surface->texture);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+@@ -3123,6 +3371,7 @@
+ {
+     gl_scanout_borrow = NULL;
+     gl_dirty = true;
++    omacvm_splash_update();
+ 
+     cocoa_gl_log("scanout disable");
+ }
+@@ -3136,6 +3385,7 @@
+     gl_scanout_id = backing_id;
+     gl_scanout_borrow = backing_borrow;
+     gl_dirty = true;
++    omacvm_splash_update();
+ 
+     cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
+                  backing_id, w, h, x, y);
+@@ -3711,6 +3961,8 @@
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+         qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
++    } else if (omacvm_splash_wanted(NULL, hd->surface)) {
++        omacvm_splash_draw(hd->dcl.con, size.width, size.height, true);
+     } else if (hd->surface && hd->surface->texture) {
+         glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
+         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+@@ -4641,6 +4893,7 @@
+ 
+         dgc.gls = qemu_gl_init_shader();
+         dcl.ops = &dcl_gl_ops;
++        qemu_register_reset(omacvm_splash_reset, NULL);
+ 
+         for (unsigned int index = 0; ; index++) {
+             QemuConsole *con = qemu_console_lookup_by_index(index);

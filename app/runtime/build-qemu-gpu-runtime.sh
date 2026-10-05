@@ -604,6 +604,12 @@ cc -fblocks -Wall -Werror -Wno-deprecated-declarations -I"$display_tests" \
   "$native_dir/Tests/display/test-gl-view-flush.c" -framework OpenGL \
   -o "$display_tests/test-gl-view-flush"
 "$display_tests/test-gl-view-flush"
+# OmacVM: Omarchy's logo instead of "Display output is not active." until the
+# guest draws (and after it switched an output off); the cells must be the
+# firmware's logo.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-boot-splash.patch"
+python3 "$native_dir/Tests/display/test-boot-splash-cells.py" "$source_dir/ui/cocoa.m" || \
+  die "the boot splash's logo is not the firmware's (test-boot-splash-cells.py)"
 # OmacVM: 2D resources (the guest's dumb buffers: console, plymouth, dumb
 # screens and cursors) are made with the SCANOUT bind, so the guest memory
 # budget's display reserve covers them (test-resource-budget checks the reserve

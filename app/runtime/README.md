@@ -28,6 +28,15 @@ commit 82927e9. Changes here:
   firmware carries no user name (the build checks that). The flash layout and the
   boot variables are the same either way: a VM's `efi-vars.fd` works with
   both
+- `patches/omacvm-cocoa-boot-splash.patch`: until the guest draws on an
+  output (and when it switches it off again, a reboot), the window shows
+  Omarchy's logo where the firmware draws it, not QEMU's "Display output is
+  not active."; after 90 s of the guest running with nothing of its own on
+  the screen (`OMACVM_SPLASH_HINT_SECONDS`), a line under the logo names the
+  VM's logs (`OMACVM_LOGS`) and qemu.log gets a warning.
+  `OMACVM_BOOT_SPLASH=0` shows QEMU's text again. The cells are the
+  firmware's (`boot-logo/make-logo-bmp.py logo.svg --rows`);
+  `Tests/display/test-boot-splash-cells.py` checks that at build time
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's
