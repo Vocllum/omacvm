@@ -23,6 +23,10 @@ in more words.
   robust app reads `GL_GUILTY_CONTEXT_RESET` and can start over. Vulkan
   (Venus) memory now counts against the same budget, for as long as anything
   in the VM still holds it (a kept dma-buf or mapping too).
+- The Mac's keyboard light goes dimmer: a new lowest step (0.001) below the
+  three added in 2.6.0, about half as bright as the old lowest and as dim as
+  the keys go while still lit. A step a Mac's keyboard can't light is
+  skipped, and Omarchy's popup shows a lit keyboard as 1 %, not 0 %.
 
 ## 2.9.0 (unreleased)
 

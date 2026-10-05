@@ -336,14 +336,21 @@ display's name). A display
 without DDC/CI keeps the keys as before (the Mac's built-in display, in full
 screen). `"external_brightness": false` in `config.json` switches it off.
 
-The keyboard light has three more steps below macOS's lowest (1/16): 0.01,
-0.02 and 0.04. Measured on a MacBook Pro M4 Max (macOS 15.7.4): each value is
-kept, and the backlight reports its own level for each
-(`backlightLevelForKeyboard`: 0.25, 0.39 and 0.68 against 1.01 at 1/16), so
-they are on by default. Whether the keys flicker that low has not been seen
-yet (only a person can): if they do, `"keyboard_low_steps": false` in
-`config.json` and a restart of the Bridge bring back macOS's steps. macOS 15 has no public way to
-show its own volume popup on demand, so the VM draws it.
+The keyboard light has four more steps below macOS's lowest (1/16): 0.001,
+0.01, 0.02 and 0.04 (`KeyboardSteps` in `mac/keylight.swift`). Measured on a
+MacBook Pro M4 Max (macOS 15.7.4): each value is kept, and the backlight
+reports its own level for each (`backlightLevelForKeyboard`: 0.115, 0.25,
+0.39 and 0.68 against 1.01 at 1/16). Any value above 0 gives at least 0.10,
+so 0.001 is about as dim as the keys go while lit. A step the backlight
+reports as dark (another Mac's keyboard may not go that low) is skipped, so
+a key press never ends on "on but dark". Whether the keys flicker that low
+has not been seen yet (only a person can): if they do,
+`"keyboard_low_steps": false` in `config.json` and a restart of the Bridge
+bring back macOS's steps. `src/tests/keyboard-light.sh` tests the steps
+(`--live`: on this Mac's keyboard, then back to the level from before).
+
+macOS 15 has no public way to show its own volume popup on demand, so the VM
+draws it.
 
 ## Tested
 

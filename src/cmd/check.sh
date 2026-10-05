@@ -207,7 +207,7 @@ if [[ $BRIDGE == on ]]; then
     skip "keyboard light" "this Mac has none (Shift + brightness keys stay macOS's)"
   elif [[ $(jq -r '.keyboard_low_steps == false' "$c" 2>/dev/null) == true ]]; then
     skip "keyboard light" "macOS's 1/16 steps (keyboard_low_steps off in $c)"
-  else ok "keyboard light" "3 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
+  else ok "keyboard light" "4 steps below macOS's lowest (keyboard_low_steps in config.json; off if the keys flicker)"; fi
   # External displays: which ones the brightness keys set while the VM is on
   # them (DDC/CI, an Apple display's own control), and why not.
   # Asked only while the feature is on: the Bridge then reads each display over DDC/CI.
