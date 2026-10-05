@@ -39,17 +39,17 @@ check(looks() == 0, "off: no display looked at (DDC reads) at all")
 
 // On, the made-up display only.
 on = true
-ExternalBrightness.retryNone = 0.5
+ExternalBrightness.retryNone = 3   // long enough for a slow CI runner between two checks
 check(externalBrightness.method(fake) == nil, "on: not known yet, a look is queued")
 check(looks() == 1, "on: the key path looked once")
 check(externalBrightness.method(fake).map { !$0.works } == true, "on: the made-up display can't be set")
 check(looks() == 1, "...and is not asked again at once")
 check(status { try externalBrightness.get(fake) } == 409, "on: the VM's read: not settable")
 check(looks() == 1, "...from the cache")
-Thread.sleep(forTimeInterval: 0.6)
+Thread.sleep(forTimeInterval: 3.2)
 _ = status { try externalBrightness.get(fake) }
 check(looks() == 2, "after retryNone the VM's request looks again")
-Thread.sleep(forTimeInterval: 0.6)
+Thread.sleep(forTimeInterval: 3.2)
 _ = status { try externalBrightness.set(fake, percent: 10, delta: nil) }
 check(looks() == 3, "...the VM's write too")
 on = false
