@@ -56,8 +56,8 @@ def qcow2(backing=0, incompat=0):
 
 def vmdk(extent='RW 134217728 SPARSE "omarchy.vmdk"', more="", magic=b"KDMV"):
     h = magic + struct.pack("<IIQQQQ", 1, 3, 134217728, 128, 1, 20)
-    d = ('# Disk DescriptorFile\nversion=1\nCID=8ca14383\nparentCID=ffffffff\ncreateType="monolithicSparse"\n'
-         '%s\n%s# The Disk Data Base\n' % (extent, more)).encode()
+    d = ('# Disk DescriptorFile\nversion=1\nencoding="UTF-8"\nCID=8ca14383\nparentCID=ffffffff\ncreateType="monolithicSparse"\n'
+         '%s\n%s# The Disk Data Base\n#DDB\n\nddb.uuid = "60 00 C2 96"\n' % (extent, more)).encode()
     return h.ljust(512, b"\0") + d.ljust(20 * 512, b"\0")
 
 
@@ -99,6 +99,7 @@ elif route == "utm":
            "QEMU": {"AdditionalArguments": [], "UEFIBoot": True},
            "Drive": [{"ImageName": QC, "ImageType": "Disk", "Interface": "NVMe", "Identifier": QC[:-6]}],
            "Network": [{"Mode": "Shared", "PortForward": []}], "System": {"CPUCount": 8, "MemorySize": 12288},
+           "Serial": [{"Mode": "Ptty", "Target": "Auto"}],
            "Sharing": {"DirectoryShareMode": "WebDAV"}}
     v = variant
     if v == "qemu-args": cfg["QEMU"]["AdditionalArguments"] = ["-drive", "file=secret"]
@@ -107,6 +108,8 @@ elif route == "utm":
     if v == "abs-path": cfg["Information"]["Icon"] = "/Users/someone/.ssh/id_ed25519"
     if v == "bookmark": cfg["Sharing"]["SharedDirectories"] = [{"Bookmark": b"book\0mark"}]
     if v == "port-forward": cfg["Network"][0]["PortForward"] = [{"GuestPort": 22, "HostPort": 2222}]
+    if v == "serial-tcp": cfg["Serial"] = [{"Mode": "TcpServer", "Target": "Auto", "TcpPort": 1234}]
+    if v == "serial-monitor": cfg["Serial"] = [{"Mode": "Ptty", "Target": "Monitor"}]
     files = {B + "/config.plist": plistlib.dumps(cfg), B + "/Data/" + QC: qcow2(), B + "/Data/efi_vars.fd": b"efi",
              B + "/Data/omacvm.png": b"png"}
     if v == "backing": files[B + "/Data/" + QC] = qcow2(backing=104)
@@ -124,10 +127,18 @@ else:
     if v == "disk-other": vmx[4] = 'nvme0:0.fileName = "other.vmdk"'
     if v == "debug-stub": vmx += ['debugStub.listen.guest64 = "TRUE"']
     if v == "working-dir": vmx += ['workingDir = "."']
+    if v == "escape-path": vmx += ['sched.swap.dir = "|2FUsers|2Fsomeone"']
+    if v == "escape-disk": vmx[4] = 'nvme0:0.fileName = "|2E|2E|2Fother.vmdk"'
+    if v == "vnc": vmx += ['RemoteDisplay.vnc.enabled = "TRUE"', 'RemoteDisplay.vnc.port = "5901"']
+    if v == "usb-auto": vmx += ['usb.autoConnect.device0 = "0x05ac:0x8600"']
     files = {B + "/Omarchy.vmx": ("\n".join(vmx) + "\n").encode(), B + "/omarchy.vmdk": vmdk(), B + "/Omarchy.nvram": b"nv"}
     if v == "extent-other": files[B + "/omarchy.vmdk"] = vmdk(extent='RW 134217728 FLAT "/Users/someone/.zshrc" 0')
     if v == "extent-two": files[B + "/omarchy.vmdk"] = vmdk(extent='RW 1 SPARSE "omarchy.vmdk"\nRW 1 SPARSE "omarchy.vmdk"')
     if v == "parent": files[B + "/omarchy.vmdk"] = vmdk(more='parentFileNameHint="/Users/someone/base.vmdk"\n')
+    if v == "parent-case": files[B + "/omarchy.vmdk"] = vmdk(more='parentfilenamehint="/Users/someone/base.vmdk"\n')
+    if v == "type-case": files[B + "/omarchy.vmdk"] = vmdk(more='createtype="twoGbMaxExtentFlat"\n')
+    if v == "extent-case": files[B + "/omarchy.vmdk"] = vmdk(extent='rw 134217728 flat "/Users/someone/.zshrc" 0')
+    if v == "change-track": files[B + "/omarchy.vmdk"] = vmdk(more='changeTrackPath="omarchy-ctk.vmdk"\n')
     if v == "text-vmdk": files[B + "/omarchy.vmdk"] = vmdk(magic=b"# Di")
     if v == "no-vmx": del files[B + "/Omarchy.vmx"]
     if v == "extra": files[B + "/Omarchy.vmx.lck"] = b"x"
@@ -229,6 +240,8 @@ utm data-file
 utm not-qcow2
 utm extra
 utm symlink
+utm serial-tcp
+utm serial-monitor
 fusion shared-folder
 fusion serial-file
 fusion disk-path
@@ -238,6 +251,14 @@ fusion working-dir
 fusion extent-other
 fusion extent-two
 fusion parent
+fusion parent-case
+fusion type-case
+fusion extent-case
+fusion change-track
+fusion escape-path
+fusion escape-disk
+fusion vnc
+fusion usb-auto
 fusion text-vmdk
 fusion no-vmx
 fusion extra

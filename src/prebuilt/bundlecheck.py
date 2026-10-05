@@ -8,8 +8,8 @@ The image is untrusted until this passes. It checks:
   * the files: exactly what that route's images hold (src/prebuilt/make-image.sh
     stage_package), each a regular file with one link, real folders, no
     symbolic links or anything else;
-  * the VM's settings: no path on the Mac, no folder or SSH keys shared from
-    the Mac, no extra QEMU arguments;
+  * the VM's settings: no path on the Mac, no folder, SSH keys, USB devices
+    or network ports of the Mac, no extra QEMU arguments;
   * the disks: they read and write only their own file in the bundle (no
     backing file, no external data file, no extent elsewhere).
 A link or a path in there would have Parallels, UTM or Fusion (or the disk
@@ -185,6 +185,11 @@ def check_utm(b, found):
     for n in c.get("Network", []) or []:
         if isinstance(n, dict) and n.get("PortForward"):
             raise Bad("config.plist forwards ports")
+    # A serial port only as a terminal on the Mac: not on a network port, not
+    # QEMU's monitor or a debugger.
+    for n in c.get("Serial", []) or []:
+        if not isinstance(n, dict) or n.get("Mode") not in ("Ptty", "Builtin") or n.get("Target", "Auto") != "Auto":
+            raise Bad("config.plist: a serial port on the network or to QEMU itself")
     drives = c.get("Drive", [])
     if not isinstance(drives, list) or not drives:
         raise Bad("config.plist has no disk")
@@ -212,22 +217,36 @@ def check_vmdk(path):
     extents = 0
     for line in desc.splitlines():
         line = line.strip()
-        m = re.match(r'(RW|RDONLY|NOACCESS)\s+\d+\s+(\S+)\s+"([^"]*)"', line)
+        if not line or line.startswith("#"):
+            continue
+        m = re.fullmatch(r'(RW|RDONLY|NOACCESS)\s+\d+\s+(\S+)\s+"([^"]*)"(\s+\d+)?', line, re.I)
+        kv = re.fullmatch(r'([A-Za-z0-9_.]+)\s*=\s*"?([^"]*)"?', line)
         if m:
-            if m.group(2) != "SPARSE" or m.group(3) != "omarchy.vmdk":
+            if m.group(2).upper() != "SPARSE" or m.group(3) != "omarchy.vmdk":
                 raise Bad("omarchy.vmdk reads or writes another file (%s)" % safe(m.group(3)))
             extents += 1
-        elif line.startswith(("parentFileNameHint", "parentCID")) and line.replace(" ", "") != "parentCID=ffffffff":
-            raise Bad("omarchy.vmdk has a parent disk")
-        elif line.startswith("createType") and line.replace(" ", "") != 'createType="monolithicSparse"':
-            raise Bad("omarchy.vmdk is not a single-file sparse disk")
+        elif not kv:
+            raise Bad("omarchy.vmdk: a descriptor line that does not read (%s)" % safe(line))
+        else:
+            # VMware's keys do not care about case. Only these, and the disk
+            # data base (ddb.*): a parent, change tracking or anything else
+            # could name another file.
+            k, v = kv.group(1).lower(), kv.group(2).strip().lower()
+            if k.startswith("parent") and (k, v) != ("parentcid", "ffffffff"):
+                raise Bad("omarchy.vmdk has a parent disk")
+            if k == "createtype" and v != "monolithicsparse":
+                raise Bad("omarchy.vmdk is not a single-file sparse disk")
+            if not k.startswith(("ddb.", "parent")) and k not in ("version", "encoding", "cid", "createtype", "isnativesnapshot"):
+                raise Bad("omarchy.vmdk: unknown descriptor entry (%s)" % safe(kv.group(1)))
     if extents != 1:
         raise Bad("omarchy.vmdk: not one extent")
 
 
-# Keys that make Fusion use a folder or a port on the Mac.
+# Keys that make Fusion use a folder, a port or a USB device of the Mac.
 VMX_REFUSED = ("sharedfolder", "hgfs.", "debugstub.", "workingdir", "extendedconfigfile",
-               "checkpoint.", "suspend.", "snapshot.")
+               "checkpoint.", "suspend.", "snapshot.", "remotedisplay.", "usb.autoconnect.",
+               "usb.generic.autoconnect")
+VMX_ESCAPE = re.compile(r"\|([0-9A-Fa-f]{2})")
 VMX_FILENAMES = {"nvme0:0.filename": "omarchy.vmdk", "sound.filename": "-1"}
 
 
@@ -241,7 +260,8 @@ def check_fusion(b, name):
         m = re.fullmatch(r'([A-Za-z0-9_.:-]+)\s*=\s*"(.*)"', line)
         if not m:
             raise Bad("%s.vmx: a line that does not read (%s)" % (name, safe(line)))
-        k, v = m.group(1).lower(), m.group(2)
+        # Values as VMware reads them: "|2F" is "/".
+        k, v = m.group(1).lower(), VMX_ESCAPE.sub(lambda e: chr(int(e.group(1), 16)), m.group(2))
         if k.startswith(VMX_REFUSED):
             raise Bad("%s.vmx uses the Mac's files or ports (%s)" % (name, safe(m.group(1))))
         if mac_path(v):
