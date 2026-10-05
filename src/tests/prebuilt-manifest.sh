@@ -102,6 +102,7 @@ python3 "$R/src/prebuilt/manifest.py" release "$T/rel.json" "$VERSION" parallels
 expect "odd tags and URLs in the release list: none taken" 1 $?
 
 # No manifest value inside (( )) or $(( )) in the scripts that use them.
-expect "no PB_ value in bash arithmetic" "" "$(grep -nE '\(\([^)]*\bPB_[A-Z_]+' "$R"/src/prebuilt/*.sh "$R"/src/cmd/build.sh "$R"/app/scripts/*.sh 2>/dev/null | grep -v '10#\$PB_DISK_GB' | grep -v '\bPB_OK\b')"
+expect "no PB_ value in bash arithmetic" "" "$(grep -nE '\(\([^)]*\bPB_[A-Z_]+' "$R"/src/prebuilt/*.sh "$R"/src/cmd/build.sh "$R"/app/scripts/*.sh 2>/dev/null |
+  sed -E -e 's/10#\$PB_[A-Z_]+//g' -e 's/PB_OK//g' | grep -E '\(\([^)]*\bPB_[A-Z_]+')"
 
 exit $fail
