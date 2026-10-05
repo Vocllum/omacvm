@@ -191,6 +191,17 @@ do {
     try tm.run(); tm.waitUntilExit()
     expect("Time Machine leaves it out", String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).contains("[Excluded]"))
 
+    // The app into ~/Applications
+    let sys = work.appendingPathComponent("Applications"), home = work.appendingPathComponent("home/Applications")
+    let app = sys.appendingPathComponent("OmacVM.app")
+    try fm.createDirectory(at: app.appendingPathComponent("Contents/MacOS"), withIntermediateDirectories: true)
+    try "x".write(to: app.appendingPathComponent("Contents/MacOS/OmacVM"), atomically: true, encoding: .utf8)
+    let newApp = try AppMover.move(app, into: home)
+    expect("app moved", newApp.path == home.appendingPathComponent("OmacVM.app").path && !fm.fileExists(atPath: app.path)
+           && fm.fileExists(atPath: newApp.appendingPathComponent("Contents/MacOS/OmacVM").path))
+    try fm.createDirectory(at: app, withIntermediateDirectories: true)
+    do { _ = try AppMover.move(app, into: home); expect("app: existing copy refused", false) }
+    catch { expect("app: existing copy refused", fm.fileExists(atPath: app.path)) }
 } catch {
     print("FAIL unexpected: \(error)")
     failed += 1

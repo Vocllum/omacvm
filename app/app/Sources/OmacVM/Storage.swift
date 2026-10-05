@@ -375,3 +375,25 @@ final class FolderMover: @unchecked Sendable {
         try? fm.setAttributes(keep, ofItemAtPath: to.path)
     }
 }
+
+/// OmacVM.app from /Applications into the user's own Applications folder: one
+/// rename (both are on the Mac's data volume), so the signature stays as it is.
+enum AppMover {
+    static func move(_ app: URL, into folder: URL) throws -> URL {
+        let fm = FileManager.default
+        let target = folder.appendingPathComponent(app.lastPathComponent)
+        guard !fm.fileExists(atPath: target.path) else {
+            throw StorageError.failed("\(target.path) already exists.")
+        }
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        guard Storage.sameVolume(app, folder) else {
+            throw StorageError.failed("\(folder.path) is on another drive.")
+        }
+        do {
+            try fm.moveItem(at: app, to: target)
+        } catch {
+            throw StorageError.failed("Could not move the app: \(error.localizedDescription)")
+        }
+        return target
+    }
+}

@@ -185,9 +185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Offers made once (3.0)
 
-    /// VMs in 2.9's hidden folder: offer the visible VMs folder. Asked once,
-    /// never while a VM runs or builds (then it waits for the next time the
-    /// window opens).
+    /// The app in /Applications: offer ~/Applications. VMs in 2.9's hidden
+    /// folder: offer the visible VMs folder. Each asked once, never while a VM
+    /// runs or builds (then it waits for the next time the window opens).
     private var offering = false
     private func offerMoves() {
         guard !offering, state.screen != .install, !state.storage.appBusy() else { return }
@@ -195,7 +195,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             defer { self.offering = false }
+            if self.offerAppMove() { return }
             self.offerLegacyMove()
+        }
+    }
+
+    /// True when the app moved and a new copy opens.
+    private func offerAppMove() -> Bool {
+        let d = UserDefaults.standard
+        let app = Bundle.main.bundleURL.standardizedFileURL
+        let home = Installer.defaultFolder
+        guard !d.bool(forKey: "offeredAppMove"),
+              ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] == nil,
+              app.deletingLastPathComponent().path == "/Applications" else { return false }
+        d.set(true, forKey: "offeredAppMove")
+        let target = home.appendingPathComponent(app.lastPathComponent)
+        guard FileManager.default.isWritableFile(atPath: "/Applications"),
+              !FileManager.default.fileExists(atPath: target.path),
+              Storage.sameVolume(app, home) else { return false }
+        let alert = NSAlert()
+        alert.messageText = "Move \(Product.name) to your own Applications folder?"
+        alert.informativeText = "\(Product.name) now lives in ~/Applications: updates then never need an administrator. Your VMs stay where they are. \(Product.name) opens again from there."
+        alert.addButton(withTitle: "Move")
+        alert.addButton(withTitle: "Keep It Here")
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        do {
+            let new = try AppMover.move(app, into: home)
+            Installer.markInstalled(new)
+            let ls = Process()
+            ls.executableURL = URL(fileURLWithPath: "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+            ls.arguments = ["-f", new.path]
+            try? ls.run()
+            ls.waitUntilExit()
+            let config = NSWorkspace.OpenConfiguration()
+            config.createsNewApplicationInstance = true
+            config.arguments = ["--installed-by", String(ProcessInfo.processInfo.processIdentifier)]
+            NSWorkspace.shared.openApplication(at: new, configuration: config) { _, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        self.state.message = "Moved to \(new.path), but it did not open: \(error.localizedDescription)"
+                    } else {
+                        NSApp.terminate(nil)
+                    }
+                }
+            }
+            return true
+        } catch {
+            state.message = "\(Product.name) stays in /Applications: \(error.localizedDescription)"
+            return false
         }
     }
 
