@@ -136,7 +136,7 @@ def main(a):
     elif cmd == "parts":
         m = json.load(open(a[2]))
         # The names become file paths on the Mac: only our own part names.
-        ok = re.compile(r"^omacvm-prebuilt-[0-9]+\.[0-9]+\.[0-9]+-(parallels|utm|fusion)\.tar\.zst\.part-[a-z]{2,4}$")
+        ok = re.compile(r"^omacvm-prebuilt-[0-9]+\.[0-9]+\.[0-9]+-(parallels|utm|fusion|app)\.tar\.zst\.part-[a-z]{2,4}$")
         for p in m["parts"]:
             size = p.get("size")
             if (not ok.match(str(p.get("name"))) or not re.fullmatch(r"[0-9a-f]{64}", str(p.get("sha256")))

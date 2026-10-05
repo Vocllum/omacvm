@@ -101,12 +101,13 @@ prebuilt_download() {
   done < <(python3 "$R/src/prebuilt/manifest.py" parts "$PB_MANIFEST")
 }
 
-# prebuilt_unpack DIR: the bundle into DIR (sparse files stay sparse).
+# prebuilt_unpack DIR: the bundle into DIR (sparse files stay sparse). $ZSTD:
+# OmacVM.app's own zstd (its users need no Homebrew).
 prebuilt_unpack() {
   local dir; dir=$(dirname "$PB_MANIFEST")
   mkdir -p "$1"
   python3 "$R/src/prebuilt/manifest.py" parts "$PB_MANIFEST" | while read -r name _ _; do cat "$dir/$name"; done |
-    zstd -dc --long=27 -q | tar -xSf - -C "$1"
+    "${ZSTD:-zstd}" -dc --long=27 -q | tar -xSf - -C "$1"
   [[ -d $1/$PB_BUNDLE ]] || die "the image did not unpack ($1/$PB_BUNDLE missing)"
 }
 
