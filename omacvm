@@ -19,7 +19,7 @@
 #
 # For scripts and coding agents: --json on vms, features, check and build
 # --plan; --yes (or no terminal) never asks; exit codes 0 done, 1 failed,
-# 2 usage, 3 needs a person. See AGENTS.md.
+# 2 usage, 3 needs a person, 4 failed and rolled back (--transaction). See AGENTS.md.
 set -euo pipefail
 # A job from the control centre (OmacVM Bridge, src/bridge/mac/control.swift):
 # the exit code goes to this file, also when an update restarts the Bridge

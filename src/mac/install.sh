@@ -3,7 +3,8 @@
 # Gestures (trackpad, scroll momentum, Cmd as Super on UTM), clipboard (VM -> Mac),
 # Omanotch (the bar beside the notch, src/omanotch).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
-#   src/mac/install.sh [--no-bridge] [--skip-gestures | --keys-only] [--skip-clip] [--omanotch] [--force] [--quiet]
+#   src/mac/install.sh [--no-bridge] [--skip-gestures | --keys-only] [--skip-clip] [--omanotch] [--force]
+#                      [--force-app NAME]... [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
 # --skip-clip leaves the clipboard helper out (only Parallels VMs use it;
@@ -14,23 +15,26 @@
 # gestures, and on UTM Cmd still reaches Omarchy as Super. (Without it, each
 # VM chooses for itself: gestures and scroll momentum are VM features.)
 # An app whose sources and options did not change since it was installed is
-# left as it is (--force rebuilds it); --quiet only reports what changed.
+# left as it is (--force rebuilds it; --force-app "OmacVM Gestures" only that
+# one, for a repair); --quiet only reports what changed.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0
-for a in "$@"; do
-  case $a in
+BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0; FORCE_APPS="|"
+while (( $# )); do
+  case $1 in
     --no-bridge) BRIDGE=0 ;;
     --keys-only) GESTURES=0 ;;
     --skip-gestures) GESTURES=-1 ;;
     --skip-clip) CLIP=0 ;;
     --omanotch) NOTCH=1 ;;
     --force) FORCE=1 ;;
+    --force-app) FORCE_APPS+="${2:?--force-app NAME}|"; shift ;;
     --quiet) QUIET=1 ;;
-    *) echo "src/mac/install.sh: unknown option $a" >&2; exit 2 ;;
+    *) echo "src/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
+  shift
 done
 STAMPS=~/Library/Application\ Support/omacvm/installed
 mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
@@ -46,7 +50,7 @@ install_app() {
   # Paths relative to src/, so another copy of the same OmacVM matches too.
   sum=$( { cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
            sort -z | xargs -0 shasum; echo "args: $*"; } | shasum | cut -c1-16)
-  if (( ! FORCE )) && [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] &&
+  if (( ! FORCE )) && [[ $FORCE_APPS != *"|$name|"* ]] && [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] &&
      launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
     (( QUIET )) || echo "$name: up to date"
     return 0

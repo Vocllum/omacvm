@@ -163,4 +163,6 @@ printf '\n  On %s:\n%s' "$VM" "$summary"
 if (( ! YES )) && (( interactive )); then
   ask_yn "Apply?" y || exit 1
 fi
+# --yes: apply asks nothing either (its control centre question).
+(( YES )) && APPLY_ARGS+=(--yes)
 exec "$R/src/cmd/apply.sh" --vm "$VM" --vm-type "$TYPE" --ip "$IP" "${changes[@]}" ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}

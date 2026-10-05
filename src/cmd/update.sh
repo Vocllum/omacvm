@@ -1,5 +1,5 @@
 #!/bin/bash
-# omacvm update [--vm NAME] [--no-pull] [--commit C] [--transaction]: OmacVM up to date everywhere. This
+# omacvm update [--vm NAME] [--no-pull] [--commit C] [--transaction] [--yes]: OmacVM up to date everywhere. This
 # checkout (git pull, when it is a clean clone), the Mac side that is
 # installed (Omanotch with it), OmacVM.app when it is installed and a newer
 # one is published (not while it runs), then OmacVM in every running VM that
@@ -9,7 +9,8 @@
 # built them) get the update, and with it the Bridge's token.
 # --commit C (the control centre's update, the commit of a release manifest the
 # Bridge verified): this checkout moves to C, only forward, instead of git pull.
-# --transaction: each VM as omacvm apply --transaction.
+# --transaction: each VM as omacvm apply --transaction (exit code 4: that VM
+# failed and went back to what it had). --yes: no questions (as apply --yes).
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
 source "$R/src/lib/mac.sh"
@@ -22,13 +23,18 @@ while (( $# )); do
     --commit) COMMIT=$2; shift 2
               [[ $COMMIT =~ ^[0-9a-f]{40}$ ]] || { echo "omacvm update: --commit: 40 hex digits" >&2; exit 2; } ;;
     --transaction) APPLY_ARGS+=(--transaction); shift ;;
-    -h|--help) sed -n '2,13s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --yes|-y) APPLY_ARGS+=(--yes); shift ;;
+    -h|--help) sed -n '2,14s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm update: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 export OMA_KEY=~/.ssh/omacvm
+# Steps for the control centre's progress (one VM: its apply's three follow).
+OMA_STEPS=$(( ${#COMMIT} ? 3 : 2 ))
+[[ -n $VM ]] && OMA_STEPS=$((OMA_STEPS + 3))
 
 # ---------- this checkout ----------
+[[ -n $COMMIT ]] && step release "the release"
 if [[ -n $COMMIT && $(git -C "$R" rev-parse HEAD) != "$COMMIT" ]]; then
   [[ -z $(git -C "$R" status --porcelain --untracked-files=no) ]] || die "this checkout has local changes: not moved to the release ($R)"
   log "OmacVM: the release (${COMMIT:0:12})"
@@ -59,10 +65,12 @@ if launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -q -- -
 elif ! launchctl print "gui/$(id -u)/org.omacvm.gestures" >/dev/null 2>&1; then args+=(--skip-gestures); fi
 launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--skip-clip)
 launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
+step mac "the Mac side"
 log "OmacVM on the Mac"
 "$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
 
 # ---------- OmacVM.app ----------
+step app "OmacVM.app"
 # The version that goes with this OmacVM, from its release (curl: no
 # quarantine). Not while the app is open: it may run a VM.
 if app=$(app_bundle); then
@@ -86,7 +94,7 @@ fi
 
 # ---------- the VMs ----------
 if [[ -n $VM ]]; then
-  "$R/src/cmd/apply.sh" --vm "$VM" --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
+  OMACVM_STEP_BASE=$OMA_STEP OMACVM_STEP_OF=$OMA_STEPS "$R/src/cmd/apply.sh" --vm "$VM" --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
   exit
 fi
 done_any=0; stopped=(); failed=()

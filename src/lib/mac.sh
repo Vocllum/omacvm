@@ -3,6 +3,17 @@ log() { printf '\033[1;32m==>\033[0m \033[1m%s\033[0m\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+# Progress for the control centre's jobs (OMACVM_PROGRESS=json, set by the
+# Bridge): one JSON line per step, "step n of m". A command that runs another
+# passes its count on (OMACVM_STEP_BASE steps done, OMACVM_STEP_OF in all).
+OMA_STEP=${OMACVM_STEP_BASE:-0}; OMA_STEPS=${OMACVM_STEP_OF:-0}
+step() {   # NAME TEXT
+  OMA_STEP=$((OMA_STEP + 1)); (( OMA_STEP <= OMA_STEPS )) || OMA_STEPS=$OMA_STEP
+  [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
+  local t=${2//\\/\\\\}; t=${t//\"/\\\"}
+  printf '{"omacvm_progress": 1, "step": "%s", "n": %d, "of": %d, "text": "%s"}\n' "$1" "$OMA_STEP" "$OMA_STEPS" "$t"
+}
+
 PRLCTL=/usr/local/bin/prlctl
 LEASES=/Library/Preferences/Parallels/parallels_dhcp_leases
 
@@ -53,6 +64,21 @@ bridge_token_ensure() {
   [[ -f $BRIDGE_TOKEN && $(tr -d '[:space:]' < "$BRIDGE_TOKEN" | wc -c) -ge 32 ]] && return 0
   mkdir -p "$(dirname "$BRIDGE_TOKEN")" && chmod 700 "$(dirname "$BRIDGE_TOKEN")"
   (umask 077; openssl rand -hex 32 > "$BRIDGE_TOKEN")
+}
+
+# The control centre's key for one VM (TYPE NAME): the Bridge acts for a VM
+# only when its request carries this key, so a VM that takes another VM's
+# address cannot act for it (src/bridge/mac/control.swift reads it). Made at
+# the VM's first apply, again with "new" (apply --reset-host-key: a rebuilt VM).
+VM_KEYS="$HOME/Library/Application Support/omacvm/vm-keys"
+vm_key_file() { printf '%s/%s' "$VM_KEYS" "$(printf '%s/%s' "$1" "$2" | shasum -a 256 | cut -c1-32)"; }
+vm_key_ensure() {   # TYPE NAME [new] -> the key's file
+  local f; f=$(vm_key_file "$1" "$2")
+  if [[ ${3:-} == new || ! -s $f ]]; then
+    mkdir -p "$VM_KEYS" && chmod 700 "$VM_KEYS"
+    (umask 077; openssl rand -hex 32 > "$f.tmp") && mv -f "$f.tmp" "$f"
+  fi
+  echo "$f"
 }
 
 # Omanotch on this Mac serves OmacVM.app's VMs (on 127.0.0.1) only from the
