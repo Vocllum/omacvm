@@ -8,7 +8,7 @@ source "$R/src/lib/mac.sh"
 source "$R/src/lib/vm.sh"
 source "$R/src/lib/setup.sh"
 if ! { : < "$TTY"; } 2>/dev/null; then
-  sed -n '2,20s/^# \{0,1\}//p' "$R/omacvm"
+  sed -n '2,21s/^# \{0,1\}//p' "$R/omacvm"
   exit 2
 fi
 export OMA_KEY=~/.ssh/omacvm
@@ -65,14 +65,16 @@ say "    2  Change the features of a VM (scroll momentum, gestures, Bridge, Oman
 say "    3  Add OmacVM to a VM, or bring it up to date"
 say "    4  Update OmacVM everywhere (this checkout, the Mac, your running VMs)"
 say "    5  Check a VM"
+say "    6  Change the CPUs and memory of a VM"
 while :; do
-  read -r -p "  Choose 1-5, q quits [$DEF]: " a < "$TTY" || exit 1
+  read -r -p "  Choose 1-6, q quits [$DEF]: " a < "$TTY" || exit 1
   case ${a:-$DEF} in
     1) exec "$R/src/cmd/build.sh" ;;
     2) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" --vm-type "$PICKT" ;;
     3) choose_vm "Which VM?"; exec "$R/src/cmd/apply.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     4) exec "$R/src/cmd/update.sh" ;;
     5) choose_vm "Which VM?"; exec "$R/src/cmd/check.sh" --vm "$PICK" --vm-type "$PICKT" ;;
+    6) choose_vm "Which VM?"; exec "$R/src/cmd/resources.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     q) exit 0 ;;
   esac
 done

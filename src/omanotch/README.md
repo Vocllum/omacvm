@@ -132,7 +132,7 @@ VM — `systemctl --user edit notchcast`, `Environment=…`:
 | `NOTCHBAR_VM_NETS` | `192.168.64.0/24 10.211.55.0/24 10.37.129.0/24` | networks where the Mac is looked for automatically |
 | `NOTCHBAR_PORT` | `47811` | |
 | `NOTCHBAR_OUTPUT` | `NOTCH` | name of the invisible monitor |
-| `NOTCHBAR_SCREEN` | `Virtual-1` | the built-in display's output |
+| `NOTCHBAR_SCREEN` | `Virtual-1` | the built-in display's output; by default OmacVM.app names it (with external displays it can be `Virtual-2` or later) |
 | `NOTCHBAR_FOLLOW_MODE` | on under QEMU (UTM) | `1`/`0`: when UTM resizes the display to its window while running, apply and keep that size (Hyprland does not pick it up by itself) |
 
 ## Good to know
@@ -195,11 +195,11 @@ up by itself.
 | Strip stays black | `~/Library/Logs/omanotch.log` ("listening on …", "guest connected"?) · in the VM: `systemctl --user status notchcast` |
 | UTM: the pointer never reaches the strip | UTM's automatic input capture is on (see Requirements), or press ⌃⌥ to release the mouse |
 | UTM: with capture off the VM's cursor does not move | a SPICE agent (`spice-vdagentd`) takes UTM's absolute mouse positions: it must run with a real uinput device (not `-f`) and a session agent that reports the screen size — or not at all, then QEMU's USB tablet is used |
-| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` |
+| Bar in the VM *and* in the strip | `omarchy-shell notchbar state` → `parked` should be `true` and `screen` the built-in display · `~/.local/state/omanotch/park` is what notchcast asked for (`1 <output>`); the bar follows it within 3 s, also after a shell restart |
 | OmacVM.app: the strip stays black | `~/Library/Logs/omanotch.log` ("refused a connection on 127.0.0.1: …") · in the VM: `journalctl --user -u notchcast` ("answered no proof": the Mac's Omanotch is older than the VM's, update it) |
 | Strip shows another VM's bar | two VMs of one app are connected: Omanotch tells apps apart, not VMs of one app (`~/Library/Logs/omanotch.log`: "strip serves guest …"); stop the other VM or restart its `notchcast` |
 | Mouse lands in the wrong place | `hyprctl monitors` → `NOTCH` must sit at the built-in display's position and width |
-| Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display |
+| Panels open on the wrong screen | `NOTCHBAR_SCREEN` must name the built-in display (OmacVM.app: `$XDG_RUNTIME_DIR/omacvm/builtin` does, `omacvm check` → "notch display") |
 
 ## Credits
 
