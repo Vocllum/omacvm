@@ -65,7 +65,7 @@ final class Runner {
             "-qmp", "unix:\(q(c.qmpSocket.path)),server=on,wait=off",
         ]
         // Notch mode: the guest learns the strip's height (OEM strings, omacvm-app-host).
-        if Settings.useNotch, let s = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) {
+        if Settings.useNotch, let s = Mac.notchScreen {
             let k = s.backingScaleFactor
             let rows = Int((s.safeAreaInsets.top * k).rounded(.up))
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
@@ -138,7 +138,7 @@ final class Runner {
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
         // ports: Omanotch, Gestures and Bridge (patched libslirp).
         env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
-        env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
+        env["OMACVM_NOTCH"] = Settings.notchActive ? "1" : "0"
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
         // video-decode): FFmpeg's AV1 cannot go to VideoToolbox.
