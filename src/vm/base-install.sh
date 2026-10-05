@@ -10,6 +10,7 @@
 set -euo pipefail
 source /root/omacvm.env
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 D=$(lsblk -dnpo NAME,TRAN | awk '$2 == "nvme" { print $1; exit }')
 [[ -b ${D:-} ]] || { echo "base-install: no NVMe disk found" >&2; exit 1; }
@@ -29,8 +30,21 @@ done | sort -n | head -4 | awk '{ print $2 }' || true)
 } > /etc/pacman.d/mirrorlist
 cat /etc/pacman.d/mirrorlist
 
+log "package signing keys"
+# The try-omarchy live system ships a set-up keyring. Create it if an image
+# ever comes without one, then take the current archlinuxarm-keyring (a no-op
+# while it is up to date). pacstrap copies this keyring into the new system.
+G=/etc/pacman.d/gnupg
+if [[ ! -s $G/trustdb.gpg ]] || [[ ! -s $G/pubring.gpg && ! -s $G/pubring.kbx ]]; then
+  echo "no pacman keyring in the live system: creating it"
+  pacman-key --init || die "pacman-key --init failed"
+  pacman-key --populate archlinuxarm || die "pacman-key --populate archlinuxarm failed"
+fi
+pacman -Sy --noconfirm --needed archlinuxarm-keyring ||
+  die "could not update archlinuxarm-keyring (mirror, network or clock; see the lines above)"
+
 log "tools for the install"
-pacman -Sy --noconfirm --needed arch-install-scripts dosfstools btrfs-progs gptfdisk >/dev/null
+pacman -S --noconfirm --needed arch-install-scripts dosfstools btrfs-progs gptfdisk >/dev/null
 
 log "partitions on $D"
 sgdisk --zap-all "$D" >/dev/null
@@ -66,9 +80,6 @@ Include = /etc/pacman.d/mirrorlist
 [aur]
 Include = /etc/pacman.d/mirrorlist
 EOF
-pacman-key --init >/dev/null 2>&1
-pacman-key --populate archlinuxarm >/dev/null 2>&1
-pacman -Sy --noconfirm archlinuxarm-keyring >/dev/null 2>&1
 pacstrap -C /root/pacman.alarm.conf /mnt base base-devel linux-aarch64 linux-aarch64-headers archlinuxarm-keyring \
   btrfs-progs dosfstools grub efibootmgr openssh sudo git networkmanager nano vim man-db 2>&1 | tail -3
 cp /root/pacman.alarm.conf /mnt/etc/pacman.conf
