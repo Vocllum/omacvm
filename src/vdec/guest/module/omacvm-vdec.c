@@ -14,13 +14,16 @@
  * apps keep decoding on the CPU.
  *
  * Locking: inst->lock is the vb2 lock of both queues (and is taken by hand
- * in the other ioctls); inst->slock guards the buffer table and the
- * capture setup handshake, which the daemon touches from its own ioctls;
- * inst->done_lock is held from taking a buffer back to vb2_buffer_done(),
- * so stop_streaming never returns while the daemon is still completing one;
+ * in the other ioctls). inst->slock guards the buffer table, the capture
+ * setup handshake and the closing flag, which the daemon touches from its
+ * own ioctls. Buffers go back to vb2 (vb2_buffer_done, IRQ-safe) under
+ * slock, so once stop_streaming has taken them back nothing the daemon does
+ * completes one again. Events go to the app's fh under slock and only while
+ * !closing: release sets closing before the fh goes. The daemon's ioctls
+ * hold a kref, which keeps the struct, not the fh or the queues.
  * dev->lock guards the instance table and the daemon's file; dev->msg_lock
- * the message list. Order: dev->lock, then done_lock; inst->lock, then
- * done_lock; slock innermost.
+ * the message list and dev->online. Order: dev->lock, then slock; inst->lock,
+ * then slock; msg_lock innermost.
  */
 #include <linux/dma-buf.h>
 #include <linux/file.h>
@@ -45,10 +48,14 @@
 
 #define DRV "omacvm-vdec"
 #define SETUP_TIMEOUT (5 * HZ)
-#define MIN_SIZE 64u
+#define MIN_SIZE OVD_MIN_SIZE
 /* Each open decoder is a decode session on the Mac and up to 24 pinned
  * CAPTURE buffers in the VM: past this, apps decode on the CPU. */
 #define MAX_INSTANCES 8
+/* Unread messages per decoder. A normal stream has a few control messages
+ * plus one per queued buffer; past this the daemon is stuck or the app loops
+ * STREAMON/STREAMOFF or DEC_CMD_STOP, and the decoder fails. */
+#define MAX_INST_MSGS 256
 
 struct ovd_dev {
 	struct platform_device *pdev;
@@ -65,13 +72,17 @@ struct ovd_dev {
 
 	spinlock_t msg_lock;
 	struct list_head msgs;
+	bool online;			/* a daemon reads the messages */
 	wait_queue_head_t msg_wq;
 };
+
+struct ovd_inst;
 
 struct ovd_kmsg {
 	struct list_head list;
 	struct ovd_msg hdr;
 	void *data;
+	struct ovd_inst *inst;		/* holds a reference */
 };
 
 struct ovd_buf {
@@ -86,14 +97,17 @@ struct ovd_inst {
 	struct kref ref;
 	u32 id;
 	struct mutex lock;		/* vb2 queues + format ioctls */
-	struct mutex done_lock;		/* buffers on their way back to vb2 */
 	struct v4l2_ctrl_handler hdl;
+	atomic_t nmsgs;			/* unread by the daemon */
 
 	u32 codec;			/* OUTPUT fourcc */
 	u32 out_width, out_height, out_sizeimage;
 
 	spinlock_t slock;
-	bool dead;			/* daemon gone */
+	bool dead;			/* daemon gone, or it failed this decoder */
+	bool closing;			/* release runs: no more events to fh */
+	bool cap_streaming;
+	bool last_pending;		/* the next CAPTURE buffer goes back LAST */
 	u64 seq;
 	struct ovd_buf *out[VB2_MAX_FRAME];
 	struct ovd_buf *cap[VB2_MAX_FRAME];
@@ -140,58 +154,155 @@ static inline struct ovd_inst *file2inst(struct file *file)
 	return container_of(file_to_v4l2_fh(file), struct ovd_inst, fh);
 }
 
+static void setup_release(struct ovd_inst *inst)
+{
+	struct dma_buf *put[OVD_MAX_CAPTURE];
+	unsigned int i, n = 0;
+
+	spin_lock(&inst->slock);
+	for (i = 0; i < OVD_MAX_CAPTURE; i++) {
+		if (inst->setup_dbuf[i])
+			put[n++] = inst->setup_dbuf[i];
+		inst->setup_dbuf[i] = NULL;
+	}
+	spin_unlock(&inst->slock);
+	while (n)
+		dma_buf_put(put[--n]);
+}
+
 static void inst_free(struct kref *ref)
 {
 	struct ovd_inst *inst = container_of(ref, struct ovd_inst, ref);
 
+	setup_release(inst);
 	kfree(inst);
+}
+
+/* Back to the app (slock held): every buffer goes back exactly once. */
+static void buf_give_back(struct ovd_buf *b, enum vb2_buffer_state state)
+{
+	if (!b || !b->queued)
+		return;
+	b->queued = false;
+	vb2_buffer_done(&b->m2m.vb.vb2_buf, state);
+}
+
+/* Hands every buffer still queued back to the app, flagged ERROR, so it
+ * sees a failed decode (and can fall back) instead of waiting forever. */
+static void inst_fail_all(struct ovd_inst *inst)
+{
+	unsigned int i;
+
+	spin_lock(&inst->slock);
+	WRITE_ONCE(inst->dead, true);
+	inst->last_pending = false;
+	if (inst->setup_state == 1)
+		inst->setup_state = -ENODEV;
+	for (i = 0; i < VB2_MAX_FRAME; i++) {
+		buf_give_back(inst->out[i], VB2_BUF_STATE_ERROR);
+		buf_give_back(inst->cap[i], VB2_BUF_STATE_ERROR);
+	}
+	spin_unlock(&inst->slock);
+	wake_up_interruptible(&inst->setup_wq);
 }
 
 /* ---- messages to the daemon ------------------------------------------- */
 
 static void msg_free(struct ovd_kmsg *m)
 {
+	atomic_dec(&m->inst->nmsgs);
+	kref_put(&m->inst->ref, inst_free);
 	kvfree(m->data);
 	kfree(m);
 }
 
-static int msg_send(struct ovd_dev *dev, const struct ovd_msg *hdr, void *data)
+static void msg_free_list(struct list_head *gone)
 {
-	struct ovd_kmsg *m = kzalloc(sizeof(*m), GFP_KERNEL);
+	struct ovd_kmsg *m, *n;
 
+	list_for_each_entry_safe(m, n, gone, list)
+		msg_free(m);
+}
+
+/*
+ * Queues a message for the daemon. Dropped without a daemon, and for a
+ * failed decoder (but its CLOSE). A decoder past MAX_INST_MSGS unread
+ * messages fails: kernel memory stays bounded whatever the app does.
+ */
+static int msg_send(struct ovd_inst *inst, const struct ovd_msg *hdr, void *data)
+{
+	struct ovd_dev *dev = inst->dev;
+	bool close = hdr->type == OVD_MSG_CLOSE;
+	struct ovd_kmsg *m;
+	int ret = 0;
+
+	if (!close && READ_ONCE(inst->dead)) {
+		kvfree(data);
+		return -ENODEV;
+	}
+	m = kzalloc(sizeof(*m), GFP_KERNEL);
 	if (!m) {
 		kvfree(data);
 		return -ENOMEM;
 	}
 	m->hdr = *hdr;
 	m->data = data;
+	m->inst = inst;
 	spin_lock(&dev->msg_lock);
-	list_add_tail(&m->list, &dev->msgs);
+	if (!dev->online) {
+		ret = -ENODEV;
+	} else if (!close && atomic_read(&inst->nmsgs) >= MAX_INST_MSGS) {
+		ret = -ENOSPC;
+	} else {
+		atomic_inc(&inst->nmsgs);
+		kref_get(&inst->ref);
+		list_add_tail(&m->list, &dev->msgs);
+	}
 	spin_unlock(&dev->msg_lock);
+	if (ret) {
+		kvfree(data);
+		kfree(m);
+		if (ret == -ENOSPC) {
+			dev_warn_ratelimited(&dev->pdev->dev,
+					     "decoder %u: %u messages unread, failed\n",
+					     inst->id, MAX_INST_MSGS);
+			inst_fail_all(inst);
+		}
+		return ret;
+	}
 	wake_up_interruptible(&dev->msg_wq);
 	return 0;
 }
 
-static void msg_simple(struct ovd_inst *inst, u32 type)
+static int msg_simple(struct ovd_inst *inst, u32 type)
 {
 	struct ovd_msg hdr = { .type = type, .inst = inst->id };
 
-	msg_send(inst->dev, &hdr, NULL);
+	return msg_send(inst, &hdr, NULL);
+}
+
+/* Unread messages of one decoder (and type; and buffer index unless ~0)
+ * move to `gone`, to be freed with msg_free_list outside the locks. */
+static void msg_take(struct ovd_dev *dev, u32 inst, u32 type, u32 index,
+		     struct list_head *gone)
+{
+	struct ovd_kmsg *m, *n;
+
+	spin_lock(&dev->msg_lock);
+	list_for_each_entry_safe(m, n, &dev->msgs, list)
+		if (m->hdr.inst == inst && m->hdr.type == type &&
+		    (index == ~0u || m->hdr.index == index))
+			list_move(&m->list, gone);
+	spin_unlock(&dev->msg_lock);
 }
 
 /* Bitstream not yet read by the daemon is dropped on a flush. */
 static void msg_purge(struct ovd_dev *dev, u32 inst, u32 type)
 {
-	struct ovd_kmsg *m, *n;
 	LIST_HEAD(gone);
 
-	spin_lock(&dev->msg_lock);
-	list_for_each_entry_safe(m, n, &dev->msgs, list)
-		if (m->hdr.inst == inst && m->hdr.type == type)
-			list_move(&m->list, &gone);
-	spin_unlock(&dev->msg_lock);
-	list_for_each_entry_safe(m, n, &gone, list)
-		msg_free(m);
+	msg_take(dev, inst, type, ~0u, &gone);
+	msg_free_list(&gone);
 }
 
 /* ---- CAPTURE memory: the daemon's dmabufs -------------------------------- */
@@ -274,22 +385,6 @@ static const struct vb2_mem_ops ovd_mem_ops = {
 	.vaddr = ovd_mem_vaddr,
 };
 
-static void setup_release(struct ovd_inst *inst)
-{
-	struct dma_buf *put[OVD_MAX_CAPTURE];
-	unsigned int i, n = 0;
-
-	spin_lock(&inst->slock);
-	for (i = 0; i < OVD_MAX_CAPTURE; i++) {
-		if (inst->setup_dbuf[i])
-			put[n++] = inst->setup_dbuf[i];
-		inst->setup_dbuf[i] = NULL;
-	}
-	spin_unlock(&inst->slock);
-	while (n)
-		dma_buf_put(put[--n]);
-}
-
 /* ---- vb2 queue ops ------------------------------------------------------- */
 
 static int ovd_queue_setup(struct vb2_queue *q, unsigned int *nbuf,
@@ -330,8 +425,12 @@ static int ovd_queue_setup(struct vb2_queue *q, unsigned int *nbuf,
 	inst->setup_count = 0;
 	spin_unlock(&inst->slock);
 
-	if (msg_send(inst->dev, &hdr, NULL))
-		return -ENOMEM;
+	if (msg_send(inst, &hdr, NULL)) {
+		spin_lock(&inst->slock);
+		inst->setup_state = 0;
+		spin_unlock(&inst->slock);
+		return -ENODEV;
+	}
 	left = wait_event_interruptible_timeout(inst->setup_wq,
 						inst->setup_state != 1,
 						SETUP_TIMEOUT);
@@ -401,7 +500,8 @@ static int ovd_buf_prepare(struct vb2_buffer *vb)
 	return 0;
 }
 
-/* An empty CAPTURE buffer flagged LAST: the end of a drain or of a size. */
+/* An empty CAPTURE buffer flagged LAST: the end of a drain or of a size
+ * (slock held, the buffer already taken out of the table's queued set). */
 static void cap_done_last(struct ovd_buf *b)
 {
 	struct vb2_v4l2_buffer *vbuf = &b->m2m.vb;
@@ -418,9 +518,9 @@ static void ovd_buf_queue(struct vb2_buffer *vb)
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct ovd_buf *b = container_of(vbuf, struct ovd_buf, m2m.vb);
 	struct ovd_msg hdr = { .inst = inst->id, .index = vb->index };
-	bool dead;
 	void *data = NULL;
 	u32 size = 0;
+	u64 seq;
 
 	if (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {
 		void *src = vb2_plane_vaddr(vb, 0);
@@ -439,19 +539,24 @@ static void ovd_buf_queue(struct vb2_buffer *vb)
 	}
 
 	spin_lock(&inst->slock);
-	dead = inst->dead;
-	if (!dead) {
-		b->seq = ++inst->seq;
-		b->queued = true;
-	}
-	spin_unlock(&inst->slock);
-
-	if (dead) {
+	if (inst->dead) {
+		spin_unlock(&inst->slock);
 		kvfree(data);
 		vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
 		return;
 	}
-	hdr.seq = b->seq;
+	if (!V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type) && inst->last_pending) {
+		/* A drain ended while the daemon had no CAPTURE buffer. */
+		inst->last_pending = false;
+		cap_done_last(b);
+		spin_unlock(&inst->slock);
+		return;
+	}
+	seq = b->seq = ++inst->seq;
+	b->queued = true;
+	spin_unlock(&inst->slock);
+
+	hdr.seq = seq;
 	if (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {
 		hdr.type = OVD_MSG_BITSTREAM;
 		hdr.timestamp = vb->timestamp;
@@ -459,7 +564,13 @@ static void ovd_buf_queue(struct vb2_buffer *vb)
 	} else {
 		hdr.type = OVD_MSG_CAPTURE_QUEUED;
 	}
-	msg_send(inst->dev, &hdr, data);
+	if (msg_send(inst, &hdr, data)) {
+		/* No daemon to read it: back to the app at once. */
+		spin_lock(&inst->slock);
+		if (b->seq == seq)
+			buf_give_back(b, VB2_BUF_STATE_ERROR);
+		spin_unlock(&inst->slock);
+	}
 }
 
 static int ovd_start_streaming(struct vb2_queue *q, unsigned int count)
@@ -469,7 +580,11 @@ static int ovd_start_streaming(struct vb2_queue *q, unsigned int count)
 
 	if (V4L2_TYPE_IS_OUTPUT(q->type)) {
 		hdr.codec = inst->codec;
-		msg_send(inst->dev, &hdr, NULL);
+		msg_send(inst, &hdr, NULL);
+	} else {
+		spin_lock(&inst->slock);
+		inst->cap_streaming = true;
+		spin_unlock(&inst->slock);
 	}
 	return 0;
 }
@@ -480,24 +595,19 @@ static void ovd_stop_streaming(struct vb2_queue *q)
 	struct ovd_inst *inst = vb2_get_drv_priv(q);
 	bool out = V4L2_TYPE_IS_OUTPUT(q->type);
 	struct ovd_buf **tab = out ? inst->out : inst->cap;
-	struct ovd_buf *back[VB2_MAX_FRAME];
-	unsigned int i, n = 0;
+	unsigned int i;
 
 	if (out)
 		msg_purge(inst->dev, inst->id, OVD_MSG_BITSTREAM);
 	else
 		msg_purge(inst->dev, inst->id, OVD_MSG_CAPTURE_QUEUED);
-	mutex_lock(&inst->done_lock);
 	spin_lock(&inst->slock);
+	inst->last_pending = false;	/* a stream off ends a drain */
+	if (!out)
+		inst->cap_streaming = false;
 	for (i = 0; i < VB2_MAX_FRAME; i++)
-		if (tab[i] && tab[i]->queued) {
-			tab[i]->queued = false;
-			back[n++] = tab[i];
-		}
+		buf_give_back(tab[i], VB2_BUF_STATE_ERROR);
 	spin_unlock(&inst->slock);
-	for (i = 0; i < n; i++)
-		vb2_buffer_done(&back[i]->m2m.vb.vb2_buf, VB2_BUF_STATE_ERROR);
-	mutex_unlock(&inst->done_lock);
 	msg_simple(inst, out ? OVD_MSG_FLUSH : OVD_MSG_CAPTURE_STOP);
 }
 
@@ -739,6 +849,9 @@ static int ovd_decoder_cmd(struct file *file, void *priv, struct v4l2_decoder_cm
 			msg_simple(inst, OVD_MSG_DRAIN);
 	} else {
 		vb2_clear_last_buffer_dequeued(cap);
+		spin_lock(&inst->slock);
+		inst->last_pending = false;
+		spin_unlock(&inst->slock);
 	}
 	mutex_unlock(&inst->lock);
 	return 0;
@@ -805,10 +918,14 @@ static int ovd_ctrls_init(struct ovd_inst *inst)
 {
 	struct v4l2_ctrl_handler *hdl = &inst->hdl;
 	u32 codecs = inst->dev->caps.codecs;
+	struct v4l2_ctrl *min_bufs;
 
 	v4l2_ctrl_handler_init(hdl, 4);
-	v4l2_ctrl_new_std(hdl, &ovd_ctrl_ops, V4L2_CID_MIN_BUFFERS_FOR_CAPTURE,
-			  1, 32, 1, 4);
+	/* Volatile: read from the daemon's format each time (venus does the same). */
+	min_bufs = v4l2_ctrl_new_std(hdl, &ovd_ctrl_ops, V4L2_CID_MIN_BUFFERS_FOR_CAPTURE,
+				     1, 32, 1, 4);
+	if (min_bufs)
+		min_bufs->flags |= V4L2_CTRL_FLAG_VOLATILE;
 	if (codecs & OVD_CODEC_H264)
 		v4l2_ctrl_new_std_menu(hdl, &ovd_ctrl_ops, V4L2_CID_MPEG_VIDEO_H264_PROFILE,
 			V4L2_MPEG_VIDEO_H264_PROFILE_HIGH,
@@ -851,12 +968,13 @@ static int ovd_open(struct file *file)
 	inst->dev = dev;
 	kref_init(&inst->ref);
 	mutex_init(&inst->lock);
-	mutex_init(&inst->done_lock);
 	spin_lock_init(&inst->slock);
 	init_waitqueue_head(&inst->setup_wq);
+	atomic_set(&inst->nmsgs, 0);
 	inst->out_width = 1280;
 	inst->out_height = 720;
 	inst->out_sizeimage = 1u << 20;
+	inst->min_buffers = 4;
 
 	mutex_lock(&dev->lock);
 	if (!dev->daemon || !dev->caps.codecs || dev->ninsts >= MAX_INSTANCES) {
@@ -868,7 +986,9 @@ static int ovd_open(struct file *file)
 	inst->codec = V4L2_PIX_FMT_H264;
 	if (!codec_offered(dev, inst->codec))
 		inst->codec = dev->caps.codecs & OVD_CODEC_VP9 ? V4L2_PIX_FMT_VP9 : V4L2_PIX_FMT_HEVC;
-	id = idr_alloc(&dev->insts, inst, 1, 0, GFP_KERNEL);
+	/* Reserved (NULL) until the decoder is set up; cyclic, so an id is not
+	 * reused while the daemon may still hold the old decoder's state. */
+	id = idr_alloc_cyclic(&dev->insts, NULL, 1, 0, GFP_KERNEL);
 	if (id >= 0)
 		dev->ninsts++;
 	mutex_unlock(&dev->lock);
@@ -890,7 +1010,11 @@ static int ovd_open(struct file *file)
 	}
 	inst->fh.m2m_ctx->q_lock = &inst->lock;
 	v4l2_fh_add(&inst->fh, file);
-	msg_simple(inst, OVD_MSG_OPEN);
+	mutex_lock(&dev->lock);
+	idr_replace(&dev->insts, inst, id);
+	mutex_unlock(&dev->lock);
+	if (msg_simple(inst, OVD_MSG_OPEN))
+		WRITE_ONCE(inst->dead, true);	/* the daemon just went: QBUF fails */
 	return 0;
 
 err_fh:
@@ -908,6 +1032,9 @@ static int ovd_release(struct file *file)
 	struct ovd_inst *inst = file2inst(file);
 	struct ovd_dev *dev = inst->dev;
 
+	spin_lock(&inst->slock);
+	inst->closing = true;
+	spin_unlock(&inst->slock);
 	mutex_lock(&dev->lock);
 	idr_remove(&dev->insts, inst->id);
 	dev->ninsts--;
@@ -955,49 +1082,23 @@ static int daemon_open(struct inode *inode, struct file *file)
 	int ret = 0;
 
 	mutex_lock(&dev->lock);
-	if (dev->daemon)
+	if (dev->daemon) {
 		ret = -EBUSY;
-	else
+	} else {
 		dev->daemon = file;
+		spin_lock(&dev->msg_lock);
+		dev->online = true;
+		spin_unlock(&dev->msg_lock);
+	}
 	mutex_unlock(&dev->lock);
 	file->private_data = dev;
 	return ret;
-}
-
-/* Hands every buffer still queued back to the app, flagged ERROR, so it
- * sees a failed decode (and can fall back) instead of waiting forever. */
-static void inst_fail_all(struct ovd_inst *inst)
-{
-	struct ovd_buf *back[2 * VB2_MAX_FRAME];
-	unsigned int i, n = 0;
-
-	mutex_lock(&inst->done_lock);
-	spin_lock(&inst->slock);
-	inst->dead = true;
-	if (inst->setup_state == 1)
-		inst->setup_state = -ENODEV;
-	for (i = 0; i < VB2_MAX_FRAME; i++) {
-		if (inst->out[i] && inst->out[i]->queued) {
-			inst->out[i]->queued = false;
-			back[n++] = inst->out[i];
-		}
-		if (inst->cap[i] && inst->cap[i]->queued) {
-			inst->cap[i]->queued = false;
-			back[n++] = inst->cap[i];
-		}
-	}
-	spin_unlock(&inst->slock);
-	wake_up_interruptible(&inst->setup_wq);
-	for (i = 0; i < n; i++)
-		vb2_buffer_done(&back[i]->m2m.vb.vb2_buf, VB2_BUF_STATE_ERROR);
-	mutex_unlock(&inst->done_lock);
 }
 
 /* The daemon is gone: every open decode fails, no new ones start. */
 static int daemon_release(struct inode *inode, struct file *file)
 {
 	struct ovd_dev *dev = file->private_data;
-	struct ovd_kmsg *m, *n;
 	struct ovd_inst *inst;
 	LIST_HEAD(gone);
 	int id;
@@ -1009,15 +1110,14 @@ static int daemon_release(struct inode *inode, struct file *file)
 	}
 	dev->daemon = NULL;
 	memset(&dev->caps, 0, sizeof(dev->caps));
+	spin_lock(&dev->msg_lock);
+	dev->online = false;
+	list_splice_init(&dev->msgs, &gone);
+	spin_unlock(&dev->msg_lock);
 	idr_for_each_entry(&dev->insts, inst, id)
 		inst_fail_all(inst);
 	mutex_unlock(&dev->lock);
-
-	spin_lock(&dev->msg_lock);
-	list_splice_init(&dev->msgs, &gone);
-	spin_unlock(&dev->msg_lock);
-	list_for_each_entry_safe(m, n, &gone, list)
-		msg_free(m);
+	msg_free_list(&gone);
 	return 0;
 }
 
@@ -1085,15 +1185,17 @@ static long set_format(struct ovd_dev *dev, struct ovd_format __user *uarg)
 	if (!inst)
 		return -ENOENT;
 	spin_lock(&inst->slock);
-	inst->width = f.width;
-	inst->height = f.height;
-	inst->vis_width = f.visible_width;
-	inst->vis_height = f.visible_height;
-	inst->stride = f.stride;
-	inst->min_buffers = f.min_buffers;
-	inst->fmt_known = true;
+	if (!inst->closing) {
+		inst->width = f.width;
+		inst->height = f.height;
+		inst->vis_width = f.visible_width;
+		inst->vis_height = f.visible_height;
+		inst->stride = f.stride;
+		inst->min_buffers = f.min_buffers;
+		inst->fmt_known = true;
+		v4l2_event_queue_fh(&inst->fh, &ev);
+	}
 	spin_unlock(&inst->slock);
-	v4l2_event_queue_fh(&inst->fh, &ev);
 	kref_put(&inst->ref, inst_free);
 	return 0;
 }
@@ -1147,13 +1249,40 @@ out:
 	return ret;
 }
 
+static const struct v4l2_event eos_event = { .type = V4L2_EVENT_EOS };
+
+/*
+ * A drain ended while the daemon had no CAPTURE buffer (slock held): a
+ * CAPTURE buffer queued with us whose message the daemon has not read yet
+ * goes back LAST now (and its message with it), else the next one queued
+ * while CAPTURE streams. Not streaming (no picture yet): EOS alone, as the
+ * V4L2 decoder spec has it.
+ */
+static void no_buffer_last(struct ovd_inst *inst, bool eos, struct list_head *gone)
+{
+	struct ovd_buf *b = NULL;
+	unsigned int i;
+
+	for (i = 0; i < VB2_MAX_FRAME; i++)
+		if (inst->cap[i] && inst->cap[i]->queued && (!b || inst->cap[i]->seq < b->seq))
+			b = inst->cap[i];
+	if (b) {
+		b->queued = false;
+		msg_take(inst->dev, inst->id, OVD_MSG_CAPTURE_QUEUED, b->m2m.vb.vb2_buf.index, gone);
+		cap_done_last(b);
+	} else if (inst->cap_streaming) {
+		inst->last_pending = true;
+	}
+	if (eos)
+		v4l2_event_queue_fh(&inst->fh, &eos_event);
+}
+
 static long buf_done(struct ovd_dev *dev, struct ovd_done __user *uarg, bool output)
 {
-	static const struct v4l2_event eos = { .type = V4L2_EVENT_EOS };
 	struct ovd_buf *b = NULL;
 	struct ovd_inst *inst;
 	struct ovd_done d;
-	bool last_now = false;
+	LIST_HEAD(gone);
 
 	if (copy_from_user(&d, uarg, sizeof(d)))
 		return -EFAULT;
@@ -1161,24 +1290,28 @@ static long buf_done(struct ovd_dev *dev, struct ovd_done __user *uarg, bool out
 	if (!inst)
 		return -ENOENT;
 
-	mutex_lock(&inst->done_lock);
 	spin_lock(&inst->slock);
+	if (!output && d.index == OVD_NO_BUFFER) {
+		if ((d.flags & OVD_DONE_LAST) && !inst->closing && !inst->dead)
+			no_buffer_last(inst, d.flags & OVD_DONE_EOS, &gone);
+		goto out;
+	}
 	if (d.index < VB2_MAX_FRAME) {
 		b = output ? inst->out[d.index] : inst->cap[d.index];
 		if (b && (!b->queued || b->seq != d.seq))
 			b = NULL;
 	}
-	last_now = b && !output && (d.flags & OVD_DONE_LAST);
-	if (b)
-		b->queued = false;
-	spin_unlock(&inst->slock);
-
-	if (b && output) {
+	if (!b)
+		goto out;
+	b->queued = false;
+	if (output) {
 		vb2_buffer_done(&b->m2m.vb.vb2_buf, d.flags & OVD_DONE_ERROR ?
 				VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
-	} else if (b && last_now) {
+	} else if (d.flags & OVD_DONE_LAST) {
 		cap_done_last(b);
-	} else if (b) {
+		if ((d.flags & OVD_DONE_EOS) && !inst->closing)
+			v4l2_event_queue_fh(&inst->fh, &eos_event);
+	} else {
 		struct vb2_buffer *vb = &b->m2m.vb.vb2_buf;
 
 		vb->timestamp = d.timestamp;
@@ -1188,9 +1321,9 @@ static long buf_done(struct ovd_dev *dev, struct ovd_done __user *uarg, bool out
 		vb2_buffer_done(vb, d.flags & OVD_DONE_ERROR ?
 				VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
 	}
-	mutex_unlock(&inst->done_lock);
-	if (last_now && (d.flags & OVD_DONE_EOS))
-		v4l2_event_queue_fh(&inst->fh, &eos);
+out:
+	spin_unlock(&inst->slock);
+	msg_free_list(&gone);
 	kref_put(&inst->ref, inst_free);
 	return 0;
 }
@@ -1206,6 +1339,12 @@ static long daemon_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		if (copy_from_user(&c, uarg, sizeof(c)))
 			return -EFAULT;
+		if (c.version != OVD_VERSION) {
+			dev_warn(&dev->pdev->dev,
+				 "omacvm-vdecd speaks version %u, this module %u: restart the VM\n",
+				 c.version, OVD_VERSION);
+			return -EPROTO;
+		}
 		c.codecs &= OVD_CODEC_H264 | OVD_CODEC_HEVC | OVD_CODEC_VP9;
 		c.max_width = clamp(c.max_width, MIN_SIZE, OVD_MAX_WIDTH);
 		c.max_height = clamp(c.max_height, MIN_SIZE, OVD_MAX_HEIGHT);
@@ -1350,4 +1489,7 @@ module_init(ovd_init);
 module_exit(ovd_exit);
 MODULE_DESCRIPTION("OmacVM: V4L2 video decoder backed by a userspace daemon");
 MODULE_LICENSE("GPL");
+/* With a version, modpost records the source's checksum (srcversion): the
+ * installer tells the loaded module from a newly built one by it. */
+MODULE_VERSION("0.2");
 MODULE_IMPORT_NS("DMA_BUF");

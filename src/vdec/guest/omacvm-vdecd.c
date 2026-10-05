@@ -13,9 +13,15 @@
  * surfaces: in the guest they are one page long and Chromium checks plane
  * sizes against that.
  *
- * One thread, one EGL context; instances are served in turn. Messages and
- * answers: omacvm-vdec.h. Environment: OMACVM_VDEC_DEBUG=1 logs every frame,
+ * One thread, one EGL context; instances are served in turn. A video that
+ * goes wrong (a picture size or stream VA-API cannot take, a GPU that does
+ * not finish a picture within FENCE_TIMEOUT) fails alone: the module hands
+ * its buffers back as errors and the app decodes on the CPU. A daemon that
+ * hangs as a whole stops pinging systemd's watchdog (WatchdogSec) and is
+ * restarted; the module then fails every open video. Messages and answers:
+ * omacvm-vdec.h. Environment: OMACVM_VDEC_DEBUG=1 logs every frame,
  * OMACVM_VDEC_HEVC=1 offers HEVC too (not to Chromium: see va_codecs).
+ * Exit 3: the module is from another build (it loads at the next VM start).
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -42,6 +48,7 @@
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <linux/videodev2.h>
+#include <systemd/sd-daemon.h>
 #include <va/va.h>
 #include <va/va_drmcommon.h>
 
@@ -50,6 +57,9 @@
 #define RENDER_NODE "/dev/dri/renderD128"
 #define MAX_PENDING_FRAMES 3	/* decoded, waiting for a CAPTURE buffer */
 #define MAX_PENDING_INPUT 32	/* bounded anyway by the app's OUTPUT buffers */
+#ifndef FENCE_TIMEOUT			/* a test build sets 1 to try the failure */
+#define FENCE_TIMEOUT 1000000000ull	/* ns the GPU gets for one conversion */
+#endif
 
 static bool debug;
 static int ctl = -1;
@@ -165,8 +175,10 @@ struct inst {
 	int ncap, cap_width, cap_height;
 	int busy[OVD_MAX_CAPTURE], nbusy;	/* converted, in order */
 
+	bool cap_on;			/* the app's CAPTURE buffers stream */
 	bool draining, drain_flushed;
 	bool no_va;			/* FFmpeg could not use VA-API for this stream */
+	bool failed;			/* the module was told: only CLOSE now */
 	double decode_ms;		/* the last packet's, for OMACVM_VDEC_DEBUG */
 	struct srcimg *src;
 	AVBufferRef *src_frames;	/* the frames context src belongs to */
@@ -205,9 +217,7 @@ static enum AVPixelFormat pick_vaapi(AVCodecContext *c, const enum AVPixelFormat
 	for (; *f != AV_PIX_FMT_NONE; f++)
 		if (*f == AV_PIX_FMT_VAAPI)
 			return *f;
-	if (!in->no_va)
-		log_msg("vdecd: inst %u: the stream cannot be decoded with VA-API", in->id);
-	in->no_va = true;
+	in->no_va = true;	/* pump() fails the video */
 	return AV_PIX_FMT_NONE;
 }
 
@@ -248,6 +258,23 @@ static void input_drop(struct inst *in)
 	}
 	in->in_tail = &in->in;
 	in->nin = 0;
+}
+
+/* This video fails: the module hands the app its buffers back as errors
+ * and refuses new ones, so the app decodes on the CPU. Others go on.
+ * why NULL: the app closed it already, nothing to say. */
+static void inst_fail(struct inst *in, const char *why)
+{
+	if (in->failed)
+		return;
+	if (why)
+		log_msg("vdecd: inst %u: %s: this video decodes on the CPU", in->id, why);
+	in->failed = true;
+	if (ioctl(ctl, OVD_IOC_ERROR, &in->id) && errno != ENOENT)
+		log_msg("vdecd: error ioctl: %s", strerror(errno));
+	input_drop(in);
+	frames_drop(in);
+	in->draining = in->drain_flushed = false;
 }
 
 static void finish(struct inst *in, bool deliver);
@@ -331,6 +358,7 @@ static void cap_free(struct inst *in)
 	}
 	memset(in->cap, 0, sizeof(in->cap));
 	in->ncap = 0;
+	in->cap_on = false;
 }
 
 static struct gbm_bo *cap_bo(int w, int h)
@@ -373,7 +401,7 @@ static void cap_setup(struct inst *in, const struct ovd_msg *m)
 	b.count = ok ? n : 0;
 	if (!ok)
 		log_msg("vdecd: inst %u: no CAPTURE buffers for %dx%d", in->id, in->width, in->height);
-	if (ioctl(ctl, OVD_IOC_SET_BUFFERS, &b))
+	if (ioctl(ctl, OVD_IOC_SET_BUFFERS, &b) && errno != ENOENT)	/* ENOENT: closed meanwhile */
 		log_msg("vdecd: set buffers: %s", strerror(errno));
 	for (int i = 0; i < n; i++)
 		if (b.fd[i] >= 0)
@@ -583,16 +611,22 @@ static bool convert_frame(struct inst *in, AVFrame *f, struct capbuf *c)
 }
 
 /* Waits for the converted pictures in order and hands them to the app
- * (deliver), or only settles them (the buffers are being taken back). */
+ * (deliver), or only settles them (the buffers are being taken back).
+ * Not forever: a GPU that does not finish one in FENCE_TIMEOUT fails this
+ * video (and the rest of its pictures go back as errors at once). */
 static void finish(struct inst *in, bool deliver)
 {
+	bool late = false;
+
 	for (int k = 0; k < in->nbusy; k++) {
 		struct capbuf *c = &in->cap[in->busy[k]];
 
 		if (c->fence) {
-			if (wait_sync(egl, c->fence, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, EGL_FOREVER_KHR) !=
-			    EGL_CONDITION_SATISFIED_KHR)
+			if (wait_sync(egl, c->fence, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, late ? 0 : FENCE_TIMEOUT) !=
+			    EGL_CONDITION_SATISFIED_KHR) {
 				c->ok = false;
+				late = true;
+			}
 			destroy_sync(egl, c->fence);
 			c->fence = NULL;
 		}
@@ -600,6 +634,8 @@ static void finish(struct inst *in, bool deliver)
 			done(OVD_IOC_CAPTURE_DONE, in, in->busy[k], c->seq, c->pts, c->ok ? 0 : OVD_DONE_ERROR);
 	}
 	in->nbusy = 0;
+	if (late)
+		inst_fail(in, "the GPU did not finish a picture within 1 s");
 }
 
 /* ---- the work loop for one instance ------------------------------------------------ */
@@ -608,10 +644,13 @@ static bool set_format(struct inst *in, AVFrame *f)
 {
 	struct ovd_format fmt = { .inst = in->id, .min_buffers = 4 };
 	int w = (f->width + 1) & ~1, h = (f->height + 1) & ~1;
+	char why[96];
 
-	if (w > (int)OVD_MAX_WIDTH || h > (int)OVD_MAX_HEIGHT || !(fmt.stride = cap_stride(w, h))) {
-		log_msg("vdecd: inst %u: unsupported picture %dx%d", in->id, f->width, f->height);
-		ioctl(ctl, OVD_IOC_ERROR, &in->id);
+	/* The module's limits: what it refuses, the app must hear about. */
+	if (w < (int)OVD_MIN_SIZE || h < (int)OVD_MIN_SIZE || w > (int)OVD_MAX_WIDTH ||
+	    h > (int)OVD_MAX_HEIGHT || !(fmt.stride = cap_stride(w, h))) {
+		snprintf(why, sizeof(why), "unsupported picture %dx%d", f->width, f->height);
+		inst_fail(in, why);
 		return false;
 	}
 	fmt.width = w;
@@ -619,7 +658,8 @@ static bool set_format(struct inst *in, AVFrame *f)
 	fmt.visible_width = f->width;
 	fmt.visible_height = f->height;
 	if (ioctl(ctl, OVD_IOC_SET_FORMAT, &fmt)) {
-		log_msg("vdecd: set format: %s", strerror(errno));
+		snprintf(why, sizeof(why), "format %dx%d refused (%s)", f->width, f->height, strerror(errno));
+		inst_fail(in, errno == ENOENT ? NULL : why);
 		return false;
 	}
 	in->fmt_set = true;
@@ -644,20 +684,19 @@ static bool output_frames(struct inst *in)
 
 		if (!in->fmt_set || f->width != in->vis_width || f->height != in->vis_height) {
 			/* A new size: the frames before it are out. The app gets the
-			 * new format (SOURCE_CHANGE), then an empty LAST buffer. */
+			 * new format (SOURCE_CHANGE), then an empty LAST buffer if
+			 * its CAPTURE buffers stream. */
 			c = NULL;
-			if (in->ncap && !(c = cap_get(in)))
+			if (in->ncap && in->cap_on && !(c = cap_get(in)))
 				return progress;
 			finish(in, true);	/* the pictures before the change first */
-			if (!set_format(in, f)) {
-				frames_drop(in);
+			if (in->failed || !set_format(in, f))
 				return true;
-			}
 			if (c) {
 				c->free = false;
 				done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST);
-				cap_free(in);
 			}
+			cap_free(in);
 			return true;
 		}
 		if (in->cap_width != in->width || in->cap_height != in->height)
@@ -732,7 +771,9 @@ static bool feed_input(struct inst *in)
 	return progress;
 }
 
-/* DEC_CMD_STOP: everything queued comes out, then an empty LAST buffer + EOS. */
+/* DEC_CMD_STOP: everything queued comes out, then an empty LAST buffer + EOS.
+ * Without CAPTURE buffers (no picture yet, or CAPTURE stopped) the module
+ * sends EOS and makes the next CAPTURE buffer the LAST one (OVD_NO_BUFFER). */
 static bool drain(struct inst *in)
 {
 	struct capbuf *c;
@@ -748,11 +789,17 @@ static bool drain(struct inst *in)
 	if (in->out)
 		return false;
 	c = cap_get(in);
-	if (!c)
-		return false;
+	if (!c && in->ncap && in->cap_on)
+		return false;	/* the app holds them all: wait for one */
 	finish(in, true);
-	c->free = false;
-	done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST | OVD_DONE_EOS);
+	if (in->failed)
+		return true;
+	if (c) {
+		c->free = false;
+		done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST | OVD_DONE_EOS);
+	} else {
+		done(OVD_IOC_CAPTURE_DONE, in, OVD_NO_BUFFER, 0, 0, OVD_DONE_LAST | OVD_DONE_EOS);
+	}
 	if (in->cc)
 		avcodec_flush_buffers(in->cc);
 	in->draining = in->drain_flushed = false;
@@ -761,14 +808,13 @@ static bool drain(struct inst *in)
 
 static void pump(struct inst *in)
 {
-	for (int guard = 0; guard < 1000; guard++) {
+	for (int guard = 0; guard < 1000 && !in->failed; guard++) {
 		bool progress = output_frames(in);
 
 		progress |= feed_input(in);	/* the next decodes go out first */
-		if (in->no_va) {	/* the module fails the app's buffers */
-			ioctl(ctl, OVD_IOC_ERROR, &in->id);
+		if (in->no_va) {
 			in->no_va = false;
-			input_drop(in);
+			inst_fail(in, "VA-API cannot decode this stream");
 			return;
 		}
 		finish(in, true);
@@ -780,6 +826,21 @@ static void pump(struct inst *in)
 
 /* ---- messages ------------------------------------------------------------------ */
 
+static void inst_close(struct inst *in)
+{
+	struct inst **pp = &insts;
+
+	while (*pp != in)
+		pp = &(*pp)->next;
+	*pp = in->next;
+	input_drop(in);
+	decoder_close(in);
+	cap_free(in);
+	if (debug)
+		log_msg("vdecd: inst %u: closed after %u frames", in->id, in->frames);
+	free(in);
+}
+
 static void handle(const struct ovd_msg *m, const uint8_t *data)
 {
 	struct inst *in = inst_find(m->inst);
@@ -789,8 +850,10 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 			in ? in->nin : -1, in ? in->nout : -1);
 
 	if (m->type == OVD_MSG_OPEN) {
+		/* The module does not reuse ids; should one come again anyway,
+		 * the old decoder's state goes, it is not the new one's. */
 		if (in)
-			return;
+			inst_close(in);
 		in = calloc(1, sizeof(*in));
 		if (!in)
 			return;
@@ -805,26 +868,20 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 	}
 	if (!in)
 		return;
-
-	switch (m->type) {
-	case OVD_MSG_CLOSE: {
-		struct inst **pp = &insts;
-
-		while (*pp != in)
-			pp = &(*pp)->next;
-		*pp = in->next;
-		input_drop(in);
-		decoder_close(in);
-		cap_free(in);
-		if (debug)
-			log_msg("vdecd: inst %u: closed after %u frames", in->id, in->frames);
-		free(in);
+	if (m->type == OVD_MSG_CLOSE) {
+		inst_close(in);
 		return;
 	}
+	if (in->failed)
+		return;
+
+	switch (m->type) {
 	case OVD_MSG_START:
 		if ((!in->cc || in->codec != m->codec) && !decoder_open(in, m->codec)) {
-			log_msg("vdecd: inst %u: cannot decode %.4s", in->id, (const char *)&m->codec);
-			ioctl(ctl, OVD_IOC_ERROR, &in->id);
+			char why[64];
+
+			snprintf(why, sizeof(why), "cannot decode %.4s", (const char *)&m->codec);
+			inst_fail(in, why);
 		}
 		break;
 	case OVD_MSG_BITSTREAM: {
@@ -864,12 +921,14 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 		if (m->index < (uint32_t)in->ncap) {
 			in->cap[m->index].free = true;
 			in->cap[m->index].seq = m->seq;
+			in->cap_on = true;
 		}
 		break;
 	case OVD_MSG_CAPTURE_STOP:
 		finish(in, false);
 		for (int i = 0; i < in->ncap; i++)
 			in->cap[i].free = false;
+		in->cap_on = false;
 		break;
 	}
 	pump(in);
@@ -959,9 +1018,13 @@ static void write_status(const char *codecs)
 
 int main(void)
 {
-	struct ovd_caps caps = { .max_width = OVD_MAX_WIDTH, .max_height = OVD_MAX_HEIGHT };
+	struct ovd_caps caps = { .max_width = OVD_MAX_WIDTH, .max_height = OVD_MAX_HEIGHT,
+				 .version = OVD_VERSION };
 	size_t bufsize = sizeof(struct ovd_msg) + OVD_MAX_BITSTREAM;
 	uint8_t *buf = malloc(bufsize);
+	uint64_t wd_usec = 0;
+	int wd_ms = -1;		/* systemd's watchdog: ping every third of it */
+	double pinged = 0;
 
 	debug = getenv("OMACVM_VDEC_DEBUG") && *getenv("OMACVM_VDEC_DEBUG") == '1';
 	signal(SIGPIPE, SIG_IGN);
@@ -983,6 +1046,11 @@ int main(void)
 		return 1;
 	}
 	if (ioctl(ctl, OVD_IOC_SET_CAPS, &caps)) {
+		if (errno == EPROTO) {
+			log_msg("vdecd: the omacvm-vdec module loaded is from another build: "
+				"restart the VM (apps decode on the CPU until then)");
+			return 3;
+		}
 		log_msg("vdecd: set caps: %s", strerror(errno));
 		return 1;
 	}
@@ -990,11 +1058,29 @@ int main(void)
 		 caps.codecs & OVD_CODEC_HEVC ? " HEVC" : "", caps.codecs & OVD_CODEC_VP9 ? " VP9" : "");
 	log_msg("vdecd: ready:%s", (char *)buf);
 	write_status((char *)buf + 1);
+	if (sd_watchdog_enabled(0, &wd_usec) > 0 && wd_usec >= 3000)
+		wd_ms = (int)(wd_usec / 3000);
 
 	for (;;) {
-		ssize_t n = read(ctl, buf, bufsize);
+		struct pollfd pfd = { .fd = ctl, .events = POLLIN };
 		struct ovd_msg m;
+		ssize_t n;
+		int r;
 
+		if (wd_ms > 0 && now_ms() - pinged >= wd_ms) {
+			sd_notify(0, "WATCHDOG=1");
+			pinged = now_ms();
+		}
+		r = poll(&pfd, 1, wd_ms);
+		if (r < 0 && errno == EINTR)
+			continue;
+		if (r < 0) {
+			log_msg("vdecd: poll: %s", strerror(errno));
+			return 1;
+		}
+		if (!r)
+			continue;
+		n = read(ctl, buf, bufsize);
 		if (n < 0 && errno == EINTR)
 			continue;
 		if (n < (ssize_t)sizeof(m)) {

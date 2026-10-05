@@ -7,7 +7,8 @@
  * time (struct ovd_msg, then `size` bytes of bitstream for OVD_MSG_BITSTREAM)
  * and answers with the ioctls below. Buffers are named by (index, seq): seq is
  * new every time a buffer is queued, so an answer for a buffer the app has
- * since taken back is ignored.
+ * since taken back is ignored. Instance ids are not reused (cyclic, 31 bits):
+ * a late answer for a closed decoder never lands on a new one.
  */
 #ifndef OMACVM_VDEC_H
 #define OMACVM_VDEC_H
@@ -19,6 +20,10 @@
 #define OVD_MAX_WIDTH		4096u
 #define OVD_MAX_HEIGHT		2304u
 #define OVD_MAX_CAPTURE		24u
+#define OVD_MIN_SIZE		64u	/* pictures smaller than this fail */
+/* SET_CAPS carries it: a daemon and a module from different builds refuse
+ * each other (until the VM restarts with the new module). */
+#define OVD_VERSION		2u
 
 /* Codecs the daemon can decode (OVD_IOC_SET_CAPS). */
 #define OVD_CODEC_H264		(1u << 0)
@@ -55,7 +60,7 @@ struct ovd_caps {
 	__u32 codecs;		/* OVD_CODEC_* */
 	__u32 max_width;
 	__u32 max_height;
-	__u32 reserved;
+	__u32 version;		/* OVD_VERSION */
 };
 
 /*
@@ -85,6 +90,10 @@ struct ovd_buffers {
 #define OVD_DONE_LAST	(1u << 0)	/* CAPTURE: this buffer goes back empty, flagged LAST */
 #define OVD_DONE_EOS	(1u << 1)	/* with LAST: end of a drain */
 #define OVD_DONE_ERROR	(1u << 2)
+/* CAPTURE_DONE with this index and LAST|EOS: a drain ended while the daemon
+ * had no CAPTURE buffer (none set up yet, or CAPTURE stopped). The module
+ * sends EOS and hands back the next CAPTURE buffer empty, flagged LAST. */
+#define OVD_NO_BUFFER	0xffffffffu
 
 struct ovd_done {
 	__u32 inst;
