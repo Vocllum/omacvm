@@ -66,6 +66,14 @@ in more words.
   one to one through the VM app again, with nothing added after the wheel
   stops (before, a smooth-scrolling mouse could jump on after it stopped).
   So it is now on by default: on a Mac with only mice it does nothing.
+- ⌃⌥⌘ Esc on a Mac with only the desktop and the VM's Space (a Mac mini):
+  a swipe that bounces at the edge is tried the other way once, and the way
+  that works is kept, so the swipe works from the first press. "Swipe all
+  monitors" swipes each display (the pointer visits it and comes back).
+- OmacVM Bridge: Wi-Fi shows connected while the Mac is, also before
+  Location Services is allowed for the Bridge (or when it is not): the
+  interface's link decides then, the network's name stays hidden.
+- OmacVM.app's `apply-vm.sh` takes `--reset-host-key` for a reinstalled VM.
 - OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
   OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
   these copies (nothing is compiled on the Mac), and macOS keeps their
