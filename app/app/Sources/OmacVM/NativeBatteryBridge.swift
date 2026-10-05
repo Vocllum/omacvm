@@ -77,7 +77,10 @@ final class NativeBatteryBridge: @unchecked Sendable {
         stopLock.unlock()
         heartbeat?.cancel()
         heartbeat = nil
-        if let source, let loop { CFRunLoopRemoveSource(loop, source, .defaultMode) }
+        if let source, let loop {
+            CFRunLoopRemoveSource(loop, source, .defaultMode)
+            CFRunLoopStop(loop)   // ends the notification thread's wait now
+        }
         Darwin.shutdown(descriptor, SHUT_RDWR)
         Darwin.close(descriptor)
     }
@@ -110,7 +113,9 @@ final class NativeBatteryBridge: @unchecked Sendable {
             let loop = CFRunLoopGetCurrent()!
             guard self.registerPowerSource(source, on: loop) else { return }
             CFRunLoopAddSource(loop, source, .defaultMode)
-            while !self.hasStopped() { CFRunLoopRunInMode(.defaultMode, 1.0, false) }
+            // stop() removes the source and stops the loop; the long wait
+            // only keeps this thread from waking every second for nothing.
+            while !self.hasStopped() { CFRunLoopRunInMode(.defaultMode, 3600, false) }
         }
     }
 
