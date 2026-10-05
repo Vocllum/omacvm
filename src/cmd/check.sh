@@ -199,6 +199,13 @@ if [[ $BRIDGE == on ]]; then
   else bad "token" "missing (src/mac/install.sh)"; fi
   m=$(last_line "$L/omacvm-bridge.log" 'media keys: (event tap|waiting|cannot)')
   [[ $m == *installed* ]] && ok "media keys" "event tap installed" || bad "media keys" "${m:-no event tap yet}"
+  # The Bridge says which permissions it has (at start and on each change).
+  pm=$(last_line "$L/omacvm-bridge.log" 'omacvm-bridge: permissions: ')
+  case $pm in
+    "") ;;   # a Bridge from before it said so
+    *"Accessibility MISSING"*) bad "Bridge permissions" "Accessibility is off for OmacVM Bridge (the media keys need it): System Settings > Privacy & Security > Accessibility" human ;;
+    *) ok "Bridge permissions" "${pm#permissions: }" ;;
+  esac
   # Dimmer keyboard light steps (config.json); flicker is for a person to judge.
   c=~/Library/Application\ Support/omacvm-bridge/config.json
   if [[ $(last_line "$L/omacvm-bridge.log" 'keyboard light: ') == *none* ]]; then
@@ -270,9 +277,18 @@ if [[ $GESTURES == on ]]; then
     fi
     # The helper listens only once it has its permissions, so a later
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
-    p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
-    [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
-      || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    # Gestures says which of its two permissions it has (at start and on each
+    # change); one from before that: its older lines.
+    p=$(last_line "$L/omacvm-gestures.log" 'omacvm-gestures: permissions: ')
+    if [[ $p == *MISSING* ]]; then
+      miss=$(sed -E 's/^permissions: //; s/[A-Za-z ]+ granted(, )?//g; s/ MISSING//g; s/[, ]+$//' <<<"$p")
+      bad "keyboard/trackpad access" "$miss off for OmacVM Gestures (the escape combo and gestures need it): System Settings > Privacy & Security" human
+    elif [[ -n $p ]]; then ok "keyboard/trackpad access" "Accessibility + Input Monitoring"
+    else
+      p=$(last_line "$L/omacvm-gestures.log" 'permission|listening on')
+      [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
+        || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
+    fi
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
 else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
 # The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
