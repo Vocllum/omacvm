@@ -68,3 +68,6 @@ jobs:
 
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
+
+      - name: The vulkan feature (VM folder file, guest Mesa step)
+        run: src/tests/vulkan-feature.sh
