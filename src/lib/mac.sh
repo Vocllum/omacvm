@@ -64,10 +64,12 @@ omanotch_serves_app() {
 }
 
 wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
-  local i
-  for ((i = 0; i < ${2:-600}; i += 5)); do
+  # By the clock: each try can take seconds of its own (connect and key scan).
+  local end=$((SECONDS + ${2:-600}))
+  while :; do
     gssh "$1" true 2>/dev/null && return 0
     hostkey_changed "$1" && { hostkey_error; return 3; }
+    (( SECONDS < end )) || break
     sleep 5
   done
   die "no SSH on $1 after ${2:-600} s"

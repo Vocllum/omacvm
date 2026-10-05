@@ -68,6 +68,11 @@ jobs:
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
 
+      - name: Prebuilt images for Parallels, UTM and Fusion are checked (untrusted input)
+        run: |
+          command -v zstd >/dev/null || brew install zstd
+          src/tests/prebuilt-routes.sh
+
       - name: omacvm-netd offline tests
         run: src/net/mac/test.sh
 

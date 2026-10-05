@@ -588,6 +588,7 @@ exec > >(tee -a "$BUILD_LOG") 2>&1
 UI_LOG=$BUILD_LOG
 build_end() {
   local rc=$1
+  if [[ $SOURCE == prebuilt ]]; then prebuilt_exit; fi   # the seed and an unused unpacked image go
   (( rc == 0 && DONE )) && return
   (( rc )) || rc=1
   printf '\n\033[1;31mThe build stopped\033[0m in step %s of %s. The whole log:\n  open "%s"\n' "$STEP" "$STEPS" "$BUILD_LOG"
