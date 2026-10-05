@@ -176,12 +176,14 @@ static uint8_t ys[HFRAMES][W * H];
 
 struct stream {
    int hevc;
+   int low_latency;              /* the encode backend's constant-QP session */
    int count;
    uint8_t *au[HFRAMES];
    size_t au_size[HFRAMES];
    CMFormatDescriptionRef fmt;   /* the encoder's parameter sets (reference decode) */
 };
-static struct stream avc, hevc = { .hevc = 1 };
+static struct stream avc, hevc_streams[2] = { { .hevc = 1 }, { .hevc = 1, .low_latency = 1 } };
+static struct stream *hevc = &hevc_streams[0];
 
 static void put_nal(uint8_t **out, size_t *n, const uint8_t *nal, size_t len)
 {
@@ -239,7 +241,9 @@ static void enc_cb(void *ref, void *frame_ref, OSStatus st, VTEncodeInfoFlags fl
 }
 
 /* FRAMES pictures; picture KEY_AT (> 0) is forced to be a key frame. HEVC is made
- * on the media engine, as the encode backend does (hevc_vaapi in the VM). */
+ * on the media engine, as the encode backend does (hevc_vaapi in the VM): a bitrate
+ * session, or with LOW_LATENCY the constant-QP one (low-latency rate control, the QP
+ * with every frame), whose stream differs (temporal sub-layers in the SPS). */
 static int make_stream(struct stream *s, int frames, int key_at)
 {
    VTCompressionSessionRef vt = NULL;
@@ -249,6 +253,9 @@ static int make_stream(struct stream *s, int frames, int key_at)
                                        &kCFTypeDictionaryValueCallBacks);
       CFDictionarySetValue(spec,
          kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder, kCFBooleanTrue);
+      if (s->low_latency)
+         CFDictionarySetValue(spec, kVTVideoEncoderSpecification_EnableLowLatencyRateControl,
+                              kCFBooleanTrue);
    }
    OSStatus st = VTCompressionSessionCreate(NULL, W, H, s->hevc ? kCMVideoCodecType_HEVC :
                                             kCMVideoCodecType_H264, spec, NULL, NULL,
@@ -262,9 +269,18 @@ static int make_stream(struct stream *s, int frames, int key_at)
    VTSessionSetProperty(vt, kVTCompressionPropertyKey_ProfileLevel, s->hevc ?
                         kVTProfileLevel_HEVC_Main_AutoLevel :
                         kVTProfileLevel_H264_High_AutoLevel);
-   const void *fk = kVTEncodeFrameOptionKey_ForceKeyFrame, *fv = kCFBooleanTrue;
-   CFDictionaryRef force = CFDictionaryCreate(NULL, &fk, &fv, 1, &kCFTypeDictionaryKeyCallBacks,
-                                              &kCFTypeDictionaryValueCallBacks);
+   int32_t qp = 25;
+   CFNumberRef qp_num = CFNumberCreate(NULL, kCFNumberSInt32Type, &qp);
+   CFMutableDictionaryRef opts = CFDictionaryCreateMutable(NULL, 0,
+      &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+   CFMutableDictionaryRef force = CFDictionaryCreateMutable(NULL, 0,
+      &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+   CFDictionarySetValue(force, kVTEncodeFrameOptionKey_ForceKeyFrame, kCFBooleanTrue);
+   if (s->low_latency) {
+      CFDictionarySetValue(opts, kVTEncodeFrameOptionKey_BaseFrameQP, qp_num);
+      CFDictionarySetValue(force, kVTEncodeFrameOptionKey_BaseFrameQP, qp_num);
+   }
+   CFRelease(qp_num);
    static uint8_t uv[W * H / 2];
    for (int f = 0; f < frames; f++) {
       CVPixelBufferRef pix = NULL;
@@ -280,13 +296,14 @@ static int make_stream(struct stream *s, int frames, int key_at)
       }
       CVPixelBufferUnlockBaseAddress(pix, 0);
       VTCompressionSessionEncodeFrame(vt, pix, CMTimeMake(f, 30), kCMTimeInvalid,
-                                      key_at > 0 && f == key_at ? force : NULL, NULL, NULL);
+                                      key_at > 0 && f == key_at ? force : opts, NULL, NULL);
       CVPixelBufferRelease(pix);
    }
    VTCompressionSessionCompleteFrames(vt, kCMTimeInvalid);
    VTCompressionSessionInvalidate(vt);
    CFRelease(vt);
    CFRelease(force);
+   CFRelease(opts);
    return s->count == frames;
 }
 
@@ -294,9 +311,11 @@ static int make_stream(struct stream *s, int frames, int key_at)
 /* hevc_vaapi in the VM encodes on VideoToolbox. Its stream uses what a libx265 stream
  * does not: SPS reference picture sets picked by index, reference list modification
  * syntax (lists_modification_present_flag), weighted prediction tables, WPP entry
- * points and the default scaling lists. The guest's VA-API driver (Mesa) gives the
- * host what FFmpeg parsed and leaves NumPocTotalCurr and NumDeltaPocsOfRefRpsIdx at 0;
- * the descriptions here are filled the same way, from a parse of the stream. A second
+ * points and the default scaling lists; its constant-QP session also overrides the
+ * deblocking filter per slice. The guest's VA-API driver (Mesa) gives the host what
+ * FFmpeg parsed and leaves NumPocTotalCurr, NumDeltaPocsOfRefRpsIdx and
+ * deblocking_filter_control_present_flag at 0; the descriptions here are filled the
+ * same way, from a parse of the stream. A second
  * variant writes each P slice's reference set as a set predicted from the SPS's
  * (inter RPS prediction in the slice header, which other encoders use), with its size
  * in bits (st_rps_bits) as FFmpeg passes it. */
@@ -316,10 +335,10 @@ static int hevc_prepare(void)
 {
    int dpb_poc[17], dpb_f[17], dpb_n = 0, prev_poc = 0;
 
-   for (int f = 0; f < hevc.count; f++) {
+   for (int f = 0; f < hevc->count; f++) {
       struct hpic *pic = &hpics[f];
-      const uint8_t *a = hevc.au[f];
-      size_t n = hevc.au_size[f];
+      const uint8_t *a = hevc->au[f];
+      size_t n = hevc->au_size[f];
       struct hslice first = { 0 };
       int have = 0, inter_done = 0;
 
@@ -406,9 +425,12 @@ static int hevc_prepare(void)
       d->NumShortTermPictureSliceHeaderBits = first.st_rps_bits;
       if (!inter_done)
          pic->st_bits_inter = first.st_rps_bits;
-      /* Mesa (va/picture_hevc.c) never sets these two: the host must not need them. */
+      /* Mesa (va/picture_hevc.c) never sets these (VA-API has no such fields): the
+       * host must not need them. VA passes tile sizes also for uniform spacing. */
       d->NumPocTotalCurr = 0;
       d->NumDeltaPocsOfRefRpsIdx = 0;
+      d->pps.deblocking_filter_control_present_flag = 0;
+      d->pps.uniform_spacing_flag = 0;
       memset(d->RefPicSetStCurrBefore, 0xff, sizeof(d->RefPicSetStCurrBefore));
       memset(d->RefPicSetStCurrAfter, 0xff, sizeof(d->RefPicSetStCurrAfter));
       memset(d->RefPicSetLtCurr, 0xff, sizeof(d->RefPicSetLtCurr));
@@ -476,14 +498,14 @@ static int hevc_reference_decode(void)
    CFNumberRef num = CFNumberCreate(NULL, kCFNumberSInt32Type, &nv12);
    CFDictionarySetValue(attrs, kCVPixelBufferPixelFormatTypeKey, num);
    CFRelease(num);
-   OSStatus st = hevc.fmt ? VTDecompressionSessionCreate(NULL, hevc.fmt, NULL, attrs, &cb, &vt)
+   OSStatus st = hevc->fmt ? VTDecompressionSessionCreate(NULL, hevc->fmt, NULL, attrs, &cb, &vt)
                           : -1;
    CFRelease(attrs);
    if (st != noErr)
       return 0;
-   for (int f = 0; f < hevc.count; f++) {
-      const uint8_t *a = hevc.au[f];
-      size_t n = hevc.au_size[f], len = 0;
+   for (int f = 0; f < hevc->count; f++) {
+      const uint8_t *a = hevc->au[f];
+      size_t n = hevc->au_size[f], len = 0;
       uint8_t *sample_data = malloc(n);
       for (size_t off = 0; off + 4 < n;) {       /* length prefixes, no parameter sets */
          size_t end = off + 4;
@@ -508,7 +530,7 @@ static int hevc_reference_decode(void)
       if (CMBlockBufferCreateWithMemoryBlock(NULL, NULL, len, NULL, NULL, 0, len, 0, &block) ==
              noErr &&
           CMBlockBufferReplaceDataBytes(sample_data, block, 0, len) == noErr &&
-          CMSampleBufferCreateReady(NULL, block, hevc.fmt, 1, 0, NULL, 1, &len, &sample) ==
+          CMSampleBufferCreateReady(NULL, block, hevc->fmt, 1, 0, NULL, 1, &len, &sample) ==
              noErr) {
          VTDecompressionSessionDecodeFrame(vt, sample, 0, (void *)(intptr_t)f, NULL);
          VTDecompressionSessionWaitForAsynchronousFrames(vt);
@@ -522,7 +544,7 @@ static int hevc_reference_decode(void)
    }
    VTDecompressionSessionInvalidate(vt);
    CFRelease(vt);
-   return got == hevc.count;
+   return got == hevc->count;
 }
 
 /* --- the guest's side ---------------------------------------------------------- */
@@ -706,6 +728,69 @@ static int hevc_decode_picture(uint32_t codec, int f, int inter, double *psnr)
    return !memcmp(got_y, ref_y[f], sizeof(got_y)) && !memcmp(got_uv, ref_uv[f], sizeof(got_uv));
 }
 
+/* Every picture of *hevc as VideoToolbox decodes the stream itself, also with the
+ * slices' reference sets predicted from the SPS's. Codecs CODEC and CODEC + 1. */
+static void hevc_check(uint32_t codec, const char *mode)
+{
+   char line[300];
+   int list_mod = 0, exact = 0, exact_inter = 0, inter = 0;
+   double low = 99, low_inter = 99, p1;
+
+   for (int f = 0; f < HFRAMES; f++) {
+      free(hpics[f].bits);
+      free(hpics[f].bits_inter);
+      ref_got[f] = 0;
+   }
+   memset(hpics, 0, sizeof(hpics));
+   memset(&hp, 0, sizeof(hp));
+   if (!make_stream(hevc, HFRAMES, HKEY)) {
+      printf("skip: no hardware HEVC encoder (%s) for the test stream (%d pictures)\n", mode,
+             hevc->count);
+      return;
+   }
+   if (hevc_prepare()) {
+      snprintf(line, sizeof(line), "HEVC test stream (%s) parsed", mode);
+      check(0, line);
+      return;
+   }
+   if (!hevc_reference_decode()) {
+      printf("skip: VideoToolbox does not decode its own HEVC stream (%s) here\n", mode);
+      return;
+   }
+   for (int f = 0; f < HFRAMES; f++) {
+      list_mod += hpics[f].list_mod;
+      inter += hpics[f].st_bits_inter > 0;
+   }
+   printf("HEVC stream (%s): lists_modification_present %d (in %d pictures), weighted_pred "
+          "%d, WPP %d, scaling lists %d, %u SPS reference sets\n", mode,
+          hp.lists_modification_present_flag, list_mod, hp.weighted_pred_flag,
+          hp.entropy_coding_sync_enabled_flag, hp.sps.scaling_list_enabled_flag, num_sets);
+   for (int pass = 0; pass < 2; pass++) {
+      create_codec_for(codec + (uint32_t)pass, G_HEVC_MAIN, 120);
+      submit(1);
+      for (int f = 0; f < HFRAMES; f++) {
+         int same = hevc_decode_picture(codec + (uint32_t)pass, f, pass, &p1);
+         if (pass) {
+            exact_inter += same;
+            low_inter = p1 < low_inter ? p1 : low_inter;
+         } else {
+            exact += same;
+            low = p1 < low ? p1 : low;
+         }
+      }
+      destroy_codec(codec + (uint32_t)pass);
+      submit(1);
+   }
+   snprintf(line, sizeof(line), "HEVC from VideoToolbox's encoder, %s (IDR at 0 and %d): %d "
+            "of %d pictures bit for bit as VideoToolbox decodes it, lowest luma PSNR %.1f dB",
+            mode, HKEY, exact, HFRAMES, low);
+   check(exact == HFRAMES && low > 30, line);
+   snprintf(line, sizeof(line), "same with slice reference sets predicted from the SPS's "
+            "(%d pictures, st_rps_bits): %d of %d bit for bit, lowest luma PSNR %.1f dB",
+            inter, exact_inter, HFRAMES, low_inter);
+   check(inter > 0 && exact_inter == HFRAMES && low_inter > 30, line);
+}
+
 int main(void)
 {
    char line[200];
@@ -855,57 +940,19 @@ int main(void)
             MAX_LIVE);
    check(in2 && again == MAX_LIVE, line);
 
-   /* HEVC as the Mac's own encoder writes it (hevc_vaapi in the VM), with an IDR in
-    * the middle: every picture as VideoToolbox decodes the stream itself, also with
-    * the slices' reference sets predicted from the SPS's. */
+   /* HEVC as the Mac's own encoder writes it (hevc_vaapi in the VM), from its bitrate
+    * and its constant-QP session, with an IDR in the middle. */
    int hevc_ok = 0;
    if (!offered(G_HEVC_MAIN, &hevc_ok)) {
       printf("skip: no HEVC decoder offered\n");
-   } else if (!make_stream(&hevc, HFRAMES, HKEY)) {
-      printf("skip: no hardware HEVC encoder for the test stream (%d pictures)\n",
-             hevc.count);
-   } else if (hevc_prepare()) {
-      check(0, "HEVC test stream parsed");
-   } else if (!hevc_reference_decode()) {
-      printf("skip: VideoToolbox does not decode its own HEVC stream here\n");
    } else {
-      int list_mod = 0, exact = 0, exact_inter = 0, inter = 0;
-      double low = 99, low_inter = 99, p1;
-      for (int f = 0; f < HFRAMES; f++) {
-         list_mod += hpics[f].list_mod;
-         inter += hpics[f].st_bits_inter > 0;
-      }
-      printf("HEVC stream: lists_modification_present %d (in %d pictures), weighted_pred %d, "
-             "WPP %d, scaling lists %d, %u SPS reference sets\n",
-             hp.lists_modification_present_flag, list_mod, hp.weighted_pred_flag,
-             hp.entropy_coding_sync_enabled_flag, hp.sps.scaling_list_enabled_flag, num_sets);
       for (uint32_t h = REFBUF; h < REFBUF + NREFBUF; h++)
          create_buffer_as(h);
       submit(1);
-      for (int pass = 0; pass < 2; pass++) {
-         create_codec_for(20 + (uint32_t)pass, G_HEVC_MAIN, 120);
-         submit(1);
-         for (int f = 0; f < HFRAMES; f++) {
-            int same = hevc_decode_picture(20 + (uint32_t)pass, f, pass, &p1);
-            if (pass) {
-               exact_inter += same;
-               low_inter = p1 < low_inter ? p1 : low_inter;
-            } else {
-               exact += same;
-               low = p1 < low ? p1 : low;
-            }
-         }
-         destroy_codec(20 + (uint32_t)pass);
-         submit(1);
+      for (int i = 0; i < 2; i++) {
+         hevc = &hevc_streams[i];
+         hevc_check(20 + 2 * (uint32_t)i, i ? "constant QP" : "bitrate");
       }
-      snprintf(line, sizeof(line), "HEVC from VideoToolbox's encoder (IDR at 0 and %d): %d of "
-               "%d pictures bit for bit as VideoToolbox decodes it, lowest luma PSNR %.1f dB",
-               HKEY, exact, HFRAMES, low);
-      check(exact == HFRAMES && low > 30, line);
-      snprintf(line, sizeof(line), "same with slice reference sets predicted from the SPS's "
-               "(%d pictures, st_rps_bits): %d of %d bit for bit, lowest luma PSNR %.1f dB",
-               inter, exact_inter, HFRAMES, low_inter);
-      check(inter > 0 && exact_inter == HFRAMES && low_inter > 30, line);
    }
 
    virgl_renderer_context_destroy(1);
@@ -913,12 +960,14 @@ int main(void)
       virgl_renderer_resource_unref(r);
    for (int f = 0; f < HFRAMES; f++) {
       free(avc.au[f]);
-      free(hevc.au[f]);
+      free(hevc_streams[0].au[f]);
+      free(hevc_streams[1].au[f]);
       free(hpics[f].bits);
       free(hpics[f].bits_inter);
    }
-   if (hevc.fmt)
-      CFRelease(hevc.fmt);
+   for (int i = 0; i < 2; i++)
+      if (hevc_streams[i].fmt)
+         CFRelease(hevc_streams[i].fmt);
    free(c);
    virgl_renderer_cleanup(&cookie);
    printf("%s\n", failures ? "video decode: FAILED" : "video decode: all checks passed");
