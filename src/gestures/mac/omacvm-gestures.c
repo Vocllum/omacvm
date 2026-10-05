@@ -162,6 +162,9 @@ static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
+static CFRunLoopSourceRef tapSource;
+static CGEventMask tapMask;
+static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u);
 static int verbose;
 int ns_event_type(CGEventRef e);  // scroll_ns.m
 void ns_on_app_activate(void (*f)(void));
@@ -392,31 +395,63 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
   if (win) CFRelease(win);
 }
 
-static void updateCapture(CFRunLoopTimerRef t, void *info) {
-  (void)info;
-  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
-  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  // Parallels' VM window, UTM's, or VMware Fusion's.
-  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
-          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
-          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
-  int front = net >= 0 && vmFullScreen(pid);
+// ---- the event tap: created again when a VM app starts after us ----
+// A new event tap goes to the head of the HID chain. QEMU's own one (OmacVM.app,
+// full grab) is created when the VM starts and then sits ahead of ours: it
+// sends the escape combo to the guest and returns nothing, so we never saw it
+// after OmacVM.app was restarted (brianmerchant, PR #39). So the tap is
+// created again whenever a different OmacVM VM comes to the front full screen,
+// and when macOS has invalidated it. The new tap goes in before the old one
+// is removed: no gap without one.
+static int installTap(void) {
+  CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
+  if (!newTap) return 0;
+  CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
+  if (!newSource) { CFMachPortInvalidate(newTap); CFRelease(newTap); return 0; }
+  CFRunLoopRef loop = CFRunLoopGetMain();
+  CFRunLoopAddSource(loop, newSource, kCFRunLoopCommonModes);
+  if (tapSource) {
+    CFRunLoopRemoveSource(loop, tapSource, kCFRunLoopCommonModes);
+    CFRunLoopSourceInvalidate(tapSource);
+    CFRelease(tapSource);
+  }
+  if (tapPort) { CFMachPortInvalidate(tapPort); CFRelease(tapPort); }
+  tapPort = newTap;
+  tapSource = newSource;
+  return 1;
+}
+
+// Main thread only. A failure (permission taken away) keeps the old tap and
+// is logged once until a re-creation works again.
+static void rearmTap(const char *why) {
+  static int failedLogged;
+  if (installTap()) {
+    logf_("event tap created again (%s)", why);
+    failedLogged = 0;
+  } else if (!failedLogged) {
+    logf_("cannot create the event tap again (%s): Accessibility or Input Monitoring taken away? Keeping the old one", why);
+    failedLogged = 1;
+  }
+}
+
+// What the capture check found (updateCapture, below): the front app's pid,
+// its VM network (-1: not a VM app), whether its VM window covers a display,
+// and that window's title. Main thread.
+static void frontChanged(pid_t pid, int net, int front, const char *title) {
+  // Each OmacVM VM is its own QEMU process with its own tap: a different pid
+  // in front (frontPid is 0 while no VM is) may have put its tap ahead of ours.
+  if (front && net == NET_APP && pid != frontPid) rearmTap("an OmacVM VM came to the front");
   if (front) {
-    // Which of the app's VMs: its window title, on this check (every 0.2 s
-    // while a VM app is full screen in front) and on every app switch.
-    char title[sizeof frontTitle];
-    windowTitle(pid, title, sizeof title);
     pthread_mutex_lock(&sendLock);
     if (net != frontNet || strcmp(title, frontTitle)) {
       frontNet = net;
-      memcpy(frontTitle, title, sizeof frontTitle);
+      snprintf(frontTitle, sizeof frontTitle, "%s", title);
       retargetLocked(capturing);
     }
     pthread_mutex_unlock(&sendLock);
   }
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -426,7 +461,25 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
     if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
     sendState(now ? "on" : (front ? "esc" : "off"));
   }
-  if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+  if (tapPort && !CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
+  else if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+}
+
+static void updateCapture(CFRunLoopTimerRef t, void *info) {
+  (void)info;
+  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
+  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
+  // Parallels' VM window, UTM's, or VMware Fusion's.
+  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
+          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
+          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
+  int front = net >= 0 && vmFullScreen(pid);
+  // Which of the app's VMs: its window title, on this check (every 0.2 s
+  // while a VM app is full screen in front) and on every app switch.
+  char title[sizeof frontTitle] = "";
+  if (front) windowTitle(pid, title, sizeof title);
+  frontChanged(pid, net, front, title);
+  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
 }
 
 // ---- the macOS pointer over the full-screen VM ----
@@ -636,7 +689,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn() && ns_event_type(e) == 30) {
+  if (!pinchSent && capturing && glideOn() &&
+      (type == 30 || (type == 29 && ns_event_type(e) == 30))) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
@@ -934,16 +988,16 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
+  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
-  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
+  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
   // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
   // combo). Ask once, then wait for the grant instead of exiting, so launchd
   // does not restart us into a loop of prompts.
   CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
   CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   int asked = 0;
-  while (!(tapPort = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, m, tapCb, NULL))) {
+  while (!installTap()) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
       AXIsProcessTrustedWithOptions(opts);
@@ -954,7 +1008,6 @@ int main(int argc, char **argv) {
   }
   CFRelease(opts);
   if (asked) logf_("permissions granted");
-  CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(NULL, tapPort, 0), kCFRunLoopCommonModes);
 
   // The trackpad only now, with the permissions granted and the run loop about
   // to run: opened while still waiting, its frames were never taken, and on a
