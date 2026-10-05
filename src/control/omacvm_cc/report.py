@@ -150,12 +150,12 @@ PATTERNS = [
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
     ("secret", re.compile(r"(?i)\b(Bearer)\s+[^\s\"']+"), r"\1 <secret>"),
     # name = value, name: value, "name": "value", 'name': 'value' (YAML, INI,
-    # JSON, Python): the value goes, quoted (also with spaces) or not.
+    # JSON, Python), also with escaped quotes (\"value\" in a logged command
+    # line): the value goes, quoted (also with spaces) or not.
     ("secret", re.compile(r"""(?i)\b(?P<name>(?:[a-z0-9]*[_-])*(?:token|password|passwd|pass|pwd|passphrase|secret|psk|api_?key|key|credentials?))"""
-                          r"""(?P<sep>["']?\s*[=:]\s*)(?:"(?P<dq>[^"\n]+)"|'(?P<sq>[^'\n]+)'|(?P<bare>(?!<)[^\s"',;}]+))"""),
-     lambda m: m.group(0) if (m.group("dq") or m.group("sq")) == "<secret>" else
-     m.group("name") + m.group("sep") + ('"' if m.group("dq") is not None else "'" if m.group("sq") is not None else "")
-     + "<secret>" + ('"' if m.group("dq") is not None else "'" if m.group("sq") is not None else "")),
+                          r"""(?P<sep>\\*["']?\s*[=:]\s*)(?:(?P<q>\\*["'])(?P<v>[^\n]*?)(?P=q)|(?P<bare>(?!<)(?!\\*["'])[^\s"',;}\\]+))"""),
+     lambda m: m.group(0) if m.group("v") == "<secret>" else
+     m.group("name") + m.group("sep") + (m.group("q") or "") + "<secret>" + (m.group("q") or "")),
     ("serial", re.compile(r"(?i)(IOPlatformSerialNumber\"?\s*=?\s*\"?|Serial Number(?: \(system\))?:\s*)([A-Z0-9]{6,})"), r"\1<serial>"),
     ("uuid", re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<uuid>"),
     ("hw", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<hw-addr>"),

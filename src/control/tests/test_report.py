@@ -180,6 +180,9 @@ def test_gate_sees_escapes_and_curly_apostrophes():
     ("db_password = s3cr3t", "db_password = <secret>"),
     ("auth-token: abc", "auth-token: <secret>"),
     ("credentials: 'x y'", "credentials: '<secret>'"),
+    # A command line in the journal: quotes escaped once or more.
+    ('bash -c "echo {\\"passphrase\\": \\"s3cr3t pass\\"}"', 'bash -c "echo {\\"passphrase\\": \\"<secret>\\"}"'),
+    ('psk = \\\\\\"Zorro PSK\\\\\\"', 'psk = \\\\\\"<secret>\\\\\\"'),
 ])
 def test_quoted_secrets(line, kept):
     out, counts = R.redact(line, R.Known())
