@@ -71,7 +71,7 @@ struct SetupView: View {
     @State private var autologin = false
     @State private var location = Paths.vmsRoot.path
     @State private var locationProblem: String?
-    @State private var prebuilt: PrebuiltImage?
+    @State private var prebuilt = PrebuiltImage.Lookup.checking
     @State private var usePrebuilt = true
 
     private var userOK: Bool {
@@ -79,20 +79,33 @@ struct SetupView: View {
     }
     private var canBuild: Bool {
         userOK && !password.isEmpty && password == password2 && VMConfig.validName(state.config.name)
+            && prebuilt != .checking
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("New Omarchy VM").font(.title2.bold())
-            Text(prebuilt == nil
-                 ? "\(Product.name) installs Arch Linux ARM and Omarchy into a new VM. It takes 10 to 30 minutes and downloads a few GB."
-                 : "\(Product.name) downloads a VM that is already built (a few minutes), or builds it here from Arch Linux ARM and Omarchy (10 to 30 minutes).")
+            Text("\(Product.name) makes a new VM with Arch Linux ARM and Omarchy. It downloads one that is already built when there is one for this version (a few minutes), or builds it here (10 to 30 minutes).")
                 .foregroundStyle(.secondary)
             Form {
-                if let pb = prebuilt {
+                // Shown at once; the choice comes when the lookup is done, so
+                // nothing changes under the user's hands later on.
+                switch prebuilt {
+                case .checking:
+                    LabeledContent("How") {
+                        HStack(spacing: 6) {
+                            ProgressView().controlSize(.small)
+                            Text("checking for a prebuilt VM…").foregroundStyle(.secondary)
+                        }
+                    }
+                case .found(let pb):
                     Picker("How", selection: $usePrebuilt) {
                         Text("Download a prebuilt VM (\(pb.size), Omarchy \(pb.omarchy))").tag(true)
                         Text("Build it here (10 to 30 minutes)").tag(false)
+                    }
+                case .none:
+                    LabeledContent("How") {
+                        Text("Build it here (10 to 30 minutes; no prebuilt VM for this version)").foregroundStyle(.secondary)
                     }
                 }
                 TextField("VM name", text: $state.config.name)
@@ -140,7 +153,9 @@ struct SetupView: View {
                     .disabled(!canBuild)
             }
         }
-        .task { prebuilt = await PrebuiltImage.lookup() }
+        .task {
+            if let pb = await PrebuiltImage.lookup() { prebuilt = .found(pb) } else { prebuilt = .none }
+        }
     }
 
     private func chooseLocation() {
@@ -183,7 +198,9 @@ struct SetupView: View {
         // Omanotch off for now: see VMConfig.features.
         state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         state.screen = .building
-        state.creator.start(config: state.config, password: password, prebuilt: usePrebuilt && prebuilt != nil)
+        var download = false
+        if case .found = prebuilt { download = usePrebuilt }
+        state.creator.start(config: state.config, password: password, prebuilt: download)
         password = ""; password2 = ""
     }
 }

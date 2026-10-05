@@ -149,7 +149,15 @@ struct PrebuiltImage: Equatable {
 
     var size: String { String(format: "%.1f GB", Double(bytes) / 1e9) }
 
-    /// Off the main thread; nil when there is none, or no connection.
+    /// Where the setup screen's lookup is.
+    enum Lookup: Equatable {
+        case checking
+        case found(PrebuiltImage)
+        case none
+    }
+
+    /// Off the main thread; nil when there is none, no connection, or no
+    /// answer within 20 seconds (then the VM is built here).
     static func lookup() async -> PrebuiltImage? {
         let script = Paths.scripts.appendingPathComponent("prebuilt-vm.sh")
         guard FileManager.default.fileExists(atPath: script.path) else { return nil }
@@ -162,12 +170,18 @@ struct PrebuiltImage: Equatable {
             p.standardError = FileHandle.nullDevice
             p.standardInput = FileHandle.nullDevice
             do { try p.run() } catch { return nil }
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
+            let deadline = Date().addingTimeInterval(20)
+            while p.isRunning {
+                if Date() > deadline { p.terminate(); return nil }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             guard p.terminationStatus == 0 else { return nil }
-            // TAG BYTES OMARCHY_VERSION
-            let f = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isWhitespace)
-            guard f.count >= 3, let bytes = Int64(f[1]), bytes > 0 else { return nil }
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            // TAG BYTES OMARCHY_VERSION IMAGE_VERSION
+            let f = String(decoding: data.prefix(1024), as: UTF8.self).split(whereSeparator: \.isWhitespace)
+            guard f.count >= 3, let bytes = Int64(f[1]), bytes > 0,
+                  f[2].count <= 80, f[2].allSatisfy({ $0.isASCII && !$0.isWhitespace && $0.asciiValue! >= 0x21 })
+            else { return nil }
             return PrebuiltImage(release: String(f[0]), bytes: bytes, omarchy: String(f[2]))
         }.value
     }
