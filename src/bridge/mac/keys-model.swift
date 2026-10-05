@@ -104,11 +104,13 @@ enum MediaRoute {
       return .macOS("the VM takes no keys from the Bridge (QEMU's control socket not found)")
     case .brightnessUp, .brightnessDown:
       if !vm.builtin, external == .works { return .external(vm.display) }
-      // The Bridge's own call reaches the VM's display: the built-in one
-      // (full screen; a window there stays macOS's, with its popup), or a
-      // Mac mini's only display that macOS dims itself (LG UltraFine,
-      // Studio Display), full screen or not.
-      if macBrightness == vm.display && (vm.fullScreen || !vm.builtin) { return .mac }
+      // The Bridge's own call reaches the VM's display: the built-in one, or a
+      // Mac mini's only display that macOS dims itself (LG UltraFine, Studio
+      // Display), full screen or not. An OmacVM.app window on the built-in one
+      // too: while it has the keyboard, macOS's own shortcuts are off (they go
+      // to the VM), so the Bridge sets the brightness itself rather than rely
+      // on macOS for it.
+      if macBrightness == vm.display && (vm.fullScreen || !vm.builtin || vm.omacvm) { return .mac }
       if vm.builtin { return .macOS(nil) }
       switch external {
       case .no(let why): return .macOS(why)
