@@ -14,6 +14,8 @@ fi
 export OMA_KEY=~/.ssh/omacvm
 printf '\n\033[1mOmacVM %s\033[0m: Omarchy in a VM on your Mac, feeling native.\n' "$(cat "$R/src/VERSION")"
 
+app_name() { case $1 in parallels) echo Parallels ;; utm) echo UTM ;; fusion) echo Fusion ;; app) echo OmacVM.app ;; esac; }
+
 # The VMs, with OmacVM's state for the running ones.
 NAMES=(); TYPES=(); STATES=(); KIND=()   # KIND: omacvm | plain | locked | stopped
 while IFS=$'\t' read -r name type state; do
@@ -34,7 +36,7 @@ while IFS=$'\t' read -r name type state; do
     locked) what="running, OmacVM cannot get in yet" ;;
     *) [[ $state == unknown ]] && what=$UTM_NO_ANSWER || what=${state:-stopped} ;;   # stopped, suspended, paused, ...
   esac
-  printf '    %-24s %-10s %s\n' "$name" "$(case $type in (parallels) echo Parallels ;; (utm) echo UTM ;; (fusion) echo Fusion ;; (app) echo OmacVM.app ;; esac)" "$what" > "$TTY"
+  printf '    %-24s %-10s %s\n' "$name" "$(app_name "$type")" "$what" > "$TTY"
 done < <(vms_list)
 
 if (( ${#NAMES[@]} == 0 )); then
@@ -43,15 +45,15 @@ if (( ${#NAMES[@]} == 0 )); then
 fi
 [[ ${#NAMES[@]} -gt 0 ]] && printf '\n' > "$TTY"
 
-choose_vm() {   # PROMPT -> sets PICK (a name)
+choose_vm() {   # PROMPT -> sets PICK (a name) and PICKT (its app: two apps may use one name)
   local i a
-  if (( ${#NAMES[@]} == 1 )); then PICK=${NAMES[0]}; return; fi
+  if (( ${#NAMES[@]} == 1 )); then PICK=${NAMES[0]}; PICKT=${TYPES[0]}; return; fi
   hd "$1"
-  for ((i = 0; i < ${#NAMES[@]}; i++)); do printf '    %d  %s\n' $((i + 1)) "${NAMES[$i]}"; done
+  for ((i = 0; i < ${#NAMES[@]}; i++)); do printf '    %d  %-24s %s\n' $((i + 1)) "${NAMES[$i]}" "$(app_name "${TYPES[$i]}")"; done
   while :; do
     read -r -p "  Choose 1-${#NAMES[@]} [1]: " a < "$TTY" || exit 1
     a=${a:-1}
-    [[ $a =~ ^[0-9]+$ ]] && (( a >= 1 && a <= ${#NAMES[@]} )) && { PICK=${NAMES[$((a - 1))]}; return; }
+    [[ $a =~ ^[0-9]+$ ]] && (( a >= 1 && a <= ${#NAMES[@]} )) && { PICK=${NAMES[$((a - 1))]}; PICKT=${TYPES[$((a - 1))]}; return; }
   done
 }
 
@@ -67,10 +69,10 @@ while :; do
   read -r -p "  Choose 1-5, q quits [$DEF]: " a < "$TTY" || exit 1
   case ${a:-$DEF} in
     1) exec "$R/src/cmd/build.sh" ;;
-    2) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" ;;
-    3) choose_vm "Which VM?"; exec "$R/src/cmd/apply.sh" --vm "$PICK" ;;
+    2) choose_vm "Which VM?"; exec "$R/src/cmd/features.sh" features --vm "$PICK" --vm-type "$PICKT" ;;
+    3) choose_vm "Which VM?"; exec "$R/src/cmd/apply.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     4) exec "$R/src/cmd/update.sh" ;;
-    5) choose_vm "Which VM?"; exec "$R/src/cmd/check.sh" --vm "$PICK" ;;
+    5) choose_vm "Which VM?"; exec "$R/src/cmd/check.sh" --vm "$PICK" --vm-type "$PICKT" ;;
     q) exit 0 ;;
   esac
 done

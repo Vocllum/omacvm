@@ -151,7 +151,10 @@ resolve_vm() {
       fi
     fi
   fi
-  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type_in "$VM" <<<"$list") || { echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2; exit 2; }
+  # vm_type_in exits 2 for a name in two apps, and has said so.
+  [[ -n ${TYPE:-} ]] || TYPE=$(vm_type_in "$VM" <<<"$list") || {
+    (( $? == 2 )) || echo "omacvm: no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM'" >&2
+    exit 2; }
   vm_pin "$VM" "$TYPE"
   IP=""
   state=$(awk -F'\t' -v n="$VM" -v t="$TYPE" '$1 == n && $2 == t { print $3; exit }' <<<"$list")
@@ -172,14 +175,31 @@ resolve_vm() {
   fi
 }
 
-# vm_type NAME -> parallels | utm | fusion (replaces mac.sh's, without starting UTM); a
-# name in both: the running one, else a usable one (Parallels first), and an
+# vm_type NAME -> parallels | utm | fusion | app (replaces mac.sh's, without
+# starting UTM). A name in two apps (a Parallels VM and an OmacVM.app VM both
+# called "OmacVM Test") is not guessed: exit 2 with a message, --vm-type picks.
+# A name in one app twice: the running one, else a usable one, and an
 # "invalid" Parallels VM (its files are gone) last.
 vm_type() { vms_list | vm_type_in "$1"; }
 vm_type_in() {   # NAME, vms_list's lines on stdin
+  local list apps
+  list=$(cat)
+  apps=$(awk -F'\t' -v n="$1" '$1 == n && $3 != "invalid" && !seen[$2]++ { print $2 }' <<<"$list")
+  if [[ $(grep -c . <<<"$apps") -gt 1 ]]; then
+    echo "omacvm: there is a VM named '$1' in $(vm_app_names "$apps" and): pass $(sed 's/^/--vm-type /' <<<"$apps" | paste -sd, - | sed 's/,/ or /g') to say which" >&2
+    return 2
+  fi
   awk -F'\t' -v n="$1" '
     $1 == n { if ($3 == "running") run = $2
               else if ($3 == "invalid") bad = $2
-              else if (!any || $2 == "parallels") any = $2 }
-    END { if (run) print run; else if (any) print any; else if (bad) print bad; else exit 1 }'
+              else if (!any) any = $2 }
+    END { if (run) print run; else if (any) print any; else if (bad) print bad; else exit 1 }' <<<"$list"
+}
+vm_app_names() {   # "TYPE\nTYPE..." WORD -> "Parallels WORD OmacVM.app"
+  local t out=""
+  while read -r t; do
+    case $t in parallels) t=Parallels ;; utm) t=UTM ;; fusion) t="VMware Fusion" ;; app) t=OmacVM.app ;; esac
+    out=${out:+$out $2 }$t
+  done <<<"$1"
+  echo "$out"
 }

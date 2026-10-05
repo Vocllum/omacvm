@@ -53,3 +53,6 @@ jobs:
 
       - name: Omanotch offline tests
         run: src/omanotch/mac/test.sh
+
+      - name: Which VM --vm NAME means
+        run: src/tests/vm-names.sh

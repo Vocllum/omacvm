@@ -56,6 +56,7 @@ git ls-files -z '*.py' | xargs -0 python3 -m py_compile
 (cd app/app && swift build)
 src/gestures/mac/build.sh && src/bridge/mac/build.sh
 src/omanotch/mac/test.sh
+src/tests/vm-names.sh
 ```
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`

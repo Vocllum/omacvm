@@ -46,7 +46,11 @@ if [[ -z $IP ]]; then
   IFS=$'\t' read -r VM TYPE IP <<<"$r"
   [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
-[[ -n $TYPE ]] || TYPE=$(vm_type "$VM") || stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"
+if [[ -z $TYPE ]]; then
+  TYPE=$(vm_type "$VM" 2>/dev/null) || {
+    (( $? == 2 )) && stop 2 "there is more than one VM named '$VM': pass --vm-type parallels, utm, fusion or app"
+    stop 1 "no Parallels, UTM, VMware Fusion or OmacVM.app VM named '$VM' (or pass --vm-type and --ip)"; }
+fi
 case $TYPE in
   parallels) HOST=10.211.55.2
              [[ -n $IP ]] || IP=$(vm_ip "$(vm_bundle "$VM")") || stop 1 "no IP for VM '$VM' (is it running?)" ;;
