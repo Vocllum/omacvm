@@ -26,6 +26,7 @@ omanotch:off.sh omanotch_off, also an install queued for the next login; no Oman
 mac-clock:the Mac's format is read only when on (apply); clock.sh off, also a queued clock
 camera:camera/guest/install.sh off on every apply; OmacVM.app does not serve the camera port
 battery:battery/guest/install.sh off on every apply; OmacVM.app does not serve the battery port
+external-brightness:install.sh removes OmacVM's ddcutil on every apply; apply sets the Bridge's external_brightness false, so no DDC (src/tests/external-brightness.sh)
 idle-lock:nothing of it talks to the Mac
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
