@@ -546,8 +546,7 @@ final class Updater: ObservableObject {
             p.arguments = [script.path, mode, bundle.path, new?.path ?? "-", home.path,
                            String(ProcessInfo.processInfo.processIdentifier), token, "--work", work.path]
                 + (quiet ? ["--quiet"] : [])
-            let log = try FileHandle(forWritingTo: logFile)
-            log.seekToEndOfFile()
+            guard let log = appendHandle() else { throw HelperError.io("cannot write \(logFile.path)") }
             p.standardOutput = log
             p.standardError = log
             p.standardInput = FileHandle.nullDevice
@@ -639,10 +638,17 @@ final class Updater: ObservableObject {
 
     func log(_ s: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
-        guard let h = try? FileHandle(forWritingTo: logFile) else { return }
-        h.seekToEndOfFile()
+        guard let h = appendHandle() else { return }
         h.write(Data("\(stamp) app \(currentVersion): \(s)\n".utf8))
         try? h.close()
+    }
+
+    /// The log opened for appending (O_APPEND): the swap script and the
+    /// app it starts write to it at the same time; with a plain offset one
+    /// overwrote the other's line.
+    private func appendHandle() -> FileHandle? {
+        let fd = open(logFile.path, O_WRONLY | O_APPEND | O_CLOEXEC)
+        return fd < 0 ? nil : FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     }
 
     private func trimLog() {
