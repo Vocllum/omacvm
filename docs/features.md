@@ -39,14 +39,32 @@ the media keys. While it is full screen and in front, the Mac's trackpad
 gestures and ⌘ shortcuts go to Omarchy, and macOS's own Spaces swipe is off.
 
 **⌃⌥⌘ Esc** (Control + Option + Command + Escape) in the VM takes you
-straight back to macOS: the trackpad and keys go back to macOS and the app
-you were in before the VM comes to the front, on its own Space. No swipe
-needed, so it works with a mouse too. Press **⌃⌥⌘ Esc** in macOS to go back
-into the VM: its Space comes back, full screen as before, and the VM has the
-trackpad and keys again. Coming back with a swipe or Mission Control works
-as well. If the app from before has quit, you land in Finder. Volume and
-brightness keys always change the Mac, with Omarchy's popup while you are in
-the VM.
+straight back to macOS: the trackpad and keys go back to macOS and the
+monitor under the pointer swipes to the Space beside the VM's, with macOS's
+own animation. Only that monitor changes; the keyboard goes to what it shows.
+No trackpad needed, so it works with a mouse too. Press **⌃⌥⌘ Esc** there
+again to swipe back into the VM: full screen as before, with the trackpad
+and keys. Coming back with a swipe or Mission Control works as well.
+
+OmacVM.app's **Escape combo** setting: *Swipe the monitor under the pointer*
+(the default) or *Swipe all monitors*, every monitor that shows the VM. For
+Parallels, UTM and VMware Fusion: `defaults write org.omacvm.gestures
+EscapeSwipe all` (or `pointer`).
+
+Never stuck: if the swipe cannot be made (the VM's Space has no neighbour,
+or macOS gives no Spaces information) or does not land, the app you were in
+before comes to the front instead, with its Space (Finder if it has quit);
+if macOS refuses that too, the VM's app is hidden, so macOS has the keyboard.
+The combo brings it back.
+
+Media keys while a VM is in front (OmacVM.app full screen or in a window;
+Parallels, UTM and Fusion full screen): volume and mute change the Mac's
+output, with Omarchy's popup. When the output has no volume macOS can set
+(an audio interface such as a Focusrite Scarlett), they change the VM's own
+volume instead, with Omarchy's popup, not macOS's greyed-out panel.
+Play/pause, next and previous go to the VM's players (OmacVM.app). Brightness
+keys change the built-in display, or on a Mac without one the display macOS
+dims itself (LG UltraFine, Studio Display), also with the VM in a window.
 
 <p align="center">
   <img src="images/capture.svg" alt="A MacBook shows Omarchy full screen, marked as captured with a lock. Three fingers swipe and Omarchy changes workspace while macOS's Spaces swipe is blocked; Command+Space opens Omarchy's launcher. Control+Option+Command+Escape opens the lock: Omarchy shows a notification, the trackpad belongs to macOS again and a four-finger swipe moves to the Mac's other Space. Back on the full-screen VM it is captured again. A panel shows where trackpad gestures, Command shortcuts and media keys go in each moment." width="100%">
