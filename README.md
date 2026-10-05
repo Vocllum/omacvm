@@ -22,7 +22,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 |---|---|
 | 🔳 **Omanotch**<br>Omarchy's real bar beside the MacBook's notch, where the VM leaves a black strip. | 🍎 **Standalone app, UTM, VMware Fusion or Parallels**<br>Pick one, OmacVM sets it up the same way. |
 | 🎬 **Hardware video decoding**<br>YouTube 4K on the Mac's media engine, not the CPU. | 💻 **Runs on M1, M2, M3, M4, M5, M6**<br>Adapts to notch, ProMotion, HDR and missing hardware on its own. |
-| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 2.9.0)* | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
+| 🎮 **Real GPU performance**<br>Vulkan, WebGPU and OpenCL in the VM. *(coming with 3.0.0, opt-in)* | 🛠️ **A setup script that fits your needs**<br>Pick the app, CPUs, memory, disk, keyboard, user and every feature; change them later anytime. |
 | 🖥️ **Multiple external monitors**<br>Every display in your macOS arrangement, hardware accelerated. | ⏱️ **Ready in 5 minutes**<br>Download a prebuilt VM, or build it fully yourself. |
 | 👆 **Mac trackpad gestures**<br>2, 3 and 4 finger swipes and pinch zoom, plus optional macOS-like momentum scrolling. | 🎨 **Theme and wallpaper sync**<br>Your Omarchy theme and wallpaper carry over to macOS. |
 | ⌨️ **Mac keys, fully Omarchy**<br>Cmd works as Super, macOS shortcuts stay out of the way. | 🔋 **Optimized for battery**<br>Measured power draw on every route, tuned to stay close to macOS. |
@@ -51,7 +51,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Omanotch | ✅ | ✅ | ✅ | ✅ |
 | Hardware video decoding | ✅ | ❌ | ❌ | ❌ |
 | GPU in desktop and browsers | ✅ | ✅ | ✅ | ✅ |
-| Vulkan, WebGPU, OpenCL | 🔜 2.9.0 | ❌ | ❌ | ❌ |
+| Vulkan, WebGPU, OpenCL | 🔜 3.0.0 | ❌ | ❌ | ❌ |
 | External monitors | ✅ | ❌ | ✅ | ✅ |
 | 120 Hz ProMotion | 🔜 2.9.0 | ✅ | ✅ | ✅ |
 | Trackpad gestures | ✅ | ✅ | ✅ | ✅ |
