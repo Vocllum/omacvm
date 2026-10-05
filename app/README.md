@@ -85,8 +85,14 @@ The app updates itself ([ADR 0033](../docs/adr/0033-app-self-update.md)):
 - *Check for updates once a week* in the window switches it off: no checks,
   no messages. It is the same switch as in OmacVM's control centre
   (`update_checks` in `~/Library/Application Support/omacvm/settings.json`).
-- Files and log: `~/Library/Application Support/OmacVM/Updates/org.omacvm.app/`
-  (`update.log`, `previous/`, `staged/`).
+- When the update goes in because you quit or shut the VM down, the new
+  version starts in the background only to check itself: no window pops up.
+  The next start says it updated.
+- Files and log, per copy of the app:
+  `~/Library/Application Support/OmacVM/Updates/org.omacvm.app/<name>-<hash>/`
+  (`update.log`, `previous/`, `staged/`). An app on another disk keeps
+  `previous/` next to itself in `.omacvm-updates/`, so the swap never copies
+  across disks.
 - Not notarized yet: the app downloads without a quarantine flag, so macOS
   does not ask; the feed signature and the Developer ID check stand in for it.
 

@@ -63,7 +63,7 @@ Updates…" in the app menu always works. A server answer, even a 404, starts
 the week again, so there is no hourly retry while no release has a feed.
 
 **Download and checks.** The zip goes to
-`~/Library/Application Support/OmacVM/Updates/<bundle id>/staged/`: size and
+`~/Library/Application Support/OmacVM/Updates/<bundle id>/<copy>/staged/`: size and
 SHA-256 from the feed, then unpacked: exactly one app, our bundle id, the
 version the feed named, `codesign --verify --deep --strict` with OmacVM's
 Developer ID requirement on the app and on its QEMU (the part with the
@@ -79,7 +79,11 @@ in once nothing runs from the app: when the launcher's VM ends (shut down or
 crashed), on a check every 30 s while the launcher is open (a VM started by
 the CLI, or by a launcher that crashed, has no runner to report its end), and
 at the next launch (the request is kept). A hidden `--update-now` launcher
-does not stay behind to wait.
+does not stay behind to wait. When the waiting update goes in because the
+user quit the app or shut the VM down, the new version only checks that it
+starts and quits again (`--update-quiet`, opened in the background): no
+window the user did not ask for. The next launch says it updated; a failed
+start rolls back without opening anything either.
 
 **Swap and rollback.** `update-swap.sh` runs from a copy outside the bundle
 (bash reads scripts as it runs). It waits for the app to quit, refuses while
@@ -99,6 +103,26 @@ back (app menu: Go Back to X), with the same script and checks. A copy
 installed under its own name keeps it: the new app gets the name and is
 signed again ad hoc, as the installer does (checked before that, as
 downloaded).
+
+**One folder per copy.** Two copies with one bundle id (OmacVM.app and a
+renamed Omarchy.app, a copy on a USB disk) must not share a kept version, a
+download or a swap result: one would delete the other's Go Back version.
+Each copy has its own folder, `Updates/<bundle id>/<name>-<8 hex digits of
+SHA-256 of its real path>/`, with its state as small files (`last-check`,
+`skip`, `install-pending`, `app` = where the copy is) instead of the
+defaults, which the copies share. A moved app starts a new folder; a folder
+whose app has been gone for 30 days is removed by the next copy that starts.
+
+**An app on another disk.** A rename is only atomic, and only a rename, on
+one volume; across volumes `mv` copies and deletes, and a failure halfway
+leaves no app. So `previous/` and `incoming/` live on the app's volume:
+in the copy's folder when that is on the same volume (the usual case,
+/Applications and ~/Library), else in `.omacvm-updates/<copy>/` next to the
+app. The app copies the staged update there (a clone on APFS), checks the
+copy (bundle id, version, Developer ID) and only then hands it to the
+script, which refuses a work folder or a new app on another volume than the
+app ("nothing moved"). The swap is then two renames on that volume, each
+checked and undone on failure.
 
 **Notarization** is not available yet. The app downloads with URLSession,
 which sets no quarantine flag, so Gatekeeper does not assess the new app at
@@ -141,8 +165,11 @@ update path itself is tested with test builds.
   build is signed with the same Developer ID as a release.
 - Tests: `swift run update-tests` (CI) and `app/scripts/dev/self-update-test.sh`
   (this Mac: weekly schedule, switch off, held back while a VM runs and
-  applied after, rollback of two broken builds, one step back, a renamed
-  copy).
+  applied after (quietly after a shutdown), rollback of two broken builds,
+  one step back, a renamed copy with its own folder, an app on another disk
+  (a disk image)). `--render-update-ui DIR` (test builds only) draws the
+  window's update states, the app menu and the alerts into PNGs, light and
+  dark, without showing a window.
 - Not covered: delta updates (a full zip, about 13 MB, at most once a week),
   an install that needs an administrator (the app only updates where it can
   write: the folder and the bundle itself, which the swap renames; a copy
