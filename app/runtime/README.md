@@ -118,8 +118,9 @@ commit 82927e9. Changes here:
   work for it (2D updates, new scanouts, the extra outputs' windows) and comes
   back with the next. The main window's GL frames are pushed and never needed
   it, so an idle desktop (or a blinking cursor) no longer wakes QEMU 60-120
-  times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. Numbers:
-  the idle-power PR
+  times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. The build
+  tests the rate logic, taken from the patched `ui/cocoa.m`
+  (`Tests/display/test-idle-refresh.c`). Numbers: the idle-power PR
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

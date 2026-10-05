@@ -20,10 +20,11 @@ Omarchy desktop, also with the window minimised or hidden.
 
 Upstream: not sent (QEMU's VNC server slows its own refresh the same way;
 the Cocoa GL present path and OmacVM's extra outputs are OmacVM patches).
-Test: idle wakeups and CPU of QEMU per process (proc_pid_rusage) before and
-after, window shown and minimised (numbers in the idle-power PR); typing,
-the cursor, a console switch and a video still update at once (notes:
-tracks/idle-power). Applies after qemu-cocoa-gl-present-color.patch.
+Test: Tests/display/test-idle-refresh.c runs the rate logic, taken from the
+patched ui/cocoa.m, in every build. Idle wakeups and CPU of QEMU per process
+(proc_pid_rusage) before and after, window shown and minimised (numbers in
+the idle-power PR); a notification and a console switch after idle still
+show at once. Applies after qemu-cocoa-gl-present-color.patch.
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -99,6 +99,8 @@ static void cocoa_switch(DisplayChangeListener *dcl,
