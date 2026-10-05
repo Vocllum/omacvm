@@ -563,6 +563,10 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-align
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-on-flush.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-iosurface.patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subregion.patch"
+# Frames on the display's refresh: one per refresh, no judder.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-vsync.patch"
+# Colour-space tagged frames; 10-bit scanouts in half float; HDR (PQ) with EDR.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-color.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
