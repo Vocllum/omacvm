@@ -489,7 +489,7 @@ final class Server {
     inet_pton(AF_INET, listenAddr, &sin.sin_addr)
     let ok = withUnsafePointer(to: &sin) {
       $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
-    } == 0 && listen(fd, 16) == 0
+    } == 0 && listen(fd, SOMAXCONN) == 0   // a burst from one guest must not drop the others' connections
     guard ok else {
       log("listener: cannot listen on \(listenAddr):\(listenPort): \(String(cString: strerror(errno)))")
       close(fd); return
