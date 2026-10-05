@@ -21,7 +21,10 @@
 # runs this is added) that are QEMU signed with OmacVM's Developer ID (team
 # 722686Y34B), or, for an app signed ad hoc (built from source), exactly that
 # app's QEMU (its cdhash: install again after rebuilding the app).
-# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask for).
+# OMACVM_ADMIN_PROMPT=gui: macOS's own password dialog instead of sudo in a
+# terminal (OmacVM.app's Fast Network button runs this script that way).
+# Exit codes: 0 done, 1 failed, 2 usage, 3 needs a person (no password to ask
+# for), 4 the person cancelled the password dialog.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 LABEL=org.omacvm.netd
@@ -70,8 +73,9 @@ installed_req() {   # the requirement the installed daemon runs with
   /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST" 2>/dev/null
 }
 installed_users() {   # the uids it takes connections from, one per line
-  plutil -extract ProgramArguments json -o - "$PLIST" 2>/dev/null |
-    python3 -c 'import json, sys; a = json.load(sys.stdin); print("\n".join(a[i + 1] for i in range(len(a) - 1) if a[i] == "--user"))' 2>/dev/null
+  # (no python3: on a Mac without Xcode's tools it asks to install them)
+  /usr/libexec/PlistBuddy -c 'Print :ProgramArguments' "$PLIST" 2>/dev/null |
+    awk '{ sub(/^[ \t]+/, "") } u && /^[0-9]+$/ { print } { u = $0 == "--user" }'
 }
 
 status() {
@@ -101,7 +105,27 @@ stopped() {
   [[ $b == "$boot" && $f =~ ^[0-9]+$ ]] && (( f >= MAX_FAILURES ))
 }
 
-as_root() {   # SCRIPT ARGS...: one sudo for all of it
+# One argument in single quotes for /bin/sh.
+shq() { local q="'\\''"; printf "'%s'" "${1//\'/$q}"; }
+# SCRIPT ARGS... as one /bin/sh command line: bash -c SCRIPT ARGS (test.sh runs it).
+root_cmd() { local cmd="/bin/bash -c" a; for a in "$@"; do cmd+=" $(shq "$a")"; done; printf '%s' "$cmd"; }
+as_root() {   # SCRIPT ARGS...: one sudo (or one password dialog) for all of it
+  if [[ ${OMACVM_ADMIN_PROMPT:-} == gui ]]; then
+    local out rc=0
+    # The command goes in as an argument, never into AppleScript's text.
+    out=$(/usr/bin/osascript - "$(root_cmd "$@")" 2>&1 <<'AS'
+on run argv
+  do shell script (item 1 of argv) with prompt "OmacVM wants to change its fast network service (omacvm-netd)." with administrator privileges
+end run
+AS
+) || rc=$?
+    if (( rc )); then
+      [[ $out == *"-128"* ]] && { echo "cancelled: the fast network was not changed" >&2; exit 4; }
+      printf '%s\n' "$out" >&2; exit 1
+    fi
+    [[ -z $out ]] || printf '%s\n' "$out" >&2
+    return 0
+  fi
   if ! sudo -n true 2>/dev/null; then
     { : < /dev/tty; } 2>/dev/null || { echo "the fast network needs an administrator's password (sudo), and there is no terminal to ask in" >&2; exit 3; }
     echo "==> the fast network is a system service: macOS asks for your password (sudo)" >&2
@@ -202,7 +226,7 @@ if h=$(bundled "$APP"); then
     echo "$h is not signed with OmacVM's Developer ID" >&2; exit 1
   fi
 else
-  xcrun -f clang >/dev/null 2>&1 || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
+  { xcode-select -p >/dev/null 2>&1 && xcrun -f clang >/dev/null 2>&1; } || { echo "this OmacVM.app has no fast network service built in, and building it here needs Xcode's Command Line Tools: xcode-select --install (or update the app)" >&2; exit 3; }
   xcrun clang -O2 -Wall -mmacosx-version-min=14.0 -DNETD_VERSION="\"$VERSION\"" -o "$T/omacvm-netd" "$HERE/omacvm-netd.c" \
     -framework vmnet -framework Security -framework CoreFoundation -lbsm
 fi

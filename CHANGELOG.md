@@ -66,6 +66,10 @@ in more words.
   VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
   old hidden folder or another folder are hidden from it, not deleted; 3.0
   finds them again.
+- Fast network (OmacVM.app, experimental): a button in the app turns it on
+  and off (Fast network › Turn On…, one password dialog), and Omanotch
+  works over it. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
+  changes.
 
 ## 2.9.0 (unreleased)
 

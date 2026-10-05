@@ -89,6 +89,11 @@ notch_had=$(sed -n 's/^OMACVM_FEATURE_omanotch=//p' <<<"$probe" | tail -1)   # O
 if [[ -z $had ]] || grep -q '^OMACVM_PREBUILT_FRESH=1' <<<"$probe"; then
   for ((i = 0; i < ${#FN[@]}; i++)); do FV[$i]=$(feature_default "$i"); done
 fi
+# OmacVM.app: the VM's fast-network file is the switch (the app's button sets
+# it too), so an apply without --feature fast-network keeps what it says.
+if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
+  [[ -s $d/fast-network ]] && FV[$(feature_index fast-network)]=on || FV[$(feature_index fast-network)]=off
+fi
 for ((k = 0; k < ${#SETN[@]}; k++)); do FV[$(feature_index "${SETN[$k]}")]=${SETV[$k]}; done
 before=("${FV[@]}"); features_fix
 for ((i = 0; i < ${#FN[@]}; i++)); do

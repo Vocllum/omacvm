@@ -401,7 +401,7 @@ final class Controller: NSObject, NSApplicationDelegate, StripInputDelegate {
         } else if text.hasPrefix("hello ") {
             let hv = String(text.dropFirst("hello ".count))
             // An app that is not a VM app here (vmOwners) could be any of them.
-            // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1.
+            // OmacVM.app's VMs (QEMU too) come in on 127.0.0.1 or its fast network.
             guest.owner = link.viaOmacVMApp(guest.id) ? OmacVMApp.owner
                 : GuestPicker.owner(hello: hv).flatMap { settings.vmOwners.contains($0) ? $0 : nil }
             Log.info("guest \(guest.id) runs in \(hv) (\(guest.owner ?? "any VM app"))")

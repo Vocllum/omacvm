@@ -299,10 +299,11 @@ app)
   # Fast network (vmnet through omacvm-netd on the Mac), else QEMU's user network.
   if [[ $GW == 192.168.77.1 ]]; then
     a=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ print $4; exit }')
-    if [[ $FAST_NET == on ]]; then ok "fast network" "vmnet, ${a%/*}"
-    else bad "fast network" "the VM is on vmnet, but the feature is off here: omacvm enable fast-network"; fi
+    # On here or turned on with the app's button (no apply since then).
+    ok "fast network" "vmnet, ${a%/*}"
   elif [[ $FAST_NET == on ]]; then
-    bad "fast network" "on, but the VM got QEMU's user network (the app says why: omacvm check on the Mac)"
+    # The app's button may have turned it off since; the Mac's check knows.
+    skip "fast network" "not this start: QEMU's user network (omacvm check on the Mac says why)"
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
@@ -448,7 +449,7 @@ elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | g
   if [[ -z $(at NOTCH) || -z $(at "$b") ]]; then skip "notch display" "no NOTCH or $b output now"
   elif [[ $(at NOTCH) != "$(at "$b")" ]]; then bad "notch display" "NOTCH is not on $b, the built-in display (journalctl --user -u notchcast)"
   elif [[ $parked == true && $pscreen != "$b" ]]; then bad "notch display" "the bar on $pscreen is parked, not $b's: two bars on the MacBook"
-  elif beat=$(tr -cd 0-9 < "$H/.local/state/omanotch/beat" 2>/dev/null) &&
+  elif beat=$(tr -cd 0-9 2>/dev/null < "$H/.local/state/omanotch/beat") &&
        [[ $parked != true && -n $beat && $(cut -d' ' -f1 "$H/.local/state/omanotch/park" 2>/dev/null) == 1 ]] &&
        (( $(date +%s%3N) - beat < 15000 )); then
     bad "notch display" "the strip shows the bar but $b's own bar is not parked: two bars on the MacBook (omarchy-restart-shell)"

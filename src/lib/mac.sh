@@ -62,6 +62,12 @@ omanotch_serves_app() {
   [[ -d $b ]] || return 2
   grep -aqF /Contents/Resources/runtime/bin/OmacVM "$b"/* 2>/dev/null || return 1
 }
+# ... and on the app's fast network (192.168.77.1): 0 it does, 1 too old, 2 not installed.
+omanotch_serves_fast_network() {
+  local b=$HOME/Applications/Omanotch.app/Contents/MacOS
+  [[ -d $b ]] || return 2
+  grep -aqF "on OmacVM.app's fast network" "$b"/* 2>/dev/null || return 1
+}
 
 wait_ssh() {   # <ip> [seconds]: 3 when the VM's host key changed
   # By the clock: each try can take seconds of its own (connect and key scan).
