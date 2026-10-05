@@ -3,6 +3,12 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
+  in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
+  first pictures it came out garbled.
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
