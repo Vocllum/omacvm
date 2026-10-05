@@ -9,7 +9,8 @@ the Mac-side script of a test run calls it over SSH and checks the Mac too.
   vm_e2e.py updates [check]        the update list (c first with "check"), and the silence switch state
   vm_e2e.py checks on|off          s on the updates screen until weekly checks are on or off
   vm_e2e.py install                u (install the update, yes to the question), until the job ends
-                                   (no question and no job: "asked": false, "job_started": false)
+                                   (no question and no job: "asked": false, "job_started": false);
+                                   the banners shown while it ran
 Prints one JSON object."""
 import asyncio
 import json
@@ -68,10 +69,13 @@ async def main(argv):
             started = await settle(pilot, lambda: bool(app.c.jobs), 20)
             out["job_started"] = started
             out["notices"] = notes_seen
-            seen_busy, notes = False, []
+            seen_busy, notes, banners = False, [], []
 
             def finished():
                 nonlocal seen_busy
+                b = app.banner()
+                if b and (not banners or banners[-1] != b):
+                    banners.append(b)
                 for r in app.rows:
                     if r.status.value == "busy":
                         seen_busy = True
@@ -85,8 +89,9 @@ async def main(argv):
             j = list(app.c.jobs.values())[-1] if app.c.jobs else None
             out["busy_shown"] = seen_busy
             out["busy_notes"] = notes
-            out["job"] = {"state": j.state, "text": j.text, "steps": j.step, "of": j.of,
-                          "lines": app.c.job_lines.get(j.id, [])[-12:]} if j else None
+            out["banners_while_running"] = banners
+            out["job"] = {"state": j.state, "text": j.text, "steps": j.step, "of": j.of, "failed_part": j.failed_part,
+                          "mac_omacvm": j.mac_omacvm, "lines": app.c.job_lines.get(j.id, [])[-12:]} if j else None
             out["banner"] = app.banner()
             out["after"] = [row(app, name).on, row(app, name).status.value, row(app, name).note]
         elif cmd == "updates":
@@ -97,6 +102,7 @@ async def main(argv):
                 await settle(pilot, lambda: not any(w.group == "updates" and w.is_running for w in app.workers), 60)
                 await pilot.press("escape")
             out["updates"] = app.c.updates
+            out["offered"] = app.c.update_offered()
             out["changed"] = [r.feature.name for r in app.rows if r.update]
         elif cmd == "checks":
             want = argv[1] == "on"
