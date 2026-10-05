@@ -425,11 +425,12 @@ final class Control {
     let text = state == "running" ? (step?.text ?? last ?? "starting")
       : state == "done" ? "done" : (failed?.text ?? lines.last ?? "failed")
     return ["id": j.id, "action": j.action, "features": j.features, "state": state, "step": step?.n ?? 0, "of": step?.of ?? 0,
-            "text": text, "failed_part": failed?.part ?? "", "mac_omacvm": j.action == "update" ? macVersionNow() : "",
+            "text": text, "failed_part": failed?.part ?? "", "mac_omacvm": macVersionNow(),
             "rc": rc.map { Int($0) } ?? NSNull(), "lines": Array(lines.suffix(20))]
   }
 
-  /// The Mac's OmacVM now (an update job moves it): for the job's text.
+  /// The Mac's OmacVM now (an update job moves it): the VM tells from it
+  /// whether it went back to an older OmacVM than the Mac's.
   private func macVersionNow() -> String {
     guard case .success(let cli) = controlCLI() else { return "" }
     return macVersion(cli)

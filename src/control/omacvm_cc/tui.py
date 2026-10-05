@@ -674,13 +674,21 @@ class ControlCentre(App):
                  "update": "u tries again"}.get(action, "")
         titles = {f.name: f.title for f in self.c.local.features}
         part = titles.get(job.failed_part, "")
+        if part.startswith("The "):
+            part = "t" + part[1:]   # mid-sentence
         failed = job.text.strip().rstrip(".") if job.text and "rolled back" not in job.text else ""
         head = f"{what}: {failed}." if failed else f"{what}: failed."
-        if job.state == "rolled-back" and action == "update":
+        vm = self.c.local.version
+        mac_newer = bool(job.mac_omacvm) and job.mac_omacvm != vm
+        if job.state == "rolled-back" and (action == "update" or mac_newer):
+            # The Mac stays on its (newer) OmacVM; turning the failed part off
+            # or repairing it still runs (the Bridge allows both).
             mac = f"OmacVM {job.mac_omacvm}" if job.mac_omacvm else "the new OmacVM"
-            way = (f"Turn {part} off (space) or repair it (r) to go on, or u tries again"
-                   if part else "u tries again")
-            return (f"{head} The Mac keeps {mac}; this VM went back to OmacVM {self.c.local.version} and its features. "
+            if action == "update":
+                way = f"Turn {part} off (space) or repair it (r) to go on, or u tries again" if part else "u tries again"
+            else:
+                way = f"Turn {part} off (space) to go on without it, or {again}" if part else again[:1].upper() + again[1:]
+            return (f"{head} The Mac keeps {mac}; this VM went back to OmacVM {vm} and its features. "
                     f"{way}; on the Mac: {self.on_the_mac('apply')}. ! reports the problem.")
         if job.state == "rolled-back":
             return f"{head} This VM went back to its features from before ({again}; ! reports the problem)."

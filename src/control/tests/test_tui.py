@@ -418,7 +418,7 @@ def test_failed_update_says_the_mac_kept_it_and_the_way_out(world, monkeypatch, 
             r = a.last_result
             assert r.startswith("Update: camera was not set up. The Mac keeps OmacVM 2.9.1; "
                                 "this VM went back to OmacVM 2.7.0 and its features."), r
-            assert "Turn The Mac's camera off (space) or repair it (r)" in r
+            assert "Turn the Mac's camera off (space) or repair it (r)" in r
             assert "omacvm apply --vm 'My Omarchy'" in r
     asyncio.run(go())
 
@@ -494,4 +494,26 @@ def test_a_release_older_than_the_vm_shows_nothing(world):
             from textual.widgets import Static
             body = str(a.screen.query_one("#body", Static).render())
             assert "Up to date" in body and "→" not in body
+    asyncio.run(go())
+
+
+def test_repair_that_went_back_on_an_older_vm(world):
+    """A repair while the Mac is newer installs all of the Mac's OmacVM; when
+    it goes back, the text says the Mac keeps its version."""
+    world.job_end = ("rolled-back", "The Mac's camera was not set up")
+    world.job_extra = {"failed_part": "camera", "mac_omacvm": "2.9.1"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("camera"))
+            await pilot.press("r")
+            assert await settle(pilot, lambda: bool(a.last_result))
+            assert a.last_result == ("Repair The Mac's camera: The Mac's camera was not set up. The Mac keeps OmacVM 2.9.1; "
+                                     "this VM went back to OmacVM 2.7.0 and its features. Turn the Mac's camera off (space) "
+                                     "to go on without it, or r tries again; on the Mac: omacvm apply --vm NAME. "
+                                     "! reports the problem."), a.last_result
     asyncio.run(go())
