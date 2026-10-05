@@ -71,3 +71,6 @@ jobs:
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
+
+      - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
+        run: src/tests/app-storage.sh
