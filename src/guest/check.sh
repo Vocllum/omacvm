@@ -320,6 +320,16 @@ app)
     "") skip "GPU" "no glxinfo/eglinfo to ask (mesa-utils)" ;;
     *) bad "GPU" "software rendering: $r" ;;
   esac
+  # Vulkan (Venus), with the app's Vulkan switch on: the driver must size GPU
+  # memory to the Mac's pages, or every Vulkan app fails to start.
+  vk=$(/usr/local/share/omacvm/app/guest/venus/vulkan-virtio.sh --status 2>/dev/null)
+  case ${vk%% *} in
+    ok) if v=$(vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -m1 Venus); then ok "Vulkan (Venus)" "$v, ${vk#* }"
+        else bad "Vulkan (Venus)" "${vk#* }, but vulkaninfo finds no Venus device"; fi ;;
+    needed) bad "Vulkan (Venus)" "${vk#* }: omacvm apply" ;;
+    no-venus|no-pages) skip "Vulkan (Venus)" "${vk#* }" ;;
+    *) skip "Vulkan (Venus)" "not known (an OmacVM from before this check: omacvm apply)" ;;
+  esac
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
   # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).

@@ -5,6 +5,11 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
+- Vulkan in the VM (the hidden `venus` switch) works on a stock Omarchy:
+  `omacvm apply` builds Mesa 26.2.4's Venus driver as Arch's `vulkan-virtio`
+  package while Arch Linux ARM has 26.2.3, whose driver does not size GPU
+  memory to the Mac's 16 KiB pages (every Vulkan app failed with
+  `ERROR_OUT_OF_HOST_MEMORY`). `omacvm check` has a "Vulkan (Venus)" row.
 - External display brightness (feature `external-brightness`, on): with the
   VM in front on an external display, the Mac's brightness keys set that
   display over DDC/CI, in macOS's 16 steps (Option: 64), with Omarchy's
