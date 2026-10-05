@@ -16,8 +16,9 @@ in more words.
   picture is no longer squeezed and the pointer lands where it is on the Mac
   (it was up to 5 points off at the bottom).
 - OmacVM.app in full screen: the Dock no longer comes up at the edge of an
-  external display, and macOS hot corners no longer fire from inside the VM
-  (the pointer stops 3 points short of a screen corner).
+  external display. Near a screen corner the Mac's cursor is held 3 points
+  short of it; whether that keeps macOS hot corners from firing is not
+  confirmed yet (in tests with simulated mouse motion they still fired).
 - Cmd-drag moves an Omarchy window from one Mac display to another; a held
   modifier key is no longer let go when the pointer crosses to another
   display's window.
