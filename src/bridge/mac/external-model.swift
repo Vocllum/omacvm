@@ -94,14 +94,20 @@ enum DisplayPick {
 
   /// A guest output's box from OmacVM.app's layout (points; the layout's
   /// top-left corner is 0,0) -> the display it is on, among the displays that
-  /// show an OmacVM.app window. The layout keeps the Mac's arrangement, so the
-  /// box's centre, moved by the top-left corner of those displays, lands on
-  /// its display (the notch strip shifts it by a few dozen points at most).
+  /// show an OmacVM.app window. First by size: the output's window is as wide
+  /// as the box and at most a title bar or the notch strip taller (another
+  /// VM's windows rarely match). Several left: the layout keeps the Mac's
+  /// arrangement, so the box's centre, moved by the top-left corner of their
+  /// displays, lands on its display (the notch strip shifts it a little).
   static func forBox(_ box: CGRect, windows: [CGRect], displays: [MacDisplay]) -> MacDisplay? {
-    var shown: [MacDisplay] = []
-    for w in windows {
-      if let d = home(w, displays), !shown.contains(d) { shown.append(d) }
+    func homes(_ ws: [CGRect]) -> [MacDisplay] {
+      var out: [MacDisplay] = []
+      for w in ws { if let d = home(w, displays), !out.contains(d) { out.append(d) } }
+      return out
     }
+    let sized = homes(windows.filter { abs($0.width - box.width) < 2 && (-2...60).contains($0.height - box.height) })
+    if sized.count == 1 { return sized[0] }
+    let shown = sized.isEmpty ? homes(windows) : sized
     if shown.count == 1 { return shown[0] }
     guard let minX = shown.map({ $0.bounds.minX }).min(), let minY = shown.map({ $0.bounds.minY }).min() else { return nil }
     let p = CGPoint(x: minX + box.midX, y: minY + box.midY)
