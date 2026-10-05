@@ -63,6 +63,8 @@ src/tests/gestures-off.sh
 src/tests/app-paths.sh
 src/tests/app-notch.sh
 src/tests/bench-docs.sh
+python3 src/app/guest/tests/test_omacvm_displays.py
+python3 src/app/guest/tests/test_idle_waits.py
 ```
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`

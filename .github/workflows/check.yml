@@ -97,3 +97,8 @@ jobs:
 
       - name: Benchmark chart and the pages that quote it agree
         run: src/tests/bench-docs.sh
+
+      - name: Guest agents offline tests (desktop check, idle waits)
+        run: |
+          python3 src/app/guest/tests/test_omacvm_displays.py
+          python3 src/app/guest/tests/test_idle_waits.py
