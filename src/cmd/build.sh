@@ -156,7 +156,7 @@ if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels, utm, fusion or app"
   # OmacVM.app first: the README recommends it.
   ui_select pick "Where should Omarchy run?" 0 \
-    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · one display" \
+    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · every display" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
     "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it" \
     "Parallels Desktop|near-native speed, every display · paid"
