@@ -166,6 +166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+// `OmacVM --vms-folder`: print where the VMs are and quit (no window), for
+// `omacvm check` and the tests.
+if CommandLine.arguments.dropFirst().first == "--vms-folder" {
+    print(Paths.vmsRoot.path)
+    exit(0)
+}
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()
