@@ -3,6 +3,16 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased (after 2.9.0)
+
+- OmacVM.app can make its VM from a prebuilt image, like the other apps:
+  "Download a prebuilt VM" in the app's setup, or
+  `omacvm build --vm-type app --prebuilt`. The parts are checked against
+  the release's SHA-256 sums; the first boot (without a window) sets up your
+  user, password, keyboard and timezone from a seed that is deleted after.
+  The images come with a release after 2.9.0; until then the app builds its
+  VM as before. See [docs/prebuilt.md](docs/prebuilt.md).
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
