@@ -109,9 +109,10 @@ a manifest that makes Macs check out another commit (0032), where the release
 key is the only guard. Rotation: the release that brings a new public key is
 signed with the old one. A lost key means one manual update for everyone.
 
-**Release channel.** A release is published as a pre-release first and tried
-with `OMACVM_APPCAST_URL` pointing at its feed; installed apps see it only
-once it is marked latest.
+**Release channel.** A release is published as a pre-release first and its
+zip tried by hand; installed apps see it only once it is marked latest.
+Release builds ignore `OMACVM_APPCAST_URL` (see test hooks below), so the
+update path itself is tested with test builds.
 
 ## Consequences
 
@@ -122,8 +123,11 @@ once it is marked latest.
   rollback). Both paths keep working side by side.
 - Test hooks: `OMACVM_APPCAST_URL`, `OMACVM_APPCAST_KEY` (a test key),
   `OMACVM_SETTINGS_DIR`, `OMACVM_COCOA_HIDDEN`; `build-app.sh --id` makes test
-  builds that share nothing with an installed OmacVM. A test key can only
-  ever install builds that carry OmacVM's Developer ID.
+  builds that share nothing with an installed OmacVM. Only test builds read
+  the first three: a build with the release id `org.omacvm.app` ignores them
+  and `update-swap.sh` does not pass them on to it. Otherwise a process that
+  can `launchctl setenv` could point the app at its own feed, and every local
+  build is signed with the same Developer ID as a release.
 - Tests: `swift run update-tests` (CI) and `app/scripts/dev/self-update-test.sh`
   (this Mac: weekly schedule, switch off, held back while a VM runs and
   applied after, rollback of two broken builds, one step back, a renamed

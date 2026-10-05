@@ -87,6 +87,16 @@ if case .success(let a) = Appcast.verified(feed: good, signature: sign(good), pu
     expect(UpdatePolicy.offer(a, current: v("2.7.0"), skipped: nil, os: v("14.6")) == .needsMacOS("15.0"), "too old a macOS: not offered")
 }
 
+// Test hooks: only in test builds
+let hookEnv = ["OMACVM_APPCAST_URL": "http://127.0.0.1:1/feed.json", "OMACVM_APPCAST_KEY": ""]
+expect(!TestHooks.allowed(bundleID: "org.omacvm.app"), "release build: no test hooks")
+expect(!TestHooks.allowed(bundleID: nil) && !TestHooks.allowed(bundleID: ""), "no bundle id: no test hooks")
+expect(TestHooks.allowed(bundleID: "org.omacvm.sutest"), "test build: test hooks")
+expect(TestHooks.value("OMACVM_APPCAST_URL", bundleID: "org.omacvm.app", environment: hookEnv) == nil, "release build: feed URL hook ignored")
+expect(TestHooks.value("OMACVM_APPCAST_URL", bundleID: "org.omacvm.sutest", environment: hookEnv) == "http://127.0.0.1:1/feed.json",
+       "test build: feed URL hook read")
+expect(TestHooks.value("OMACVM_APPCAST_KEY", bundleID: "org.omacvm.sutest", environment: hookEnv) == nil, "empty hook: unset")
+
 // The shared switch (control centre and app)
 let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("omacvm-update-tests-\(getpid())")
 try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)

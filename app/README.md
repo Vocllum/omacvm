@@ -61,8 +61,9 @@ release `v<version>`: `omacvm build --vm-type app` and `omacvm update`
 download them from there. With a release key (`../src/lib/release-key.pub`),
 `package-release.sh` also writes the update feed `OmacVM-appcast.json` and
 its `.sig` (`scripts/appcast.sh`); upload them too. Publish as a pre-release
-first and try the update with `OMACVM_APPCAST_URL` set to its feed;
-installed apps see it once the release is marked latest.
+first and try its zip; installed apps see it once the release is marked
+latest. (Release builds ignore `OMACVM_APPCAST_URL`; the update itself is
+tested with `scripts/dev/self-update-test.sh`.)
 
 ## Updates
 

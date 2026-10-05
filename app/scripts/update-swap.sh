@@ -27,9 +27,13 @@ version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/C
 # Processes started from inside the bundle (its QEMU, the launcher).
 running_from() { ps -axww -o pid=,args= | grep -F -- "$1/Contents/" | grep -v -e grep -e update-swap.sh | awk '{ print $1 }'; }
 
-# The test hooks travel with the app across the restart.
+# The test hooks travel with a test build across the restart; a release
+# build (org.omacvm.app) ignores them, so they are not passed on to it.
+HOOKS=(OMACVM_COCOA_HIDDEN)
+APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null)
+[[ -z $APP_ID || $APP_ID == org.omacvm.app ]] || HOOKS+=(OMACVM_APPCAST_URL OMACVM_APPCAST_KEY OMACVM_SETTINGS_DIR)
 OPEN_ENV=()
-for v in OMACVM_APPCAST_URL OMACVM_APPCAST_KEY OMACVM_SETTINGS_DIR OMACVM_COCOA_HIDDEN; do
+for v in "${HOOKS[@]}"; do
   [[ -n ${!v:-} ]] && OPEN_ENV+=(--env "$v=${!v}")
 done
 launch() { open -n ${OPEN_ENV[@]+"${OPEN_ENV[@]}"} "$APP" --args "$@"; }

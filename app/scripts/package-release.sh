@@ -39,9 +39,8 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 printf '==> %s (%s)\n' "$ZIP" "$(du -h "$ZIP" | cut -f1)"
 printf '==> %s\n' "$ZIP.sha256"
 
-# The update feed. Publish the release as a pre-release first and try the
-# update with OMACVM_APPCAST_URL=<the pre-release's OmacVM-appcast.json>;
-# installed apps see it only once the release is marked latest.
+# The update feed. Publish the release as a pre-release first and try its
+# zip; installed apps see it only once the release is marked latest.
 if [[ -f $REPO/src/lib/release-key.pub ]]; then
   "$ROOT/scripts/appcast.sh"
 else

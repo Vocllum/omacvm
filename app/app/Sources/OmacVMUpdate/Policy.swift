@@ -28,6 +28,26 @@ public enum UpdatePolicy {
     }
 }
 
+/// The update's test hooks: OMACVM_APPCAST_URL, OMACVM_APPCAST_KEY and
+/// OMACVM_SETTINGS_DIR. Only test builds (build-app.sh --id) read them; a
+/// release build (org.omacvm.app) ignores them, so `launchctl setenv` cannot
+/// point it at another feed or key.
+public enum TestHooks {
+    public static let releaseID = "org.omacvm.app"
+
+    public static func allowed(bundleID: String?) -> Bool {
+        guard let id = bundleID, !id.isEmpty else { return false }
+        return id != releaseID
+    }
+
+    /// The hook's value in a test build; nil in a release build or when unset.
+    public static func value(_ name: String, bundleID: String?,
+                             environment: [String: String] = ProcessInfo.processInfo.environment) -> String? {
+        guard allowed(bundleID: bundleID), let v = environment[name], !v.isEmpty else { return nil }
+        return v
+    }
+}
+
 /// The one switch for update checks, shared with OmacVM's control centre
 /// (the Bridge reads and writes the same file): `update_checks` in
 /// ~/Library/Application Support/omacvm/settings.json. Missing or not a
@@ -37,9 +57,9 @@ public struct SharedSettings: Sendable {
 
     public init(directory: URL) { file = directory.appendingPathComponent("settings.json") }
 
-    /// OMACVM_SETTINGS_DIR (tests) or ~/Library/Application Support/omacvm.
+    /// OMACVM_SETTINGS_DIR (test builds only) or ~/Library/Application Support/omacvm.
     public static var standard: SharedSettings {
-        if let d = ProcessInfo.processInfo.environment["OMACVM_SETTINGS_DIR"], !d.isEmpty {
+        if let d = TestHooks.value("OMACVM_SETTINGS_DIR", bundleID: Bundle.main.bundleIdentifier) {
             return SharedSettings(directory: URL(fileURLWithPath: d))
         }
         return SharedSettings(directory: FileManager.default.homeDirectoryForCurrentUser

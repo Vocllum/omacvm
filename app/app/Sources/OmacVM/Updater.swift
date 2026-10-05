@@ -20,7 +20,8 @@ import OmacVMUpdate
 ///
 /// Its files: ~/Library/Application Support/OmacVM/Updates/<bundle id>/
 /// (staged/, previous/, update.log). Tests: OMACVM_APPCAST_URL,
-/// OMACVM_APPCAST_KEY (a test key), OMACVM_SETTINGS_DIR.
+/// OMACVM_APPCAST_KEY (a test key), OMACVM_SETTINGS_DIR; only test builds
+/// (another bundle id) read them (TestHooks).
 @MainActor
 final class Updater: ObservableObject {
     static let shared = Updater()
@@ -65,14 +66,14 @@ final class Updater: ObservableObject {
     }
 
     var feedURL: URL {
-        let env = ProcessInfo.processInfo.environment["OMACVM_APPCAST_URL"]
-        return URL(string: env?.isEmpty == false ? env! : Self.defaultFeed)!
+        let hook = TestHooks.value("OMACVM_APPCAST_URL", bundleID: bundleID).flatMap(URL.init(string:))
+        return hook ?? URL(string: Self.defaultFeed)!
     }
 
     /// The release key's public half: src/lib/release-key.pub in the app
-    /// (inside the signed bundle), or OMACVM_APPCAST_KEY for tests.
+    /// (inside the signed bundle), or OMACVM_APPCAST_KEY in a test build.
     var publicKey: String? {
-        if let k = ProcessInfo.processInfo.environment["OMACVM_APPCAST_KEY"], !k.isEmpty { return k }
+        if let k = TestHooks.value("OMACVM_APPCAST_KEY", bundleID: bundleID) { return k }
         let url = Paths.resources.appendingPathComponent(Mac.omacvmSrc + "/lib/release-key.pub")
         let k = (try? String(contentsOf: url, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
         return k?.isEmpty == false ? k : nil
