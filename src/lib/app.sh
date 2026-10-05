@@ -5,6 +5,8 @@
 #   app_list            NAME<TAB>app<TAB>running|stopped, one line per VM
 #   app_vms_root        the folder with the VM folders (~/OmacVM by default)
 #   app_dir NAME        the VM's folder
+#   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
+#   app_links_stale DIR FEATURES on|off  links that differ from this start of the VM
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address)
 #   app_any_fast_network  one of the VMs has the fast network on
 #   app_start NAME      start it in the app (its window opens)
@@ -67,6 +69,31 @@ app_list() {
     n=$(app_env "$d" NAME); [[ -n $n ]] || n=$(basename "$d")
     printf '%s\tapp\t%s\n' "$n" "$(app_running_dir "$d" && echo running || echo stopped)"
   done
+}
+
+# app_features_write DIR "bridge=on gestures=off ...": the VM's features for
+# the app, which reads them at each start of the VM (MacLinks.swift: a
+# feature that is off gets nothing of the Mac). Status 0 if they changed.
+app_features_write() {
+  [[ $(cat "$1/features" 2>/dev/null) != "$2" ]] || return 1
+  printf '%s\n' "$2" > "$1/features"
+}
+
+# app_links_stale DIR "bridge=on gestures=off ..." on|off: the Mac links the
+# app took at this start of the VM (its "Mac links" line in qemu.log) against
+# the features. "on": the features that are on but closed to the VM until its
+# next start; "off": the ones that are off but still served. As "Bridge,
+# camera"; nothing for an app from before the line. A feature not named is on.
+app_links_stale() {
+  local l x k n v out=""
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$1/logs/qemu.log" 2>/dev/null | tail -1)
+  [[ -n $l ]] || return 0
+  for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
+    k=${x%%:*} n=${x#*:} v=on
+    [[ " $2 " == *" $k=off "* ]] && v=off
+    [[ $v == "$3" && ", $l, " != *", $n $3, "* ]] && out+="${out:+, }$n"
+  done
+  echo "$out"
 }
 
 app_dir() {

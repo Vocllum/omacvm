@@ -91,3 +91,6 @@ jobs:
 
       - name: Keyboard light steps (offline)
         run: src/tests/keyboard-light.sh
+
+      - name: A feature that is off is off on every route (VM side, checks, Mac side)
+        run: src/tests/features-off.sh

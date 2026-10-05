@@ -60,6 +60,15 @@ default_gateway() {
 # OmacVM.app on its fast network (vmnet): the Mac is the gateway 192.168.77.1.
 GW=$(default_gateway)
 [[ $TYPE == app && $GW == 192.168.77.1 ]] && HOST=$GW
+# OmacVM.app gives the VM a feature's link to the Mac only when the VM starts
+# (its port, or the battery/camera port): one turned on while the VM ran waits
+# for the next start. "port": a port on the Mac's 127.0.0.1, which the fast
+# network does not gate.
+restart_hint() {
+  [[ $TYPE == app ]] || return 0
+  [[ ${1:-} == port && $HOST == 192.168.77.1 ]] && return 0
+  printf '; turned on while the VM was running? shut it down and start it again'
+}
 FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
@@ -98,7 +107,7 @@ if [[ $BRIDGE == on ]]; then
     else bad "Wi-Fi" "Location Services not granted to OmacVM Bridge on the Mac (no network names)" human; fi
     if jq -e .can_share <<<"$state" >/dev/null; then ok "Wi-Fi password sharing" "QR card can ask the Mac"
     else skip "Wi-Fi password sharing" "not on a shareable network"; fi
-  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update)"; fi
+  else bad "Wi-Fi" "the Bridge does not answer at $HOST:47831 (or did not prove it is OmacVM's Bridge: omacvm update$(restart_hint port))"; fi
   audio=$(as_user omacvm-bridge audio 2>/dev/null)
   if jq -e .devices >/dev/null 2>&1 <<<"$audio"; then
     ok "audio" "$(jq -r '(.devices[] | select(.default_output) | .name) // "no output"' <<<"$audio" | head -1)"
@@ -153,7 +162,11 @@ if [[ $BRIDGE == on ]]; then
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
+  elif user_active omacvm-wallpaper.path || user_active omacvm-wallpaper.service; then
+    bad "wallpaper" "off, but its watcher runs: omacvm apply"
   else skip "wallpaper" "off (chosen at setup)"; fi
+elif user_active omacvm-bridge-events.socket || user_active omacvm-bridge-osd.service || pgrep -u "$U" -f /usr/local/bin/omacvm-bridge >/dev/null; then
+  bad "Bridge" "off, but its services run and talk to the Mac: omacvm apply"
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Camera and microphone"
@@ -170,7 +183,7 @@ elif [[ $CAMERA == on ]]; then
   cs=$(as_user /usr/local/bin/omacvm-camera --status 2>/dev/null)
   if [[ $TYPE == app ]]; then
     if jq -e .port <<<"$cs" >/dev/null 2>&1; then ok "camera from the Mac" "OmacVM.app's camera port"
-    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update)"; fi
+    else bad "camera from the Mac" "no camera port: start the VM from an OmacVM.app with the camera (omacvm update$(restart_hint))"; fi
   else
     case $(jq -r '.permission // empty' <<<"$cs" 2>/dev/null) in
       granted|test) ok "camera from the Mac" "OmacVM Bridge: $(jq -r '.camera // "no camera"' <<<"$cs"), $(jq -r 'if .on then "on, \(.readers) reading" else "off" end' <<<"$cs")" ;;
@@ -179,6 +192,7 @@ elif [[ $CAMERA == on ]]; then
       *) bad "camera from the Mac" "the Bridge does not answer /camera/status: $(jq -r '.error // "no answer"' <<<"$cs" 2>/dev/null) (omacvm update)" ;;
     esac
   fi
+elif user_active omacvm-camera.service; then bad "camera" "off, but omacvm-camera runs and asks the Mac: omacvm apply"
 else skip "camera" "off (chosen at setup)"; fi
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
@@ -206,20 +220,21 @@ elif [[ $BATTERY == on ]]; then
   up=$(upower -i /org/freedesktop/UPower/devices/battery_BAT0 2>/dev/null)
   pct=$(awk '/percentage:/ { print $2; exit }' <<<"$up"); st=$(awk '/state:/ { print $2; exit }' <<<"$up")
   if [[ -n $pct ]]; then ok "battery in UPower" "BAT0 $pct, $st"
-  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update)"
-  else bad "battery in UPower" "no BAT0"; fi
+  elif [[ -d /sys/class/power_supply/ADP0 ]]; then bad "battery in UPower" "no BAT0 yet: the Mac sent no battery (a Mac without one, or the Mac's side is older: omacvm update$(restart_hint))"
+  else bad "battery in UPower" "no BAT0$(restart_hint)"; fi
   if jq -e '[.bar.layout[]?[]?.id] | index("omarchy.power")' "$H/.config/omarchy/shell.json" >/dev/null 2>&1; then
     ok "battery in the bar" "Omarchy's power widget (shows while BAT0 is there)"
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
   if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "the VM never suspends for it"
   else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
+elif systemctl is-active -q omacvm-battery; then bad "battery" "off, but omacvm-battery runs and asks the Mac: omacvm apply"
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
 if [[ $GESTURES == on ]]; then
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
-    else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
+    else bad "gestures" "service runs but is not connected to $HOST:47830$(restart_hint port)"; fi
   else bad "gestures" "omacvm-gestures.service not running"; fi
 elif systemctl is-active -q omacvm-gestures; then
   bad "gestures" "off, but omacvm-gestures.service runs and talks to the Mac: omacvm apply"
@@ -406,15 +421,21 @@ if [[ $MAC_CLOCK == on ]]; then
   if [[ -n $f ]]; then ok "the Mac's clock" "far right, $f"
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
-fi
+else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
 
 section "Omanotch"
-if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+if [[ $OMANOTCH == off ]]; then
+  if user_active notchcast.service || pgrep -u "$U" -x notchcast >/dev/null || connected_to "$HOST" 47811; then
+    bad "Omanotch" "off, but notchcast runs and talks to the Mac: omacvm apply"
+  elif [[ $(systemctl --global is-enabled omacvm-omanotch.service 2>/dev/null) == enabled ]]; then
+    bad "Omanotch" "off, but queued to install at the next login: omacvm apply"
+  else skip "Omanotch" "off (chosen at setup)"; fi
+elif [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
   if connected_to "$HOST" 47811; then ok "Omanotch" "streaming the bar to the Mac"
-  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says)"
+  elif [[ $TYPE == app ]]; then bad "Omanotch" "notchcast is not connected to $HOST:47811 (is Omanotch running on the Mac, and new enough for OmacVM.app? omacvm check on the Mac says$(restart_hint port))"
   else bad "Omanotch" "notchcast is not connected to $HOST:47811 (Omanotch on the Mac serves one VM at a time: is it running, or is another VM connected?)"; fi
   # The hidden NOTCH output sits on the built-in display, and the bar parked
   # under the strip is that display's (else the MacBook shows two bars).

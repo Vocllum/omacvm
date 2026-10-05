@@ -233,6 +233,7 @@ if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
   running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
     || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
 fi
+[[ $(feat camera off) == off ]] && skip "camera" "off for this VM (chosen at setup)"
 # The microphone: the VM's app records only with macOS's permission, and its
 # recording helper cannot ask (docs/troubleshooting.md, finding 22). Its log says so.
 miclog=""
@@ -349,6 +350,7 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
     esac
   fi
 fi
+[[ $(feat battery off) == off && $TYPE != parallels ]] && skip "battery (Mac)" "off for this VM (chosen at setup)"
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
@@ -378,7 +380,9 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
-if pgrep -xq omanotch; then
+if [[ $(feat omanotch off) == off ]]; then
+  skip "Omanotch" "off for this VM (chosen at setup)"
+elif pgrep -xq omanotch; then
   # Omanotch's own setting (defaults write ch.gillesgoetsch.omanotch flush -bool true|false).
   [[ $(defaults read ch.gillesgoetsch.omanotch flush 2>/dev/null) == 1 ]] && h="the notch's (flush)" || h="the menu bar's"
   ok "Omanotch (Mac)" "running, bar height: $h"
@@ -387,6 +391,23 @@ else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
+fi
+# OmacVM.app: what of the Mac this start of the VM may use (the app reads
+# the VM's features at start and says so in qemu.log). A feature that is off
+# must get nothing; one switched on while the VM runs waits for its next start.
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
+  l=$(sed -n 's/^OmacVM: Mac links: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
+  if [[ -z $l ]]; then
+    skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
+  else
+    fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
+    m=""
+    [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
+    [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
+    else ok "Mac links (app)" "$l"; fi
+  fi
 fi
 if [[ $TYPE == app ]]; then
   # The app's "Use the notch for the menu bar": on unless switched off, only with a notch

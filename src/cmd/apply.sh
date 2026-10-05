@@ -187,6 +187,17 @@ gssh "$IP" "/usr/local/share/omacvm/guest/install.sh --user '$U' --keyboard '$KB
 # hid Omarchy's pointer and need the Mac's until they get this apply.
 if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   echo omarchy > "$d/guest-pointer"
+  # The app reads them at each start of the VM: a feature that is off gets
+  # no port to the Mac's helpers and nothing on its virtio port (MacLinks.swift).
+  feats=$(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)
+  # The app reads them only when the VM starts: say which ones wait for that.
+  app_features_write "$d" "${feats% }"
+  if app_running_dir "$d"; then
+    l=$(app_links_stale "$d" "${feats% }" on)
+    [[ -z $l ]] || info "OmacVM.app: $l only from the VM's next start: shut it down and start it again"
+    l=$(app_links_stale "$d" "${feats% }" off)
+    [[ -z $l ]] || info "OmacVM.app: $l off in the VM now; the Mac stops serving it at the VM's next start"
+  fi
   # The fast network from the VM's next start: its own MAC address (the VMs
   # share vmnet's network), kept in fast-network, which the app reads.
   if on fast-network; then

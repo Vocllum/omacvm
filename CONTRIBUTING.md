@@ -62,6 +62,7 @@ src/tests/prebuilt-manifest.sh
 src/tests/gestures-off.sh
 src/tests/app-paths.sh
 src/tests/app-notch.sh
+src/tests/features-off.sh
 ```
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`
@@ -73,6 +74,7 @@ or `${var,,}`.
 |---|---|
 | Build questions, options | `./omacvm build --plan --json --vm-type app\|utm\|fusion\|parallels`: builds nothing |
 | VM side (`src/guest`, a feature's `guest/`) | `./omacvm apply --no-mac --vm "OmacVM Test-<topic>"`, then `./omacvm check --vm "OmacVM Test-<topic>"` |
+| A feature's off | `src/tests/features-off-vm.sh --vm "OmacVM Test-<topic>"`: nothing of an off feature runs or connects to the Mac |
 | Mac helpers (Bridge, Gestures, Omanotch) | `src/mac/install.sh --omanotch` (replaces the installed ones), then `./omacvm check` |
 | The build itself | `./omacvm build --no-mac --vm-type ROUTE --vm-name "OmacVM Test-<topic>"`: 30 to 70 minutes |
 | OmacVM.app | `cd app && scripts/build-app.sh`, then open `app/dist/OmacVM.app` |

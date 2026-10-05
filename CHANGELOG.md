@@ -27,6 +27,18 @@ in more words.
   three added in 2.6.0, about half as bright as the old lowest and as dim as
   the keys go while still lit. A step a Mac's keyboard can't light is
   skipped, and Omarchy's popup shows a lit keyboard as 1 %, not 0 %.
+- A feature switched off is off on every route. Omanotch off left an
+  Omanotch that was still to be built at the next login, which then built
+  itself and kept connecting to the Mac; the Bridge, the wallpaper and
+  queued bar widgets or clock could come back the same way when nobody was
+  logged in. Now nothing of an off feature runs in the VM or connects to
+  the Mac, OmacVM.app gives a VM nothing of the Mac for its features that
+  are off (no Omanotch, Gestures or Bridge port, no battery or camera) from
+  its next start, and `omacvm check` says "off" for them, or fails when
+  something of them still runs.
+  On OmacVM.app a feature turned on while the VM runs gets its link to the
+  Mac at the VM's next start: `omacvm apply` names it and `omacvm check`
+  says to shut the VM down and start it again.
 
 ## 2.9.0 (unreleased)
 

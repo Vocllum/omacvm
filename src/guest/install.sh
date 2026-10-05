@@ -43,6 +43,18 @@ log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 read -r layout variant <<<"$KB"
 H=$(getent passwd "$U" | cut -d: -f6)
 user_ctl() { systemctl --user -M "$U@" "$@"; }
+# A command in the desktop user's session (Hyprland, Omarchy's environment).
+in_session() {
+  local run; run=/run/user/$(id -u "$U")
+  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
+    HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
+    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
+}
+# Updated bar widgets load in a new shell: restarted once at the end.
+restart_shell_later() { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
+# What off means for the features with a part in the VM that talks to the Mac.
+ROOT=""
+source "$R/guest/off.sh"
 
 # Earlier choices, then this run's.
 ENV=/etc/omacvm/env
@@ -213,19 +225,18 @@ esac
 if [[ ${F[battery]} == on ]]; then
   log "the Mac's battery"
   "$R/battery/guest/install.sh" on || log "the Mac's battery: not installed (see above)"
-elif [[ -f /etc/systemd/system/omacvm-battery.service ]]; then
-  log "the Mac's battery: off"
+else
+  # Says "battery: off" when there was something to take off.
   "$R/battery/guest/install.sh" off || log "the Mac's battery: not removed (see above)"
 fi
 log "memory";     "$R/memory/guest/install.sh"
 log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
-# Gestures off means the daemon is off on every route. It used to stay on UTM,
-# VMware Fusion and OmacVM.app for the Cmd shortcuts (keys-only), so a VM with
-# gestures off still connected to the Mac's Gestures.
+# Off means off on every route (off.sh): no service of the feature runs in the
+# VM and nothing of it connects to the Mac.
 if [[ ${F[gestures]} == on ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
-elif systemctl is-enabled -q omacvm-gestures 2>/dev/null || systemctl is-active -q omacvm-gestures 2>/dev/null; then
-  log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
+else
+  gestures_off
 fi
 if [[ ${F[scroll-momentum]} == on ]]; then
   log "macOS-native scroll momentum (experimental)"; "$R/gestures/guest/glide.sh" "$U" on
@@ -235,23 +246,8 @@ fi
 log "workspaces"; "$R/workspaces/guest/install.sh" "$U"
 if [[ ${F[bridge]} == on ]]; then
   log "bridge";     "$R/bridge/guest/install.sh" "$U"
-elif [[ -x /usr/local/bin/omacvm-bridge ]]; then
-  # Disabling the clones brings Omarchy's own Bluetooth, Wi-Fi and audio widgets back.
-  log "bridge: off"
-  user_ctl disable --now omacvm-bridge-osd.service omacvm-bridge-events.socket >/dev/null 2>&1 || true
-  user_ctl stop omacvm-bridge-events.service >/dev/null 2>&1 || true
-  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="/run/user/$(id -u "$U")" bash -c \
-    'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null
-     for p in omacvm.bluetooth omacvm.wifi omacvm.audio omacvm.wifiqr omacvm.nightshift; do omarchy plugin disable "$p" >/dev/null 2>&1; done' || true
-  # Omarchy's own night light indicator, as it was before the Bridge.
-  NL=$H/.local/state/omacvm/nightlight-indicator C=$H/.config/omarchy/shell.json
-  if [[ -f $NL && -f $C ]]; then
-    tmp=$(mktemp "$C.XXXXXX")
-    jq --argjson items "$(cat "$NL")" '(.bar.layout[]?[]? | select(.id == "omarchy.indicators")) |= (if $items == null then del(.items) else .items = $items end)' "$C" > "$tmp" &&
-      chmod --reference="$C" "$tmp" && chown "$U:$U" "$tmp" && mv -f "$tmp" "$C"
-    rm -f "$tmp" "$NL"
-  fi
-  rm -f /usr/local/bin/omarchy-toggle-nightlight /usr/local/bin/omarchy-network-qr /usr/local/bin/omarchy-network-password
+else
+  bridge_off   # Omarchy's own Bluetooth, Wi-Fi and audio widgets come back
 fi
 # External display brightness: Omarchy's own DDC/CI path (ddcutil) goes through
 # the Bridge to the external Mac display an output is on. Only our ddcutil is
@@ -270,18 +266,12 @@ if [[ ${F[camera]} == on && $TYPE != parallels ]]; then log "camera (Mac Camera)
 "$R/camera/guest/install.sh" "$U" "$TYPE" "${F[camera]}" || log "camera: not set up (see above)"
 if [[ ${F[wallpaper]} == on ]]; then
   log "wallpaper";  "$R/wallpaper/guest/install.sh" "$U"
-elif user_ctl is-enabled -q omacvm-wallpaper.path 2>/dev/null; then
-  log "wallpaper: off"; user_ctl disable --now omacvm-wallpaper.path omacvm-wallpaper.service >/dev/null 2>&1 || true
+else
+  wallpaper_off
 fi
 # Omanotch's VM side (omanotch/guest in this copy) builds and installs in the
 # desktop session: omacvm-omanotch.service runs it at the next login, or right
 # away when the session is running. A changed copy installs again.
-in_session() {
-  local run; run=/run/user/$(id -u "$U")
-  sudo -u "$U" env HOME="$H" XDG_RUNTIME_DIR="$run" WAYLAND_DISPLAY=wayland-1 \
-    HYPRLAND_INSTANCE_SIGNATURE="$(ls -t "$run/hypr" 2>/dev/null | head -1)" \
-    bash -c 'source /usr/share/omarchy/default/bash/env-bootstrap 2>/dev/null; exec "$@"' _ "$@"
-}
 # Earlier versions cloned Omanotch into the user's home; this copy is used now.
 if [[ -d $H/.local/share/omanotch/.git ]]; then
   if [[ -z $(git -C "$H/.local/share/omanotch" status --porcelain 2>/dev/null) ]]; then
@@ -338,17 +328,10 @@ Description = OmacVM: Omarchy's notifications under Omanotch's strip
 When = PostTransaction
 Exec = /usr/local/lib/omacvm/omanotch-notifications.sh on
 HOOK
-  if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then
-    install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"
-  fi
-elif [[ -x $H/.local/bin/notchcast ]]; then
-  log "Omanotch: off"
-  systemctl --global disable omacvm-omanotch.service >/dev/null 2>&1 || true
-  rm -f /etc/pacman.d/hooks/zz-omacvm-omanotch-notifications.hook
-  [[ -n $("$R/guest/omanotch-notifications.sh" off || true) ]] && { install -d -o "$U" -g "$U" "$H/.local/state/omacvm"; touch "$H/.local/state/omacvm/restart-shell"; }
-  in_session bash "$R/omanotch/guest/uninstall.sh" >/dev/null 2>&1 ||
-    user_ctl disable --now notchcast.service >/dev/null 2>&1 || true
-  rm -f "$H/.local/state/omacvm/omanotch"
+  if [[ -n $(/usr/local/lib/omacvm/omanotch-notifications.sh on || true) ]]; then restart_shell_later; fi
+else
+  # Also an Omanotch queued for the next login, not built yet.
+  omanotch_off
 fi
 if [[ ${F[thp-kernel]} == on ]]; then
   if command -v grub-mkconfig >/dev/null; then

@@ -104,6 +104,16 @@ OmacVM's version.
   OmacVM Gestures, as on UTM: the app needs no Accessibility of its own.
   With the gestures feature off the VM does not talk to Gestures, so these
   shortcuts stay with macOS.
+- A feature switched off gets nothing of the Mac: from the VM's next start
+  the app keeps that feature's port on the Mac (Omanotch, Gestures, Bridge)
+  closed to the VM and does not serve its battery or camera port.
+  `omacvm apply` writes the VM's features into its folder (`features`); a
+  VM without that file gets everything, as before. On the fast network the
+  VM reaches the Mac directly: there only the VM side keeps it away.
+- The app reads the features only when the VM starts. A feature turned on
+  while the VM runs (`omacvm enable bridge`) gets its link to the Mac at the
+  next start: shut the VM down and start it again. `omacvm apply` names
+  such features, and `omacvm check` fails on them until then.
 - On a MacBook with a notch, "Use the notch for the menu bar" (on by
   default): full screen covers the strip beside the notch too and Omarchy's
   bar goes there, but that full screen has no Space of its own (macOS 15
