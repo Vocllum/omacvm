@@ -274,12 +274,32 @@ off from the VM keeps the API reachable (tested), so it can switch it back on.
 
 ## Media keys
 
-While **Parallels, UTM or VMware Fusion is frontmost with the VM covering a whole display**, volume
+While **a VM is in front** (an OmacVM.app VM, full screen or in a window;
+Parallels, UTM or VMware Fusion with the VM covering a whole display), volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
-and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
-VM is not full screen, passes through untouched. Switch it off in the
-menu-bar icon or with `"capture_keys": false`.
+and shown by Omarchy's own OSD in the VM. Which key goes where is one tested
+rule, `MediaRoute` in `mac/keys-model.swift` (`mac/test-models.sh`):
+
+- volume and mute on an output without a software volume (an audio interface
+  such as a Scarlett 2i2: `outputVolumeSettable` false) go into an OmacVM.app
+  VM as its own keys (XF86AudioRaiseVolume & co.: the VM's volume with
+  Omarchy's popup), never to macOS's greyed-out panel;
+- play/pause, next and previous (also an Apple keyboard's track keys) go into
+  an OmacVM.app VM (XF86AudioPlay & co.: Omarchy's playerctl), not to macOS's
+  Now Playing;
+- brightness: the display the Bridge's own call sets (the built-in one, else
+  the display macOS dims itself: a Mac mini's LG UltraFine or Studio Display,
+  also with the VM in a window);
+- keys go into the VM through QEMU's control socket (QMP `input-send-event`,
+  `mac/vm-keys.swift`): the socket on the VM's QEMU command line, this user's
+  own. A busy socket, a paused VM or a refusal hands the key back to macOS.
+  `mac/test-vm-keys.sh` types every key into a real, headless QEMU;
+- a key the Bridge cannot use goes to macOS, and the log says once why
+  (`media key ...: to macOS: ...`).
+
+Anything else, or any key while no VM is in front, passes through untouched.
+Switch it off in the menu-bar icon or with `"capture_keys": false`.
 
 The keyboard light has three more steps below macOS's lowest (1/16): 0.01,
 0.02 and 0.04. Measured on a MacBook Pro M4 Max (macOS 15.7.4): each value is
