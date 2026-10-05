@@ -252,7 +252,10 @@ final class MediaKeys {
   func check() {
     logPermissions()
     let front = NSWorkspace.shared.frontmostApplication
-    let vm = front?.executableURL?.lastPathComponent == "OmacVM" ? front?.processIdentifier : nil
+    // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
+    let exe = front.flatMap { $0.executableURL?.path ?? pidPath($0.processIdentifier) } ?? ""
+    let isVM = exe.hasSuffix("/runtime/bin/OmacVM") || (exe as NSString).lastPathComponent == "qemu-system-aarch64"
+    let vm = isVM ? front?.processIdentifier : nil
     let again = rearm.front(vm)
     guard config.captureKeys else { return }
     if let tap {
