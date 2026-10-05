@@ -48,7 +48,7 @@ Return to confirm):
    |---|---|
    | OmacVM Bridge: the Mac's Wi-Fi, Bluetooth, audio, Night Shift and media keys in Omarchy | on |
    | Omarchy's wallpaper on the Mac too | on |
-   | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc gives them back) | on |
+   | Trackpad gestures in Omarchy, in full screen (macOS's own swipes are off then; ⌃⌥⌘ Esc takes you back to macOS) | on |
    | macOS-native scroll momentum *(experimental)* | off |
    | Omanotch, on a MacBook with a notch | on |
    | The Mac's battery: its charge and charging state in Omarchy's bar (Parallels shows it itself) | on with a battery, not on Parallels |

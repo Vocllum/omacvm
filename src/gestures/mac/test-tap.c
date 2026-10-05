@@ -32,41 +32,41 @@ int main(void) {
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   check(installTap() && created == 1, "the first tap");
   CFMachPortRef first = tapPort; CFRetain(first);
-  // Front app, network, full screen, title: as updateCapture finds them.
-  frontChanged(500, -1, 0, "");                    // Terminal
+  // Front app, network, full screen, title, window, other: as updateCapture finds them.
+  frontChanged(500, -1, 0, "", 0, 0);                    // Terminal
   check(created == 1, "no new tap for an app that is no VM");
-  frontChanged(600, NET_APP, 1, "Omarchy");          // an OmacVM VM goes full screen
+  frontChanged(600, NET_APP, 1, "Omarchy", 0, 0);          // an OmacVM VM goes full screen
   check(created == 2, "new tap when an OmacVM VM comes to the front");
   check(!CFMachPortIsValid(first) && CFMachPortIsValid(tapPort), "the old tap is gone, the new one live");
   CFRelease(first);
-  frontChanged(600, NET_APP, 1, "Omarchy");
-  frontChanged(600, NET_APP, 1, "Omarchy");
+  frontChanged(600, NET_APP, 1, "Omarchy", 0, 0);
+  frontChanged(600, NET_APP, 1, "Omarchy", 0, 0);
   check(created == 2, "not again while the same VM stays in front (checked every 0.2 s)");
-  frontChanged(700, NET_APP, 1, "Work");             // straight to a second VM (another QEMU)
+  frontChanged(700, NET_APP, 1, "Work", 0, 0);             // straight to a second VM (another QEMU)
   check(created == 3, "new tap for a second OmacVM VM, straight from the first");
-  frontChanged(700, NET_APP, 0, "");                 // its window left full screen
-  frontChanged(800, NET_APP, 1, "Omarchy");          // the app was restarted: a new QEMU
+  frontChanged(700, NET_APP, 0, "", 0, 0);                 // its window left full screen
+  frontChanged(800, NET_APP, 1, "Omarchy", 0, 0);          // the app was restarted: a new QEMU
   check(created == 4, "new tap after OmacVM.app was restarted");
-  frontChanged(500, -1, 0, "");
-  frontChanged(900, 0, 1, "Omarchy");                // Parallels: its app outlives its VMs
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(900, 0, 1, "Omarchy", 0, 0);                // Parallels: its app outlives its VMs
   check(created == 4, "no new tap for Parallels");
   CFMachPortInvalidate(tapPort);                     // macOS took it away
-  frontChanged(900, 0, 1, "Omarchy");
+  frontChanged(900, 0, 1, "Omarchy", 0, 0);
   check(created == 5 && CFMachPortIsValid(tapPort), "new tap when macOS invalidated ours");
   enabled = 0;
-  frontChanged(900, 0, 1, "Omarchy");
+  frontChanged(900, 0, 1, "Omarchy", 0, 0);
   check(created == 5 && enabled, "a disabled tap is enabled again, not created again");
   // Permission taken away: the old tap stays.
   failNext = 1;
   CFMachPortRef keep = tapPort;
-  frontChanged(500, -1, 0, "");
-  frontChanged(1000, NET_APP, 1, "Omarchy");
-  frontChanged(500, -1, 0, "");
-  frontChanged(1001, NET_APP, 1, "Omarchy");
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1000, NET_APP, 1, "Omarchy", 0, 0);
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1001, NET_APP, 1, "Omarchy", 0, 0);
   check(tapPort == keep && CFMachPortIsValid(keep), "a failed re-creation keeps the old tap");
   failNext = 0;
-  frontChanged(500, -1, 0, "");
-  frontChanged(1002, NET_APP, 1, "Omarchy");
+  frontChanged(500, -1, 0, "", 0, 0);
+  frontChanged(1002, NET_APP, 1, "Omarchy", 0, 0);
   check(created == 6 && tapPort != keep, "works again once permitted");
   return fail;
 }

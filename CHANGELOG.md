@@ -85,6 +85,17 @@ in more words.
   network (9.5 against 12.2 Gbit/s). Without the service the VM keeps QEMU's
   user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
   changes, several VMs at once, Omanotch over it.
+- ⌃⌥⌘ Esc in the full-screen VM now takes you straight back to macOS: the
+  app you were in before comes to the front with its Space, no swipe needed
+  (a mouse is enough). Pressed in macOS it takes you back into the VM, full
+  screen, with the trackpad and keys. Before, it only handed the trackpad
+  back. OmacVM.app, Parallels, UTM and VMware Fusion.
+- After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
+  working until the Mac's helpers were restarted: the new VM's own key tap
+  sat ahead of theirs. They now take the front place again whenever an
+  OmacVM VM comes to the front (Gestures fix by brianmerchant, #39).
+- OmacVM Bridge: Wi-Fi no longer flips between connected and disconnected
+  in Omarchy's bar on a Mac on Ethernet with Wi-Fi also on (Mac mini).
 - Trackpad gestures off now means the VM's Gestures service is off on every
   route. On UTM, VMware Fusion and OmacVM.app it used to keep running for
   the Cmd shortcuts and connected to the Mac's Gestures anyway; Cmd as Super
