@@ -11,6 +11,8 @@ in more words.
   switches and repairs them through the Mac, lists what an update changes
   and installs it, and turns update checks off. A VM from before gets it with
   its next `omacvm apply` or `omacvm update` (one question, default yes).
+  A change that fails puts the VM back as it was. OmacVM.app's VMs ask the
+  app through their own port; each VM proves itself with its own key.
 - **Report a problem**: `omacvm report` on the Mac, or `!` in the control
   centre, collects checks, versions and logs without personal data, shows
   the exact text, then opens a pre-filled GitHub issue.

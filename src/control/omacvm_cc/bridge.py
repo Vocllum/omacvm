@@ -1,6 +1,12 @@
 """Client for the Mac's side of the control centre: the OmacVM Bridge's
 /omacvm/* requests (docs/adr/0031). Same rules as omacvm-bridge (the shell
-client): the token goes only to a Bridge that first proved it knows it.
+client): the token goes only to a Bridge that first proved it knows it. Each
+request also carries this VM's own key (~/.config/omacvm-bridge/vm-key, from
+omacvm apply), so a VM that takes another VM's address cannot act for it.
+
+OmacVM.app's VMs ask through the app instead: the virtio-serial port
+org.omacvm.control, one JSON line per request and per answer. The app knows
+which VM's port it is and passes the request on to the Bridge.
 
 Every call raises BridgeError with a kind the UI can show:
   offline  the Mac does not answer (VM network down, Bridge not running)
@@ -16,12 +22,17 @@ import http.client
 import json
 import os
 import secrets
+import errno
+import select
+import threading
 import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 PROTO = 1          # what this client speaks
 PORT = 47831
+CONTROL_PORT = "/dev/virtio-ports/org.omacvm.control"
+ANSWER_MAX = 1 << 20
 
 
 class BridgeError(Exception):
@@ -59,9 +70,15 @@ class Bridge:
         self.mac_addr = "127.0.0.1" if env.get("OMACVM_VM_TYPE") == "app" else self.host
         self.token_file = token_file or os.environ.get("OMACVM_BRIDGE_TOKEN_FILE") or \
             os.path.expanduser("~/.config/omacvm-bridge/token")
+        self.vm_key_file = os.environ.get("OMACVM_VM_KEY_FILE") or os.path.expanduser("~/.config/omacvm-bridge/vm-key")
         self.vm_version = vm_version
         self.proto = PROTO
         self._proven_at = 0.0
+        # OmacVM.app: its control port (OMACVM_CONTROL_PORT for tests).
+        port = os.environ.get("OMACVM_CONTROL_PORT") or CONTROL_PORT
+        direct = url or os.environ.get("OMACVM_BRIDGE_URL")
+        self.port_path = port if env.get("OMACVM_VM_TYPE") == "app" and not direct and os.path.exists(port) else ""
+        self._port_lock = threading.Lock()
 
     # ---- transport ----
     def _token(self) -> bytes:
@@ -99,20 +116,84 @@ class Bridge:
             raise BridgeError("unproven", f"{self.host}:{self.port} did not prove it is OmacVM's Bridge; token not sent")
         self._proven_at = time.monotonic()
 
-    def call(self, method: str, path: str, obj: dict | None = None, timeout: float = 5.0) -> dict:
-        self.prove(min(timeout, 3.0))
-        body = None if obj is None else json.dumps(obj).encode()
-        headers = {"Authorization": "Bearer " + self._token().decode("ascii", "replace"),
-                   "X-OmacVM-Proto": str(self.proto), "X-OmacVM-Version": self.vm_version}
-        if body is not None:
-            headers["Content-Type"] = "application/json"
-        status, data = self._raw(method, path, body, headers, timeout)
+    def _vm_key(self) -> str:
         try:
-            answer = json.loads(data) if data.strip() else {}
-        except ValueError:
-            answer = {}
-        if not isinstance(answer, dict):
-            answer = {}
+            with open(self.vm_key_file, encoding="ascii") as f:
+                return f.read().strip()
+        except (OSError, ValueError):
+            return ""
+
+    def _port(self, method: str, path: str, obj: dict | None, timeout: float) -> tuple[int, dict]:
+        """One request over OmacVM.app's control port. The port opens for one
+        program at a time (the notice timer may have it a moment): retried."""
+        rid = secrets.token_hex(8)
+        line = json.dumps({"id": rid, "method": method, "path": path, "body": obj, "proto": self.proto,
+                           "version": self.vm_version}).encode() + b"\n"
+        end = time.monotonic() + timeout
+        with self._port_lock:
+            while True:
+                try:
+                    fd = os.open(self.port_path, os.O_RDWR | os.O_NONBLOCK | os.O_CLOEXEC)
+                    break
+                except OSError as e:
+                    if e.errno != errno.EBUSY or time.monotonic() > end:
+                        raise BridgeError("offline", f"OmacVM.app's control port: {e.strerror}") from e
+                    time.sleep(0.1)
+            try:
+                sent = 0
+                while sent < len(line):
+                    left = end - time.monotonic()
+                    if left <= 0 or not select.select([], [fd], [], left)[1]:
+                        raise BridgeError("offline", "OmacVM.app does not read this VM's control port (update OmacVM.app)")
+                    sent += os.write(fd, line[sent:])
+                buf = b""
+                while True:
+                    while b"\n" in buf:
+                        raw, buf = buf.split(b"\n", 1)
+                        try:
+                            a = json.loads(raw)
+                        except ValueError:
+                            continue
+                        if isinstance(a, dict) and a.get("id") == rid:   # an earlier, given-up answer is skipped
+                            body = a.get("body")
+                            return int(a.get("status") or 0), body if isinstance(body, dict) else {}
+                    left = end - time.monotonic()
+                    if left <= 0 or not select.select([fd], [], [], left)[0]:
+                        raise BridgeError("offline", "OmacVM.app did not answer on this VM's control port")
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        time.sleep(0.05)   # the app is not connected yet
+                        continue
+                    buf += chunk
+                    if len(buf) > ANSWER_MAX:
+                        raise BridgeError("offline", "OmacVM.app's answer was too long")
+            except OSError as e:
+                raise BridgeError("offline", f"OmacVM.app's control port: {e.strerror}") from e
+            finally:
+                os.close(fd)
+
+    def call(self, method: str, path: str, obj: dict | None = None, timeout: float = 5.0) -> dict:
+        if self.port_path and path.startswith("/omacvm/"):
+            status, answer = self._port(method, path, obj, timeout)
+            if status == 0:   # the app could not reach the Bridge
+                raise BridgeError("offline", str(answer.get("error") or "OmacVM Bridge does not answer on the Mac"))
+        else:
+            self.prove(min(timeout, 3.0))
+            body = None if obj is None else json.dumps(obj).encode()
+            headers = {"Authorization": "Bearer " + self._token().decode("ascii", "replace"),
+                       "X-OmacVM-Proto": str(self.proto), "X-OmacVM-Version": self.vm_version}
+            key = self._vm_key() if path.startswith("/omacvm/") else ""
+            if key:
+                headers["X-OmacVM-VM-Key"] = key
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            status, data = self._raw(method, path, body, headers, timeout)
+            try:
+                answer = json.loads(data) if data.strip() else {}
+            except ValueError:
+                answer = {}
+            if not isinstance(answer, dict):
+                answer = {}
         if status == 200 or status == 202:
             return answer
         msg = str(answer.get("error") or f"HTTP {status}")

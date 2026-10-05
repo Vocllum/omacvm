@@ -10,9 +10,11 @@ import os
 import socket
 import tempfile
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+VM_KEY = "5a" * 32
 SRC = os.path.join(os.path.dirname(__file__), "..", "..")
 
 CHECKS_TSV = (
@@ -32,6 +34,11 @@ class FakeMac:
         self.jobs: dict[str, dict] = {}
         self.checks_enabled = True
         self.manifest: dict | None = None
+        self.checked_at = "2026-01-05T10:41:00Z"
+        self.job_polls_fail = False       # the Mac stops answering about jobs
+        self.refuse_jobs: tuple | None = None   # (status, code, error) for POST /omacvm/jobs
+        self.vm_keys: list = []           # X-OmacVM-VM-Key of each /omacvm/ request
+        self.hello_delay = 0.0
         fake = self
 
         class H(BaseHTTPRequestHandler):
@@ -59,9 +66,12 @@ class FakeMac:
                 if self.headers.get("Authorization") != "Bearer " + TOKEN.decode():
                     return self.send(401, {"error": "token"})
                 fake.requests.append(("GET", p, {}))
+                if p.startswith("/omacvm/"):
+                    fake.vm_keys.append(self.headers.get("X-OmacVM-VM-Key"))
                 if fake.old and p.startswith("/omacvm/"):
                     return self.send(404, {"error": "not found"})
                 if p == "/omacvm/hello":
+                    time.sleep(fake.hello_delay)
                     names = [l.split("\t")[0] for l in open(os.path.join(SRC, "features.tsv"), encoding="utf-8")
                              if l.strip() and not l.startswith("#")]
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
@@ -76,10 +86,13 @@ class FakeMac:
                 if p == "/omacvm/updates":
                     return self.send(200, fake.updates())
                 if p.startswith("/omacvm/jobs/"):
+                    if fake.job_polls_fail:
+                        return self.send(503, {"error": "restarting"})
                     j = fake.jobs.get(p.rsplit("/", 1)[1])
                     if not j:
                         return self.send(404, {"error": "no such job"})
                     j["polls"] += 1
+                    j["step"], j["of"], j["text"] = 2, 4, "the VM side"
                     if j["polls"] >= 2:
                         j["state"], j["text"] = fake.job_end
                     return self.send(200, {k: v for k, v in j.items() if k != "polls"})
@@ -94,16 +107,21 @@ class FakeMac:
                     return self.send(401, {"error": "token"})
                 b = self.body()
                 fake.requests.append(("POST", self.path, b))
+                fake.vm_keys.append(self.headers.get("X-OmacVM-VM-Key"))
+                if self.path == "/omacvm/jobs" and fake.refuse_jobs:
+                    st, code, err = fake.refuse_jobs
+                    return self.send(st, {"error": err, "code": code})
                 if self.path == "/omacvm/jobs":
                     jid = f"{len(fake.jobs) + 1:016x}"
                     fake.jobs[jid] = {"id": jid, "action": b["action"], "features": b.get("features", []),
-                                      "state": "running", "step": 1, "of": 0, "text": "OmacVM Bridge on the Mac",
+                                      "state": "running", "step": 1, "of": 4, "text": "the Mac side",
                                       "lines": ["==> OmacVM Bridge on the Mac"], "polls": 0}
                     return self.send(202, {k: v for k, v in fake.jobs[jid].items() if k != "polls"})
                 if self.path == "/omacvm/settings/update-checks":
                     fake.checks_enabled = bool(b["enabled"])
                     return self.send(200, fake.updates())
                 if self.path == "/omacvm/updates/check":
+                    fake.checked_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                     return self.send(200, fake.updates())
                 self.send(404, {"error": "not found"})
 
@@ -112,7 +130,7 @@ class FakeMac:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     def updates(self) -> dict:
-        return {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": "2026-10-05T10:41:00Z",
+        return {"checks_enabled": self.checks_enabled, "omacvm": self.version, "checked_at": self.checked_at,
                 "ok": self.manifest is not None, "offline": False, "error": None, "manifest": self.manifest}
 
     def stop(self) -> None:
@@ -156,10 +174,13 @@ def vm_env(tmp: str, mac_port: int, check_sock: str, extra: str = "") -> dict:
     token = os.path.join(tmp, "token")
     with open(token, "wb") as f:
         f.write(TOKEN + b"\n")
+    vm_key = os.path.join(tmp, "vm-key")
+    with open(vm_key, "w") as f:
+        f.write(VM_KEY + "\n")
     installed = os.path.join(tmp, "installed.json")
     with open(installed, "w") as f:
         json.dump({"version": "2.7.0", "parts": {"gestures": {"digest": "sha256:" + "a" * 64, "release": "2.7.0"},
                                                  "bridge": {"digest": "sha256:" + "b" * 64, "release": "2.7.0"}}}, f)
     return {"OMACVM_SHARE": os.path.abspath(SRC), "OMACVM_ENV": env_file, "OMACVM_INSTALLED": installed,
             "OMACVM_CHECK_SOCKET": check_sock, "OMACVM_BRIDGE_URL": f"http://127.0.0.1:{mac_port}",
-            "OMACVM_BRIDGE_TOKEN_FILE": token, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}
+            "OMACVM_BRIDGE_TOKEN_FILE": token, "OMACVM_VM_KEY_FILE": vm_key, "XDG_CACHE_HOME": os.path.join(tmp, "cache")}

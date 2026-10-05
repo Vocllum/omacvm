@@ -195,12 +195,151 @@ def test_updates_screen_and_silence(world):
             from omacvm_cc.tui import UpdatesScreen
             assert isinstance(a.screen, UpdatesScreen)
             await pilot.press("s")
-            assert await settle(pilot, lambda: not world.checks_enabled)
+            assert await settle(pilot, lambda: not world.checks_enabled and not a.c.checks_enabled)
+            # Checks off: no marks, no count on the features screen; the Updates screen still shows it.
+            assert not any(r.update for r in a.rows) and "update" not in a.subtitle()
+            assert rows_with_updates(a)["gestures"].update
+            # ... and the last result is old: i installs nothing until c checked again.
+            await pilot.press("i")
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert not isinstance(a.screen, ConfirmScreen)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+            await pilot.press("c")
+            assert await settle(pilot, lambda: a.c.manifest_fresh())
             await pilot.press("i")
             await pilot.pause(0.2)
+            assert isinstance(a.screen, ConfirmScreen)
             await pilot.press("y")
             assert await settle(pilot, lambda: any(b == {"action": "update"} for _, p, b in world.requests if p == "/omacvm/jobs"))
     asyncio.run(go())
+
+
+def rows_with_updates(a):
+    return {r.feature.name: r for r in a.c.rows(with_updates=True)}
+
+
+def test_checks_off_hides_marks_and_u_waits(world):
+    world.manifest = {"version": "2.9.1", "parts": {"gestures": {"digest": "sha256:" + "c" * 64, "release": "2.9.1"}}}
+    world.checks_enabled = False
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.updates is not None and a.c.updates.get("manifest"))
+            await pilot.pause(0.1)
+            assert not any(r.update for r in a.rows)
+            assert "update" not in a.subtitle()
+            await pilot.press("u")
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert not isinstance(a.screen, ConfirmScreen)
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+    asyncio.run(go())
+
+
+def test_lost_job_ends_failed_and_offers_a_retry(world, monkeypatch):
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "LOST_AFTER", 2)
+    world.job_polls_fail = True
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: isinstance(a.screen, tui.ConfirmScreen), 12)
+            j = list(a.c.jobs.values())[-1]
+            assert j.state == "failed" and not j.active and a.c.active_job() is None
+            assert "stopped answering" in a.last_result
+            # Retry: the same job again.
+            world.job_polls_fail = False
+            await pilot.press("y")
+            assert await settle(pilot, lambda: len([1 for _, p, _ in world.requests if p == "/omacvm/jobs"]) == 2)
+            assert await settle(pilot, lambda: a.c.jobs and list(a.c.jobs.values())[-1].state == "done")
+    asyncio.run(go())
+
+
+def test_rolled_back_says_what_next(world):
+    world.job_end = ("rolled-back", "omacvm apply: rolled back")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
+            await pilot.press("r")
+            assert await settle(pilot, lambda: bool(a.last_result))
+            assert "Repair The Mac's clock" in a.last_result and "r tries again" in a.last_result
+            assert a.banner() == a.last_result
+            body = [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1]
+            assert body == {"action": "reinstall", "features": ["mac-clock"]}
+    asyncio.run(go())
+
+
+def test_step_n_of_m_while_running(world):
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: rows(a)["autologin"].status.value == "busy")
+            assert await settle(pilot, lambda: "(2/4)" in rows(a)["autologin"].note or "(1/4)" in rows(a)["autologin"].note)
+    asyncio.run(go())
+
+
+def test_update_first_offers_u(world):
+    world.refuse_jobs = (409, "update-first", "the Mac has OmacVM 2.9.1, this VM 2.7.0: update first")
+    seen = []
+
+    async def go():
+        a = app()
+        orig = a.notify
+        a.notify = lambda m, **kw: (seen.append(str(m)), orig(m, **kw))
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: any("u updates this VM" in m for m in seen))
+    asyncio.run(go())
+
+
+def test_still_asking_the_mac(world):
+    world.hello_delay = 2.0
+    seen = []
+
+    async def go():
+        a = app()
+        orig = a.notify
+        a.notify = lambda m, **kw: (seen.append(str(m)), orig(m, **kw))
+        async with a.run_test(size=(110, 30)) as pilot:
+            await pilot.pause(0.2)
+            assert a.c.hello is None
+            await pilot.press("space")
+            await pilot.pause(0.1)
+            assert any(m == "still asking the Mac: a moment" for m in seen), seen
+            assert not any(p == "/omacvm/jobs" for _, p, _ in world.requests)
+    asyncio.run(go())
+
+
+def test_every_mac_request_carries_the_vm_key(world):
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.mac_status is not None)
+    asyncio.run(go())
+    from fakes import VM_KEY
+    assert world.vm_keys and all(k == VM_KEY for k in world.vm_keys)
 
 
 def test_report_has_no_personal_data(world, monkeypatch):

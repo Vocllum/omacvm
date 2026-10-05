@@ -8,6 +8,9 @@
                              report a problem: what goes into the GitHub issue,
                              without personal data, shown before the browser opens
   omacvm --version
+  omacvm --window            what the menu, the bar item and the launcher run:
+                             as omacvm, and the window waits for Return before
+                             it closes when the control centre cannot start
 
 Switching features asks the Mac (OmacVM Bridge); on the Mac the same is
 `omacvm enable|disable FEATURE --vm NAME`."""
@@ -123,11 +126,24 @@ def notify() -> int:
                         f"{n} feature{'s' if n != 1 else ''} change. Open OmacVM to install it."],
                        capture_output=True, text=True)
     if r.stdout.strip() == "open":
-        subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm"], start_new_session=True)
+        subprocess.Popen(["omarchy-launch-or-focus-tui", "omacvm", "--window"], start_new_session=True)
     return 0
 
 
+def wait_in_window() -> None:
+    """Opened from the menu, the bar or the launcher: the window would close
+    with the text in it. It waits instead."""
+    if os.environ.get("OMACVM_WINDOW") == "1" and sys.stdin.isatty():
+        try:
+            input("\nPress Return to close.")
+        except EOFError:
+            pass
+
+
 def main(args: list) -> int:
+    if args[:1] == ["--window"]:
+        os.environ["OMACVM_WINDOW"] = "1"
+        args = args[1:]
     cmd = args[0] if args else ""
     if cmd in ("-h", "--help", "help"):
         print(__doc__.split("\n", 2)[2].rstrip())
@@ -158,10 +174,16 @@ def main(args: list) -> int:
     except Exception:   # Textual missing or broken: the same table as text, never an empty window
         from omacvm_cc import plain
         rc = plain.status(False, fallback=True)
-        if os.environ.get("OMACVM_WINDOW") == "1":
-            input("\nPress Return to close.")
+        wait_in_window()
         return rc
-    return tui.run()
+    try:
+        return tui.run()
+    except Exception as e:   # the screens failed: say why and show the table, never a window that just closes
+        print(f"omacvm: the control centre stopped ({type(e).__name__}: {e})", file=sys.stderr)
+        from omacvm_cc import plain
+        rc = plain.status(False, fallback=False)
+        wait_in_window()
+        return rc or 1
 
 
 if __name__ == "__main__":

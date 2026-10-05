@@ -27,6 +27,10 @@ from .bridge import BridgeError
 from .controller import ACTION_FOR, Controller
 from .local import log_tail
 
+# Job polls (one a second) that may fail in a row before the job counts as
+# lost: an update restarts the Bridge, which takes a while.
+LOST_AFTER = 120
+
 THEME = Theme(
     name="omacvm-ansi", ansi=True, dark=True,
     primary="ansi_blue", secondary="ansi_cyan", accent="ansi_magenta",
@@ -363,7 +367,8 @@ class UpdatesScreen(Screen):
             t.append("No connection at the last try: this is the result from before.\n\n", style="yellow")
         elif u.get("error") and not m:
             t.append(f"{u['error']}\n\n", style="yellow")
-        rows = [r for r in app.rows if r.update]
+        all_rows = app.c.rows(with_updates=True)
+        rows = [r for r in all_rows if r.update]
         if m:
             mac = u.get("omacvm") or (app.c.hello.omacvm if app.c.hello else "?")
             vm = app.c.local.version
@@ -383,7 +388,7 @@ class UpdatesScreen(Screen):
                     if o.get("note"):
                         t.append(f"   {o['note']}", style="bright_black")
                     t.append("\n")
-                n = len(app.rows) - len(rows)
+                n = len(all_rows) - len(rows)
                 t.append(f"    {n} features unchanged\n", style="bright_black")
                 if any(app.c.offer().get(k, {}).get("digest") != app.c.local.installed_parts().get(k, {}).get("digest")
                        for k in ("core",)):
@@ -393,7 +398,9 @@ class UpdatesScreen(Screen):
                 t.append(m["notes_url"] + "\n")
         elif not u.get("error") and app.c.linked:
             t.append("No update information yet: c checks now.\n")
-        on_ = u.get("checks_enabled", True)
+        on_ = app.c.checks_enabled
+        if m and not on_ and not app.c.manifest_fresh():
+            t.append("\n  Update checks are off: this result may be old. c checks now, then i installs.\n", style="yellow")
         t.append("\n  Update checks  ", style="bright_black")
         t.append("[x] weekly" if on_ else "[ ] off", style="bold" if on_ else "yellow")
         t.append("     (off: no checks, no prompts; c still checks when you ask)\n", style="bright_black")
@@ -548,6 +555,7 @@ class ControlCentre(App):
         self.rows: list[S.Row] = c.rows()
         self.tick = 0
         self.watching: str | None = None
+        self.last_result = ""   # the last job's outcome and what to do next (the banner)
 
     def on_mount(self) -> None:
         self.register_theme(THEME)
@@ -607,13 +615,15 @@ class ControlCentre(App):
 
     def banner(self) -> str:
         c = self.c
-        if c.local.vm_type == "app":
-            return "OmacVM.app's VMs: switch features with omacvm on the Mac for now; the app's control port comes later."
+        if self.last_result:
+            return self.last_result
         if c.mac_error is None:
             return ""
         if c.mac_error.kind == "old":
             return "The Mac runs an older OmacVM: run omacvm update on the Mac to switch features from here."
         if c.mac_error.kind == "offline":
+            if c.local.vm_type == "app":
+                return "OmacVM.app does not answer on this VM's control port (update OmacVM.app): showing this VM's side."
             return "The Mac does not answer (VM network, or OmacVM Bridge not running): showing this VM's side."
         return f"The Mac: {c.mac_error}"
 
@@ -626,11 +636,29 @@ class ControlCentre(App):
         if self.c.active_job() is not None:
             self.notify("a job runs: wait for it", severity="warning")
             return False
+        if self.c.hello is None and self.c.mac_error is None:
+            self.notify("still asking the Mac: a moment", severity="warning")
+            return False
         problem = self.c.mac_problem()
         if problem:
             self.notify(f"needs the Mac: {problem}", severity="warning")
             return False
         return True
+
+    def describe(self, action: str, features: list[str]) -> str:
+        titles = {f.name: f.title for f in self.c.local.features}
+        names = ", ".join(titles.get(n, n) for n in features)
+        return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names}: on",
+                "disable": f"{names}: off"}.get(action, action)
+
+    def next_step(self, action: str, state: str) -> str:
+        """What the person can do after a job that did not work."""
+        again = {"enable": "space tries again", "disable": "space tries again", "reinstall": "r tries again",
+                 "update": "u tries again"}.get(action, "")
+        if state == "rolled-back":
+            what = ("this VM keeps its OmacVM" if action == "update" else "the features are as before")
+            return f"rolled back: {what}. {again}; ! reports the problem."
+        return f"On the Mac, omacvm apply puts this VM right; {again}; ! reports the problem."
 
     def toggle(self, r: S.Row) -> None:
         if r.status is S.Status.UNAVAILABLE:
@@ -659,16 +687,20 @@ class ControlCentre(App):
             self.notify(f"{r.feature.title} is off: space turns it on", severity="warning")
             return
         if self.can_ask():
-            self.run_job("reinstall", [r.feature.name])
+            self.run_job("reinstall", [r.feature.name])   # that feature only (apply --reinstall)
 
     def install_update(self) -> None:
         m = (self.c.updates or {}).get("manifest")
         if not isinstance(m, dict):
             self.notify("no update known: U, then c checks", severity="warning")
             return
+        if not self.c.checks_enabled and not self.c.manifest_fresh():
+            # Checks off: no prompts, and nothing installed from a result that may be old.
+            self.notify("update checks are off and the last result may be old: U, then c checks now", severity="warning")
+            return
         if not self.can_ask():
             return
-        n = sum(1 for r in self.rows if r.update)
+        n = sum(1 for r in self.c.rows(with_updates=True) if r.update)
         self.push_screen(ConfirmScreen(f"OmacVM {m.get('version')}",
                                        f"Install OmacVM {m.get('version')} on the Mac and in this VM"
                                        f" ({n} feature{'s' if n != 1 else ''} change)?\n"
@@ -677,11 +709,18 @@ class ControlCentre(App):
 
     @work(thread=True, exclusive=True, group="job")
     def run_job(self, action: str, features: list[str]) -> None:
+        what = self.describe(action, features)
         try:
             job = self.c.start(action, features)
         except BridgeError as e:
-            self.call_from_thread(self.notify, str(e), severity="error")
+            msg = str(e)
+            if e.code == "update-first":
+                msg = "the Mac has a newer OmacVM: u updates this VM first"
+            elif e.code == "stale-update":
+                msg = "update checks are off and the last result may be old: U, then c checks now"
+            self.call_from_thread(self.notify, f"{what}: {msg}", severity="error", timeout=8)
             return
+        self.last_result = ""
         self.call_from_thread(self.refresh_all)
         failures = 0
         while job.active:
@@ -691,16 +730,22 @@ class ControlCentre(App):
                 failures = 0
             except BridgeError:
                 failures += 1       # an update may restart the Bridge: keep asking a while
-                if failures > 120:
-                    break
+                if failures > LOST_AFTER:
+                    job = self.c.lose(job.id)
             self.call_from_thread(self.refresh_all)
         self.c.reload_local()
-        msg = {"done": "done", "rolled-back": "failed and rolled back: the features are as before",
-               "failed": "failed"}.get(job.state, job.state)
-        what = " ".join(features) or "update"
-        tail = "" if job.state == "done" else f": {job.text}"
-        self.call_from_thread(self.notify, f"{action} {what}: {msg}{tail}",
-                              severity="information" if job.state == "done" else "error", timeout=8)
+        lost = failures > LOST_AFTER
+        if job.state == "done":
+            self.last_result = ""
+            self.call_from_thread(self.notify, f"{what}: done", timeout=6)
+        elif lost:
+            self.last_result = (f"{what}: the Mac stopped answering about it (it may still finish there; "
+                                "omacvm status on the Mac shows it).")
+            self.call_from_thread(self.ask_retry, action, features, self.last_result)
+        else:
+            head = "failed and " if job.state == "rolled-back" else "failed: " + job.text + ". "
+            self.last_result = f"{what}: {head}{self.next_step(action, job.state)}"
+            self.call_from_thread(self.notify, self.last_result, severity="error", timeout=12)
         if action == "disable" and "control-centre" in features and job.state == "done":
             self.call_from_thread(self.exit)
             return
@@ -708,6 +753,10 @@ class ControlCentre(App):
         self.c.refresh_mac()
         self.c.refresh_updates()
         self.call_from_thread(self.refresh_all)
+
+    def ask_retry(self, action: str, features: list[str], text: str) -> None:
+        self.push_screen(ConfirmScreen("Try again?", text + "\nAsk the Mac again?"),
+                         lambda yes: yes and self.can_ask() and self.run_job(action, features))
 
 
 def run() -> int:

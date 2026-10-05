@@ -1,15 +1,17 @@
 #!/bin/bash
 # The control centre in the VM (feature control-centre). Run as root by
 # ../../guest/install.sh:
-#   control/guest/install.sh <desktop-user> on|off
+#   control/guest/install.sh <desktop-user> on|off [vm-type]
 # On: Textual (pacman), /usr/local/bin/omacvm, the root check socket (the
 # guest checks for the control centre: a fixed command, nothing read from the
 # caller), the app launcher entry, an "OmacVM" row in the Omarchy menu, the
-# OmacVM item in the bar, and the update notice (a user timer). Off: all of
-# it goes again. Idempotent.
+# OmacVM item in the bar, and the update notice (a user timer). OmacVM.app:
+# the desktop user may open the app's control port. Off: all of it goes
+# again. Idempotent. The menu, the bar and the launcher run `omacvm --window`.
 set -euo pipefail
 cd "$(dirname "$0")"
-U=${1:?usage: install.sh <desktop-user> on|off}; WANT=${2:?on|off}
+U=${1:?usage: install.sh <desktop-user> on|off [vm-type]}; WANT=${2:?on|off}; TYPE=${3:-}
+PORT_RULE=/etc/udev/rules.d/70-omacvm-control.rules
 H=$(getent passwd "$U" | cut -d: -f6)
 SHARE=/usr/local/share/omacvm
 MENU=$H/.config/omarchy/extensions/omarchy-menu.jsonc
@@ -30,7 +32,7 @@ import os, sys
 path, want = sys.argv[1], sys.argv[2]
 mark = "  // OmacVM control centre, the next line (on the Mac: omacvm disable control-centre)"
 row = ('  "omacvm": {"icon":"\U000f0633","label":"OmacVM","description":"features, updates, report a problem",'
-       '"action":"omarchy-launch-or-focus-tui omacvm"},')
+       '"action":"omarchy-launch-or-focus-tui omacvm --window"},')
 old = open(path, encoding="utf-8").read() if os.path.exists(path) else "{\n}\n"
 out, skip = [], False
 for line in old.split("\n"):
@@ -43,7 +45,7 @@ for line in old.split("\n"):
 if want == "on":
     at = next((i for i, l in enumerate(out) if l.strip() == "{"), None)
     if at is None:
-        sys.exit("  the Omarchy menu file has no line with only '{': add an OmacVM row yourself (omarchy-launch-or-focus-tui omacvm)")
+        sys.exit("  the Omarchy menu file has no line with only '{': add an OmacVM row yourself (omarchy-launch-or-focus-tui omacvm --window)")
     out[at + 1:at + 1] = [mark, row]
 new = "\n".join(out)
 if new != old:
@@ -67,6 +69,12 @@ if [[ $WANT == on ]]; then
   systemctl enable omacvm-check.socket >/dev/null 2>&1
   systemctl restart omacvm-check.socket
   install -Dm644 omacvm.desktop /usr/local/share/applications/omacvm.desktop
+  # OmacVM.app: the requests go through the app's control port, which only
+  # the desktop user may open.
+  if [[ $TYPE == app ]]; then
+    printf 'SUBSYSTEM=="virtio-ports", ATTR{name}=="org.omacvm.control", OWNER="%s", MODE="0600"\n' "$U" > "$PORT_RULE"
+    udevadm control --reload 2>/dev/null; udevadm trigger --subsystem-match=virtio-ports 2>/dev/null || true
+  fi
   install -m644 omacvm-notify.service omacvm-notify.timer /etc/systemd/user/
   user_ctl daemon-reload 2>/dev/null || true
   user_ctl enable --now omacvm-notify.timer >/dev/null 2>&1 ||
@@ -80,6 +88,7 @@ else
   rm -f /etc/systemd/system/omacvm-check.socket /etc/systemd/system/omacvm-check@.service
   systemctl daemon-reload
   rm -f /usr/local/share/applications/omacvm.desktop
+  if [[ -f $PORT_RULE ]]; then rm -f "$PORT_RULE"; udevadm control --reload 2>/dev/null || true; fi
   user_ctl disable --now omacvm-notify.timer >/dev/null 2>&1 || true
   rm -f /etc/systemd/user/omacvm-notify.service /etc/systemd/user/omacvm-notify.timer "$H/.config/systemd/user/timers.target.wants/omacvm-notify.timer"
   menu_line off

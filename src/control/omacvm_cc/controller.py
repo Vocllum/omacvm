@@ -4,6 +4,7 @@ Methods that talk to the Mac or run checks block: the TUI calls them from
 worker threads."""
 from __future__ import annotations
 
+import dataclasses
 import time
 
 from . import state as S
@@ -11,6 +12,24 @@ from .bridge import Bridge, BridgeError, Hello
 from .local import Local, guest_checks, write_attention
 
 ACTION_FOR = {True: "enable", False: "disable"}
+# With update checks off, an update is installed only from a check this recent
+# (the Bridge has the same rule).
+FRESH_SECONDS = 3600
+
+
+def iso_age(stamp) -> float | None:
+    """Seconds since an ISO time ("2026-10-05T10:41:00Z"), None if unknown."""
+    if not isinstance(stamp, str) or not stamp:
+        return None
+    try:
+        from datetime import datetime, timezone
+        t = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if t.tzinfo is None:
+            t = t.replace(tzinfo=timezone.utc)
+        age = time.time() - t.timestamp()
+        return age if age > -60 else None   # a time in the future: unknown
+    except ValueError:
+        return None
 
 
 class Controller:
@@ -38,12 +57,10 @@ class Controller:
 
     def mac_problem(self) -> str:
         """Why switching from here does not work right now ("" if it does)."""
-        if self.local.vm_type == "app":
-            return "OmacVM.app's VMs switch features with omacvm on the Mac for now"
         if self.mac_error is not None:
             return str(self.mac_error)
         if self.hello is None:
-            return "asking the Mac"
+            return "still asking the Mac: a moment"
         return ""
 
     def refresh_mac(self) -> None:
@@ -94,12 +111,27 @@ class Controller:
         self.bridge = Bridge(self.local.env, self.local.version)
 
     # ---- the model ----
+    @property
+    def checks_enabled(self) -> bool:
+        """The Mac's update check setting (off: no update marks, no prompts)."""
+        return (self.updates or {}).get("checks_enabled", True) is not False
+
+    def manifest_fresh(self) -> bool:
+        """The update information comes from a check in the last hour."""
+        age = iso_age((self.updates or {}).get("checked_at"))
+        return age is not None and age < FRESH_SECONDS
+
     def offer(self) -> dict:
         m = (self.updates or {}).get("manifest")
         parts = m.get("parts") if isinstance(m, dict) else None
         return parts if isinstance(parts, dict) else {}
 
-    def rows(self) -> list[S.Row]:
+    def rows(self, with_updates: bool | None = None) -> list[S.Row]:
+        """The features. Update marks only while update checks are on (or
+        with_updates=True: the Updates screen, the one place that shows an
+        update when they are off)."""
+        if with_updates is None:
+            with_updates = self.checks_enabled
         avail = {}
         mac_checks = None
         if self.mac_status:
@@ -112,7 +144,7 @@ class Controller:
         mac_features = set(self.hello.features) if self.hello and self.hello.features else None
         return S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
-                            offer=self.offer(), mac_features=mac_features)
+                            offer=self.offer() if with_updates else {}, mac_features=mac_features)
 
     # ---- jobs ----
     def _job(self, d: dict) -> S.Job:
@@ -129,10 +161,17 @@ class Controller:
     def poll(self, job_id: str) -> S.Job:
         return self._job(self.bridge.job(job_id))
 
+    def lose(self, job_id: str) -> S.Job:
+        """The Mac stopped answering about a job: it ends here as failed (it
+        may still finish on the Mac; the next status shows how it went)."""
+        j = dataclasses.replace(self.jobs[job_id], state="failed", text="the Mac stopped answering about this job")
+        self.jobs[job_id] = j
+        return j
+
     def write_attention(self, rows: list[S.Row]) -> None:
         """For the bar item: how many features need a look, and updates."""
         problems = sum(1 for r in rows if r.status in (S.Status.FAILING, S.Status.NEEDS_PERSON))
-        updates = sum(1 for r in rows if r.update) if (self.updates or {}).get("checks_enabled", True) else 0
+        updates = sum(1 for r in rows if r.update) if self.checks_enabled else 0
         write_attention(problems, updates)
 
     def active_job(self) -> S.Job | None:

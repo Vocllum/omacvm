@@ -45,7 +45,7 @@ BarWidget {
                : root.updates > 0 ? "OmacVM: an update is out"
                : "OmacVM"
     onPressed: function(button) {
-      if (root.bar) root.bar.run("omarchy-launch-or-focus-tui omacvm")
+      if (root.bar) root.bar.run("omarchy-launch-or-focus-tui omacvm --window")
     }
   }
 }
