@@ -180,7 +180,7 @@ case $TYPE in
   utm)
     if (( YES )); then [[ -x $UTMCTL ]] && (( $(utm_major || echo 0) >= 5 )) || { utm_install_help >&2; needs_person "UTM 5 is not installed (brew install --cask utm@beta, then open UTM once)"; }
     else wait_for_app utm; fi
-    : ;;
+    if ! (( DRY )); then why=$(utm_scripting) || needs_person "$why"; fi ;;
   fusion)
     if (( YES )); then have_fusion || needs_person "VMware Fusion is not installed: download it from support.broadcom.com (free, needs a sign-in), then open it once"
     else wait_for_app fusion; fi

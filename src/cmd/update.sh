@@ -75,9 +75,10 @@ if [[ -n $VM ]]; then
   "$R/src/cmd/apply.sh" --vm "$VM" --no-mac
   exit
 fi
-done_any=0; stopped=(); failed=()
+done_any=0; stopped=(); unanswered=(); failed=()
 while IFS=$'\t' read -r name type state; do
   [[ -n $name ]] || continue
+  if [[ $state == unknown ]]; then unanswered+=("$name"); continue; fi
   if [[ $state != running ]]; then stopped+=("$name"); continue; fi
   ip=$(vm_find_ip "$name" "$type" 3 2>/dev/null) || continue
   vm_pin "$name" "$type"
@@ -101,6 +102,7 @@ if (( ${#stopped[@]} )); then
   info "not running, so not updated: $(printf '%s, ' "${stopped[@]}" | sed 's/, $//')"
   info "start one and run: omacvm update --vm NAME"
 fi
+(( ${#unanswered[@]} )) && info "not updated: $(printf '%s, ' "${unanswered[@]}" | sed 's/, $//'): $UTM_NO_ANSWER"
 (( ${failed_app:-0} )) && failed+=("OmacVM.app")
 if (( ${#failed[@]} )); then
   echo "omacvm update: failed in $(printf '%s, ' "${failed[@]}" | sed 's/, $//') (see above)" >&2
