@@ -166,6 +166,7 @@ struct inst {
 	int busy[OVD_MAX_CAPTURE], nbusy;	/* converted, in order */
 
 	bool draining, drain_flushed;
+	bool no_va;			/* FFmpeg could not use VA-API for this stream */
 	double decode_ms;		/* the last packet's, for OMACVM_VDEC_DEBUG */
 	struct srcimg *src;
 	AVBufferRef *src_frames;	/* the frames context src belongs to */
@@ -194,12 +195,19 @@ static void done(int ioc, struct inst *in, uint32_t index, uint64_t seq, uint64_
 
 /* ---- decoder ------------------------------------------------------------------ */
 
+/* VA-API or nothing: decoding on the CPU here would be slower than
+ * Chromium's own. Without it (a profile the Mac lacks, or no decoder left)
+ * the app gets a decode error and can fall back to its software decoder. */
 static enum AVPixelFormat pick_vaapi(AVCodecContext *c, const enum AVPixelFormat *f)
 {
+	struct inst *in = c->opaque;
+
 	for (; *f != AV_PIX_FMT_NONE; f++)
 		if (*f == AV_PIX_FMT_VAAPI)
 			return *f;
-	log_msg("vdecd: the stream cannot be decoded with VA-API");
+	if (!in->no_va)
+		log_msg("vdecd: inst %u: the stream cannot be decoded with VA-API", in->id);
+	in->no_va = true;
 	return AV_PIX_FMT_NONE;
 }
 
@@ -267,6 +275,7 @@ static bool decoder_open(struct inst *in, uint32_t codec)
 		return false;
 	in->cc->hw_device_ctx = av_buffer_ref(hwdev);
 	in->cc->get_format = pick_vaapi;
+	in->cc->opaque = in;
 	in->cc->extra_hw_frames = MAX_PENDING_FRAMES + 2;
 	in->cc->thread_count = 1;
 	in->cc->pkt_timebase = (AVRational){ 1, 1000000000 };
@@ -275,7 +284,7 @@ static bool decoder_open(struct inst *in, uint32_t codec)
 		return false;
 	}
 	in->codec = codec;
-	in->draining = in->drain_flushed = false;
+	in->draining = in->drain_flushed = in->no_va = false;
 	return true;
 }
 
@@ -756,6 +765,12 @@ static void pump(struct inst *in)
 		bool progress = output_frames(in);
 
 		progress |= feed_input(in);	/* the next decodes go out first */
+		if (in->no_va) {	/* the module fails the app's buffers */
+			ioctl(ctl, OVD_IOC_ERROR, &in->id);
+			in->no_va = false;
+			input_drop(in);
+			return;
+		}
 		finish(in, true);
 		progress |= drain(in);
 		if (!progress)
