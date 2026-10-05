@@ -1,6 +1,6 @@
 # 0031: Mac-side actions from the VM: a fixed list of Bridge requests
 
-Status: accepted, built (rounds 1 and 2). Branch `control-centre`.
+Status: accepted, built (rounds 1 to 3). Branch `control-centre`.
 
 ## Context
 
@@ -28,26 +28,50 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 
 - The Mac decides which VM: the peer address must match exactly one running
   VM that OmacVM set up (pinned host key); otherwise 409 and nothing runs.
-  The guest never names a VM. The request must also carry that VM's own key
-  (`X-OmacVM-VM-Key`, made by `omacvm apply`, kept on the Mac in
-  `omacvm/vm-keys/` and in the VM in `~/.config/omacvm-bridge/vm-key`): a
-  VM that takes another VM's address cannot act for it. Everything except
-  `hello` needs this, also the Mac-wide update settings.
+  The guest never names a VM. Each request is signed with that VM's own key
+  (made by `omacvm apply`, kept on the Mac in `omacvm/vm-keys/` and in the
+  VM in `~/.config/omacvm-bridge/vm-key`), which never crosses the network:
+  `X-OmacVM-Auth: 1 <time> <nonce> <HMAC-SHA256(key, method, path, time,
+  nonce, protocol header, SHA-256 of the body)>`. The Bridge takes it within
+  5 minutes of its own clock and each nonce once. Answers to signed requests
+  carry `X-OmacVM-Answer: <HMAC-SHA256(key, nonce, status, SHA-256 of the
+  body)>`, and the VM believes nothing else: a VM that answers for the Mac's
+  address (it has the Bridge token, as every VM does, so it passes /proof)
+  sees only signatures, cannot change a request it passes on, and cannot
+  send one twice. A VM whose clock is off gets a signed answer with the
+  Mac's time and signs again once. Everything except `hello` needs this,
+  also the Mac-wide update settings; `hello` carries nothing of the key.
 - Strict JSON (≤ 4 KB, unknown keys rejected); feature names must be in the
   Mac's own `features.tsv`.
 - The CLI runs by posix_spawn with a fixed argv, no shell; its path comes
-  from a file `src/mac/install.sh` writes, checked for owner and mode.
+  from a file `src/mac/install.sh` writes, checked for owner and mode. Only
+  the installed checkout writes it (the one the `omacvm` command links to;
+  `cli_for_bridge` in `src/lib/mac.sh`): another clone or an agent's
+  worktree that runs the script never becomes what the Bridge runs, or what
+  an update moves.
 - One job per VM, 20 per hour; every request logged.
 - Toggles only when the Mac's and the VM's OmacVM versions match; otherwise
-  the only action is `update`, which installs the version the Mac fetched
-  and verified itself (ADR 0032), never one the guest names.
+  `update` installs the version the Mac fetched and verified itself (ADR
+  0032), never one the guest names, and only forward (409 `not-newer` for a
+  release older than the Mac or the VM). A failed update never locks a VM:
+  the Mac keeps the new version, the VM goes back, and turning a feature off
+  or repairing it still runs (they bring the VM to the Mac's version without
+  that feature, or with it installed again). A VM newer than the Mac: 409
+  `mac-older`, update the Mac first.
 - Every job runs `omacvm apply --transaction`: the new OmacVM is unpacked
-  beside the VM's old one and swapped in; on failure (also a part that would
-  only be logged otherwise) the old one and the saved feature set come back,
-  and apply ends with exit code 4, which the job shows as `rolled-back`
-  (the exit code alone decides, never the output). `reinstall` repairs only
-  the named features (`apply --reinstall F`). Progress comes as JSON lines
-  (`OMACVM_PROGRESS=json`): step n of m.
+  beside the VM's old one and swapped in; on failure the old one and the
+  saved feature set come back, and apply ends with exit code 4, which the
+  job shows as `rolled-back` (the exit code alone decides, never the
+  output). A part that is only logged when it fails (battery, camera,
+  thp-kernel, control centre) fails the job only when it belongs to it: the
+  features switched or repaired, or for an update the parts whose digest
+  changes; others keep being logged only. `reinstall` repairs only the named
+  features (`apply --reinstall F`), and its rollback re-runs only those.
+  Apply names what failed in a JSON line (`{"omacvm_failed": 1, "part",
+  "text"}`), which the job answer carries as its text and `failed_part`.
+  Progress comes as JSON lines (`OMACVM_PROGRESS=json`): step n of m, shown
+  on the rows the job changes or, for an update of OmacVM's own scripts or
+  the app, in the banner.
 - With update checks off, `update` installs only from a check made in the
   last hour (409 `stale-update`).
 - Protocol number in `hello` and the `X-OmacVM-Proto` header; an older Mac
@@ -86,3 +110,14 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   the per-VM key above.
 - From 127.0.0.1 and the Mac's own addresses only `hello` is answered,
   unless OmacVM.app relays it with the relay key.
+- Round 2's key travelled in a header (`X-OmacVM-VM-Key`). Every VM has the
+  Bridge token, so a VM answering for 10.211.55.2 towards another (ARP on
+  the shared network) passed /proof and got that VM's key. Round 3 signs
+  instead (above); the impostor test is in the round 3 notes.
+- OmacVM.app's control port opens for one program at a time, and a status
+  request holds it up to 60 s: meanwhile job polls wait and the notice
+  timer gives up for that run ("offline"). Accepted for now; a port shared
+  by several clients (a small multiplexer in the guest) would remove it.
+- The Bridge logs a request's method and path with control characters
+  replaced: a `%0A` in a path must not write a forged line into the log that
+  `omacvm report` on the Mac includes.
