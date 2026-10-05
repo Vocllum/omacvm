@@ -239,6 +239,81 @@ EOF
 else
   echo "skip MacLinks.swift: no swiftc"
 fi
+# A feature turned on while an app VM runs: the app opens the Mac to it only
+# at the VM's next start (libslirp and Runner read the features once). apply
+# names it, omacvm check fails with "shut the VM down and start it again".
+V=$T/run; mkdir -p "$V/logs"
+printf '%s\n' "OmacVM: Mac links: Omanotch on, Gestures on, Bridge on, battery on, camera on" \
+  "OmacVM: Mac links: Omanotch off, Gestures on, Bridge off, battery off, camera on" > "$V/logs/qemu.log"
+fs="bridge=on gestures=on omanotch=off battery=on camera=off"
+expect "app: on, closed since this start (the last line)" "Bridge, battery" "$(app_links_stale "$V" "$fs" on)"
+expect "app: off, still served since this start" "camera" "$(app_links_stale "$V" "$fs" off)"
+expect "app: features as at the start: nothing" "" "$(app_links_stale "$V" "omanotch=off bridge=off battery=off" on)$(app_links_stale "$V" "omanotch=off bridge=off battery=off" off)"
+expect "app: a feature not named is on" "Bridge, battery" "$(app_links_stale "$V" "omanotch=off" on)"
+mkdir -p "$T/older/logs"; echo "OmacVM: network: user" > "$T/older/logs/qemu.log"
+expect "app: an app from before the line: nothing" "" "$(app_links_stale "$T/older" "$fs" on)"
+
+# apply's lines for a running app VM.
+ap=$(awk '/^  # The app reads them only when the VM starts/ {on = 1} on {print} on && /^  fi$/ {exit}' "$R/src/cmd/apply.sh")
+[[ $ap == *app_links_stale* ]] || { echo "FAIL apply.sh: no Mac links lines for a running app VM"; fail=1; }
+apply_app() {   # RUNNING(0|1) FEATURES -> what apply says
+  ( RUN=$1 d=$V feats="$2 "
+    app_running_dir() { (( RUN )); }
+    info() { echo "$*"; }
+    eval "$ap" )
+}
+expect "apply, running, bridge and battery turned on: names them, says restart" \
+  "OmacVM.app: Bridge, battery only from the VM's next start: shut it down and start it again" \
+  "$(apply_app 1 "bridge=on gestures=on omanotch=off battery=on camera=on")"
+expect "apply, running, camera turned off: says the Mac serves it until the next start" \
+  "OmacVM.app: camera off in the VM now; the Mac stops serving it at the VM's next start" \
+  "$(apply_app 1 "bridge=off gestures=on omanotch=off battery=off camera=off")"
+expect "apply, running, nothing changed: says nothing" "" "$(apply_app 1 "bridge=off gestures=on omanotch=off battery=off camera=on")"
+expect "apply, running, unchanged features again: still names them" "OmacVM.app: Bridge only from the VM's next start: shut it down and start it again" \
+  "$(apply_app 1 "bridge=on gestures=on omanotch=off battery=off camera=on"; apply_app 1 "bridge=on gestures=on omanotch=off battery=off camera=on" >/dev/null)"
+expect "apply, stopped: says nothing (the next start reads them)" "" "$(apply_app 0 "bridge=on gestures=on omanotch=on battery=on camera=on")"
+expect "apply: features written" "bridge=on gestures=on omanotch=on battery=on camera=on" "$(cat "$V/features")"
+
+# omacvm check's "Mac links (app)" row.
+ck=$(awk '/^# OmacVM.app: what of the Mac this start of the VM may use/ {on = 1} on && /^if \[\[ \$TYPE == app \]\]; then$/ {exit} on {print}' "$R/src/cmd/check.sh")
+[[ $ck == *'"Mac links (app)"'* ]] || { echo "FAIL check.sh: no Mac links (app) row"; fail=1; }
+check_app() {   # FEATURES -> the row
+  ( TYPE=app VM=x F=" $1 "
+    app_dir() { echo "$V"; }
+    feat() { [[ $F == *" $1=off "* ]] && echo off || echo on; }
+    ok() { echo "ok: $2"; }
+    bad() { echo "fail: $2"; }
+    skip() { echo "skip: $2"; }
+    eval "$ck" )
+}
+expect "check, app: features as at the start: ok" "ok: Omanotch off, Gestures on, Bridge off, battery off, camera on" \
+  "$(check_app "omanotch=off bridge=off battery=off")"
+expect "check, app: bridge turned on while it runs: fails, says restart" \
+  "fail: on, but closed to the VM since its start: Bridge (shut the VM down and start it again)" \
+  "$(check_app "omanotch=off battery=off")"
+expect "check, app: camera turned off while it runs: fails, says restart" \
+  "fail: off for this VM, but the app still serves it: camera (shut the VM down and start it again)" \
+  "$(check_app "omanotch=off bridge=off battery=off camera=off")"
+expect "check, app: both: one row with both" \
+  "fail: off for this VM, but the app still serves it: camera; on, but closed to the VM since its start: Omanotch (shut the VM down and start it again)" \
+  "$(check_app "bridge=off battery=off camera=off")"
+expect "check, app from before the line: skip" "skip: this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)" "$(V=$T/older check_app "")"
+
+# In the VM: the rows that find no link to the Mac hint at the restart on
+# OmacVM.app (not for a port on the fast network, which does not gate them).
+rh=$(awk '/^restart_hint\(\) \{$/ {on = 1} on {print} on && /^}$/ {exit}' "$R/src/guest/check.sh")
+hint() { ( TYPE=$1 HOST=$2; eval "$rh"; restart_hint "${3:-}" ); }
+h="; turned on while the VM was running? shut it down and start it again"
+expect "guest hint: app, port" "$h" "$(hint app 10.0.2.2 port)"
+expect "guest hint: app, battery/camera port" "$h" "$(hint app 192.168.77.1)"
+expect "guest hint: app on the fast network, port: none" "" "$(hint app 192.168.77.1 port)"
+expect "guest hint: UTM: none" "" "$(hint utm 192.168.64.1 port)"
+for r in '"gestures" "service runs but is not connected to $HOST:47830$(restart_hint port)"' \
+         'omacvm check on the Mac says$(restart_hint port))"' "OmacVM's Bridge: omacvm update\$(restart_hint port))\"" \
+         'with the camera (omacvm update$(restart_hint))"' 'older: omacvm update$(restart_hint))"'; do
+  grep -qF -- "$r" "$R/src/guest/check.sh" && echo "ok   guest check.sh hints at the restart: ${r:0:40}" ||
+    { echo "FAIL guest check.sh: no restart hint in $r"; fail=1; }
+done
 grep -q 'env\["OMACVM_SLIRP_HOST_PORTS"\] = links.hostPorts' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'if links.battery { startBattery() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&
   grep -q 'if links.camera { startCamera() }' "$R/app/app/Sources/OmacVM/Runner.swift" &&

@@ -115,6 +115,8 @@ the Bridge.
 Off means off: nothing of the feature keeps running in the VM, the VM no
 longer talks to the Mac for it, OmacVM.app gives that VM nothing of the Mac
 for it from its next start, and `omacvm check` says "off".
+On OmacVM.app the same goes for turning one on: the VM gets its link to
+the Mac from its next start (shut it down and start it again).
 
 **Already have an Omarchy VM** you installed yourself from omarchy-mac?
 `omacvm apply --vm NAME` adds OmacVM to it. If OmacVM cannot get in yet, it

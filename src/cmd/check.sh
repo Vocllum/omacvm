@@ -342,17 +342,18 @@ if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
 fi
 # OmacVM.app: what of the Mac this start of the VM may use (the app reads
 # the VM's features at start and says so in qemu.log). A feature that is off
-# must get nothing.
+# must get nothing; one switched on while the VM runs waits for its next start.
 if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
   l=$(sed -n 's/^OmacVM: Mac links: //p' "$d/logs/qemu.log" 2>/dev/null | tail -1)
   if [[ -z $l ]]; then
     skip "Mac links (app)" "this OmacVM.app serves every feature to every VM (older than 3.0.0: omacvm update)"
   else
-    open=""
-    for x in omanotch:Omanotch gestures:Gestures bridge:Bridge battery:battery camera:camera; do
-      [[ $(feat "${x%%:*}" on) == off && ", $l, " == *", ${x#*:} on, "* ]] && open+="${open:+, }${x#*:}"
-    done
-    if [[ -n $open ]]; then bad "Mac links (app)" "off for this VM, but the app still serves it: $open (shut the VM down and start it again)"
+    fs=$(for k in omanotch gestures bridge battery camera; do printf '%s=%s ' "$k" "$(feat "$k" on)"; done)
+    open=$(app_links_stale "$d" "$fs" off) closed=$(app_links_stale "$d" "$fs" on)
+    m=""
+    [[ -z $open ]] || m="off for this VM, but the app still serves it: $open"
+    [[ -z $closed ]] || m+="${m:+; }on, but closed to the VM since its start: $closed"
+    if [[ -n $m ]]; then bad "Mac links (app)" "$m (shut the VM down and start it again)"
     else ok "Mac links (app)" "$l"; fi
   fi
 fi

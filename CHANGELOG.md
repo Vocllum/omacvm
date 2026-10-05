@@ -14,6 +14,9 @@ in more words.
   are off (no Omanotch, Gestures or Bridge port, no battery or camera) from
   its next start, and `omacvm check` says "off" for them, or fails when
   something of them still runs.
+  On OmacVM.app a feature turned on while the VM runs gets its link to the
+  Mac at the VM's next start: `omacvm apply` names it and `omacvm check`
+  says to shut the VM down and start it again.
 
 ## 2.9.0 (unreleased)
 

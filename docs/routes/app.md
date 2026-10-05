@@ -71,6 +71,10 @@ OmacVM's version.
   `omacvm apply` writes the VM's features into its folder (`features`); a
   VM without that file gets everything, as before. On the fast network the
   VM reaches the Mac directly: there only the VM side keeps it away.
+- The app reads the features only when the VM starts. A feature turned on
+  while the VM runs (`omacvm enable bridge`) gets its link to the Mac at the
+  next start: shut the VM down and start it again. `omacvm apply` names
+  such features, and `omacvm check` fails on them until then.
 - Optional notch-strip mode (a switch in the app): the window covers the
   strip itself and Omarchy's bar moves there, but that full screen has no
   Space of its own (macOS 15 keeps full-screen Spaces below the notch).
