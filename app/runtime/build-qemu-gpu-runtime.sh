@@ -905,6 +905,8 @@ verify_file_sha "Framebuffer without attachments patch" "$virgl_framebuffer_no_a
 patch -d "$virgl_source" -p1 -f -i "$virgl_framebuffer_no_attachments_patch"
 verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_caps_sampler_limit_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
+# OmacVM Venus: MoltenVK cannot compile zero-initialized workgroup memory.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-moltenvk-zero-init.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
