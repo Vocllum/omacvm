@@ -118,6 +118,13 @@ virgl_vertex_unused_patch="$native_dir/patches/virgl-vertex-unused-first-input.p
 virgl_memory_budget_patch="$native_dir/patches/virgl-resource-memory-budget.patch"
 virgl_queue_flush_patch="$native_dir/patches/virgl-control-queue-flush.patch"
 virgl_venus_robust_patch="$native_dir/patches/virgl-venus-robust-buffer-access.patch"
+virgl_shader_core_glsl_version_patch="$native_dir/patches/virgl-shader-core-glsl-version.patch"
+virgl_shader_shadow_lod_patch="$native_dir/patches/virgl-shader-shadow-lod-extension.patch"
+virgl_shader_int_outputs_patch="$native_dir/patches/virgl-shader-integer-outputs.patch"
+virgl_blitter_core_glsl_version_patch="$native_dir/patches/virgl-blitter-core-glsl-version.patch"
+virgl_blitter_integer_msaa_patch="$native_dir/patches/virgl-blitter-integer-msaa.patch"
+virgl_framebuffer_no_attachments_patch="$native_dir/patches/virgl-framebuffer-no-attachments.patch"
+virgl_caps_sampler_limit_patch="$native_dir/patches/virgl-caps-sampler-limit.patch"
 prepare_runtime="$native_dir/prepare-qemu-gpu-runtime.sh"
 pinned_bottles="$native_dir/pinned-runtime-bottles.sh"
 
@@ -172,6 +179,13 @@ virgl_memory_budget_patch_sha256=c8068ca79738984e8c1205fc4eea73956de44ce92a98148
 virgl_queue_flush_patch_sha256=7f468d955d47cfbf9df75578efddfab0f36256b9b092c8e992f6b78faf67991b
 virgl_venus_robust_patch_sha256=1f877c60460374d0d0109089e70de8c0bb3f5d670404d1a0b1e76d426db80946
 virgl_venus_lost_patch_sha256=c88ad7984c70a79e90c9685d39879f445f637ad1a99d5496976049d3fa494fdc
+virgl_shader_core_glsl_version_patch_sha256=aa6a6c0055d3b5cdca09e26fba7f2b97a635696e60d9c00835e8edab09cb25c7
+virgl_shader_shadow_lod_patch_sha256=c56fb4fa4637f5c634bce74be2a750b9ba321a7ed79cc16787dd579a71da1d92
+virgl_shader_int_outputs_patch_sha256=79ab17b35d689f58736c853aa7cdc4a2d8b2e91897e9e4cccb8ebf584acc0d57
+virgl_blitter_core_glsl_version_patch_sha256=aa73744e14d048435df10343839fc1962d079110a895c7c27ed8f6b67788a11e
+virgl_blitter_integer_msaa_patch_sha256=eb113286234b36d976546c443df19d4faee76cd48448e77cc00b4e227277831e
+virgl_framebuffer_no_attachments_patch_sha256=21d98c69877901238db0f50cc610e7156decaebf2e41775e11cd8dea539986f5
+virgl_caps_sampler_limit_patch_sha256=ec779a77aab1384dd5f2c046e9d3238ee11c840dd19577bb6f96fb7e85ff2169
 strchrnul_patch_sha256=ec1048dd0e8ebe53bf7e8a3bca9bf2f5f4336cd607d4cd077437470e9a32094a
 usb_exact_bus_patch_sha256=5e39159171295c566d014a1ef2744130f80fa02b742c349fa47373b00ae697ec
 udp_patch_sha256=95e8ee890be78cdce70b3ee54a8adac27be02421be08b986ae987c74ef8cec8c
@@ -870,6 +884,22 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-ext-t
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-host-pages.patch"
 # OmacVM Venus: a KosmicKrisp without a usable device falls back to MoltenVK.
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-kosmickrisp-fallback.patch"
+# OmacVM: where virglrenderer and Apple's core profile disagree (ADR 0019). Each gap made
+# one shader or draw stop the guest's whole GL context: the app drew black from then on.
+verify_file_sha "Core profile GLSL version patch" "$virgl_shader_core_glsl_version_patch" "$virgl_shader_core_glsl_version_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_core_glsl_version_patch"
+verify_file_sha "Shadow lod extension patch" "$virgl_shader_shadow_lod_patch" "$virgl_shader_shadow_lod_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_shadow_lod_patch"
+verify_file_sha "Integer outputs patch" "$virgl_shader_int_outputs_patch" "$virgl_shader_int_outputs_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_shader_int_outputs_patch"
+verify_file_sha "Blitter GLSL version patch" "$virgl_blitter_core_glsl_version_patch" "$virgl_blitter_core_glsl_version_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_blitter_core_glsl_version_patch"
+verify_file_sha "Blitter integer multisample patch" "$virgl_blitter_integer_msaa_patch" "$virgl_blitter_integer_msaa_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_blitter_integer_msaa_patch"
+verify_file_sha "Framebuffer without attachments patch" "$virgl_framebuffer_no_attachments_patch" "$virgl_framebuffer_no_attachments_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_framebuffer_no_attachments_patch"
+verify_file_sha "Sampler limit patch" "$virgl_caps_sampler_limit_patch" "$virgl_caps_sampler_limit_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_caps_sampler_limit_patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
