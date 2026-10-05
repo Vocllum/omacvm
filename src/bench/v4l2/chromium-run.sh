@@ -7,6 +7,7 @@
 #   EXTRA='--flag ...'                 more Chromium flags
 #   BROWSER=chromium                   binary (chromium, google-chrome-stable, brave)
 #   GUSER=<user>                       desktop user (default: the one running Hyprland)
+#   QUIET=1                            no media logging (it costs CPU: for measurements)
 set -euo pipefail
 
 guser=${GUSER:-$(ps -o user= -p "$(pgrep -x Hyprland | head -1)")}
@@ -21,8 +22,9 @@ rm -rf "$prof"
 
 args=(--user-data-dir="$prof" --remote-debugging-port=9222 --no-first-run
       --no-default-browser-check --password-store=basic --autoplay-policy=no-user-gesture-required
-      --enable-logging=stderr --vmodule='*/media/gpu/*=4,*/media/gpu/v4l2/*=4,*/media/gpu/chromeos/*=4,*/mojo/services/*=3'
       --ozone-platform=wayland)
+[ -n "${QUIET:-}" ] || args+=(--enable-logging=stderr
+      --vmodule='*/media/gpu/*=4,*/media/gpu/v4l2/*=4,*/media/gpu/chromeos/*=4,*/mojo/services/*=3')
 [ -n "${FEAT:-}" ] && args+=(--enable-features="$FEAT")
 [ -n "${DISABLE:-}" ] && args+=(--disable-features="$DISABLE")
 # shellcheck disable=SC2206
