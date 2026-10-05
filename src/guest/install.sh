@@ -6,7 +6,7 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, fast-network) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, fast-network, vulkan) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -93,6 +93,7 @@ esac
 [[ $TYPE == parallels ]] && F[battery]=off
 # The fast network is OmacVM.app's (the other apps have vmnet themselves).
 [[ $TYPE == app ]] || F[fast-network]=off
+[[ $TYPE == app ]] || F[vulkan]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
@@ -205,7 +206,14 @@ case $TYPE in
   utm)
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
   app)
-    log "OmacVM.app"; "$R/app/guest/install.sh" "$U" ;;
+    log "OmacVM.app"; "$R/app/guest/install.sh" "$U"
+    # Vulkan (Venus): OmacVM's Mesa for it, built once in the VM.
+    if [[ ${F[vulkan]} == on ]]; then
+      log "Vulkan, WebGPU and GPU compute (the first time: Mesa builds in the VM, a few minutes)"
+      "$R/app/guest/venus/install.sh" --force || log "Vulkan: not installed (see above); GL is as it was"
+    elif [[ -e /opt/omacvm-mesa ]]; then
+      log "Vulkan: off"; "$R/app/guest/venus/install.sh" --remove
+    fi ;;
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac

@@ -1,9 +1,11 @@
 #!/bin/bash
 # Venus extras for OmacVM.app VMs: Vulkan (Venus), OpenCL (rusticl on Zink on
 # Venus), WebGPU in Firefox and, from an extra launcher, in Chromium/Chrome.
-# Run as root inside the VM: ./install.sh
-# Only does something when the VM runs with Venus (the app's hidden switch:
-# defaults write org.omacvm.app venus -bool true); --force builds anyway.
+# The feature vulkan (omacvm enable vulkan) runs it with --force from
+# guest/install.sh; the app starts that VM with Venus from then on.
+# Run as root inside the VM: ./install.sh [--force | --remove | --venus-on]
+# Without --force it only does something when the VM runs with Venus now.
+# --venus-on: status 0 if this VM runs with Venus now (for omacvm check).
 #
 # Builds the pinned Mesa below with OmacVM's patches into /opt/omacvm-mesa
 # (Arch Linux ARM's Mesa stays the GL driver) and registers it:
@@ -47,10 +49,14 @@ venus_on() {
 
 case ${1:-} in
   --remove) remove; exit 0 ;;
+  --venus-on) venus_on; exit ;;
   --force) ;;
   *) venus_on || { echo "OmacVM Venus extras: no Venus in this VM, skipped"; exit 0; } ;;
 esac
 
+# The loader and the tools omacvm check uses (small; also when Mesa is built).
+pacman -S --needed --noconfirm vulkan-icd-loader vulkan-tools ocl-icd clinfo >/dev/null 2>&1 ||
+  echo "OmacVM Venus extras: vulkan-tools/clinfo not installed (omacvm check cannot test Vulkan)"
 STAMP="$MESA_VERSION $(cat patches/*.patch | sha256sum | cut -c1-16)"
 if [[ $(cat "$PREFIX/omacvm-mesa-version" 2>/dev/null) != "$STAMP" ]]; then
   pacman -S --needed --noconfirm meson ninja pkgconf python-mako python-yaml python-packaging \
