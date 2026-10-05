@@ -154,12 +154,13 @@ fi
 # ---------- 1. Parallels, UTM, VMware Fusion or OmacVM.app ----------
 if [[ -z $TYPE ]]; then
   (( YES )) && usage "--yes needs --vm-type parallels, utm, fusion or app"
+  # OmacVM.app first: the README recommends it.
   ui_select pick "Where should Omarchy run?" 0 \
-    "Parallels Desktop|near-native speed, every display · paid" \
+    "OmacVM.app|recommended · free · its own app, nothing else to install · hardware video · one display" \
     "UTM|free · one display, slower desktop · UTM 5 (beta)" \
-    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it (new)" \
-    "OmacVM.app|free · its own app, nothing else to install · one display (new)"
-  case $pick in 0) TYPE=parallels ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=app ;; esac
+    "VMware Fusion|free · every display · slower desktop · OmacVM patches Hyprland for it" \
+    "Parallels Desktop|near-native speed, every display · paid"
+  case $pick in 0) TYPE=app ;; 1) TYPE=utm ;; 2) TYPE=fusion ;; *) TYPE=parallels ;; esac
   say "    Comparison: $README_ROUTES"
 fi
 # The app itself: installed now (after asking) when it is missing.
@@ -458,7 +459,7 @@ human_steps() {
     parallels_profile_emptied || echo "Let Cmd+C/V/X reach Omarchy as Super: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh (app-wide: every Linux VM in Parallels)."
     parallels_sends_shortcuts || echo "Let Cmd+Space etc. reach Omarchy: Parallels Desktop > Settings > Shortcuts > macOS System Shortcuts > \"Send macOS system shortcuts: Always\" (an alert shows where)." ;;
   utm)
-    echo "UTM: put the VM in full screen on the built-in display (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
+    echo "UTM: put the VM in full screen on the main display, a MacBook's own screen (gestures and media keys need it); keep UTM in the foreground, a backgrounded UTM runs slower." ;;
   fusion)
     echo "VMware Fusion asks for Accessibility on its first start: click OK, then turn on VMware Fusion in System Settings > Privacy & Security > Accessibility (keyboard and mouse in the VM)."
     echo "VMware Fusion: put the VM in full screen (View > Full Screen; gestures and media keys need it)." ;;
@@ -768,7 +769,7 @@ mac_steps=$(human_steps | sed 's/^/    * /')
 ssh_to="root@$IP"; [[ $IP == *:* ]] && ssh_to="-p ${IP##*:} root@${IP%:*}"   # OmacVM.app: 127.0.0.1:PORT
 cat <<EOF
 
-  Done in $(( ($(date +%s) - started) / 60 )) minutes${PB_TIMES:+ ($PB_TIMES)}. VM '$VM' ($TYPE) is rebooting into Omarchy.
+  Done in $(mins=$(( ($(date +%s) - started) / 60 )); (( mins == 1 )) && echo "1 minute" || echo "$mins minutes")${PB_TIMES:+ ($PB_TIMES)}. VM '$VM' ($TYPE) is rebooting into Omarchy.
 
   One-time steps on the Mac:
 $mac_steps
