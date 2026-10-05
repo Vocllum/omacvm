@@ -1101,6 +1101,13 @@ static uint32_t default_gateway(void) {
 
 static int on_fast_network(void) { return default_gateway() == htonl(FAST_NET_MAC); }
 
+// The app moved the VM to the other network: a default route again, through
+// the other gateway (none for a moment, as while DHCP renews, is no move).
+static int moved_network(int fast) {
+    uint32_t gw = default_gateway();
+    return gw && (gw == htonl(FAST_NET_MAC)) != fast;
+}
+
 // Candidate addresses of the Mac, in the order they are tried.
 static int host_candidates(struct in_addr *out, int max, int app) {
     int n = 0;
@@ -1236,7 +1243,7 @@ static void *net_thread(void *unused) {
         for (;;) {
             ssize_t n = recv(fd, buf + len, sizeof buf - 1 - len, 0);
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                if (on_fast_network() != fast) {
+                if (moved_network(fast)) {
                     LOG("the VM moved to %s: connecting again", fast ? "QEMU's user network" : "the fast network");
                     break;
                 }
