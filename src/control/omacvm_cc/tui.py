@@ -679,12 +679,25 @@ class ControlCentre(App):
         failed = job.text.strip().rstrip(".") if job.text and "rolled back" not in job.text else ""
         head = f"{what}: {failed}." if failed else f"{what}: failed."
         vm = self.c.local.version
+        if job.failed_side == "mac":
+            # A Mac helper did not build: its last build keeps running there.
+            # Trying again from here would stop on it again; the Mac's own
+            # omacvm update shows why.
+            if action == "update" and job.state != "rolled-back":
+                where = f"This VM has OmacVM {vm} now, as the Mac; the helper's last build keeps running on the Mac."
+            else:
+                where = "This VM was not changed."
+            return f"{head} {where} On the Mac, omacvm update tries it again and shows why (! reports the problem)."
         mac_newer = bool(job.mac_omacvm) and job.mac_omacvm != vm
+        # Turning the control centre off from inside it is no way on: it would close.
+        cc = job.failed_part == "control-centre"
         if job.state == "rolled-back" and (action == "update" or mac_newer):
             # The Mac stays on its (newer) OmacVM; turning the failed part off
             # or repairing it still runs (the Bridge allows both).
             mac = f"OmacVM {job.mac_omacvm}" if job.mac_omacvm else "the new OmacVM"
-            if action == "update":
+            if cc:
+                way = f"Later, {again} (the control centre's own part failed: is this VM online for its packages?)"
+            elif action == "update":
                 way = f"Turn {part} off (space) or repair it (r) to go on, or u tries again" if part else "u tries again"
             else:
                 way = f"Turn {part} off (space) to go on without it, or {again}" if part else again[:1].upper() + again[1:]
@@ -704,24 +717,43 @@ class ControlCentre(App):
         turn_on = plan[r.feature.name]
         titles = {f.name: f.title for f in self.c.local.features}
         others = [titles[n] for n in plan if n != r.feature.name]
+        texts = []
         if r.feature.name == "control-centre" and not turn_on:
-            text = ("This closes the control centre and takes it out of this VM.\n"
-                    "To get it back, on the Mac: omacvm enable control-centre")
+            texts.append("This closes the control centre and takes it out of this VM.\n"
+                         "To get it back, on the Mac: omacvm enable control-centre")
         elif others:
             what = "also turns on" if turn_on else "also turns off"
-            text = f"{r.feature.title} {what}: {', '.join(others)}."
-        else:
+            texts.append(f"{r.feature.title} {what}: {', '.join(others)}.")
+        if not turn_on and self.brings_mac_version():
+            texts.append(self.brings_mac_version())
+        if not texts:
             self.run_job(ACTION_FOR[turn_on], list(plan))
             return
-        self.push_screen(ConfirmScreen(f"{r.feature.title}: {'on' if turn_on else 'off'}", text),
+        self.push_screen(ConfirmScreen(f"{r.feature.title}: {'on' if turn_on else 'off'}", "\n".join(texts)),
                          lambda yes: yes and self.run_job(ACTION_FOR[turn_on], list(plan)))
+
+    def brings_mac_version(self) -> str:
+        """On a VM older than the Mac, a switch-off or a repair brings all of
+        the Mac's OmacVM in (the Bridge allows them so a failed update never
+        locks the VM): said before it runs, also with update checks off."""
+        mac = self.c.mac_version()
+        if not S.mac_newer(self.c.local.version, mac):
+            return ""
+        return (f"This also brings this VM from OmacVM {self.c.local.version} to OmacVM {mac}, the Mac's: "
+                "all of it goes in, your feature choices stay.")
 
     def repair(self, r: S.Row) -> None:
         if not r.on:
             self.notify(f"{r.feature.title} is off: space turns it on", severity="warning")
             return
-        if self.can_ask():
-            self.run_job("reinstall", [r.feature.name])   # that feature only (apply --reinstall)
+        if not self.can_ask():
+            return
+        name = r.feature.name   # that feature only (apply --reinstall)
+        if self.brings_mac_version():
+            self.push_screen(ConfirmScreen(f"Repair {r.feature.title}", self.brings_mac_version()),
+                             lambda yes: yes and self.run_job("reinstall", [name]))
+        else:
+            self.run_job("reinstall", [name])
 
     def install_update(self) -> None:
         m = self.c.manifest()

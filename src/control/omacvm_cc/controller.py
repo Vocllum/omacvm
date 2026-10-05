@@ -165,7 +165,8 @@ class Controller:
         j = S.Job(id=str(d.get("id", "")), action=str(d.get("action", "")),
                   features=tuple(str(x) for x in d.get("features") or ()), state=str(d.get("state", "running")),
                   step=int(d.get("step") or 0), of=int(d.get("of") or 0), text=str(d.get("text", "")),
-                  failed_part=str(d.get("failed_part") or ""), mac_omacvm=str(d.get("mac_omacvm") or ""))
+                  failed_part=str(d.get("failed_part") or ""), mac_omacvm=str(d.get("mac_omacvm") or ""),
+                  failed_side=str(d.get("failed_side") or ""))
         self.jobs[j.id] = j
         self.job_lines[j.id] = [str(x) for x in d.get("lines") or []]
         return j

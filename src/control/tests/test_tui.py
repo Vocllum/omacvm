@@ -48,13 +48,17 @@ def rows(a):
 
 
 def test_first_frame_fast(world):
+    """The budget is 0.5 s (measured in a real pty by vm_e2e.py). Here the
+    process's CPU time is checked against it, and the wall time only loosely:
+    a loaded machine or CI runner must not fail it."""
     async def go():
-        t0 = time.monotonic()
+        t0, c0 = time.monotonic(), time.process_time()
         a = app()
         async with a.run_test(size=(110, 30)) as pilot:
             await pilot.pause()
-            first = time.monotonic() - t0
-            assert first < 0.5, f"first frame after {first:.2f} s"
+            first, cpu = time.monotonic() - t0, time.process_time() - c0
+            assert cpu < 0.5, f"first frame took {cpu:.2f} s of CPU"
+            assert first < 3.0, f"first frame after {first:.2f} s"
             from textual.widgets import DataTable
             assert a.screen.query_one(DataTable).row_count == len(a.rows) >= 12
     asyncio.run(go())
@@ -516,4 +520,104 @@ def test_repair_that_went_back_on_an_older_vm(world):
                                      f"this VM went back to OmacVM {a.c.local.version} and its features. Turn the Mac's camera off (space) "
                                      "to go on without it, or r tries again; on the Mac: omacvm apply --vm NAME. "
                                      "! reports the problem."), a.last_result
+    asyncio.run(go())
+
+
+def _move_to(a, name):
+    from textual.widgets import DataTable
+    a.screen.query_one(DataTable).move_cursor(row=[r.feature.name for r in a.rows].index(name))
+
+
+@pytest.mark.parametrize("key", ["space", "r"])
+def test_off_or_repair_on_an_older_vm_asks_first(world, key):
+    """The Mac has a newer OmacVM: switching off or repairing brings all of it
+    into this VM, so the control centre says so and waits for y."""
+    world.version = "2.99.0"
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            _move_to(a, "camera")
+            await pilot.press(key)
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            assert isinstance(a.screen, ConfirmScreen), a.screen
+            assert f"from OmacVM {a.c.local.version} to OmacVM 2.99.0" in a.screen.text
+            await pilot.press("n")
+            await pilot.pause(0.3)
+            assert not [p for _, p, _ in world.requests if p == "/omacvm/jobs"], "nothing ran after n"
+            await pilot.press(key)
+            await pilot.pause(0.3)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
+            posts = [b for m, p, b in world.requests if p == "/omacvm/jobs"]
+            assert posts[-1] == {"action": "disable" if key == "space" else "reinstall", "features": ["camera"]}
+    asyncio.run(go())
+
+
+def test_same_version_switch_off_does_not_ask(world):
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            world.version = a.c.local.version
+            assert await settle(pilot, lambda: a.c.linked)
+            _move_to(a, "camera")
+            await pilot.press("space")
+            assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
+    asyncio.run(go())
+
+
+@pytest.mark.parametrize("action,key,state,where", [
+    ("enable", "space", "failed", "This VM was not changed."),
+    ("update", "u", "failed", "now, as the Mac"),
+])
+def test_mac_helper_that_did_not_build(world, action, key, state, where):
+    """A Mac helper failed: the job names it, says where the VM is, and the
+    next step is on the Mac (not "apply", which would stop on it again)."""
+    world.version = "2.99.0" if action == "update" else "2.7.0"
+    world.manifest = {"version": "2.99.0", "parts": {"gestures": {"digest": "sha256:" + "a" * 64, "release": "2.99.0"}}}
+    world.job_end = (state, "OmacVM Gestures did not build on the Mac")
+    world.job_extra = {"failed_part": "gestures", "failed_side": "mac", "mac_omacvm": world.version}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            if action == "enable":
+                world.version = a.c.local.version
+                world.job_extra["mac_omacvm"] = a.c.local.version
+            assert await settle(pilot, lambda: a.c.linked and (action != "update" or a.c.update_offered()))
+            if action == "enable":
+                _move_to(a, "gestures")
+            await pilot.press(key)
+            await pilot.pause(0.3)
+            from omacvm_cc.tui import ConfirmScreen
+            if isinstance(a.screen, ConfirmScreen):
+                await pilot.press("y")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            r = a.last_result
+            assert "OmacVM Gestures did not build on the Mac." in r and where in r, r
+            assert "On the Mac, omacvm update tries it again and shows why" in r, r
+            assert "omacvm apply" not in r and "space" not in r, r
+    asyncio.run(go())
+
+
+def test_control_centre_part_failed_never_says_turn_it_off(world):
+    """An update whose control-centre part failed (Textual from pacman while
+    offline): turning the control centre off from inside it is no way on."""
+    world.manifest = {"version": "2.99.0", "parts": {"control-centre": {"digest": "sha256:" + "c" * 64, "release": "2.99.0"}}}
+    world.version = "2.99.0"
+    world.job_end = ("rolled-back", "The OmacVM control centre was not set up")
+    world.job_extra = {"failed_part": "control-centre", "mac_omacvm": "2.99.0"}
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.update_offered())
+            await pilot.press("u")
+            await pilot.pause(0.2)
+            await pilot.press("y")
+            assert await settle(pilot, lambda: bool(a.last_result), 10)
+            r = a.last_result
+            assert "off (space)" not in r and "Later, u tries again" in r, r
     asyncio.run(go())

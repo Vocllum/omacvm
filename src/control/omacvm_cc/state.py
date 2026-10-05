@@ -68,6 +68,7 @@ class Job:
     text: str = ""
     failed_part: str = ""   # the feature whose part failed (failed, rolled-back)
     mac_omacvm: str = ""    # update: the Mac's OmacVM after the job
+    failed_side: str = ""   # "mac": a Mac helper did not build; "vm" or "": the VM side
 
     @property
     def active(self) -> bool:
@@ -193,6 +194,13 @@ def version_tuple(v) -> tuple | None:
         return None
     t = [int(p) for p in parts]
     return tuple(t + [0] * (4 - len(t)))
+
+
+def mac_newer(vm, mac) -> bool:
+    """The Mac has a newer OmacVM than this VM (a switch or repair brings all
+    of it into the VM)."""
+    m, v = version_tuple(mac), version_tuple(vm)
+    return m is not None and (v is None or m > v)
 
 
 def update_offered(release, vm, mac=None) -> bool:
