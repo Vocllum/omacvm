@@ -16,8 +16,11 @@
  * Locking: inst->lock is the vb2 lock of both queues (and is taken by hand
  * in the other ioctls); inst->slock guards the buffer table and the
  * capture setup handshake, which the daemon touches from its own ioctls;
+ * inst->done_lock is held from taking a buffer back to vb2_buffer_done(),
+ * so stop_streaming never returns while the daemon is still completing one;
  * dev->lock guards the instance table and the daemon's file; dev->msg_lock
- * the message list.
+ * the message list. Order: dev->lock, then done_lock; inst->lock, then
+ * done_lock; slock innermost.
  */
 #include <linux/dma-buf.h>
 #include <linux/file.h>
@@ -83,6 +86,7 @@ struct ovd_inst {
 	struct kref ref;
 	u32 id;
 	struct mutex lock;		/* vb2 queues + format ioctls */
+	struct mutex done_lock;		/* buffers on their way back to vb2 */
 	struct v4l2_ctrl_handler hdl;
 
 	u32 codec;			/* OUTPUT fourcc */
@@ -483,6 +487,7 @@ static void ovd_stop_streaming(struct vb2_queue *q)
 		msg_purge(inst->dev, inst->id, OVD_MSG_BITSTREAM);
 	else
 		msg_purge(inst->dev, inst->id, OVD_MSG_CAPTURE_QUEUED);
+	mutex_lock(&inst->done_lock);
 	spin_lock(&inst->slock);
 	for (i = 0; i < VB2_MAX_FRAME; i++)
 		if (tab[i] && tab[i]->queued) {
@@ -492,6 +497,7 @@ static void ovd_stop_streaming(struct vb2_queue *q)
 	spin_unlock(&inst->slock);
 	for (i = 0; i < n; i++)
 		vb2_buffer_done(&back[i]->m2m.vb.vb2_buf, VB2_BUF_STATE_ERROR);
+	mutex_unlock(&inst->done_lock);
 	msg_simple(inst, out ? OVD_MSG_FLUSH : OVD_MSG_CAPTURE_STOP);
 }
 
@@ -845,6 +851,7 @@ static int ovd_open(struct file *file)
 	inst->dev = dev;
 	kref_init(&inst->ref);
 	mutex_init(&inst->lock);
+	mutex_init(&inst->done_lock);
 	spin_lock_init(&inst->slock);
 	init_waitqueue_head(&inst->setup_wq);
 	inst->out_width = 1280;
@@ -964,6 +971,7 @@ static void inst_fail_all(struct ovd_inst *inst)
 	struct ovd_buf *back[2 * VB2_MAX_FRAME];
 	unsigned int i, n = 0;
 
+	mutex_lock(&inst->done_lock);
 	spin_lock(&inst->slock);
 	inst->dead = true;
 	if (inst->setup_state == 1)
@@ -982,6 +990,7 @@ static void inst_fail_all(struct ovd_inst *inst)
 	wake_up_interruptible(&inst->setup_wq);
 	for (i = 0; i < n; i++)
 		vb2_buffer_done(&back[i]->m2m.vb.vb2_buf, VB2_BUF_STATE_ERROR);
+	mutex_unlock(&inst->done_lock);
 }
 
 /* The daemon is gone: every open decode fails, no new ones start. */
@@ -1152,6 +1161,7 @@ static long buf_done(struct ovd_dev *dev, struct ovd_done __user *uarg, bool out
 	if (!inst)
 		return -ENOENT;
 
+	mutex_lock(&inst->done_lock);
 	spin_lock(&inst->slock);
 	if (d.index < VB2_MAX_FRAME) {
 		b = output ? inst->out[d.index] : inst->cap[d.index];
@@ -1178,6 +1188,7 @@ static long buf_done(struct ovd_dev *dev, struct ovd_done __user *uarg, bool out
 		vb2_buffer_done(vb, d.flags & OVD_DONE_ERROR ?
 				VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
 	}
+	mutex_unlock(&inst->done_lock);
 	if (last_now && (d.flags & OVD_DONE_EOS))
 		v4l2_event_queue_fh(&inst->fh, &eos);
 	kref_put(&inst->ref, inst_free);
