@@ -70,6 +70,12 @@ in more words.
   and off (Fast network › Turn On…, one password dialog), and Omanotch
   works over it. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
   changes.
+- Omarchy's Chromium decodes H.264 and VP9 on the Mac's media engine in
+  OmacVM.app VMs, YouTube included, with no flags to set: feature
+  `chromium-video`, on by default for app VMs (`omacvm disable
+  chromium-video` takes it out). YouTube 4K60 uses 0.41-0.62 of a core in
+  the VM instead of 1.00-1.11. HEVC, AV1 and 10-bit stay on the CPU.
+  `omacvm check` has a "video decoding in Chromium" line.
 
 ## 2.9.0 (unreleased)
 
