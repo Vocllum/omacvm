@@ -3,7 +3,7 @@
  * vdec-test: drives the omacvm-vdec V4L2 decoder the way Chromium does and
  * checks every picture against FFmpeg's software decoder.
  *
- *   vdec-test FILE [FILE...]      (root or the video group, omacvm-vdecd running)
+ *   vdec-test [MODE] FILE [FILE...]   (root or the video group, omacvm-vdecd running)
  *
  * Per file: OUTPUT buffers with one frame each, CAPTURE buffers taken from
  * the driver (MMAP) and exported (EXPBUF), each picture read back through EGL
@@ -12,7 +12,19 @@
  * STREAMOFF/STREAMON from the first key frame), then a drain (DEC_CMD_STOP:
  * an empty LAST buffer and the EOS event). A size change in the stream must
  * come as LAST + SOURCE_CHANGE. Prints one JSON line per file; exit 1 when a
- * check fails.
+ * check fails. MODEs (one, before the files):
+ *   --early-drain  DEC_CMD_STOP before the first packet: EOS within 2 s, then
+ *                  DEC_CMD_START and the normal run on the same decoder
+ *   --churn        5 rounds: a busy decoder is closed (another thread) while
+ *                  the next one opens; the next one must decode the file
+ *   --expect-fail  the file must fail fast (a picture under 64 px): an error
+ *                  back within 5 s, no hang
+ *   --stall        (root) the daemon is stopped (SIGSTOP) after 20 pictures:
+ *                  an error must come back within 15 s (systemd's watchdog
+ *                  restarts it), then the file decodes again
+ *   --flood        (root) with the daemon stopped for a moment, 1000
+ *                  DEC_CMD_STOPs: the module fails the decoder (its message
+ *                  queue is bounded) instead of growing
  *
  * Build: cc -O2 -o vdec-test vdec-test.c $(pkg-config --cflags --libs \
  *          libavformat libavcodec libavutil libswscale egl glesv2 gbm libdrm)
@@ -27,8 +39,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <EGL/egl.h>
@@ -48,6 +63,7 @@
 #define MIN_PSNR 35.0
 
 static int vfd;
+static enum { NORMAL, EARLY_DRAIN, CHURN, EXPECT_FAIL, STALL, FLOOD } mode;
 static EGLDisplay egl;
 static PFNEGLCREATEIMAGEKHRPROC create_image;
 static PFNEGLDESTROYIMAGEKHRPROC destroy_image;
@@ -57,6 +73,14 @@ static void die(const char *what)
 {
 	fprintf(stderr, "vdec-test: %s: %s\n", what, strerror(errno));
 	exit(1);
+}
+
+static double now_ms(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
 }
 
 static int xioctl(unsigned long req, void *arg)
@@ -172,18 +196,19 @@ static void cap_release(void)
 	xioctl(VIDIOC_REQBUFS, &rb);
 }
 
-static void cap_queue(int i)
+/* False: the decoder failed (an expected end in the failure modes). */
+static bool cap_queue(int i)
 {
 	struct v4l2_plane pl[1] = { 0 };
 	struct v4l2_buffer b = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE, .memory = V4L2_MEMORY_MMAP,
 				 .index = i, .length = 1, .m.planes = pl };
 
-	if (xioctl(VIDIOC_QBUF, &b))
-		die("QBUF CAPTURE");
+	return xioctl(VIDIOC_QBUF, &b) == 0;
 }
 
-/* After SOURCE_CHANGE: the new format, buffers, exports, imports, stream on. */
-static void cap_setup(void)
+/* After SOURCE_CHANGE: the new format, buffers, exports, imports, stream on.
+ * False: the decoder failed. */
+static bool cap_setup(void)
 {
 	struct v4l2_format f = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE };
 	struct v4l2_selection sel = { .type = V4L2_BUF_TYPE_VIDEO_CAPTURE, .target = V4L2_SEL_TGT_COMPOSE };
@@ -202,7 +227,7 @@ static void cap_setup(void)
 	vis_w = sel.r.width;
 	vis_h = sel.r.height;
 	if (xioctl(VIDIOC_REQBUFS, &rb) || rb.count < 2)
-		die("REQBUFS CAPTURE");
+		return false;
 	ncap = rb.count > NCAP ? NCAP : rb.count;
 	for (int i = 0; i < ncap; i++) {
 		struct v4l2_exportbuffer e = { .type = type, .index = i, .plane = 0, .flags = O_CLOEXEC | O_RDWR };
@@ -230,10 +255,10 @@ static void cap_setup(void)
 		glGenFramebuffers(1, &caps[i].fbo);
 		glBindFramebuffer(GL_FRAMEBUFFER, caps[i].fbo);
 		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, caps[i].tex, 0);
-		cap_queue(i);
+		if (!cap_queue(i))
+			return false;
 	}
-	if (xioctl(VIDIOC_STREAMON, &type))
-		die("STREAMON CAPTURE");
+	return xioctl(VIDIOC_STREAMON, &type) == 0;
 }
 
 /* ---- one file ------------------------------------------------------------------------ */
@@ -242,7 +267,49 @@ struct result {
 	int frames, sizes, seeks, errors;
 	double min_psnr;
 	bool drained, eos;
+	bool failed;		/* the decoder refused buffers (an error came back) */
+	bool timeout;		/* no progress: a hang */
+	bool early_eos;		/* --early-drain: EOS without a picture */
+	double fail_ms;		/* --stall/--expect-fail: until the error came */
 };
+
+/* The daemon's pid (--stall). */
+static pid_t daemon_pid(void)
+{
+	FILE *p = popen("pidof -s omacvm-vdecd", "r");
+	int pid = 0;
+
+	if (p) {
+		if (fscanf(p, "%d", &pid) != 1)
+			pid = 0;
+		pclose(p);
+	}
+	return pid;
+}
+
+/* --early-drain: STOP with nothing decoded; EOS must come, then START. */
+static bool early_drain(void)
+{
+	struct v4l2_decoder_cmd dc = { .cmd = V4L2_DEC_CMD_STOP };
+	double t0 = now_ms();
+
+	if (xioctl(VIDIOC_DECODER_CMD, &dc))
+		die("DEC_CMD_STOP (early)");
+	while (now_ms() - t0 < 2000) {
+		struct pollfd pfd = { .fd = vfd, .events = POLLPRI };
+		struct v4l2_event ev;
+
+		if (poll(&pfd, 1, 200) > 0 && (pfd.revents & POLLPRI))
+			while (xioctl(VIDIOC_DQEVENT, &ev) == 0)
+				if (ev.type == V4L2_EVENT_EOS) {
+					dc.cmd = V4L2_DEC_CMD_START;
+					if (xioctl(VIDIOC_DECODER_CMD, &dc))
+						die("DEC_CMD_START");
+					return true;
+				}
+	}
+	return false;
+}
 
 static double psnr_rgb(const uint8_t *a, const uint8_t *b, int w, int h, int bstride)
 {
@@ -346,7 +413,7 @@ static void ref_decode(struct ref *r, AVPacket *p)
 	av_frame_free(&f);
 }
 
-static void run(const char *path, struct result *res)
+static void run(const char *path, struct result *res, int stop_after)
 {
 	struct ref r;
 	struct v4l2_format f = { .type = V4L2_BUF_TYPE_VIDEO_OUTPUT_MPLANE };
@@ -359,6 +426,10 @@ static void run(const char *path, struct result *res)
 	AVRational tb;
 	bool fed_all = false, stopped = false, sizing = false;
 	AVPacket *pending = NULL;
+	pid_t stalled = 0;
+	double t_fail = 0;
+	bool busy = false;
+	int wait_ms = mode == STALL ? 15000 : 5000;
 
 	memset(res, 0, sizeof(*res));
 	res->min_psnr = 99;
@@ -391,8 +462,23 @@ static void run(const char *path, struct result *res)
 	}
 	if (xioctl(VIDIOC_STREAMON, &out_type))
 		die("STREAMON OUTPUT");
+	if (mode == EARLY_DRAIN)
+		res->early_eos = early_drain();
+	if (mode == EXPECT_FAIL)
+		t_fail = now_ms();
+	if (mode == FLOOD) {
+		struct v4l2_decoder_cmd dc = { .cmd = V4L2_DEC_CMD_STOP };
+		pid_t pid = daemon_pid();
 
-	for (int guard = 0; guard < 200000; guard++) {
+		if (pid <= 0 || kill(pid, SIGSTOP))
+			die("SIGSTOP omacvm-vdecd");
+		t_fail = now_ms();
+		for (int k = 0; k < 1000; k++)
+			xioctl(VIDIOC_DECODER_CMD, &dc);
+		kill(pid, SIGCONT);
+	}
+
+	for (int guard = 0; guard < 200000 && !res->failed; guard++) {
 		struct pollfd pfd = { .fd = vfd, .events = POLLIN | POLLOUT | POLLPRI };
 		struct v4l2_event ev;
 		struct v4l2_plane pl[1];
@@ -446,12 +532,20 @@ static void run(const char *path, struct result *res)
 			memcpy(out_map[i], pending->data, pending->size);
 			pending->pts = us * 1000;	/* the driver's ns */
 			ref_decode(&r, pending);
-			if (xioctl(VIDIOC_QBUF, &b))
-				die("QBUF OUTPUT");
+			if (xioctl(VIDIOC_QBUF, &b)) {
+				res->failed = true;	/* the decoder failed */
+				break;
+			}
 			out_free[i] = false;
 			av_packet_free(&pending);
 			n++;
+			if (stop_after && n == stop_after) {	/* --churn: left busy */
+				busy = true;
+				goto out;
+			}
 		}
+		if (res->failed)
+			break;
 		if (fed_all && !stopped && ncap) {
 			struct v4l2_decoder_cmd dc = { .cmd = V4L2_DEC_CMD_STOP };
 
@@ -461,9 +555,10 @@ static void run(const char *path, struct result *res)
 			stopped = true;
 		}
 
-		if (poll(&pfd, 1, 5000) <= 0) {
-			fprintf(stderr, "vdec-test: no progress for 5 s\n");
+		if (poll(&pfd, 1, wait_ms) <= 0) {
+			fprintf(stderr, "vdec-test: no progress for %d s\n", wait_ms / 1000);
 			res->errors++;
+			res->timeout = true;
 			break;
 		}
 		if (pfd.revents & POLLPRI) {
@@ -476,8 +571,8 @@ static void run(const char *path, struct result *res)
 					res->sizes++;
 					if (ncap)
 						sizing = true;	/* after the LAST buffer */
-					else
-						cap_setup();
+					else if (!cap_setup())
+						res->failed = true;
 				}
 			}
 		}
@@ -486,12 +581,16 @@ static void run(const char *path, struct result *res)
 		b.memory = V4L2_MEMORY_MMAP;
 		b.length = 1;
 		b.m.planes = pl;
-		while (xioctl(VIDIOC_DQBUF, &b) == 0)
+		while (xioctl(VIDIOC_DQBUF, &b) == 0) {
 			out_free[b.index] = true;
+			if (b.flags & V4L2_BUF_FLAG_ERROR)
+				res->failed = true;
+		}
 		b.type = cap_type;
 		while (ncap && xioctl(VIDIOC_DQBUF, &b) == 0) {
 			if (b.flags & V4L2_BUF_FLAG_ERROR) {
 				res->errors++;
+				res->failed = true;
 			} else if (b.m.planes[0].bytesused) {
 				int64_t ts = ((int64_t)b.timestamp.tv_sec * 1000000 + b.timestamp.tv_usec) * 1000;
 
@@ -501,6 +600,12 @@ static void run(const char *path, struct result *res)
 					last_ts = ts;
 					compare(&r, res, b.index, ts);
 					res->frames++;
+					if (mode == STALL && res->frames == 20 && !stalled) {
+						stalled = daemon_pid();
+						if (stalled <= 0 || kill(stalled, SIGSTOP))
+							die("SIGSTOP omacvm-vdecd");
+						t_fail = now_ms();
+					}
 				}
 			}
 			if (b.flags & V4L2_BUF_FLAG_LAST) {
@@ -520,24 +625,43 @@ static void run(const char *path, struct result *res)
 					if (xioctl(VIDIOC_STREAMOFF, &cap_type))
 						die("STREAMOFF CAPTURE");
 					cap_release();
-					cap_setup();
+					if (!cap_setup())
+						res->failed = true;
 					sizing = false;
 					break;
 				}
 				res->drained = true;
 				break;
 			}
-			cap_queue(b.index);
+			if (!cap_queue(b.index)) {
+				res->failed = true;
+				break;
+			}
 		}
 		if (res->drained && res->eos)
 			break;
 	}
-	xioctl(VIDIOC_STREAMOFF, &out_type);
-	xioctl(VIDIOC_STREAMOFF, &cap_type);
-	cap_release();
+	if (res->failed && t_fail)
+		res->fail_ms = now_ms() - t_fail;
+	if (stalled)
+		kill(stalled, SIGCONT);	/* when the watchdog has not killed it */
+out:
+	if (busy) {	/* closing the fd does the rest, in the driver */
+		for (int i = 0; i < ncap; i++) {
+			glDeleteFramebuffers(1, &caps[i].fbo);
+			glDeleteTextures(1, &caps[i].tex);
+			destroy_image(egl, caps[i].img);
+			close(caps[i].fd);
+		}
+		ncap = 0;
+	} else {
+		xioctl(VIDIOC_STREAMOFF, &out_type);
+		xioctl(VIDIOC_STREAMOFF, &cap_type);
+		cap_release();
+		rb.count = 0;
+		xioctl(VIDIOC_REQBUFS, &rb);
+	}
 	refs_clear();
-	rb.count = 0;
-	xioctl(VIDIOC_REQBUFS, &rb);
 	for (int i = 0; i < NOUT; i++)
 		munmap(out_map[i], f.fmt.pix_mp.plane_fmt[0].sizeimage);
 	sws_freeContext(r.sws);
@@ -565,32 +689,132 @@ static int find_device(void)
 	return -1;
 }
 
+/* The device opens again (the daemon is back), within `ms`. */
+static int wait_device(int ms)
+{
+	double t0 = now_ms();
+	int fd;
+
+	while ((fd = find_device()) < 0 && now_ms() - t0 < ms)
+		usleep(200000);
+	return fd;
+}
+
+static void *close_fd(void *fd)
+{
+	close((int)(intptr_t)fd);
+	return NULL;
+}
+
+static bool result_ok(const struct result *res)
+{
+	switch (mode) {
+	case EXPECT_FAIL:
+	case FLOOD:
+		return res->failed && !res->timeout && res->fail_ms < 5000;
+	case EARLY_DRAIN:
+		if (!res->early_eos)
+			return false;
+		break;
+	default:
+		break;
+	}
+	return res->frames > 0 && !res->errors && res->min_psnr >= MIN_PSNR && res->drained && res->eos;
+}
+
+static void print(const char *file, const char *what, const struct result *res, bool ok)
+{
+	printf("{\"file\": \"%s\", \"test\": \"%s\", \"ok\": %s, \"frames\": %d, \"min_psnr_rgb\": %.1f, "
+	       "\"sizes\": %d, \"seeks\": %d, \"drained\": %s, \"eos\": %s, \"errors\": %d, \"failed\": %s, "
+	       "\"timeout\": %s, \"fail_ms\": %.0f}\n", file, what, ok ? "true" : "false", res->frames,
+	       res->min_psnr, res->sizes, res->seeks, res->drained ? "true" : "false",
+	       res->eos ? "true" : "false", res->errors, res->failed ? "true" : "false",
+	       res->timeout ? "true" : "false", res->fail_ms);
+	fflush(stdout);
+}
+
+static int test_file(const char *file)
+{
+	static const char *names[] = { "decode", "early-drain", "churn", "expect-fail", "stall", "flood" };
+	struct result res;
+	bool ok;
+
+	vfd = wait_device(mode == NORMAL ? 0 : 15000);
+	if (vfd < 0) {
+		fprintf(stderr, "vdec-test: no omacvm-vdec device (module loaded, omacvm-vdecd running?)\n");
+		exit(1);
+	}
+	if (mode == CHURN) {
+		/* A busy decoder closes in another thread while the next opens:
+		 * the next one must not get the old one's id, state or answers. */
+		for (int round = 0; round < 5; round++) {
+			pthread_t t;
+			int busy;
+
+			run(file, &res, 6);	/* 6 packets queued, nothing waited for */
+			busy = vfd;
+			pthread_create(&t, NULL, close_fd, (void *)(intptr_t)busy);
+			vfd = find_device();
+			pthread_join(t, NULL);
+			if (vfd < 0)
+				vfd = wait_device(2000);
+			if (vfd < 0) {
+				fprintf(stderr, "vdec-test: no device after a close\n");
+				exit(1);
+			}
+		}
+	}
+	run(file, &res, 0);
+	close(vfd);
+	ok = result_ok(&res);
+	if (mode == STALL) {
+		/* The stalled daemon is gone; its successor decodes the file. */
+		struct result again;
+		bool stall_ok = res.failed && !res.timeout && res.fail_ms < 15000;
+
+		print(file, "stall", &res, stall_ok);
+		vfd = wait_device(15000);
+		if (vfd < 0) {
+			fprintf(stderr, "vdec-test: no device 15 s after the stall\n");
+			return 1;
+		}
+		mode = NORMAL;
+		run(file, &again, 0);
+		close(vfd);
+		mode = STALL;
+		ok = result_ok(&again);
+		print(file, "after-stall", &again, ok);
+		return !(ok && stall_ok);
+	}
+	print(file, names[mode], &res, ok);
+	return !ok;
+}
+
 int main(int argc, char **argv)
 {
-	int fails = 0;
+	int fails = 0, i = 1;
 
-	if (argc < 2) {
-		fprintf(stderr, "usage: vdec-test FILE...\n");
+	if (argc > 1 && argv[1][0] == '-') {
+		if (!strcmp(argv[1], "--early-drain"))
+			mode = EARLY_DRAIN;
+		else if (!strcmp(argv[1], "--churn"))
+			mode = CHURN;
+		else if (!strcmp(argv[1], "--expect-fail"))
+			mode = EXPECT_FAIL;
+		else if (!strcmp(argv[1], "--stall"))
+			mode = STALL;
+		else if (!strcmp(argv[1], "--flood"))
+			mode = FLOOD;
+		else
+			argc = 0;
+		i = 2;
+	}
+	if (argc <= i) {
+		fprintf(stderr, "usage: vdec-test [--early-drain|--churn|--expect-fail|--stall|--flood] FILE...\n");
 		return 2;
 	}
 	egl_init();
-	for (int i = 1; i < argc; i++) {
-		struct result res;
-		bool ok;
-
-		vfd = find_device();
-		if (vfd < 0) {
-			fprintf(stderr, "vdec-test: no omacvm-vdec device (module loaded, omacvm-vdecd running?)\n");
-			return 1;
-		}
-		run(argv[i], &res);
-		close(vfd);
-		ok = res.frames > 0 && !res.errors && res.min_psnr >= MIN_PSNR && res.drained && res.eos;
-		fails += !ok;
-		printf("{\"file\": \"%s\", \"ok\": %s, \"frames\": %d, \"min_psnr_rgb\": %.1f, \"sizes\": %d, "
-		       "\"seeks\": %d, \"drained\": %s, \"eos\": %s, \"errors\": %d}\n", argv[i], ok ? "true" : "false",
-		       res.frames, res.min_psnr, res.sizes, res.seeks, res.drained ? "true" : "false",
-		       res.eos ? "true" : "false", res.errors);
-	}
+	for (; i < argc; i++)
+		fails += test_file(argv[i]);
 	return fails ? 1 : 0;
 }
