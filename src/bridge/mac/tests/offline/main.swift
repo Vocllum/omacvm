@@ -138,6 +138,33 @@ check(NotSettable.noAnswer.contains("HDMI") && NotSettable.noAnswer.contains("US
       "no answer names the HDMI port too (M1/M2 Mac mini: AV service there, no DDC)")
 check(NotSettable.noService.contains("HDMI"), "no AV service names the HDMI port")
 
+// ---- how a display is set: macOS's own control first ----
+func pick(builtin: Bool = false, virtual: Bool = false, can: Bool = false, reads: Bool = false,
+          service: Bool = false, ioav: Bool = true) -> MethodPick.Choice {
+  MethodPick.choose(builtin: builtin, virtual: virtual, nativeCan: can, nativeReads: reads, hasService: service, ioav: ioav)
+}
+// LG UltraFine 5K on a Mac mini (macOS 27, 2026-10-04): DisplayServicesCanChangeBrightness
+// true and a level read back, over Thunderbolt (an AV service may be there, DDC/CI is not).
+check(pick(can: true, reads: true, service: true) == .native, "LG UltraFine / Studio Display: macOS's control, not DDC/CI")
+check(pick(can: true, reads: true) == .native, "...also without an AV service")
+check(pick(can: true, reads: false, service: true) == .ddc, "macOS's control does not read: DDC/CI")
+check(pick(service: true) == .ddc, "a third-party monitor (Pi-X9): DDC/CI")
+check(pick(builtin: true, can: true, reads: true) == .builtin, "the built-in display is never ours")
+check(pick(virtual: true, can: true, reads: true, service: true) == .virtual, "virtual / AirPlay: never")
+check(pick() == .noService && pick(ioav: false) == .noIOAV, "nothing: why")
+
+// A Mac mini with only an LG UltraFine 5K (2560x1440 points): full screen and windowed.
+let ultraFine = MacDisplay(id: 2, bounds: CGRect(x: 0, y: 0, width: 2560, height: 1440), builtin: false)
+let fullUF = CGRect(x: 0, y: 0, width: 2560, height: 1440), winUF = CGRect(x: 200, y: 100, width: 1600, height: 1000)
+check(DisplayPick.focused(windows: [fullUF], displays: [ultraFine], pointer: CGPoint(x: 9, y: 9), windowed: false)?.display == ultraFine,
+      "mini, full screen: the UltraFine")
+check(DisplayPick.focused(windows: [winUF], displays: [ultraFine], pointer: CGPoint(x: 9, y: 9), windowed: true)?.display == ultraFine,
+      "mini, OmacVM.app windowed: the UltraFine")
+check(DisplayPick.forBox(CGRect(x: 0, y: 0, width: 2560, height: 1440), windows: [fullUF], displays: [ultraFine]) == ultraFine,
+      "mini: Omarchy's brightness for Virtual-1 reaches the UltraFine")
+check(DisplayPick.forBox(CGRect(x: 0, y: 0, width: 1600, height: 972), windows: [winUF], displays: [ultraFine]) == ultraFine,
+      "mini, windowed: the UltraFine")
+
 // ---- one window list per key event: rects of one process, front to back ----
 func win(_ pid: Int32, _ r: CGRect, layer: Int = 0) -> [String: Any] {
   [kCGWindowOwnerPID as String: pid, kCGWindowLayer as String: layer, kCGWindowBounds as String: r.dictionaryRepresentation as NSDictionary]

@@ -139,7 +139,8 @@ set in macOS.
 The brightness of the external display a VM is on (feature
 `external-brightness`, `external-brightness.swift`): DDC/CI (VCP 0x10) over
 IOAVService on Apple Silicon, or DisplayServices for the displays macOS dims
-itself (Studio Display, Pro Display XDR). Which one works is found per display
+itself (Studio Display, Pro Display XDR, LG UltraFine; this wins over DDC/CI).
+Which one works is found per display
 when the Bridge starts, after every display change and, for a display where
 nothing worked, again a minute later when it is asked (keys, the VM, `omacvm
 check`); the built-in display is never set here. With `external_brightness:

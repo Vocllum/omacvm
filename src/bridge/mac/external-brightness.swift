@@ -3,7 +3,8 @@
 // brightness commands in the VM) set that display. Two ways, found per display
 // at run time: DDC/CI over IOAVService on Apple Silicon (VCP 0x10, as
 // MonitorControl and m1ddc do), and DisplayServices for the displays macOS
-// dims itself (Studio Display, Pro Display XDR). A display with neither (no
+// dims itself (Studio Display, Pro Display XDR, LG UltraFine), which wins over
+// DDC/CI (MethodPick). A display with neither (no
 // DDC on some Macs' HDMI ports, or the display ignores it) keeps today's
 // behaviour; the built-in display is never touched here.
 //
@@ -146,22 +147,23 @@ final class ExternalBrightness {
     let name = displayName(id)
     var d: Display
     let info = displayInfo?(id)?.takeRetainedValue() as? [String: Any]
-    if CGDisplayIsBuiltin(id) != 0 {
-      d = Display(method: .none(NotSettable.builtin), name: name)
-    } else if info?["kCGDisplayIsVirtualDevice"] as? Bool == true || info?["kCGDisplayIsAirPlay"] as? Bool == true {
-      d = Display(method: .none(NotSettable.virtual), name: name)
-    } else if dsCan?(id) == true, let v = appleLevel(id) {
-      d = Display(method: .apple, name: name, level: v, readAt: Date())
-    } else if let av = services[id] {
-      if let (cur, max) = ddcRead(av) {
+    let builtin = CGDisplayIsBuiltin(id) != 0
+    let virtual = info?["kCGDisplayIsVirtualDevice"] as? Bool == true || info?["kCGDisplayIsAirPlay"] as? Bool == true
+    let can = !builtin && !virtual && dsCan?(id) == true
+    let native = can ? appleLevel(id) : nil
+    switch MethodPick.choose(builtin: builtin, virtual: virtual, nativeCan: can, nativeReads: native != nil,
+                             hasService: services[id] != nil, ioav: avCreate != nil && avRead != nil && avWrite != nil) {
+    case .builtin: d = Display(method: .none(NotSettable.builtin), name: name)
+    case .virtual: d = Display(method: .none(NotSettable.virtual), name: name)
+    case .native: d = Display(method: .apple, name: name, level: native, readAt: Date())
+    case .ddc:
+      if let av = services[id], let (cur, max) = ddcRead(av) {
         d = Display(method: .ddc, name: name, max: max, level: BrightnessStep.level(cur, max: max), readAt: Date())
       } else {
         d = Display(method: .none(NotSettable.noAnswer), name: name)
       }
-    } else if avCreate == nil || avRead == nil || avWrite == nil {
-      d = Display(method: .none(NotSettable.noIOAV), name: name)
-    } else {
-      d = Display(method: .none(NotSettable.noService), name: name)
+    case .noIOAV: d = Display(method: .none(NotSettable.noIOAV), name: name)
+    case .noService: d = Display(method: .none(NotSettable.noService), name: name)
     }
     let before: Method? = locked { let b = known[id]?.method; known[id] = d; return b }
     if before != d.method {

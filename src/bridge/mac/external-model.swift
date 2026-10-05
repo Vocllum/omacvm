@@ -49,6 +49,23 @@ enum DDCPacket {
   }
 }
 
+/// How a display's brightness is set, from what macOS says about it.
+/// macOS's own control (DisplayServices) comes first: the displays macOS dims
+/// itself (Studio Display, Pro Display XDR, the LG UltraFine family over USB)
+/// use it even when they also have an AV service, since it is what macOS's
+/// keys use and the UltraFine has no DDC/CI. DDC/CI only for the rest.
+enum MethodPick {
+  enum Choice: Equatable { case builtin, virtual, native, ddc, noIOAV, noService }
+  static func choose(builtin: Bool, virtual: Bool, nativeCan: Bool, nativeReads: Bool,
+                     hasService: Bool, ioav: Bool) -> Choice {
+    if builtin { return .builtin }
+    if virtual { return .virtual }
+    if nativeCan && nativeReads { return .native }
+    if hasService { return .ddc }
+    return ioav ? .noService : .noIOAV
+  }
+}
+
 /// When the Bridge looks at a display (again). `works`: nil = never looked.
 /// A display that could not be set is asked again after `retry` seconds: it
 /// may have been asleep, or its AV service not there yet.
