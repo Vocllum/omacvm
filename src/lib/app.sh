@@ -12,6 +12,8 @@
 #                       own create script (the password on stdin), as when built
 #                       in the app; --prebuilt: from a prebuilt image
 #   app_has_prebuilt APP    that app can make a VM from a prebuilt image
+#   app_prebuilt_lookup APP the image that app would use (its own version):
+#                       sets PB_TAG PB_SIZE PB_OMARCHY PB_VERSION
 #   app_published VERSION   that OmacVM release has OmacVM-VERSION.zip
 #   app_install VERSION [APP]  download, check and install it (in /Applications,
 #                       else ~/Applications; or in place of APP); prints the path
@@ -122,6 +124,16 @@ app_create() {
 }
 
 app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
+
+# Asks the app's own script, so omacvm build offers the image the app then
+# downloads (the app looks with its version, not this omacvm's).
+app_prebuilt_lookup() {
+  local out
+  out=$(/bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
+  read -r PB_TAG PB_SIZE PB_OMARCHY PB_VERSION <<<"$out"
+  [[ $PB_TAG =~ ^[A-Za-z0-9._-]{1,80}$ && $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_OMARCHY =~ ^[!-~]{1,80}$ &&
+     ${PB_VERSION:-} =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]
+}
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
 # The release app is signed with OmacVM's Developer ID (team 722686Y34B). The

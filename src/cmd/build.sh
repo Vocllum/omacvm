@@ -210,15 +210,23 @@ PB_OK=0
 # An older installed OmacVM.app has no script for images (omacvm update brings it).
 APP_OLD=0
 [[ $TYPE == app && -n ${APP:-} ]] && ! app_has_prebuilt "$APP" && APP_OLD=1
+# The version the image must fit: the app's when it makes the VM (it may be
+# older or newer than this omacvm), so both find the same image.
+PB_FOR=$(cat "$R/src/VERSION")
 if [[ $SOURCE != build ]] && ! (( IMAGE || APP_OLD )); then
-  prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
+  if [[ $TYPE == app && -n ${APP:-} ]]; then
+    PB_FOR=$(app_version "$APP" || cat "$R/src/VERSION")
+    app_prebuilt_lookup "$APP" && PB_OK=1
+  else
+    prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
+  fi
 fi
 if [[ -z $SOURCE ]]; then
   SOURCE=build
   if (( PB_OK && ! YES )); then
     ui_select how "How should OmacVM make the VM?" 1 \
       "Build it yourself|about $(build_minutes) minutes, everything from Arch Linux ARM and omarchy-mac" \
-      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $(cat "$R/src/VERSION") on the way"
+      "Download a prebuilt VM|faster: about $(pb_gb "$PB_SIZE") GB, Omarchy ${PB_OMARCHY%% *}, updated to OmacVM $PB_FOR on the way"
     (( how == 1 )) && SOURCE=prebuilt
   fi
 elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
@@ -226,7 +234,7 @@ elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
   if (( APP_OLD )); then
     (( PLAN && JSON )) || info "OmacVM.app $(app_version "$APP") makes no VMs from prebuilt images (omacvm update updates it): building it here instead (about $(build_minutes) minutes)."
   else
-    (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
+    (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM ${PB_FOR%%.*}.x up to $PB_FOR: building it here instead (about $(build_minutes) minutes)."
   fi
   SOURCE=build
 fi
