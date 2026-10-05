@@ -59,3 +59,9 @@ jobs:
 
       - name: Prebuilt manifests are checked (untrusted input)
         run: src/tests/prebuilt-manifest.sh
+
+      - name: omacvm-netd offline tests
+        run: src/net/mac/test.sh
+
+      - name: Gestures offline test (which VM gets them)
+        run: src/gestures/mac/test.sh

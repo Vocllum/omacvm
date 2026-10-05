@@ -42,6 +42,25 @@ ev_device() { grep -q "^N: Name=\"$1\"" /proc/bus/input/devices; }
 [[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run omacvm apply on the Mac)"; exit 1; }
 source /etc/omacvm/env
 HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
+# The VM's default gateway, as Gestures' default_gateway() picks it: the
+# lowest metric among default routes whose card has a link. After the app
+# switches networks the old card's route stays listed (first) for seconds.
+SYS_NET=/sys/class/net
+default_gateway() {
+  local m via dev c
+  ip -4 route show default 2>/dev/null |
+    awk '{ v = d = ""; m = 0
+           for (i = 1; i < NF; i++) { if ($i == "via") v = $(i + 1); if ($i == "dev") d = $(i + 1); if ($i == "metric") m = $(i + 1) }
+           if (v != "") print m, v, d }' |
+    while read -r m via dev; do
+      c=$(cat "$SYS_NET/$dev/carrier" 2>/dev/null) || c=1   # no carrier to read: count it
+      if [[ $c == 1 ]]; then echo "$m $via"; fi
+    done | sort -n | awk '{ print $2; exit }'
+}
+# OmacVM.app on its fast network (vmnet): the Mac is the gateway 192.168.77.1.
+GW=$(default_gateway)
+[[ $TYPE == app && $GW == 192.168.77.1 ]] && HOST=$GW
+FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
@@ -249,6 +268,14 @@ app)
   section "OmacVM.app"
   check "display follows the window" "omacvm-display-sync" pgrep -u "$U" -f omacvm-display-sync
   check "QEMU guest agent" "clean shutdown fallback" systemctl is-active -q qemu-guest-agent
+  # Fast network (vmnet through omacvm-netd on the Mac), else QEMU's user network.
+  if [[ $GW == 192.168.77.1 ]]; then
+    a=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ print $4; exit }')
+    if [[ $FAST_NET == on ]]; then ok "fast network" "vmnet, ${a%/*}"
+    else bad "fast network" "the VM is on vmnet, but the feature is off here: omacvm enable fast-network"; fi
+  elif [[ $FAST_NET == on ]]; then
+    bad "fast network" "on, but the VM got QEMU's user network (the app says why: omacvm check on the Mac)"
+  else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
