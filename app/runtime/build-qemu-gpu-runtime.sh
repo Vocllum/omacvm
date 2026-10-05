@@ -627,7 +627,10 @@ patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-display-event-race.patch"
 # OmacVM: big buffers in fragmented guest memory attach (virtio-gpu).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-mapping-entries.patch"
-# OmacVM: no Dock, menu bar or hot corner from inside full screen (all displays).
+# OmacVM: no Dock, menu bar or hot corner from inside full screen (all displays);
+# the pointer guard's maths in its own header, unit tested here.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-pointer-guard.patch"
+"$native_dir/Tests/display/test-pointer-guard.sh"
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-fullscreen-edges.patch"
 # Test hook: real full screen on some displays only (OMACVM_TEST_ONLY_DISPLAYS).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-test-only-displays.patch"

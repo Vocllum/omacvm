@@ -374,11 +374,16 @@ window per guest screen:
   signals Quickshell's screens do not have); Omanotch's patched bar and
   wallpaper remap themselves when their output moves.
 - In full screen the Dock and the menu bar stay hidden on every display, and
-  the Mac's cursor stays 3 points off the screen corners while the VM has
-  the pointer (`omacvm-cocoa-fullscreen-edges.patch`; `immersive=off` turns
-  both off). That is meant to keep hot corners from firing, but it is not
-  confirmed: with simulated mouse motion the bottom-left corner still fired,
-  and a check with a real mouse is open.
+  while the VM has the pointer the Mac's cursor never gets onto a screen
+  corner or the Dock's edge: within 200 points of them it is detached and
+  stays put, and the guest's pointer moves on by the mouse's own motion
+  (`omacvm-cocoa-fullscreen-edges.patch`, maths in
+  `omacvm-cocoa-pointer-guard.patch`, unit test
+  `app/runtime/Tests/display/test-pointer-guard.sh`). The pointer moves the
+  same there as anywhere else. The app's setting "Keep the Dock and hot
+  corners away in full screen" (QEMU's `immersive`) turns both off. Whether
+  hot corners stay quiet with a real mouse is still to be confirmed (with
+  simulated motion the bottom-left corner fired in an earlier test).
 
 Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
 virtual Mac display (killing it is unplugging it). With

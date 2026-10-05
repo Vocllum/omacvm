@@ -71,3 +71,6 @@ jobs:
 
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
+
+      - name: Full-screen pointer guard (motion maths)
+        run: app/runtime/Tests/display/test-pointer-guard.sh

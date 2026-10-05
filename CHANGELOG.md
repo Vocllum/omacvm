@@ -92,6 +92,13 @@ in more words.
   `~/OmacVM` (it never reads inside a VM disk); to hide them, add the folder
   under System Settings › Spotlight › Search Privacy.
 
+- OmacVM.app in full screen: the pointer no longer races near the screen
+  corners and the Dock's edge (since 2.8.0 it got faster there with every
+  move, up to about 20 times). It now moves as macOS moves it everywhere,
+  and reaches Omarchy's own corners. The Mac's cursor still stays off the
+  corners and the Dock's edge. New setting "Keep the Dock and hot corners
+  away in full screen" (on by default); off gives macOS's own full screen.
+
 ## 2.8.0
 
 - OmacVM.app uses every Mac display in full screen: a window (in its own
