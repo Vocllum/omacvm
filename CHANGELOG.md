@@ -3,6 +3,22 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- OmacVM.app: the setup shows the VMs folder and its free space. Storage in
+  the app's window changes it (an external drive too) and moves the VMs: a
+  rename on the same drive, else copied, read back, compared and only then
+  deleted, with progress and Cancel; or New VMs Only, and the VMs stay
+  where they are and keep working. A VM that runs is never moved. Each VM's
+  size with Show in Finder; Clear Downloads for `~/Library/Caches/omacvm`.
+- A drive that is not connected is named as such ("SD4TB is not
+  connected"), and nothing is built into a stale /Volumes folder. A VM whose
+  files are missing says which and does not start.
+- VMs in the old hidden folder are found wherever the VMs folder is, and the
+  app offers once to move them to `~/OmacVM`; new VMs go to `~/OmacVM`.
+- An app in /Applications offers once to move itself to ~/Applications.
+- VM folders are left out of Time Machine.
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one

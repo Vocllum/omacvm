@@ -169,8 +169,8 @@ omacvm uninstall            # --purge also removes the bridge token and settings
 Then delete the VM in its app, and remove the OmacVM apps from System Settings
 › Privacy & Security › Location Services if still listed. The `omacvm` command
 itself stays: `rm -rf ~/.omacvm "$(command -v omacvm)"` removes it. OmacVM.app
-stays too: drag it to the Bin (its VMs stay in ~/Library/Application
-Support/OmacVM until you delete them).
+stays too: drag it to the Bin (its VMs stay in ~/OmacVM, older ones in
+~/Library/Application Support/OmacVM/VMs, until you delete them).
 
 **OmacVM 2.7.0 and older: don't use `--purge` if you have OmacVM.app VMs.** It
 deletes them with the settings. Fixed in 2.7.1: run `omacvm update` first.
