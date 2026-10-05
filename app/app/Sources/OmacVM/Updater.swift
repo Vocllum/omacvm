@@ -180,6 +180,7 @@ final class Updater: ObservableObject {
     /// The kept previous version, when it is older than this one (after a
     /// step back the newer one is kept instead: not offered as "back").
     var previousVersion: String? {
+        if let shownPrevious { return shownPrevious }
         guard let p = previousApp, let v = BundleInfo.read(p)?.version,
               let pv = Version(v), let cv = Version(currentVersion), pv < cv else { return nil }
         return v
@@ -610,6 +611,19 @@ final class Updater: ObservableObject {
     /// The notice while an update waits for the VM.
     static func waitingNotice(_ why: String, version: String) -> String {
         "\(why): \(Product.name) \(version) goes in once it has shut down."
+    }
+
+    // MARK: - pictures of the UI (test builds: --render-update-ui)
+
+    private var shownPrevious: String?
+
+    /// Puts the updater in a state to draw it; nothing is checked or saved.
+    func showForRendering(staged: Staged?, notice: String?, enabled: Bool, waiting: Bool, previous: String?) {
+        self.staged = staged
+        self.notice = notice
+        self.enabled = enabled
+        installWhenIdle = waiting
+        shownPrevious = previous
     }
 
     // MARK: - helpers

@@ -24,6 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 exit(1)
             }
         }
+        // Test builds: pictures of the update UI (RenderUpdateUI.swift).
+        if let i = args.firstIndex(of: "--render-update-ui"), i + 1 < args.count,
+           TestHooks.allowed(bundleID: Bundle.main.bundleIdentifier) {
+            buildMenu()
+            RenderUpdateUI.run(into: URL(fileURLWithPath: args[i + 1]))
+        }
         // Started by update-swap.sh after an update: check that this build
         // works (else the previous version goes back), then start as usual.
         if let i = args.firstIndex(of: "--update-check"), i + 1 < args.count {
