@@ -73,6 +73,10 @@ final class Runner {
             let size = "\(Int(s.frame.width * k))x\(Int(s.frame.height * k))"
             a += ["-smbios", "type=11,value=omacvm.notch=\(rows),value=omacvm.screen=\(size)"]
         }
+        // HDR: the guest's display sync reads it (omacvm-app-host).
+        if Settings.hdrActive {
+            a += ["-smbios", "type=11,value=omacvm.hdr=1"]
+        }
         let console = c.folder.appendingPathComponent("logs/console.log").path
         a += ["-device", "virtio-serial-pci,id=vser0",
               "-chardev", "file,id=hvc0,path=\(q(console))",
@@ -122,6 +126,9 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        if Settings.hdrActive {
+            env["OMACVM_GL_HDR"] = "1"
+        }
         if Settings.gpuSafeMode {
             env["OMACVM_VIRGL_POLL_FENCES"] = "1"
             env["OMACVM_GL_PRESENT"] = "layer"
@@ -133,6 +140,9 @@ final class Runner {
         let log = try FileHandle(forWritingTo: logURL)
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
+        }
+        if Settings.hdr && !Mac.hasHDRDisplay {
+            log.write(Data("OmacVM: HDR is on, but no display here can show it: the VM gets the SDR path\n".utf8))
         }
         p.standardOutput = log
         p.standardError = log
