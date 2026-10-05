@@ -377,6 +377,11 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     _ = c3.finished([vmB], now: t0 + 72)
     expect(c3.shouldRefresh(known: false, now: t0 + 73), "its own minute: unknown addresses still look")
 
+    // ---- log keys over the cap: a minute later they go (point 6) ----
+    var ll2 = LogLimiter(every: 60, maxKeys: 8)
+    for i in 0..<8 { _ = ll2.admit("addr\(i)", now: t0); _ = ll2.admit("addr\(i)", now: t0 + 1) }
+    expect(ll2.admit("other", now: t0 + 2) == 0 && ll2.count == 9, "full of keys with lines left out: shared one")
+    expect(ll2.admit("late", now: t0 + 70) == 0 && ll2.count <= 2, "a minute later the old keys go (\(ll2.count))")
     }
 
     print("control policy: \(passed) passed, \(failures) failed")

@@ -594,7 +594,9 @@ struct LogLimiter {
   mutating func admit(_ key: String, now: Date) -> Int? {
     var k = key
     if keys[k] == nil && keys.count >= maxKeys {
-      keys = keys.filter { now.timeIntervalSince($0.value.at) < every || $0.value.skipped > 0 }
+      // Keys whose minute is over go, also with lines left out (only their
+      // count is lost): else many addresses refused twice would hold them all.
+      keys = keys.filter { now.timeIntervalSince($0.value.at) < every }
       if keys.count >= maxKeys { k = "*" }
     }
     if let e = keys[k], now.timeIntervalSince(e.at) < every {
