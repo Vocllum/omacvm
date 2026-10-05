@@ -1,8 +1,12 @@
 """Client for the Mac's side of the control centre: the OmacVM Bridge's
 /omacvm/* requests (docs/adr/0031). Same rules as omacvm-bridge (the shell
-client): the token goes only to a Bridge that first proved it knows it. Each
-request also carries this VM's own key (~/.config/omacvm-bridge/vm-key, from
-omacvm apply), so a VM that takes another VM's address cannot act for it.
+client): the token goes only to a Bridge that first proved it knows it.
+
+Every VM has that token, so a VM that answers for the Mac's address passes
+the proof. This VM's own key (~/.config/omacvm-bridge/vm-key, from omacvm
+apply) therefore never leaves the VM: each request is signed with it (method,
+path, time, a nonce, the protocol header, the body), and only answers signed
+with it by the Mac are believed. Hello carries nothing of it.
 
 OmacVM.app's VMs ask through the app instead: the virtio-serial port
 org.omacvm.control, one JSON line per request and per answer. The app knows
@@ -30,6 +34,22 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 PROTO = 1          # what this client speaks
+AUTH_VERSION = "1"
+# Refusals the Mac sends before it knows which VM asked (so unsigned): their
+# codes are kept. Any other unsigned refusal is shown, but nothing acts on it.
+UNSIGNED_CODES = {"unknown-vm", "ambiguous-vm", "no-vm-key", "vm-key", "app-vm", "no-cli", "cli-unsafe", "proto"}
+
+
+def request_mac(key: str, method: str, path: str, ts: int, nonce: str, proto: str, body: bytes) -> str:
+    """As requestMAC in src/bridge/mac/control_policy.swift."""
+    text = "\n".join(["omacvm-control-request 1", method, path, str(ts), nonce, proto, hashlib.sha256(body).hexdigest()])
+    return hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest()
+
+
+def answer_mac(key: str, nonce: str, status: int, body: bytes) -> str:
+    """As answerMAC in src/bridge/mac/control_policy.swift."""
+    text = "\n".join(["omacvm-control-answer 1", nonce, str(status), hashlib.sha256(body).hexdigest()])
+    return hmac.new(key.encode(), text.encode(), hashlib.sha256).hexdigest()
 PORT = 47831
 CONTROL_PORT = "/dev/virtio-ports/org.omacvm.control"
 ANSWER_MAX = 1 << 20
@@ -74,6 +94,7 @@ class Bridge:
         self.vm_version = vm_version
         self.proto = PROTO
         self._proven_at = 0.0
+        self.clock_offset = 0   # the Mac's time minus this VM's, from a signed "clock" answer
         # OmacVM.app: its control port (OMACVM_CONTROL_PORT for tests).
         port = os.environ.get("OMACVM_CONTROL_PORT") or CONTROL_PORT
         direct = url or os.environ.get("OMACVM_BRIDGE_URL")
@@ -88,12 +109,14 @@ class Bridge:
         except OSError as e:
             raise BridgeError("unproven", f"no Bridge token in this VM ({e.strerror}): omacvm apply on the Mac") from e
 
-    def _raw(self, method: str, path: str, body: bytes | None, headers: dict, timeout: float):
+    def _raw(self, method: str, path: str, body: bytes | None, headers: dict, timeout: float, answer_header: bool = False):
         conn = http.client.HTTPConnection(self.host, self.port, timeout=timeout)
         try:
             conn.request(method, path, body=body, headers=headers)
             r = conn.getresponse()
             data = r.read(1 << 20)
+            if answer_header:
+                return r.status, data, r.getheader("X-OmacVM-Answer") or ""
             return r.status, data
         except (OSError, http.client.HTTPException) as e:
             raise BridgeError("offline", f"the Mac does not answer at {self.host}:{self.port} ({e})") from e
@@ -178,22 +201,7 @@ class Bridge:
             if status == 0:   # the app could not reach the Bridge
                 raise BridgeError("offline", str(answer.get("error") or "OmacVM Bridge does not answer on the Mac"))
         else:
-            self.prove(min(timeout, 3.0))
-            body = None if obj is None else json.dumps(obj).encode()
-            headers = {"Authorization": "Bearer " + self._token().decode("ascii", "replace"),
-                       "X-OmacVM-Proto": str(self.proto), "X-OmacVM-Version": self.vm_version}
-            key = self._vm_key() if path.startswith("/omacvm/") else ""
-            if key:
-                headers["X-OmacVM-VM-Key"] = key
-            if body is not None:
-                headers["Content-Type"] = "application/json"
-            status, data = self._raw(method, path, body, headers, timeout)
-            try:
-                answer = json.loads(data) if data.strip() else {}
-            except ValueError:
-                answer = {}
-            if not isinstance(answer, dict):
-                answer = {}
+            status, answer = self._http(method, path, obj, timeout)
         if status == 200 or status == 202:
             return answer
         msg = str(answer.get("error") or f"HTTP {status}")
@@ -202,6 +210,48 @@ class Bridge:
         if status == 401:
             raise BridgeError("unproven", "the Mac refused this VM's token: omacvm apply on the Mac", status)
         raise BridgeError("refused", msg, status, str(answer.get("code", "")))
+
+    def _http(self, method: str, path: str, obj: dict | None, timeout: float, retried: bool = False) -> tuple[int, dict]:
+        self.prove(min(timeout, 3.0))
+        body = None if obj is None else json.dumps(obj).encode()
+        headers = {"Authorization": "Bearer " + self._token().decode("ascii", "replace"),
+                   "X-OmacVM-Proto": str(self.proto), "X-OmacVM-Version": self.vm_version}
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        # Hello is open to any VM with the token; everything else is signed.
+        signed = path.startswith("/omacvm/") and not path.startswith("/omacvm/hello")
+        key = nonce = ""
+        if signed:
+            key = self._vm_key()
+            if len(key) < 32:
+                raise BridgeError("refused", "this VM has no control centre key yet: omacvm apply on the Mac", 403, "no-vm-key")
+            nonce = secrets.token_hex(16)
+            ts = int(time.time()) + self.clock_offset
+            headers["X-OmacVM-Auth"] = " ".join([AUTH_VERSION, str(ts), nonce, request_mac(
+                key, method, path, ts, nonce, headers["X-OmacVM-Proto"], body or b"")])
+        status, data, sig = self._raw(method, path, body, headers, timeout, answer_header=True)
+        try:
+            answer = json.loads(data) if data.strip() else {}
+        except ValueError:
+            answer = {}
+        if not isinstance(answer, dict):
+            answer = {}
+        if not signed:
+            return status, answer
+        good = bool(sig) and sig.isascii() and hmac.compare_digest(answer_mac(key, nonce, status, data), sig)
+        if good and status == 403 and answer.get("code") == "clock" and not retried:
+            # The Mac signed its own time: sign again with it, once.
+            mac_time = answer.get("mac_time")
+            if isinstance(mac_time, int):
+                self.clock_offset = mac_time - int(time.time())
+                return self._http(method, path, obj, timeout, retried=True)
+        if good:
+            return status, answer
+        if status in (200, 202):
+            raise BridgeError("unproven", f"{self.host}:{self.port} answered without this VM's key: the answer is not used")
+        if status != 401 and str(answer.get("code", "")) not in UNSIGNED_CODES:
+            answer = {"error": str(answer.get("error") or f"HTTP {status}")}   # shown, nothing acts on it
+        return status, answer
 
     # ---- requests (the fixed list) ----
     def hello(self) -> Hello:

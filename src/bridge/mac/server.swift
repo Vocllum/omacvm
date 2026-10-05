@@ -325,7 +325,7 @@ func handle(_ fd: Int32, peer: String) {
     return
   }
   guard authorized(headers["authorization"]) else {
-    log("401 \(method) \(path) from \(peer)")
+    log("401 \(logSafe(method)) \(logSafe(path)) from \(peer)")
     respond(fd, 401, ["error": "missing or wrong bearer token"], extra: "WWW-Authenticate: Bearer\r\n")
     return
   }
@@ -362,10 +362,10 @@ func handle(_ fd: Int32, peer: String) {
       respond(fd, 400, ["error": "body must be a JSON object"]); return
     }
     do {
-      log("\(p) from \(peer): \(try bluetooth.control(p, obj))")
+      log("\(logSafe(p)) from \(peer): \(try bluetooth.control(p, obj))")
       respond(fd, 200, hub.current("bluetooth"))   // also pushes the change to /events clients
     } catch let e as APIError {
-      log("\(p) from \(peer) failed: \(e.message)")
+      log("\(logSafe(p)) from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
     } catch {
       respond(fd, 500, ["error": "\(error)"])
@@ -383,10 +383,10 @@ func handle(_ fd: Int32, peer: String) {
     }
     do {
       let audioPath = p.hasPrefix("/audio/")
-      log("\(p) from \(peer): \(try audioPath ? audioControl(p, obj) : displayControl(p, obj))")
+      log("\(logSafe(p)) from \(peer): \(try audioPath ? audioControl(p, obj) : displayControl(p, obj))")
       respond(fd, 200, hub.current(audioPath ? "audio" : "display"))   // also pushes the change to /events clients
     } catch let e as APIError {
-      log("\(p) from \(peer) failed: \(e.message)")
+      log("\(logSafe(p)) from \(peer) failed: \(e.message)")
       respond(fd, e.status, ["error": e.message])
     } catch {
       respond(fd, 500, ["error": "\(error)"])
@@ -406,7 +406,7 @@ func handle(_ fd: Int32, peer: String) {
   // would get frames under the Bridge's camera permission, without asking
   // macOS itself. OmacVM.app's VMs use their virtio port, not 127.0.0.1.
   case ("GET", let p) where (p == "/camera" || p == "/camera/status") && fromThisMac(fd, peer: peer):
-    log("403 \(path) from \(peer): the camera is only for VMs")
+    log("403 \(logSafe(path)) from \(peer): the camera is only for VMs")
     respond(fd, 403, ["error": "the camera is only for VMs, not for programs on this Mac"])
   case ("GET", "/camera/status"):
     respond(fd, 200, camera.status())

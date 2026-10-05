@@ -13,6 +13,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from omacvm_cc.bridge import answer_mac, request_mac  # noqa: E402
+
 TOKEN = b"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 VM_KEY = "5a" * 32
 SRC = os.path.join(os.path.dirname(__file__), "..", "..")
@@ -30,6 +34,8 @@ class FakeMac:
     def __init__(self, old: bool = False, version: str = "2.7.0") -> None:
         self.old, self.version = old, version
         self.job_end = ("done", "done")   # (state, text) a job ends with
+        self.job_extra: dict = {}         # more fields of the ended job (failed_part, mac_omacvm)
+        self.job_polls_to_end = 2
         self.requests: list[tuple[str, str, dict]] = []
         self.jobs: dict[str, dict] = {}
         self.checks_enabled = True
@@ -37,25 +43,57 @@ class FakeMac:
         self.checked_at = "2026-01-05T10:41:00Z"
         self.job_polls_fail = False       # the Mac stops answering about jobs
         self.refuse_jobs: tuple | None = None   # (status, code, error) for POST /omacvm/jobs
-        self.vm_keys: list = []           # X-OmacVM-VM-Key of each /omacvm/ request
+        self.headers_seen: list = []      # every request's headers and body, as sent
+        self.signed: list = []            # (path, ok) for each /omacvm/ request but hello
+        self.sign_answers = True          # False: an impostor that does not have the VM's key
+        self.clock_skew = 0               # the fake Mac's clock minus the real one
         self.hello_delay = 0.0
+        self.nonces: set = set()
         fake = self
 
         class H(BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass
 
+            nonce = ""
+
             def send(self, code, obj):
                 b = json.dumps(obj).encode()
                 self.send_response(code)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(b)))
+                if self.nonce and fake.sign_answers:
+                    self.send_header("X-OmacVM-Answer", answer_mac(VM_KEY, self.nonce, code, b))
                 self.end_headers()
                 self.wfile.write(b)
 
-            def body(self):
+            def raw_body(self) -> bytes:
                 n = int(self.headers.get("Content-Length") or 0)
-                return json.loads(self.rfile.read(n) or b"{}") if n else {}
+                return self.rfile.read(n) if n else b""
+
+            def check_auth(self, raw: bytes) -> bool:
+                """As verifyControlAuth: False when it answered a refusal."""
+                fake.headers_seen.append((dict(self.headers.items()), raw))
+                p = self.path
+                if not p.startswith("/omacvm/") or p == "/omacvm/hello":
+                    return True
+                f = (self.headers.get("X-OmacVM-Auth") or "").split(" ")
+                ok = len(f) == 4 and f[0] == "1" and f[1].lstrip("-").isdigit() and hmac.compare_digest(
+                    request_mac(VM_KEY, self.command, p, int(f[1]), f[2], self.headers.get("X-OmacVM-Proto") or "", raw), f[3])
+                fake.signed.append((p, ok))
+                if not ok:
+                    self.send(403, {"error": "this VM's control centre key does not match", "code": "vm-key"})
+                    return False
+                self.nonce = f[2]
+                now = int(time.time()) + fake.clock_skew
+                if abs(int(f[1]) - now) > 300:
+                    self.send(403, {"error": "clock", "code": "clock", "mac_time": now})
+                    return False
+                if f[2] in fake.nonces:
+                    self.send(403, {"error": "sent before", "code": "replay"})
+                    return False
+                fake.nonces.add(f[2])
+                return True
 
             def do_GET(self):
                 p = self.path
@@ -65,9 +103,9 @@ class FakeMac:
                                                              hashlib.sha256).hexdigest()})
                 if self.headers.get("Authorization") != "Bearer " + TOKEN.decode():
                     return self.send(401, {"error": "token"})
+                if not self.check_auth(b""):
+                    return
                 fake.requests.append(("GET", p, {}))
-                if p.startswith("/omacvm/"):
-                    fake.vm_keys.append(self.headers.get("X-OmacVM-VM-Key"))
                 if fake.old and p.startswith("/omacvm/"):
                     return self.send(404, {"error": "not found"})
                 if p == "/omacvm/hello":
@@ -93,8 +131,9 @@ class FakeMac:
                         return self.send(404, {"error": "no such job"})
                     j["polls"] += 1
                     j["step"], j["of"], j["text"] = 2, 4, "the VM side"
-                    if j["polls"] >= 2:
+                    if j["polls"] >= fake.job_polls_to_end:
                         j["state"], j["text"] = fake.job_end
+                        j.update(fake.job_extra)
                     return self.send(200, {k: v for k, v in j.items() if k != "polls"})
                 if p in ("/state", "/scan?cached=1", "/bluetooth"):
                     return self.send(200, {"ssid": "ZorroNet 5G", "bssid": "a4:2b:b0:11:22:33",
@@ -105,9 +144,11 @@ class FakeMac:
             def do_POST(self):
                 if self.headers.get("Authorization") != "Bearer " + TOKEN.decode():
                     return self.send(401, {"error": "token"})
-                b = self.body()
+                raw = self.raw_body()
+                if not self.check_auth(raw):
+                    return
+                b = json.loads(raw or b"{}")
                 fake.requests.append(("POST", self.path, b))
-                fake.vm_keys.append(self.headers.get("X-OmacVM-VM-Key"))
                 if self.path == "/omacvm/jobs" and fake.refuse_jobs:
                     st, code, err = fake.refuse_jobs
                     return self.send(st, {"error": err, "code": code})

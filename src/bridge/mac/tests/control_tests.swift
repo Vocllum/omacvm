@@ -91,14 +91,54 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["gestures", "mac-clock"]), vm: "V", commit: nil).suffix(4)
            == ["--reinstall", "gestures", "--reinstall", "mac-clock"], "reinstall two")
 
-    // ---- the VM's own key (a VM that takes another one's address) ----
+    // ---- the VM's own key: requests signed with it, never sent ----
     let k = String(repeating: "5a", count: 32)
-    expect(vmKeyCheck(given: k, stored: k + "\n") == nil, "its key")
-    expect(vmKeyCheck(given: String(repeating: "5b", count: 32), stored: k)?.code == "vm-key", "another VM's key")
-    expect(vmKeyCheck(given: nil, stored: k)?.code == "vm-key", "no key sent")
-    expect(vmKeyCheck(given: String(k.prefix(63)), stored: k)?.code == "vm-key", "a shorter key")
-    expect(vmKeyCheck(given: k, stored: nil)?.code == "no-vm-key", "no key on the Mac: refused")
-    expect(vmKeyCheck(given: "", stored: "")?.code == "no-vm-key", "empty is no key")
+    let jobBody = Data(#"{"action": "disable", "features": ["gestures"]}"#.utf8)
+    let n0 = "0123456789abcdef0123456789abcdef"
+    // The same vector as the VM's client (src/control/tests/test_bridge_sign.py).
+    expect(requestMAC(key: k, method: "POST", path: "/omacvm/jobs", time: 1760000000, nonce: n0, proto: "1", body: jobBody)
+           == "e939f8224895cf8b312f3eb4af84fd179551fc9920e39ebba4b94905138a2b56", "request signature vector")
+    expect(answerMAC(key: k, nonce: n0, status: 202, body: Data("{\"ok\": true}\n".utf8))
+           == "10be1a4a1ddefe1ec4fe0f09d079c9cb4ad19225688a1ad00af15da382883718", "answer signature vector")
+    let tNow = Date(timeIntervalSince1970: 1760000100)
+    func auth(_ t: Int64, _ n: String, method: String = "POST", path: String = "/omacvm/jobs", body: Data = jobBody, key: String = k) -> String {
+      "1 \(t) \(n) " + requestMAC(key: key, method: method, path: path, time: t, nonce: n, proto: "1", body: body)
+    }
+    func check(_ h: String?, stored: String? = k, method: String = "POST", path: String = "/omacvm/jobs", body: Data = jobBody,
+               now: Date = tNow, cache: inout NonceCache) -> Result<String, AuthFailure> {
+      verifyControlAuth(header: h, key: stored, method: method, path: path, proto: "1", body: body, now: now, nonces: &cache)
+    }
+    func code(_ r: Result<String, AuthFailure>) -> String { if case .failure(let f) = r { return f.error.code }; return "ok" }
+    var nc = NonceCache()
+    expect(code(check(auth(1760000090, n0), stored: k + "\n", cache: &nc)) == "ok", "signed with its key")
+    expect(code(check(auth(1760000090, n0), cache: &nc)) == "replay", "the same request again: replay")
+    let n1 = "1123456789abcdef0123456789abcdef", n2 = "2123456789abcdef0123456789abcdef"
+    expect(code(check(auth(1760000090, n1, key: String(repeating: "5b", count: 32)), cache: &nc)) == "vm-key", "another VM's key")
+    expect(code(check(nil, cache: &nc)) == "vm-key", "not signed (an older client)")
+    expect(code(check(k, cache: &nc)) == "vm-key", "the key itself as the header")
+    expect(code(check(auth(1760000090, n1), body: Data(#"{"action": "enable", "features": ["gestures"]}"#.utf8), cache: &nc)) == "vm-key",
+           "body changed on the way")
+    expect(code(check(auth(1760000090, n1), path: "/omacvm/settings/update-checks", cache: &nc)) == "vm-key", "path changed")
+    expect(code(check(auth(1760000090, n1), method: "GET", cache: &nc)) == "vm-key", "method changed")
+    expect(code(check(auth(1760000090, n1), stored: nil, cache: &nc)) == "no-vm-key", "no key on the Mac")
+    expect(code(check(auth(1760000090, n1), stored: "short", cache: &nc)) == "no-vm-key", "a short key on the Mac is none")
+    expect(code(check("1 1760000090 \(n1) zz", cache: &nc)) == "vm-key", "garbage signature")
+    expect(code(check("1 99999999999999999999 \(n1) " + String(repeating: "0", count: 64), cache: &nc)) == "vm-key", "time overflow")
+    if case .failure(let f) = check(auth(1759990000, n1), cache: &nc) {
+      expect(f.error.code == "clock" && f.nonce == n1 && f.macTime == 1760000100, "an old request: clock, signed answer with the Mac's time")
+    } else { expect(false, "old request") }
+    if case .failure(let f) = check(auth(Int64.max, n2), cache: &nc) {
+      expect(f.error.code == "clock", "far future: clock, no overflow")
+    } else { expect(false, "far future") }
+    if case .failure(let f) = check(auth(1760000090, n2, key: String(repeating: "5b", count: 32)), cache: &nc) {
+      expect(f.nonce == nil, "a wrong signature gets no signed answer (no oracle)")
+    } else { expect(false, "unsigned refusal") }
+    var small = NonceCache(limit: 4)
+    for i in 0..<4 { _ = small.take(String(format: "%032x", i), now: tNow) }
+    expect(!small.take(String(format: "%032x", 9), now: tNow), "full of fresh nonces: refused, not forgotten")
+    expect(small.take(String(format: "%032x", 9), now: tNow.addingTimeInterval(2 * authWindow + 1)), "old ones expire")
+    expect(logSafe("/omacvm/x\nFAKE line\r\u{1b}[31m") == "/omacvm/x?FAKE line??[31m", "log: no control characters")
+    expect(logSafe("a\u{2028}b") == "a?b" && logSafe(String(repeating: "x", count: 500)).count == 200, "log: line separators, length")
     // As lib/mac.sh vm_key_file: printf '%s/%s' parallels "My VM" | shasum -a 256 | cut -c1-32
     expect(vmKeyName(type: "parallels", name: "My VM") == "6904477035f2e239f66f28d2d8ff406a", "key file name: \(vmKeyName(type: "parallels", name: "My VM"))")
 
@@ -114,10 +154,13 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(jobState(rc: 1, alive: false) == "failed" && jobState(rc: 3, alive: false) == "failed", "failed")
 
     // ---- progress lines ----
-    let (p, rest) = progress(["==> OmacVM Bridge on the Mac", #"{"omacvm_progress": 1, "step": "mac", "n": 1, "of": 4, "text": "the Mac side"}"#,
-                              "pacman: rolled back nothing", #"{"omacvm_progress": 1, "step": "vm", "n": 3, "of": 4, "text": "the VM side"}"#])
+    let (p, rest, fl) = progress(["==> OmacVM Bridge on the Mac", #"{"omacvm_progress": 1, "step": "mac", "n": 1, "of": 4, "text": "the Mac side"}"#,
+                              "pacman: rolled back nothing", #"{"omacvm_progress": 1, "step": "vm", "n": 3, "of": 4, "text": "the VM side"}"#,
+                              #"{"omacvm_failed": 1, "part": "camera", "text": "camera was not set up"}"#, "==> old install"])
     expect(p == Progress(n: 3, of: 4, text: "the VM side"), "last progress line")
-    expect(rest == ["==> OmacVM Bridge on the Mac", "pacman: rolled back nothing"], "progress lines are not shown as output")
+    expect(rest == ["==> OmacVM Bridge on the Mac", "pacman: rolled back nothing", "==> old install"], "progress lines are not shown as output")
+    expect(fl == Failed(part: "camera", text: "camera was not set up"), "what failed")
+    expect(progress([#"{"omacvm_failed": 1, "part": "../x", "text": "t"}"#]).2 == Failed(part: "", text: "t"), "a bad part name is dropped")
     expect(progress([#"{"omacvm_progress": 1, "n": 500, "of": 4, "text": "x"}"#]).0 == nil, "nonsense counts")
     expect(progress(["{\"omacvm_progress\": 1, broken"]).0 == nil, "broken line")
 
@@ -144,13 +187,29 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(versionGate(JobRequest(action: .enable, features: ["bridge"]), mac: "2.9.0", vm: "2.8.0")?.code == "update-first", "older VM")
     expect(versionGate(JobRequest(action: .update, features: []), mac: "2.9.0", vm: "2.8.0") == nil, "update always")
     expect(versionGate(JobRequest(action: .disable, features: ["bridge"]), mac: "2.9.0", vm: "2.9.0") == nil, "same version")
+    // An update that went back (the Mac kept the newer one) never locks the VM.
+    expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.1", vm: "2.9.0") == nil, "off after a failed update")
+    expect(versionGate(JobRequest(action: .reinstall, features: ["camera"]), mac: "2.9.1", vm: "2.9.0") == nil, "repair after a failed update")
+    expect(versionGate(JobRequest(action: .enable, features: ["camera"]), mac: "2.9.1", vm: "2.9.0")?.code == "update-first", "on: update first")
+    expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.0", vm: "2.9.1")?.code == "mac-older", "a newer VM: the Mac first")
+    expect(versionGate(JobRequest(action: .disable, features: ["camera"]), mac: "2.9.0", vm: "1.x") == nil, "a 1.x VM may turn off")
+    expect(versionLess("2.9.0", "2.10.0") == true && versionLess("2.10.0", "2.9.9") == false && versionLess("2.9", "2.9.0") == false,
+           "versions compare as numbers")
+    expect(versionLess("1.x", "2.0.0") == nil, "not a version")
+    // Updates only go forward.
+    expect(forwardGate(release: "2.9.1", mac: "2.9.0", vm: "2.9.0") == nil, "a newer release")
+    expect(forwardGate(release: "2.9.1", mac: "2.9.1", vm: "2.9.0") == nil, "retry after a VM went back")
+    expect(forwardGate(release: "2.9.1", mac: "2.9.0", vm: "") == nil, "a VM without a version")
+    expect(forwardGate(release: "2.9.0", mac: "2.9.1", vm: "2.9.0")?.code == "not-newer", "the Mac is ahead of the release")
+    expect(forwardGate(release: "2.9.0", mac: "2.9.0", vm: "2.9.1")?.code == "not-newer", "the VM is ahead of the release")
+    expect(forwardGate(release: "2.9.0", mac: "2.9.0", vm: "2.9.0")?.code == "not-newer", "nothing newer")
 
     // ---- manifest ----
     let key = Curve25519.Signing.PrivateKey()
     let other = Curve25519.Signing.PrivateKey()
     let pub = key.publicKey.rawRepresentation.base64EncodedString()
     let digest = "sha256:" + String(repeating: "ab", count: 32)
-    let body = Data(#"{"schema": 1, "version": "2.9.1", "commit": "\#(String(repeating: "c", count: 40))", "date": "2026-10-20", "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1", "proto": 1, "proto_min": 1, "parts": {"gestures": {"digest": "\#(digest)", "release": "2.9.1", "note": "fewer missed swipes"}}}"#.utf8)
+    let body = Data(#"{"schema": 1, "kind": "control-manifest", "version": "2.9.1", "commit": "\#(String(repeating: "c", count: 40))", "date": "2026-10-20", "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1", "proto": 1, "proto_min": 1, "parts": {"gestures": {"digest": "\#(digest)", "release": "2.9.1", "note": "fewer missed swipes"}}}"#.utf8)
     let sig = Data(try! key.signature(for: body).base64EncodedString().utf8)
     expect(manifestSigned(body, sig: sig, key: pub), "good signature")
     expect(!manifestSigned(body, sig: Data(try! other.signature(for: body).base64EncodedString().utf8), key: pub), "wrong key")
@@ -163,6 +222,11 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     } else { expect(false, "manifest parses") }
     let schema2 = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""schema": 1"#, with: #""schema": 2"#).utf8)
     if case .failure(let e) = parseManifest(schema2) { expect(e.code == "bad-manifest", "schema 2") } else { expect(false, "schema 2") }
+    // One key signs both feeds: the app's feed, or no kind, is no manifest.
+    let appFeed = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""kind": "control-manifest""#, with: #""kind": "app-feed""#).utf8)
+    if case .failure(let e) = parseManifest(appFeed) { expect(e.message.contains("control centre"), "app-feed refused") } else { expect(false, "app-feed refused") }
+    let noKind = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: #""kind": "control-manifest", "#, with: "").utf8)
+    if case .failure = parseManifest(noKind) { expect(true, "no kind refused") } else { expect(false, "no kind refused") }
     let badPart = Data(String(decoding: body, as: UTF8.self).replacingOccurrences(of: "\"gestures\"", with: "\"../x\"").utf8)
     if case .failure = parseManifest(badPart) { expect(true, "bad part name") } else { expect(false, "bad part name") }
 

@@ -148,6 +148,7 @@ final class Control {
   private var status: [String: (at: Date, body: [String: Any])] = [:]
   private var statusRunning: Set<String> = []
   private var jobs: [String: JobRun] = [:]
+  private var nonces = NonceCache()
   private var lastCheck = Date.distantPast
   private var timer: DispatchSourceTimer?
 
@@ -169,11 +170,19 @@ final class Control {
   // ---- entry point (server.swift) ----
   func handle(fd: Int32, peer: String, method: String, path: String, headers: [String: String], body: Data) {
     var vmName = "-"
+    // Set once the VM's signature checked out: the answer is signed with its key.
+    var signer: (key: String, nonce: String)?
     func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
-      log("control: \(method) \(path) from \(peer) (\(vmName)): \(code)\(note.isEmpty ? "" : " " + note)")
-      respond(fd, code, obj)
+      log("control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))")
+      guard let s = signer else { return respond(fd, code, obj) }
+      let data = jsonData(obj) + Data("\n".utf8)
+      let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
+      _ = writeAll(fd, httpHead(code, "application/json", length: data.count, extra: "X-OmacVM-Answer: \(sig)\r\n") + data)
+      close(fd)
     }
-    func refuse(_ e: PolicyError) { answer(e.status, ["error": e.message, "code": e.code], e.code) }
+    func refuse(_ e: PolicyError, _ extra: [String: Any] = [:]) {
+      answer(e.status, ["error": e.message, "code": e.code].merging(extra) { a, _ in a }, e.code)
+    }
 
     let cli: String
     switch controlCLI() { case .success(let c): cli = c; case .failure(let e): return refuse(e) }
@@ -208,7 +217,19 @@ final class Control {
       switch vmForApp(name, vmList(cli, refreshFor: "app/" + name)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
-      if let e = vmKeyCheck(given: headers["x-omacvm-vm-key"], stored: storedVMKey(vm)) { vmName = vm.name; return refuse(e) }
+      vmName = vm.name
+      // Signed with the VM's own key, which never crosses the network.
+      let key = storedVMKey(vm)
+      let checked = q.sync {
+        verifyControlAuth(header: headers["x-omacvm-auth"], key: key, method: method, path: path,
+                          proto: headers["x-omacvm-proto"] ?? "", body: body, now: Date(), nonces: &nonces)
+      }
+      switch checked {
+      case .success(let nonce): signer = (key!.trimmingCharacters(in: .whitespacesAndNewlines), nonce)
+      case .failure(let f):
+        if let n = f.nonce, let k = key { signer = (k.trimmingCharacters(in: .whitespacesAndNewlines), n) }
+        return refuse(f.error, f.macTime.map { ["mac_time": Int($0)] } ?? [:])
+      }
     }
     vmName = vm.name
     switch route {
@@ -239,6 +260,7 @@ final class Control {
         }
         let at = (lastResult()["checked_at"] as? String).flatMap { isoFormat.date(from: $0) }
         if let e = updateGate(checksEnabled: updateChecks(), checkedAt: at) { return refuse(e) }
+        if let e = forwardGate(release: m.version, mac: version, vm: vm.omacvm) { return refuse(e) }
         commit = m.commit
       }
       // A job started before a Bridge restart (an update reinstalls the Bridge) still counts.
@@ -393,16 +415,24 @@ final class Control {
 
   private func jobAnswer(_ j: JobRun) -> [String: Any] {
     let data = (try? Data(contentsOf: URL(fileURLWithPath: j.logPath))) ?? Data()
-    let (step, lines) = progress(cleanLines(data.suffix(65536)))
+    let (step, lines, failed) = progress(cleanLines(data.suffix(65536)))
     var rc = q.sync { j.rc }
     if rc == nil, let s = try? String(contentsOfFile: j.rcPath, encoding: .utf8) { rc = Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)) }
     // The state comes from the exit code alone (4: rolled back), never from the output.
     let state = jobState(rc: rc, alive: j.pid > 0 && kill(j.pid, 0) == 0)
     let last = lines.last(where: { $0.hasPrefix("==> ") }).map { String($0.dropFirst(4)) }
+    // Failed or rolled back: what failed (apply says it), else the last line.
     let text = state == "running" ? (step?.text ?? last ?? "starting")
-      : state == "done" ? "done" : (lines.last ?? "failed")
+      : state == "done" ? "done" : (failed?.text ?? lines.last ?? "failed")
     return ["id": j.id, "action": j.action, "features": j.features, "state": state, "step": step?.n ?? 0, "of": step?.of ?? 0,
-            "text": text, "rc": rc.map { Int($0) } ?? NSNull(), "lines": Array(lines.suffix(20))]
+            "text": text, "failed_part": failed?.part ?? "", "mac_omacvm": j.action == "update" ? macVersionNow() : "",
+            "rc": rc.map { Int($0) } ?? NSNull(), "lines": Array(lines.suffix(20))]
+  }
+
+  /// The Mac's OmacVM now (an update job moves it): for the job's text.
+  private func macVersionNow() -> String {
+    guard case .success(let cli) = controlCLI() else { return "" }
+    return macVersion(cli)
   }
 
   // ---- updates ----
