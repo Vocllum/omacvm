@@ -100,7 +100,11 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
   I420 ones FFmpeg would pick), lists AV1 only to Chromium-based browsers and
   keeps to the Mac's limit of open decoders (Limits, below;
-  `OMACVM_VA_DEBUG=1` prints it).
+  `OMACVM_VA_DEBUG=1` prints it). It also reads pictures out in the other
+  YUV layout itself (vaGetImage/vaPutImage between NV12 and I420 or YV12:
+  FFmpeg's `hwdownload,format=yuv420p`), a plain reshuffle on the CPU, so
+  they stay bit for bit the decoded ones; Mesa would convert on the GPU
+  through RGB.
   Its folder `/usr/local/lib/dri` goes into `/etc/ld.so.conf.d`: Firefox
   decodes in a sandboxed process that may load libraries only from the paths
   ld.so knows, so without it YouTube in Firefox falls back to the CPU.
@@ -115,6 +119,15 @@ put the shim in: the VM folder's `video-decode` file).
 - **AV1 in Firefox and mpv**: FFmpeg sends only the tile data of an AV1 frame,
   without its headers, and VideoToolbox needs the headers. Chrome sends the
   whole frame. So AV1 is offered to Chromium-based browsers only.
+- **VA-API conversions on the GPU give black pictures**: an image in RGB
+  (FFmpeg's `hwdownload,format=bgra`) and VA-API video processing
+  (`scale_vaapi`, GStreamer's `vapostproc`). Mesa does them with its video
+  compositor, whose shaders the Mac's OpenGL does not run as Mesa means
+  them (a swizzled sampler, 2D textures read as 2D arrays, two swizzles of
+  one texture). Read the picture out in YUV and convert or scale on the CPU
+  (`hwdownload,format=nv12,scale=...`). The other YUV layout comes from the
+  shim (above); outside the desktop session (SSH, sudo, services) it is used
+  only with `LIBVA_DRIVER_NAME=omacvm`, without it that one is black too.
 - **HEVC**: Main and Main 10; long-term reference pictures from the SPS are
   not supported (rare).
 - **32 decoders at once per VM, 48 at most.** Each holds a session on the
