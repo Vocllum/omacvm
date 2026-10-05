@@ -4,7 +4,9 @@
 #   on:  the omacvm-vdec kernel module (a V4L2 video decoder) through DKMS,
 #        rebuilt by pacman's DKMS hook for every new kernel with its headers;
 #        omacvm-vdecd, which decodes for it with VA-API (the app's VideoToolbox
-#        backend); Chromium's switch for its V4L2 decoder in the user's flags
+#        backend); Chromium's switch for its V4L2 decoder in the user's flags,
+#        and an extension that has YouTube send VP9 instead of AV1 (this
+#        Chromium decodes AV1 only on the CPU)
 #   off: all of it goes again (dkms and the kernel headers stay installed)
 # Arch Linux ARM's Chromium has no VA-API, only V4L2: see docs/adr/0025.
 # Google Chrome and Brave use VA-API directly and need none of this.
@@ -29,6 +31,7 @@ if [[ $ON == off ]]; then
     dkms remove "$NAME/$v" --all >/dev/null 2>&1 || true
   done
   rm -rf /usr/src/$NAME-*
+  rm -rf /usr/local/share/omacvm/chromium-no-av1
   rm -f /etc/systemd/system/omacvm-vdecd.service /usr/local/bin/omacvm-vdecd "$LIB/chromium-flags.py" \
     /etc/udev/rules.d/70-omacvm-vdec.rules /etc/modules-load.d/omacvm-vdec.conf \
     /etc/sysusers.d/omacvm-vdec.conf "$STAMP"
@@ -96,6 +99,7 @@ fi
 systemctl stop omacvm-vdecd.service 2>/dev/null || true
 install -m755 "$T/omacvm-vdecd" /usr/local/bin/omacvm-vdecd
 install -Dm755 chromium-flags.py "$LIB/chromium-flags.py"
+install -Dm644 -t /usr/local/share/omacvm/chromium-no-av1 no-av1/manifest.json no-av1/no-av1.js
 install -Dm644 omacvm-vdec.sysusers /etc/sysusers.d/omacvm-vdec.conf
 systemd-sysusers /etc/sysusers.d/omacvm-vdec.conf
 install -m644 70-omacvm-vdec.rules /etc/udev/rules.d/
