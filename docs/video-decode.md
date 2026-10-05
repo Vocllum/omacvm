@@ -32,8 +32,10 @@ Browsers in an OmacVM.app VM:
 - **Chromium from Arch Linux ARM** (Omarchy's default browser): no. Arch Linux
   ARM builds it without VA-API, so it always decodes on the CPU.
 - **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`) and **GStreamer**
-  (`vah264dec`, `vah265dec`, `vavp9dec`; Celluloid and other GStreamer
-  players): H.264, VP9 and HEVC. FFmpeg decodes a 4K HEVC clip at about 200
+  (`vah264dec`, `vah265dec`, `vavp9dec` from the `gst-plugin-va` package;
+  Celluloid and other GStreamer players): H.264, VP9 and HEVC. 8-bit frames
+  come out bit for bit as in software decoding; 10-bit ones within one step
+  of 1023. FFmpeg decodes a 4K HEVC clip at about 200
   frames per second.
 - **HEVC in Google Chrome** (154): in hardware, but not finished: 1080p60
   plays smoothly until Chrome seeks (the end of a looped clip, a jump in
