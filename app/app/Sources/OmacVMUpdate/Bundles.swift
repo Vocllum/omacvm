@@ -109,3 +109,40 @@ public enum Running {
         return String(cString: p)
     }
 }
+
+/// Where the self-update keeps its files: one folder per copy of the app.
+/// Two copies with one bundle id (OmacVM.app and a renamed Omarchy.app, a
+/// test copy on a USB disk) must not share their kept version, staged
+/// download or swap result.
+public enum UpdateFolders {
+    /// "<app name>-<first 8 hex digits of SHA-256 of its real path>": stays
+    /// readable, differs per place. A moved app gets a new folder.
+    public static func key(for bundle: URL) -> String {
+        let path = Running.realPath(bundle)
+        let hash = SHA256.hash(data: Data(path.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+        let name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+        return "\(name)-\(hash)"
+    }
+
+    /// Where the swap keeps the previous and the incoming app. A rename only
+    /// stays a rename on one volume (across volumes mv copies and deletes:
+    /// slow, and half done when it fails), so these lie on the app's volume:
+    /// HOME when it is there, else a hidden folder next to the app.
+    public static func work(for bundle: URL, home: URL) -> URL {
+        let parent = bundle.deletingLastPathComponent()
+        if let a = device(parent), let b = device(home), a == b { return home }
+        return parent.appendingPathComponent(".omacvm-updates/\(key(for: bundle))")
+    }
+
+    /// The volume a path lies on (its nearest existing folder: HOME may not
+    /// be made yet).
+    public static func device(_ url: URL) -> dev_t? {
+        var u = url.standardizedFileURL
+        while true {
+            var st = stat()
+            if stat(u.path, &st) == 0 { return st.st_dev }
+            if u.path == "/" { return nil }
+            u = u.deletingLastPathComponent()
+        }
+    }
+}

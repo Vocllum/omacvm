@@ -164,5 +164,26 @@ expect(Running.pids(inside: tmp.appendingPathComponent("Other.app")).isEmpty, "a
 p.terminate(); p.waitUntilExit()
 expect(Running.pids(inside: fake).isEmpty, "after it ends: nothing")
 
+// One update folder per copy; the swap's work folder on the app's volume
+let copyA = folder.appendingPathComponent("OmacVM.app")
+let copyB = tmp.appendingPathComponent("Other place/OmacVM.app")
+try! FileManager.default.createDirectory(at: copyB, withIntermediateDirectories: true)
+let keyA = UpdateFolders.key(for: copyA)
+expect(keyA.range(of: "^OmacVM-[0-9a-f]{8}$", options: .regularExpression) != nil, "folder key: name and 8 hex digits (\(keyA))")
+expect(keyA != UpdateFolders.key(for: copyB), "two copies with one name: two folders")
+expect(keyA == UpdateFolders.key(for: copyA), "the same copy: the same folder")
+let viaLink = tmp.appendingPathComponent("link")
+try! FileManager.default.createSymbolicLink(at: viaLink, withDestinationURL: folder)
+expect(UpdateFolders.key(for: viaLink.appendingPathComponent("OmacVM.app")) == keyA, "reached through a link: the same folder")
+expect(UpdateFolders.key(for: folder.appendingPathComponent("Omarchy.app")).hasPrefix("Omarchy-"), "a renamed copy: its own name")
+let home = tmp.appendingPathComponent("support/Updates/org.omacvm.app/\(keyA)")
+expect(UpdateFolders.device(home) == UpdateFolders.device(tmp), "a folder not made yet: its parent's volume")
+expect(UpdateFolders.work(for: copyA, home: home) == home, "app on the update folder's volume: work there")
+// /dev (devfs) is another volume than the temporary folder.
+let elsewhere = URL(fileURLWithPath: "/dev/OmacVM.app")
+expect(UpdateFolders.device(URL(fileURLWithPath: "/dev")) != UpdateFolders.device(tmp), "/dev is another volume")
+expect(UpdateFolders.work(for: elsewhere, home: home).path == "/dev/.omacvm-updates/\(UpdateFolders.key(for: elsewhere))",
+       "app on another volume: work next to it")
+
 print(failures == 0 ? "all passed" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)

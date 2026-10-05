@@ -28,6 +28,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // works (else the previous version goes back), then start as usual.
         if let i = args.firstIndex(of: "--update-check"), i + 1 < args.count {
             Updater.launchCheck(token: args[i + 1])
+            // The update went in after the user quit or shut the VM down:
+            // no window now. The next launch reads the result and says so.
+            if args.contains("--update-quiet") {
+                Updater.shared.log("started after the update (quiet: no window), quitting")
+                exit(0)
+            }
         }
         // One launcher at a time: a second one hands over to the first (a
         // start request too: `open -n ... --args --start --vm NAME`). The
@@ -166,11 +172,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.runner = nil
             if self.quitting {
                 self.quitting = false
-                // An update asked for while the VM ran goes in now.
-                if Updater.shared.installWhenIdle { Updater.shared.install(quit: false) }
+                // An update asked for while the VM ran goes in now, quietly:
+                // the user is quitting.
+                if Updater.shared.installWhenIdle { Updater.shared.install(quit: false, quiet: true) }
                 NSApp.reply(toApplicationShouldTerminate: true)
             } else if status == 0 {
-                if Updater.shared.installWhenIdle { Updater.shared.install() }
+                // Shut down from the guest: the app quits, so no window
+                // after the update either.
+                if Updater.shared.installWhenIdle { Updater.shared.install(quiet: true) }
                 NSApp.terminate(nil)
             } else {
                 self.state.message = "The VM stopped unexpectedly (QEMU exit \(status)). Log: \(self.state.config.folder.path)/logs/qemu.log"
@@ -193,7 +202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func buildMenu() {
+    func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         main.addItem(appItem)
@@ -227,46 +236,66 @@ extension AppDelegate: NSMenuDelegate {
         guard let item = menu.item(withTag: Self.goBackTag) else { return }
         let prev = Updater.shared.previousVersion
         item.isHidden = prev == nil
-        item.title = "Go Back to \(Product.name) \(prev ?? "")…"
+        item.title = Self.goBackTitle(prev ?? "")
     }
+
+    static func goBackTitle(_ version: String) -> String { "Go Back to \(Product.name) \(version)…" }
 
     @objc func checkForUpdates(_ sender: Any?) {
         let u = Updater.shared
         Task { @MainActor in
             let outcome = await u.check(manual: true)
-            let alert = NSAlert()
-            switch outcome {
-            case .ready(let v):
-                alert.messageText = "\(Product.name) \(v) is ready to install"
-                alert.informativeText = "This is \(u.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed. If it does not start, \(u.currentVersion) comes back by itself."
-                alert.addButton(withTitle: "Update and Relaunch")
-                alert.addButton(withTitle: "Later")
-                if alert.runModal() == .alertFirstButtonReturn { u.install() }
-                return
-            case .upToDate:
-                alert.messageText = "\(Product.name) \(u.currentVersion) is the newest version"
-            case .skipped(let v):
-                alert.messageText = "\(Product.name) \(v) is skipped"
-            case .needsMacOS(let v, let m):
-                alert.messageText = "\(Product.name) \(v) needs macOS \(m)"
-            case .failed(let why):
-                alert.messageText = "No update check"
-                alert.informativeText = why
-            }
-            alert.runModal()
+            let alert = Self.checkAlert(outcome, current: u.currentVersion, busy: u.busyNow)
+            if alert.runModal() == .alertFirstButtonReturn, case .ready = outcome { u.install() }
         }
+    }
+
+    /// What Check for Updates… says. busy: why the app cannot be replaced
+    /// right now (a VM runs from it): the update then waits for it.
+    static func checkAlert(_ outcome: Updater.Outcome, current: String, busy: String?) -> NSAlert {
+        let alert = NSAlert()
+        switch outcome {
+        case .ready(let v):
+            alert.messageText = "\(Product.name) \(v) is ready to install"
+            if let busy {
+                alert.informativeText = "You have \(current). \(busy), so \(v) goes in once it has shut down. Your VMs are not changed."
+                alert.addButton(withTitle: "Update After Shutdown")
+            } else {
+                alert.informativeText = "You have \(current). \(Product.name) restarts with the new version; your VMs are not changed. If it does not start, \(current) comes back by itself."
+                alert.addButton(withTitle: "Update and Relaunch")
+            }
+            alert.addButton(withTitle: "Later")
+        case .upToDate:
+            alert.messageText = "\(Product.name) is up to date"
+            alert.informativeText = "\(current) is the newest version."
+        case .skipped(let v):
+            alert.messageText = "\(Product.name) \(v) is skipped"
+        case .needsMacOS(let v, let m):
+            alert.messageText = "\(Product.name) \(v) needs macOS \(m)"
+            alert.informativeText = "This Mac stays on \(current). Update macOS to get \(v)."
+        case .failed(let why):
+            alert.messageText = "Could not check for updates"
+            // The reasons are log lines ("no connection to ..."): as a sentence.
+            alert.informativeText = why.prefix(1).uppercased() + why.dropFirst() + (why.hasSuffix(".") ? "" : ".")
+        }
+        return alert
     }
 
     @objc func goBack(_ sender: Any?) {
         let u = Updater.shared
         guard let prev = u.previousVersion else { return }
+        if Self.goBackAlert(prev, current: u.currentVersion).runModal() == .alertFirstButtonReturn { u.goBack() }
+        // The ready window shows the notice itself (UpdateSection).
+        if let n = u.notice, state.screen != .ready { state.message = n }
+    }
+
+    static func goBackAlert(_ prev: String, current: String) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Go back to \(Product.name) \(prev)?"
-        alert.informativeText = "\(Product.name) restarts as \(prev); \(u.currentVersion) is skipped until a later version comes out. Your VMs are not changed."
+        alert.informativeText = "\(Product.name) restarts as \(prev). \(current) is skipped until a later version comes out. Your VMs are not changed."
         alert.addButton(withTitle: "Go Back")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn { u.goBack() }
-        if let n = u.notice { state.message = n }
+        return alert
     }
 }
 

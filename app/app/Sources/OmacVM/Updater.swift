@@ -18,8 +18,12 @@ import OmacVMUpdate
 /// script puts the previous version back and the version is skipped. The
 /// previous version stays for one step back (menu: Go Back to ...).
 ///
-/// Its files: ~/Library/Application Support/OmacVM/Updates/<bundle id>/
-/// (staged/, previous/, update.log). Tests: OMACVM_APPCAST_URL,
+/// Its files, per copy of the app (UpdateFolders: two copies with one
+/// bundle id keep their own): ~/Library/Application Support/OmacVM/Updates/
+/// <bundle id>/<app name>-<hash of its path>/ (staged/, previous/,
+/// update.log, the state files below). An app on another volume keeps
+/// previous/ and incoming/ next to itself (.omacvm-updates/), so the swap
+/// stays renames on one volume. Tests: OMACVM_APPCAST_URL,
 /// OMACVM_APPCAST_KEY (a test key), OMACVM_SETTINGS_DIR; only test builds
 /// (another bundle id) read them (TestHooks).
 @MainActor
@@ -45,17 +49,21 @@ final class Updater: ObservableObject {
     let bundle = Bundle.main.bundleURL.standardizedFileURL
     let bundleID = Bundle.main.bundleIdentifier ?? "org.omacvm.app"
     let home: URL
+    /// previous/ and incoming/: on the app's volume (UpdateFolders.work).
+    let work: URL
     private var timer: Timer?
 
-    /// Per bundle id, so a test build keeps its own.
+    /// Per bundle id (a test build keeps its own) and per copy.
     nonisolated static var homeFolder: URL {
         Paths.appSupport.appendingPathComponent("Updates/\(Bundle.main.bundleIdentifier ?? "org.omacvm.app")")
+            .appendingPathComponent(UpdateFolders.key(for: Bundle.main.bundleURL))
     }
 
     static let defaultFeed = "https://github.com/gillesgoetsch/omacvm/releases/latest/download/OmacVM-appcast.json"
 
     private init() {
         home = Self.homeFolder
+        work = UpdateFolders.work(for: bundle, home: home)
         enabled = SharedSettings.standard.updateChecks
     }
 
@@ -102,26 +110,70 @@ final class Updater: ObservableObject {
     /// Said once (window and log), not as a failed swap every week; again
     /// only if the problem changes or comes back after it was fixed.
     private func tellWriteProblemOnce() {
-        let key = "updateWriteProblemSaid"
-        guard let why = writeProblem else { UserDefaults.standard.removeObject(forKey: key); return }
-        guard enabled, UserDefaults.standard.string(forKey: key) != why else { return }
-        UserDefaults.standard.set(why, forKey: key)
+        guard let why = writeProblem else { writeProblemSaid = nil; return }
+        guard enabled, writeProblemSaid != why else { return }
+        writeProblemSaid = why
         notice = why
         log(why)
     }
 
-    private var lastCheck: Date? {
-        get { UserDefaults.standard.object(forKey: "updateLastCheck") as? Date }
-        set { UserDefaults.standard.set(newValue, forKey: "updateLastCheck") }
+    // MARK: - state, one small file each in this copy's folder
+
+    private func state(_ name: String) -> String? {
+        let v = (try? String(contentsOf: home.appendingPathComponent(name), encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return v?.isEmpty == false ? v : nil
     }
 
+    private func setState(_ name: String, _ value: String?) {
+        let f = home.appendingPathComponent(name)
+        guard let value else { try? FileManager.default.removeItem(at: f); return }
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try? Data((value + "\n").utf8).write(to: f, options: .atomic)
+    }
+
+    /// last-check: when the feed last answered (ISO 8601).
+    private var lastCheck: Date? {
+        get { state("last-check").flatMap { ISO8601DateFormatter().date(from: $0) } }
+        set { setState("last-check", newValue.map { ISO8601DateFormatter().string(from: $0) }) }
+    }
+
+    /// skip: the version skipped by hand, or that did not start here.
     private var skipped: String? {
-        get { UserDefaults.standard.string(forKey: "updateSkip") }
-        set { UserDefaults.standard.set(newValue, forKey: "updateSkip") }
+        get { state("skip") }
+        set { setState("skip", newValue) }
+    }
+
+    private var writeProblemSaid: String? {
+        get { state("write-problem-said") }
+        set { setState("write-problem-said", newValue) }
+    }
+
+    /// app: where this copy is. Folders of copies that are gone (moved or
+    /// deleted) for 30 days go, with what they kept.
+    private func noteCopy() {
+        setState("app", Running.realPath(bundle))
+        let fm = FileManager.default
+        let root = home.deletingLastPathComponent()
+        let month = Date().addingTimeInterval(-30 * 24 * 3600)
+        for dir in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] where dir.lastPathComponent != home.lastPathComponent {
+            let f = dir.appendingPathComponent("app")
+            guard let path = (try? String(contentsOf: f, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  path.hasPrefix("/"),
+                  let seen = (try? fm.attributesOfItem(atPath: f.path))?[.modificationDate] as? Date, seen < month else { continue }
+            let app = URL(fileURLWithPath: path)
+            let elsewhere = app.deletingLastPathComponent().appendingPathComponent(".omacvm-updates/\(dir.lastPathComponent)")
+            // Still there, or in the middle of a swap (moved aside for a moment).
+            guard BundleInfo.read(app)?.identifier != bundleID,
+                  ![dir, elsewhere].contains(where: { fm.fileExists(atPath: $0.appendingPathComponent("incoming").path) }) else { continue }
+            try? fm.removeItem(at: elsewhere)
+            try? fm.removeItem(at: dir)
+            log("removed the update folder of \(path) (gone for 30 days)")
+        }
     }
 
     var previousApp: URL? {
-        let p = home.appendingPathComponent("previous/\(bundle.lastPathComponent)")
+        let p = work.appendingPathComponent("previous/\(bundle.lastPathComponent)")
         return BundleInfo.read(p) == nil ? nil : p
     }
 
@@ -143,6 +195,7 @@ final class Updater: ObservableObject {
     /// At launch, after the one-launcher-at-a-time check.
     func start(pending: Pending) {
         trimLog()
+        noteCopy()
         readSwapResult()
         if publicKey != nil, notice == nil { tellWriteProblemOnce() }
         Task {
@@ -339,14 +392,14 @@ final class Updater: ObservableObject {
     /// Checked when this launcher's VM ends (any exit status), every 30 s
     /// while the app is open (a VM started by the CLI, or by a launcher that
     /// crashed, has no runner here) and at the next launch (the request is
-    /// kept in the defaults: updateInstallPending).
+    /// kept in the file install-pending).
     @Published private(set) var installWhenIdle = false
     private var idleTimer: Timer?
     private var swapping = false
 
     private var pendingInstall: String? {
-        get { UserDefaults.standard.string(forKey: "updateInstallPending") }
-        set { UserDefaults.standard.set(newValue, forKey: "updateInstallPending") }
+        get { state("install-pending") }
+        set { setState("install-pending", newValue) }
     }
 
     private func waitUntilIdle(_ version: String) {
@@ -388,42 +441,60 @@ final class Updater: ObservableObject {
     }
 
     /// Installs the staged update, or once the VM has shut down when one
-    /// runs. quit false: the caller quits by itself.
-    func install(quit: Bool = true) {
+    /// runs. quit false: the caller quits by itself. quiet: the user just
+    /// quit or shut the VM down, so the new version only checks that it
+    /// starts and opens no window (the next launch says it updated).
+    func install(quit: Bool = true, quiet: Bool = false) {
         guard !swapping else { return }
         guard let s = staged else { stopWaiting(); return }
         if let why = busyNow {
             waitUntilIdle(s.version)
-            notice = "\(why): \(Product.name) \(s.version) is installed once it has stopped."
+            notice = Self.waitingNotice(why, version: s.version)
             log("install \(s.version) deferred: \(why)")
             return
         }
         stopWaiting()
         if let why = unavailableReason { notice = why; return }
-        guard let v = Version(s.version), (try? Updater.verifyApp(s.app, id: bundleID, version: v)) != nil else {
-            notice = "The downloaded update no longer checks out: it was removed. The next check downloads it again."
-            try? FileManager.default.removeItem(at: stagedRoot)
-            staged = nil
-            return
-        }
-        // Into the name of this copy (users pick the app's name at install):
-        // a renamed copy is signed again ad hoc, as the installer does.
-        let incoming = home.appendingPathComponent("incoming/\(bundle.lastPathComponent)")
+        guard let v = Version(s.version) else { return }
+        // A copy on the app's volume (a clone on APFS; a real copy when the
+        // app lies on another disk), checked there: what gets renamed into
+        // place is what was verified. The staged one stays for another try.
+        let incoming = work.appendingPathComponent("incoming/\(bundle.lastPathComponent)")
         let fm = FileManager.default
         do {
             try? fm.removeItem(at: incoming.deletingLastPathComponent())
             try fm.createDirectory(at: incoming.deletingLastPathComponent(), withIntermediateDirectories: true)
-            // A copy (a clone on APFS): the staged one stays for another try.
             try fm.copyItem(at: s.app, to: incoming)
-            if let mine = BundleInfo.read(bundle)?.name, BundleInfo.read(incoming)?.name != mine {
-                try rename(incoming, to: mine)
-            }
         } catch {
+            try? fm.removeItem(at: incoming.deletingLastPathComponent())
             notice = "Could not prepare the update: \(error.localizedDescription)"
             log("install: \(error.localizedDescription)")
             return
         }
-        swap(mode: "install", new: incoming, quit: quit)
+        do {
+            try Updater.verifyApp(incoming, id: bundleID, version: v)
+        } catch {
+            try? fm.removeItem(at: incoming.deletingLastPathComponent())
+            try? fm.removeItem(at: stagedRoot)
+            staged = nil
+            notice = "The downloaded update no longer checks out: it was removed. The next check downloads it again."
+            log("install: the copy at \(incoming.path) does not check out (\(error.localizedDescription))")
+            return
+        }
+        log("install \(s.version): copied to \(incoming.path) and checked")
+        // Into the name of this copy (users pick the app's name at install):
+        // a renamed copy is signed again ad hoc, as the installer does.
+        do {
+            if let mine = BundleInfo.read(bundle)?.name, BundleInfo.read(incoming)?.name != mine {
+                try rename(incoming, to: mine)
+            }
+        } catch {
+            try? fm.removeItem(at: incoming.deletingLastPathComponent())
+            notice = "Could not prepare the update: \(error.localizedDescription)"
+            log("install: \(error.localizedDescription)")
+            return
+        }
+        swap(mode: "install", new: incoming, quit: quit, quiet: quiet)
     }
 
     /// --update-now (scripts, tests): check as if asked by hand and install
@@ -458,12 +529,12 @@ final class Updater: ObservableObject {
     func goBack() {
         guard previousVersion != nil else { return }
         if let why = busyNow ?? unavailableReason { notice = why; return }
-        swap(mode: "rollback", new: nil, quit: true)
+        swap(mode: "rollback", new: nil, quit: true, quiet: false)
     }
 
     /// Starts update-swap.sh from a copy outside the bundle (bash reads a
     /// script as it runs: the one in the bundle is about to move) and quits.
-    private func swap(mode: String, new: URL?, quit: Bool) {
+    private func swap(mode: String, new: URL?, quit: Bool, quiet: Bool) {
         let script = home.appendingPathComponent("update-swap.sh")
         let token = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         do {
@@ -472,7 +543,8 @@ final class Updater: ObservableObject {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/bash")
             p.arguments = [script.path, mode, bundle.path, new?.path ?? "-", home.path,
-                           String(ProcessInfo.processInfo.processIdentifier), token]
+                           String(ProcessInfo.processInfo.processIdentifier), token, "--work", work.path]
+                + (quiet ? ["--quiet"] : [])
             let log = try FileHandle(forWritingTo: logFile)
             log.seekToEndOfFile()
             p.standardOutput = log
@@ -485,7 +557,7 @@ final class Updater: ObservableObject {
             return
         }
         swapping = true
-        log("\(mode): handing over to update-swap.sh, quitting")
+        log("\(mode): handing over to update-swap.sh\(quiet ? " (quiet: no window after)" : ""), quitting")
         if quit { NSApp.terminate(nil) }
     }
 
@@ -513,21 +585,31 @@ final class Updater: ObservableObject {
         try? FileManager.default.removeItem(at: file)
         let f = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ", maxSplits: 2).map(String.init)
         guard f.count >= 2 else { return }
+        if f[0] == "rolled-back" || f[0] == "went-back", Version(f[1]) != nil { skipped = f[1] }
+        notice = Self.resultNotice(f, current: currentVersion, previous: previousVersion) ?? notice
+    }
+
+    /// What the window says about the swap's result line (split in three).
+    static func resultNotice(_ f: [String], current: String, previous: String?) -> String? {
+        guard f.count >= 2 else { return nil }
         switch f[0] {
         case "installed":
-            let back = previousVersion.map { " \($0) is kept: \(Product.name) › Go Back to \($0) if something is wrong." } ?? ""
-            notice = "Updated to \(currentVersion).\(back)"
+            let back = previous.map { " If something is wrong: \(Product.name) › Go Back to \(Product.name) \($0)…" } ?? ""
+            return "Updated to \(current).\(back)"
         case "rolled-back":
-            if Version(f[1]) != nil { skipped = f[1] }
-            notice = "\(Product.name) \(f[1]) did not start (\(f.count > 2 ? f[2] : "no answer")), so this is \(currentVersion) again. \(f[1]) is skipped; a later version will be offered."
+            return "\(f[1]) did not start: \(f.count > 2 ? f[2] : "no answer"). This is \(current) again; \(f[1]) is skipped until a later version comes out."
         case "went-back":
-            if Version(f[1]) != nil { skipped = f[1] }
-            notice = "Back to \(currentVersion). \(f[1]) is skipped; a later version will be offered."
+            return "Back to \(current). \(f[1]) is skipped until a later version comes out."
         case "aborted":
-            notice = "The update did not run: \(f.dropFirst().joined(separator: " "))"
+            return "The update did not run: \(f.dropFirst().joined(separator: " "))."
         default:
-            break
+            return nil
         }
+    }
+
+    /// The notice while an update waits for the VM.
+    static func waitingNotice(_ why: String, version: String) -> String {
+        "\(why): \(Product.name) \(version) goes in once it has shut down."
     }
 
     // MARK: - helpers

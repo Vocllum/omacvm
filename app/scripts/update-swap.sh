@@ -1,22 +1,36 @@
 #!/bin/bash
 # OmacVM.app's self-update, the part that runs while the app is closed
 # (docs/adr/0033). The app starts it from a copy outside its bundle:
-#   update-swap.sh install  APP NEW HOME PID TOKEN   NEW in place of APP; APP kept as the previous version
-#   update-swap.sh rollback APP -   HOME PID TOKEN   the previous version back in place of APP
+#   update-swap.sh install  APP NEW HOME PID TOKEN [--work DIR] [--quiet]   NEW in place of APP; APP kept as the previous version
+#   update-swap.sh rollback APP -   HOME PID TOKEN [--work DIR]             the previous version back in place of APP
+# HOME is this copy's update folder (result, launch markers). DIR (default
+# HOME) holds previous/ and incoming/ and must lie on APP's volume: every
+# move here is a rename, never a copy across disks. With --quiet the new
+# app only checks that it starts and opens no window, and nothing is
+# opened after a failure either (the user had quit).
 # It waits for the app (PID) to quit and never swaps while a process runs
 # from APP (a VM's QEMU). Then it starts the swapped-in app with
 # --update-check TOKEN; that app writes HOME/launch-TOKEN ("ok" once its
 # QEMU starts). No "ok" within 90 s: the app that was there before goes
-# back. HOME/result tells the app that runs at the end what happened.
+# back. HOME/result tells the app that runs next what happened.
 set -uo pipefail
 MODE=${1:-} APP=${2:-} NEW=${3:-} HOME_DIR=${4:-} OLD_PID=${5:-} TOKEN=${6:-}
-[[ $MODE == install || $MODE == rollback ]] && [[ $APP == /*.app && -d $APP && -d $HOME_DIR ]] &&
+shift 6 2>/dev/null || set --
+WORK_DIR=$HOME_DIR QUIET=0
+while (( $# )); do
+  case $1 in
+    --work) WORK_DIR=${2:-}; shift 2 2>/dev/null || shift ;;
+    --quiet) QUIET=1; shift ;;
+    *) MODE=bad; break ;;
+  esac
+done
+[[ $MODE == install || $MODE == rollback ]] && [[ $APP == /*.app && -d $APP && -d $HOME_DIR && $WORK_DIR == /* ]] &&
   [[ $OLD_PID =~ ^[0-9]+$ && $TOKEN =~ ^[0-9a-f]{32}$ ]] ||
-  { echo "usage: update-swap.sh install|rollback APP NEW|- HOME PID TOKEN" >&2; exit 2; }
+  { echo "usage: update-swap.sh install|rollback APP NEW|- HOME PID TOKEN [--work DIR] [--quiet]" >&2; exit 2; }
 BASE=$(basename "$APP")
-PREV=$HOME_DIR/previous/$BASE
-INCOMING=$HOME_DIR/incoming/$BASE
-FAILED=$HOME_DIR/failed
+PREV=$WORK_DIR/previous/$BASE
+INCOMING=$WORK_DIR/incoming/$BASE
+FAILED=$WORK_DIR/failed
 MARKER=$HOME_DIR/launch-$TOKEN
 # 90 s: a first launch can be slow (XProtect scans the new bundle, an 8 GB
 # Mac under memory pressure); a false rollback skips a good version.
@@ -38,15 +52,23 @@ OPEN_ENV=()
 for v in "${HOOKS[@]}"; do
   [[ -n ${!v:-} ]] && OPEN_ENV+=(--env "$v=${!v}")
 done
-launch() { open -n ${OPEN_ENV[@]+"${OPEN_ENV[@]}"} "$APP" --args "$@"; }
+# Quiet: in the background (-g), not brought to the front.
+OPEN=(open -n)
+(( QUIET )) && OPEN+=(-g)
+launch() { "${OPEN[@]}" ${OPEN_ENV[@]+"${OPEN_ENV[@]}"} "$APP" --args "$@"; }
+# After a failure: the app that is there, unless the user had quit.
+reopen() { (( QUIET )) || launch; }
 
 # Nothing swapped: say why and open the app that is there.
 abort() {
-  [[ $MODE == rollback && -d $INCOMING && ! -e $PREV ]] && mkdir -p "$HOME_DIR/previous" && mv "$INCOMING" "$PREV"
+  [[ $MODE == rollback && -d $INCOMING && ! -e $PREV ]] && mkdir -p "$WORK_DIR/previous" && mv "$INCOMING" "$PREV"
   result "aborted $*"
-  launch
+  reopen
   exit 1
 }
+
+# The volume a path lies on.
+volume() { stat -f %d "$1" 2>/dev/null; }
 
 log "$MODE $APP (now $(version "$APP"))"
 for ((i = 0; i < 600; i++)); do kill -0 "$OLD_PID" 2>/dev/null || break; sleep 0.1; done
@@ -55,22 +77,27 @@ if kill -0 "$OLD_PID" 2>/dev/null; then
   exit 1
 fi
 [[ -z $(running_from "$APP") ]] || abort "a VM runs from $BASE: the update waits until it is shut down"
+# Renames only: the work folder (and the new app in it) on APP's volume.
+mkdir -p "$WORK_DIR" || abort "could not make $WORK_DIR"
+[[ -n $(volume "$WORK_DIR") && $(volume "$WORK_DIR") == "$(volume "$(dirname "$APP")")" ]] ||
+  abort "$WORK_DIR is on another disk than $BASE: nothing moved"
 
 if [[ $MODE == rollback ]]; then
   [[ -d $PREV ]] || abort "there is no previous version"
-  rm -rf "$HOME_DIR/incoming"; mkdir -p "$HOME_DIR/incoming"
+  rm -rf "$WORK_DIR/incoming"; mkdir -p "$WORK_DIR/incoming"
   mv "$PREV" "$INCOMING" || abort "could not take out the previous version"
   NEW=$INCOMING
 fi
 [[ -d $NEW ]] || abort "the new app is missing"
+[[ $(volume "$NEW") == "$(volume "$(dirname "$APP")")" ]] || abort "the new app is on another disk than $BASE: nothing moved"
 OLD_V=$(version "$APP") NEW_V=$(version "$NEW")
 
 # Old aside, new in: renames on one volume, each checked. The version kept
 # from before stays in previous.old until the new one has started.
-rm -rf "$HOME_DIR/previous.old"
-[[ ! -e $HOME_DIR/previous ]] || mv "$HOME_DIR/previous" "$HOME_DIR/previous.old" || abort "could not move the kept version aside"
-keep_old() { rm -rf "$HOME_DIR/previous"; [[ ! -e $HOME_DIR/previous.old ]] || mv "$HOME_DIR/previous.old" "$HOME_DIR/previous"; }
-mkdir -p "$HOME_DIR/previous"
+rm -rf "$WORK_DIR/previous.old"
+[[ ! -e $WORK_DIR/previous ]] || mv "$WORK_DIR/previous" "$WORK_DIR/previous.old" || abort "could not move the kept version aside"
+keep_old() { rm -rf "$WORK_DIR/previous"; [[ ! -e $WORK_DIR/previous.old ]] || mv "$WORK_DIR/previous.old" "$WORK_DIR/previous"; }
+mkdir -p "$WORK_DIR/previous"
 if ! mv "$APP" "$PREV"; then keep_old; abort "could not move $BASE aside"; fi
 # The check above and the moves are not one step: something started from
 # APP just before the move now runs from PREV, and one started from the
@@ -94,7 +121,9 @@ log "swapped $OLD_V -> $NEW_V, starting it"
 if [[ $MODE == install ]]; then result "installed $OLD_V $NEW_V"; else result "went-back $OLD_V"; fi
 rm -f "$MARKER"
 why="no answer within ${WAIT} s"
-if launch --update-check "$TOKEN"; then
+CHECK=(--update-check "$TOKEN")
+(( QUIET )) && CHECK+=(--update-quiet)
+if launch "${CHECK[@]}"; then
   for ((i = 0; i < WAIT * 4; i++)); do
     [[ -s $MARKER ]] && break
     sleep 0.25
@@ -103,7 +132,7 @@ if launch --update-check "$TOKEN"; then
   rm -f "$MARKER"
   if [[ $answer == ok ]]; then
     log "$NEW_V started"
-    rm -rf "$HOME_DIR/incoming" "$FAILED" "$HOME_DIR/previous.old"
+    rm -rf "$WORK_DIR/incoming" "$FAILED" "$WORK_DIR/previous.old"
     exit 0
   fi
   [[ -n $answer ]] && why=${answer#fail: }
@@ -128,7 +157,7 @@ if ! mv "$APP" "$FAILED/$BASE" || ! mv "$PREV" "$APP"; then
 fi
 "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 keep_old
-rm -rf "$FAILED" "$HOME_DIR/incoming"
+rm -rf "$FAILED" "$WORK_DIR/incoming"
 result "rolled-back $NEW_V $why"
-launch
+reopen
 exit 1

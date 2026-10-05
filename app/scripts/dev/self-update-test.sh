@@ -10,8 +10,10 @@
 # library, 2.7.3 whose launcher exits at once. Tests: weekly schedule,
 # silence switch, update held back while a VM runs and applied after (shut
 # down, crash, a QEMU without its launcher, next launch), rollback of both
-# broken builds, the one step back, a renamed copy, an app started during
-# a swap. Exit 0 when all pass.
+# broken builds, the one step back, a renamed copy (its own update folder),
+# an app started during a swap, no window after an update at shutdown, an
+# app on another disk (a disk image: copied next to it, renamed in place).
+# Exit 0 when all pass.
 # check() evals its condition: variables used there look unused.
 # shellcheck disable=SC2034
 set -uo pipefail
@@ -37,7 +39,9 @@ bad() { echo "FAIL $*"; fail=$((fail + 1)); }
 check() { if eval "$2"; then ok "$1"; else bad "$1"; fi; }
 log() { printf '\n== %s\n' "$*"; }
 
-UPD="$HOME/Library/Application Support/OmacVM/Updates/$ID"
+UPD_ROOT="$HOME/Library/Application Support/OmacVM/Updates/$ID"
+# One update folder per copy: "<name>-<8 hex of SHA-256 of its real path>".
+ukey() { local p; p=$(cd "$1" && pwd -P); printf '%s-%s' "$(basename "$p" .app)" "$(printf '%s' "$p" | shasum -a 256 | cut -c1-8)"; }
 INST=$WORK/install
 APP=$INST/$NAME.app
 FEED=$WORK/feed
@@ -61,16 +65,19 @@ stop_all() {
   pkill -f "$WORK/.*/Contents/" 2>/dev/null
   sleep 1
 }
+MNT=$WORK/mnt
 cleanup() {
   stop_all
   [[ -n ${SERVER:-} ]] && kill "$SERVER" 2>/dev/null
+  mount | grep -qF " on $MNT " && hdiutil detach -force "$MNT" >/dev/null 2>&1
 }
 trap cleanup EXIT
 stop_all   # leftovers of an earlier run
 
 # ---- versions ----
 log "test versions"
-rm -rf "$WORK/v" "$FEED" "$SETTINGS" "$INST" "$WORK/VMs" "$UPD"
+mount | grep -qF " on $MNT " && hdiutil detach -force "$MNT" >/dev/null 2>&1
+rm -rf "$WORK/v" "$FEED" "$SETTINGS" "$INST" "$WORK/VMs" "$UPD_ROOT" "$WORK/vol.sparseimage" "$MNT"
 mkdir -p "$WORK/v" "$FEED" "$SETTINGS" "$INST" "$WORK/VMs"
 resign() { codesign --force --sign "$SIGN_ID" --options runtime --timestamp=none --identifier "$ID" \
   --entitlements "$HERE/app/OmacVM.entitlements" "$1" 2>/dev/null; }
@@ -92,6 +99,7 @@ for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do
   check "$v is signed with the Developer ID" 'codesign --verify --deep --strict -R="$DEVID" "$WORK/v/$v/$NAME.app" 2>/dev/null'
 done
 ditto "$WORK/v/2.7.0/$NAME.app" "$APP"
+UPD="$UPD_ROOT/$(ukey "$APP")"
 
 # ---- feed ----
 swift "$SIGN" keygen "$WORK/test-key" > "$WORK/test-key.pub" || die keygen
@@ -115,7 +123,7 @@ defaults delete "$ID" >/dev/null 2>&1
 defaults write "$ID" vmsRoot "$WORK/VMs"
 defaults write "$ID" installedPath "$APP"
 defaults write "$ID" startFullScreen -bool false
-days_ago() { defaults write "$ID" updateLastCheck -date "$(date -u -v-"$1"d '+%Y-%m-%d %H:%M:%S +0000')"; }
+days_ago() { mkdir -p "$UPD"; date -u -v-"$1"d '+%Y-%m-%dT%H:%M:%SZ' > "$UPD/last-check"; }
 ENV=(--env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env "OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub")"
      --env "OMACVM_SETTINGS_DIR=$SETTINGS" --env OMACVM_COCOA_HIDDEN=1 --env OMACVM_UPDATE_WAIT=20)
 start_app() { open -n "${ENV[@]}" "$1" --args "${@:2}"; }
@@ -195,8 +203,12 @@ qmp_quit
 check "after the VM stopped: 2.7.1 in place" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.1 ]]"'
 check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.0 2.7.1\" \"\$UPD/update.log\""'
 check "2.7.0 kept for one step back" '[[ $(version "$UPD/previous/$NAME.app") == 2.7.0 ]]'
-check "2.7.1 runs" 'wait_for 10 "[[ -n \$(launcher_pid \"\$APP\") ]]"'
-check "2.7.1 read the result (its window says it updated)" 'wait_for 10 "[[ ! -e \"\$UPD/result\" ]]"'
+# Shut down from the guest: the app was quitting, so 2.7.1 only checks
+# that it starts and opens no window.
+check "2.7.1 started quietly (no window) and quit" 'wait_for 30 "grep -q \"started after the update (quiet\" \"\$UPD/update.log\"" && wait_swaps && wait_for 10 "[[ -z \$(launcher_pid \"\$APP\") ]]"'
+check "the result waits for the next launch" '[[ -e "$UPD/result" ]]'
+start_app "$APP"
+check "next launch: 2.7.1 read the result (its window says it updated)" 'wait_for 15 "[[ ! -e \"\$UPD/result\" ]]"'
 check "installed app keeps the Developer ID" 'codesign --verify --deep --strict -R="$DEVID" "$APP" 2>/dev/null'
 quit_app "$APP"; logtail
 
@@ -207,7 +219,7 @@ start_app "$APP" --update-now
 check "rolled back within 60 s" 'wait_for 60 "grep -q \"result: rolled-back 2.7.2\" \"\$UPD/update.log\""'
 check "2.7.1 in place again" '[[ $(version "$APP") == 2.7.1 ]]'
 check "2.7.1 runs again" 'wait_for 10 "[[ -n \$(launcher_pid \"\$APP\") ]]"'
-check "2.7.2 skipped" 'wait_for 10 "[[ \$(defaults read $ID updateSkip 2>/dev/null) == 2.7.2 ]]"'
+check "2.7.2 skipped" 'wait_for 10 "[[ \$(cat \"\$UPD/skip\" 2>/dev/null) == 2.7.2 ]]"'
 check "2.7.0 still kept" '[[ $(version "$UPD/previous/$NAME.app") == 2.7.0 ]]'
 quit_app "$APP"; logtail
 
@@ -236,13 +248,14 @@ OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY=$(cat "$W
   >> "$UPD/update.log" 2>&1 &
 check "2.7.0 in place" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.0 ]]"'
 check "swap result: went back" 'wait_for 30 "grep -q \"result: went-back 2.7.1\" \"\$UPD/update.log\""'
-check "2.7.1 skipped" 'wait_for 10 "[[ \$(defaults read $ID updateSkip 2>/dev/null) == 2.7.1 ]]"'
+check "2.7.1 skipped" 'wait_for 10 "[[ \$(cat \"\$UPD/skip\" 2>/dev/null) == 2.7.1 ]]"'
 quit_app "$APP"; logtail
 
 # ---- 7. a copy installed under its own name ----
-log "7. renamed copy 'Omarchy SU' (ad hoc, as the installer does): keeps its name"
+log "7. renamed copy 'Omarchy SU' (ad hoc, as the installer does): keeps its name and its own update folder"
 publish 2.7.1
-defaults delete "$ID" updateSkip 2>/dev/null
+rm -f "$UPD/skip"
+PREV_A=$(version "$UPD/previous/$NAME.app")
 REN=$INST/Omarchy\ SU.app
 ditto "$WORK/v/2.7.0/$NAME.app" "$REN"
 /usr/libexec/PlistBuddy -c "Set :CFBundleName Omarchy SU" -c "Set :CFBundleDisplayName Omarchy SU" "$REN/Contents/Info.plist"
@@ -253,6 +266,10 @@ check "it keeps its name" '[[ $(/usr/libexec/PlistBuddy -c "Print :CFBundleName"
 check "its signature is valid" 'codesign --verify --deep --strict "$REN" 2>/dev/null'
 check "its QEMU keeps the Developer ID" 'codesign --verify -R="$DEVID" "$REN/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null'
 check "it started (no rollback)" 'wait_swaps && [[ $(version "$REN") == 2.7.1 ]] && [[ -n $(launcher_pid "$REN") ]]'
+UPD_REN="$UPD_ROOT/$(ukey "$REN")"
+check "its 2.7.0 kept in its own folder" '[[ $UPD_REN != "$UPD" && $(version "$UPD_REN/previous/Omarchy SU.app") == 2.7.0 ]]'
+check "the other copy's kept version untouched ($PREV_A)" '[[ -n $PREV_A && $(version "$UPD/previous/$NAME.app") == "$PREV_A" ]]'
+check "the other copy's log has nothing of it" '! grep -q "Omarchy SU" "$UPD/update.log"'
 quit_app "$REN"; logtail
 
 # ---- 8. a waiting update after a crash of the VM ----
@@ -278,7 +295,7 @@ check "its launcher gone, QEMU still runs" '[[ -z $(launcher_pid "$APP") ]] && q
 start_app "$APP" --update-now
 check "update asked for: held back (QEMU from the bundle)" 'wait_for 30 "grep -q \"install 2.7.5 deferred\" \"\$UPD/update.log\""'
 check "the hidden --update-now launcher quits" 'wait_for 20 "[[ -z \$(launcher_pid \"\$APP\") ]]"'
-check "the request is kept" '[[ $(defaults read $ID updateInstallPending 2>/dev/null) == 2.7.5 ]]'
+check "the request is kept" '[[ $(cat "$UPD/install-pending" 2>/dev/null) == 2.7.5 ]]'
 check "still 2.7.4" '[[ $(version "$APP") == 2.7.4 ]]'
 start_app "$APP"
 check "next launch: the kept request waits (QEMU runs)" 'wait_for 30 "[[ \$(grep -c \"install 2.7.5 deferred\" \"\$UPD/update.log\") -ge 2 ]]"'
@@ -286,7 +303,7 @@ check "still 2.7.4 while QEMU runs" '[[ $(version "$APP") == 2.7.4 ]]'
 qmp_quit
 check "QEMU stopped: 2.7.5 in place (the app checks every 30 s)" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.5 ]]"'
 check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.4 2.7.5\" \"\$UPD/update.log\""'
-check "the request is cleared" 'wait_swaps && ! defaults read $ID updateInstallPending >/dev/null 2>&1'
+check "the request is cleared" 'wait_swaps && [[ ! -e "$UPD/install-pending" ]]'
 quit_app "$APP"; logtail
 
 # ---- 10. something starts from the app during the swap ----
@@ -309,6 +326,35 @@ check "the kept version still in previous/" '[[ -x "$UPD/previous/$NAME.app/Cont
 check "the new app not moved" '[[ $(version "$UPD/incoming/$NAME.app") == 2.7.1 ]]'
 kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
 quit_app "$APP"; logtail
+
+# ---- 11. an app on another disk ----
+log "11. an app on another disk (a disk image): copied next to it, checked, renamed; nothing crosses disks"
+hdiutil create -quiet -size 1g -type SPARSE -fs JHFS+ -volname "SU-test-vol" "$WORK/vol" || die "disk image"
+mkdir -p "$MNT"
+hdiutil attach -quiet -nobrowse -noautoopen -mountpoint "$MNT" "$WORK/vol.sparseimage" || die "attach the disk image"
+EXT=$MNT/Apps/$NAME.app
+mkdir -p "$MNT/Apps"; ditto "$WORK/v/2.7.0/$NAME.app" "$EXT"
+UPD_EXT="$UPD_ROOT/$(ukey "$EXT")"
+EXT_WORK="$MNT/Apps/.omacvm-updates/$(ukey "$EXT")"
+check "the disk image is another volume" '[[ $(stat -f %d "$MNT") != $(stat -f %d "$HOME/Library") ]]'
+publish 2.7.1
+start_app "$EXT" --update-now
+check "the app on the other disk updated to 2.7.1" 'wait_for 90 "[[ \$(version \"\$EXT\") == 2.7.1 ]]"'
+check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.0 2.7.1\" \"\$UPD_EXT/update.log\""'
+check "the copy was made and checked on that disk" 'grep -qF "copied to $EXT_WORK/incoming/$NAME.app and checked" "$UPD_EXT/update.log"'
+check "2.7.0 kept on its own disk" '[[ $(version "$EXT_WORK/previous/$NAME.app") == 2.7.0 ]]'
+check "no app kept in the home folder" '[[ ! -e $UPD_EXT/previous && ! -e $UPD_EXT/incoming ]]'
+check "it started (no rollback), Developer ID kept" 'wait_swaps && [[ -n $(launcher_pid "$EXT") ]] && codesign --verify --deep --strict -R="$DEVID" "$EXT" 2>/dev/null'
+quit_app "$EXT"; logtail
+# The swap itself refuses a work folder on another disk than the app.
+mkdir -p "$UPD_EXT/incoming"; ditto "$WORK/v/2.7.4/$NAME.app" "$UPD_EXT/incoming/$NAME.app"
+OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS \
+  bash "$EXT/Contents/Resources/scripts/update-swap.sh" install "$EXT" "$UPD_EXT/incoming/$NAME.app" "$UPD_EXT" 99999 "$(openssl rand -hex 16)" \
+  >> "$UPD_EXT/update.log" 2>&1
+check "work folder on another disk: refused" 'grep -q "result: aborted .* is on another disk than $NAME.app: nothing moved" "$UPD_EXT/update.log"'
+check "2.7.1 still in place, nothing moved" '[[ $(version "$EXT") == 2.7.1 && $(version "$UPD_EXT/incoming/$NAME.app") == 2.7.4 && $(version "$EXT_WORK/previous/$NAME.app") == 2.7.0 ]]'
+quit_app "$EXT"
+hdiutil detach -quiet "$MNT" || hdiutil detach -force -quiet "$MNT"
 
 log "the installed OmacVM and the shared settings untouched"
 check "fingerprint unchanged" '[[ $(fingerprint) == "$FP_BEFORE" ]]'
