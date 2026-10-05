@@ -83,6 +83,7 @@ virgl_native_patch="$native_dir/patches/virgl-native-opengl.patch"
 virgl_int_tex_patch="$native_dir/patches/virgl-texture-integer-samplers.patch"
 virgl_videotoolbox_patch="$native_dir/patches/virgl-videotoolbox-decode.patch"
 virgl_row_size_patch="$native_dir/patches/virgl-transfer-row-size.patch"
+virgl_vt_encode_patch="$native_dir/patches/virgl-videotoolbox-encode.patch"
 hidden_window_patch="$native_dir/patches/qemu-cocoa-hidden-for-tests.patch"
 virgl_skip_draws_patch="$native_dir/patches/virgl-shader-failure-skip-draws.patch"
 virgl_loss_report_patch="$native_dir/patches/virgl-context-loss-report.patch"
@@ -137,6 +138,7 @@ virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
 virgl_videotoolbox_patch_sha256=3ebb7b1b2046dce6d205081206f9d5c3ea049c6883309a2272ba3a1e4eea33bc
 virgl_row_size_patch_sha256=c1994d82562625ba8211d1443423b23763b8932fbfe610a416ae6f556010da9f
+virgl_vt_encode_patch_sha256=7c92879d7b06a4e06af1c47054d38d2f102bd94f8c264d75ba16eece59625fc7
 hidden_window_patch_sha256=21e1d8bf7c26c748266f9c4d6a3c1784bbc62f91d4cc189c2a04b9deb9b508b3
 virgl_skip_draws_patch_sha256=7611495f5afd94b016c9cd7126a457bfdcb13f60df46b5a754cb3d584a4002f1
 virgl_loss_report_patch_sha256=cfef9d4417fabb60cc559f970598fa7f7da069ff747ff652baddb922ca29905a
@@ -741,6 +743,9 @@ patch -d "$virgl_source" -p1 -f -i "$virgl_videotoolbox_patch"
 # No texture transfer moves more bytes per row in GL than the guest's buffers hold.
 verify_file_sha "Transfer row size patch" "$virgl_row_size_patch" "$virgl_row_size_patch_sha256"
 patch -d "$virgl_source" -p1 -f -i "$virgl_row_size_patch"
+# Video encode (H.264, HEVC) on the Mac's media engine: guest VA-API -> VTCompressionSession.
+verify_file_sha "VideoToolbox video encode patch" "$virgl_vt_encode_patch" "$virgl_vt_encode_patch_sha256"
+patch -d "$virgl_source" -p1 -f -i "$virgl_vt_encode_patch"
 # OmacVM: a shader the Mac's GL refuses skips its draws instead of stopping the guest's
 # whole context, and a context that does stop tells the guest (GL context reset).
 verify_file_sha "Refused shader patch" "$virgl_skip_draws_patch" "$virgl_skip_draws_patch_sha256"

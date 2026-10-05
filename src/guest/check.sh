@@ -293,7 +293,14 @@ app)
   if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
     check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
       grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
-  fi ;;
+  fi
+  e=$(as_user env LIBVA_DRIVER_NAME=$drv LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri \
+      vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointEncSlice$/\1/p' | tr '\n' ' ')
+  if [[ -n $e ]]; then
+    ok "video encoding" "the Mac's media engine: $e"
+    check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (omacvm apply)" \
+      python3 /usr/local/share/omacvm/app/guest/browser-video-encode.py "$U" check
+  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
