@@ -123,7 +123,10 @@ commit 82927e9. Changes here:
 - `patches/virgl-venus-memory-budget.patch`: Venus device memory and shm blobs
   count against the same budget (one per VM); past it `vkAllocateMemory`
   fails with `VK_ERROR_OUT_OF_DEVICE_MEMORY` (guest Mesa allocates
-  asynchronously by default: then the app ends at its next use of the memory)
+  asynchronously by default: then the app ends at its next use of the memory).
+  The charge goes with the storage: it lasts until the last holder is gone
+  (the memory, memory imported from it, the guest's blob), so a kept dma-buf
+  fd or mapping still counts. Checked by `Tests/virgl/test-venus-budget-storage.c`
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked
