@@ -7,9 +7,10 @@ in more words.
 
 A faster GPU path for OmacVM.app with frames on the display's refresh (120
 Hz on a MacBook Pro), fewer black WebGL canvases, video encoding on the
-Mac's media engine, ⌃⌥⌘ Esc straight back to macOS, brightness keys for
-external displays, and an opt-in fast network. Numbers against 2.8.0 are
-from the release candidate, with the benchmark lock held.
+Mac's media engine, ⌃⌥⌘ Esc straight back to macOS, media and brightness
+keys for the VM and external displays, signed Mac helpers, and an opt-in
+fast network. Numbers against 2.8.0 are from the release candidate, with
+the benchmark lock held.
 
 ### GPU and display (OmacVM.app)
 
@@ -113,10 +114,6 @@ from the release candidate, with the benchmark lock held.
   Play/pause, next and previous go to the VM's players, not macOS's Now
   Playing. The keys reach the VM through QEMU's control socket; if that is
   busy, the key goes to macOS.
-- Brightness keys on a Mac mini with one Apple-style display (LG UltraFine,
-  Studio Display) set that display with the VM in front, full screen or in a
-  window. A key the Bridge cannot use goes to macOS, and the Bridge's log
-  says once why.
 - OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
   OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
   these copies (nothing is compiled on the Mac), and macOS keeps their
@@ -124,8 +121,6 @@ from the release candidate, with the benchmark lock held.
   once more after the first signed install. A source checkout without the
   app, or of another version, builds them as before. Both helpers log which
   permission is missing, and `omacvm check` shows it.
-- OmacVM.app opens the VM's window on the display you are using (under the
-  pointer, else the one with the active menu bar) and gives it the keyboard.
 - After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
   working until the Mac's helpers were restarted: the new VM's own key tap
   sat ahead of theirs. They now take the front place again whenever an
@@ -134,12 +129,14 @@ from the release candidate, with the benchmark lock held.
   VM in front on an external display, the Mac's brightness keys set that
   display, in macOS's 16 steps (Option: 64), with Omarchy's popup. A display
   macOS dims itself (Studio Display, Pro Display XDR, LG UltraFine) goes
-  through macOS's own control; other monitors over DDC/CI. Omarchy's
+  through macOS's own control, also on a Mac mini where it is the only
+  display; other monitors over DDC/CI. Omarchy's
   brightness keys, `omarchy brightness display` and its monitor panel in the
   VM do the same through OmacVM Bridge. OmacVM.app also in a window;
   Parallels, UTM and VMware Fusion in full screen. The built-in display works
   as before, and so does a display without DDC/CI (`omacvm check` names it
-  and why).
+  and why). A key the Bridge cannot use goes to macOS, and the Bridge's log
+  says once why.
 - OmacVM Bridge: Wi-Fi no longer flips between connected and disconnected
   in Omarchy's bar on a Mac on Ethernet with Wi-Fi also on (Mac mini).
 - Trackpad gestures off now means the VM's Gestures service is off on every
@@ -162,6 +159,8 @@ from the release candidate, with the benchmark lock held.
   before, so a new download replaces it instead of adding a second app, and
   says when Install replaces a copy. Run Without Installing now counts for
   that copy only. Install refuses to replace a copy that is running.
+- OmacVM.app opens the VM's window on the display you are using (under the
+  pointer, else the one with the active menu bar) and gives it the keyboard.
 - Fast network, experimental and off by default:
   `omacvm enable fast-network --vm NAME` puts the VM on macOS's own VM
   network (vmnet, as Parallels and UTM) through a small system service,
