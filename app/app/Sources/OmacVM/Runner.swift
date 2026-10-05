@@ -168,7 +168,9 @@ final class Runner {
         // QEMU records through SDL in its own process, which cannot ask macOS
         // for the microphone (its AudioQueueStart just fails): the app asks,
         // once, and QEMU records under its grant from then on.
-        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+        // Not in a hidden test run (OMACVM_COCOA_HIDDEN): no prompt there.
+        if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined,
+           ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] == nil {
             AVCaptureDevice.requestAccess(for: .audio) { _ in }
         }
         try p.run()
