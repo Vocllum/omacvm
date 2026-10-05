@@ -3,7 +3,7 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 2.9.0 (unreleased)
+## 2.9.0
 
 A faster GPU path for OmacVM.app with frames on the display's refresh (120
 Hz on a MacBook Pro), fewer black WebGL canvases, video encoding on the
