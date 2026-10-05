@@ -321,6 +321,10 @@ func handle(_ fd: Int32, peer: String) {
   let method = String(parts[0]), url = URLComponents(string: String(parts[1]))
   let path = url?.path ?? "", query = url?.queryItems ?? []
 
+  // The relay socket carries the control centre's requests only.
+  if peer == relayPeer, !path.hasPrefix("/omacvm/") {
+    respond(fd, 404, ["error": "only the control centre's requests come here"]); return
+  }
   if method == "GET", path == "/proof" {   // no token: it is how the VM checks this is the Bridge
     guard let n = query.first(where: { $0.name == "nonce" })?.value, n.count == 32,
           n.allSatisfy({ "0123456789abcdef".contains($0) }) else {
@@ -533,5 +537,94 @@ final class Server {
     src.resume()
     source = src; boundInterface = owner; waitingLogged = false
     log("listener: http://\(listenAddr):\(listenPort) on \(owner)")
+  }
+}
+
+// OmacVM.app's relay (its NativeControlBridge.swift) on a channel of its own:
+// a Unix socket only this Mac user can open (mode 0600 in the 0700 support
+// folder, and the peer's user checked on every connection). The app's guests
+// reach the Bridge from 127.0.0.1 like every program on this Mac, so on
+// 127.0.0.1 they could use up the relay's places; here they cannot
+// (ConnectionGate key "relay"). Only /omacvm/... is served on it.
+let relayPeer = "relay"
+
+final class RelaySocket {
+  private let q = DispatchQueue(label: "omacvm-bridge.relay")
+  private var source: DispatchSourceRead?
+  private var bound: (dev: dev_t, ino: ino_t)?
+  private var lastProblem: String?
+  let path: String
+
+  init(path: String) { self.path = path }
+
+  /// Listens, or listens again when the socket file was removed or replaced.
+  func check() { q.async { self.checkLocked() } }
+
+  private func problem(_ s: String) {
+    if s != lastProblem { log("relay socket: \(s)") }
+    lastProblem = s
+  }
+
+  private func checkLocked() {
+    if source != nil {
+      var st = stat()
+      if lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFSOCK, let b = bound, st.st_dev == b.dev, st.st_ino == b.ino { return }
+      log("relay socket: \(path) was removed or replaced: listening again")
+      source?.cancel(); source = nil; bound = nil
+    }
+    guard relaySocketPathOK(path) else {
+      return problem("\(path) is too long for a Unix socket (\(relaySocketPathMax) bytes): OmacVM.app relays on 127.0.0.1")
+    }
+    // The folder: ours and private (connectSecure in the app checks the same).
+    let dir = (path as NSString).deletingLastPathComponent
+    var ds = stat()
+    guard lstat(dir, &ds) == 0, (ds.st_mode & S_IFMT) == S_IFDIR, ds.st_uid == getuid() else {
+      return problem("\(dir) is not a folder of this Mac user")
+    }
+    if ds.st_mode & 0o077 != 0 { chmod(dir, 0o700) }
+    // An old socket (a Bridge that stopped) goes; anything else stays and we give up.
+    var st = stat()
+    if lstat(path, &st) == 0 {
+      guard (st.st_mode & S_IFMT) == S_IFSOCK else { return problem("\(path) exists and is not a socket") }
+      unlink(path)
+    }
+    let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+    guard fd >= 0 else { return problem("no socket: \(String(cString: strerror(errno)))") }
+    var addr = sockaddr_un()
+    addr.sun_len = UInt8(MemoryLayout<sockaddr_un>.size)
+    addr.sun_family = sa_family_t(AF_UNIX)
+    withUnsafeMutableBytes(of: &addr.sun_path) { $0.copyBytes(from: Array(path.utf8)) }
+    let ok = withUnsafePointer(to: &addr) {
+      $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+    } == 0 && chmod(path, 0o600) == 0 && listen(fd, 64) == 0
+    guard ok, lstat(path, &st) == 0 else {
+      let e = String(cString: strerror(errno))
+      close(fd)
+      return problem("cannot listen on \(path): \(e)")
+    }
+    _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+    let src = DispatchSource.makeReadSource(fileDescriptor: fd, queue: q)
+    src.setEventHandler {
+      while true {
+        let c = accept(fd, nil, nil)
+        if c < 0 { break }
+        var uid: uid_t = 0, gid: gid_t = 0
+        guard getpeereid(c, &uid, &gid) == 0, uid == getuid() else {
+          close(c)
+          logRefusal("relay uid", "relay socket: refused a connection from another user (uid \(uid))")
+          continue
+        }
+        guard gate.enter(relayPeer, known: true) else {
+          close(c)
+          logRefusal("busy relay", "busy: turned away a relay connection (too many at once)")
+          continue
+        }
+        DispatchQueue.global(qos: .utility).async { handle(c, peer: relayPeer); gate.leave(relayPeer, known: true) }
+      }
+    }
+    src.setCancelHandler { close(fd) }
+    src.resume()
+    source = src; bound = (st.st_dev, st.st_ino); lastProblem = nil
+    log("relay socket: \(path)")
   }
 }

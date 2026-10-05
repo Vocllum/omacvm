@@ -118,6 +118,13 @@ func negotiateProto(_ header: String?) -> Result<Int, PolicyError> {
     : .failure(PolicyError(409, "proto", "this VM's control centre is too old for the Mac (protocol \(guest)): update the VM"))
 }
 
+/// The relay socket's path (server.swift's RelaySocket): absolute and short
+/// enough for a Unix socket address (sun_path holds 104 bytes with the NUL).
+let relaySocketPathMax = 103
+func relaySocketPathOK(_ p: String) -> Bool {
+  p.hasPrefix("/") && !p.utf8.contains(0) && p.utf8.count <= relaySocketPathMax
+}
+
 /// A VM as `omacvm vms --json` lists it.
 struct VMEntry: Equatable {
   let name: String, type: String, state: String, ip: String, omacvm: String, setup: Bool
@@ -614,8 +621,9 @@ struct LogLimiter {
 // ---- connections being handled ----
 
 /// Requests being handled at once, one thread each. Every VM the Mac knows
-/// (by its address in the VM list), and this Mac (127.x: OmacVM.app's relay),
-/// has `reserved` places nobody else can take; past them it shares `total`
+/// (by its address in the VM list), this Mac (127.x: its programs and
+/// OmacVM.app's guests) and OmacVM.app's relay (its own socket) each have
+/// `reserved` places nobody else can take; past them it shares `total`
 /// with everyone, at most `perKey` in all. Addresses the list does not have
 /// take at most `unknownTotal` of `total` together and `perUnknown` each: a
 /// guest can add any number of addresses. So a guest holding all it can (its

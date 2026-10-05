@@ -10,6 +10,9 @@ import Foundation
 /// guest cannot name another VM (its guests all reach the Mac from
 /// 127.0.0.1, so the Bridge cannot tell them apart by address). The relay key
 /// proves to the Bridge that the app sent it; no VM ever gets that key.
+/// The requests go on the Bridge's relay socket (omacvm-bridge/relay.sock,
+/// only this Mac user can open it), so guests that crowd 127.0.0.1 cannot
+/// take the relay's places; a Bridge older than that gets them on 127.0.0.1.
 ///
 /// The guest is untrusted: lines over 8 KB are dropped, only GET and POST to
 /// /omacvm/... with a JSON object body go on, at most 4 requests at a time.
@@ -114,20 +117,46 @@ final class NativeControlBridge: @unchecked Sendable {
         return t.count >= 32 ? t : nil
     }
 
-    /// The request to the Bridge on 127.0.0.1, with the app's headers only.
+    /// The Bridge's relay socket (OMACVM_BRIDGE_RELAY_SOCKET as for the Bridge itself: tests).
+    static let relaySocketPath = ProcessInfo.processInfo.environment["OMACVM_BRIDGE_RELAY_SOCKET"]
+        ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/omacvm-bridge/relay.sock").path
+    static let timeout: TimeInterval = 75
+    private let fallbackLock = NSLock()
+    private var saidFallback = false
+
+    /// The request to the Bridge, with the app's headers only.
     private func relay(_ r: Request) -> (Int, [String: Any]) {
-        guard let token = Self.secret("token"), let relayKey = Self.secret("relay-key"),
-              let url = URL(string: "http://127.0.0.1:\(Self.bridgePort)\(r.path)") else {
+        guard let token = Self.secret("token"), let relayKey = Self.secret("relay-key") else {
             return (0, ["error": "OmacVM Bridge is not set up on this Mac (or is older): omacvm update on the Mac"])
         }
-        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 75)
+        var headers: [(String, String)] = [
+            ("Authorization", "Bearer " + token),
+            ("X-OmacVM-Relay", relayKey),
+            ("X-OmacVM-App-VM", Data(vmName.utf8).base64EncodedString()),
+            ("X-OmacVM-Proto", String(r.proto)),
+        ]
+        if !r.version.isEmpty { headers.append(("X-OmacVM-Version", r.version)) }
+        if r.body != nil { headers.append(("Content-Type", "application/json")) }
+        // Once connected, the answer comes from there: a request is never sent
+        // twice (a job must not start twice).
+        if let fd = try? NativeBridgeSocket.connectSecure(path: Self.relaySocketPath, label: "Bridge relay") {
+            defer { Darwin.close(fd) }
+            return Self.exchange(fd, Self.httpRequest(method: r.method, path: r.path, headers: headers, body: r.body))
+        }
+        fallbackLock.lock()
+        if !saidFallback {
+            saidFallback = true
+            fputs("[control] no relay socket from OmacVM Bridge (older, or not running): 127.0.0.1\n", stderr)
+        }
+        fallbackLock.unlock()
+        guard let url = URL(string: "http://127.0.0.1:\(Self.bridgePort)\(r.path)") else {
+            return (0, ["error": "OmacVM Bridge does not answer on this Mac"])
+        }
+        var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: Self.timeout)
         req.httpMethod = r.method
-        req.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
-        req.setValue(relayKey, forHTTPHeaderField: "X-OmacVM-Relay")
-        req.setValue(Data(vmName.utf8).base64EncodedString(), forHTTPHeaderField: "X-OmacVM-App-VM")
-        req.setValue(String(r.proto), forHTTPHeaderField: "X-OmacVM-Proto")
-        if !r.version.isEmpty { req.setValue(r.version, forHTTPHeaderField: "X-OmacVM-Version") }
-        if let b = r.body { req.httpBody = b; req.setValue("application/json", forHTTPHeaderField: "Content-Type") }
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        if let b = r.body { req.httpBody = b }
         var result: (Int, [String: Any]) = (0, ["error": "OmacVM Bridge does not answer on this Mac"])
         let done = DispatchSemaphore(value: 0)
         URLSession.shared.dataTask(with: req) { data, response, _ in
@@ -139,5 +168,55 @@ final class NativeControlBridge: @unchecked Sendable {
         }.resume()
         done.wait()
         return result
+    }
+
+    /// One HTTP/1.1 request; the Bridge answers with Content-Length and closes.
+    static func httpRequest(method: String, path: String, headers: [(String, String)], body: Data?) -> Data {
+        var head = "\(method) \(path) HTTP/1.1\r\nHost: omacvm-bridge\r\n"
+        for (k, v) in headers { head += "\(k): \(v)\r\n" }
+        head += "Content-Length: \(body?.count ?? 0)\r\nConnection: close\r\n\r\n"
+        return Data(head.utf8) + (body ?? Data())
+    }
+
+    /// Status and JSON body of the Bridge's answer, or nil (not one).
+    static func parseResponse(_ data: Data) -> (Int, [String: Any])? {
+        guard let end = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
+        let lines = String(decoding: data[..<end.lowerBound], as: UTF8.self).components(separatedBy: "\r\n")
+        let first = lines[0].split(separator: " ")
+        guard first.count >= 2, first[0].hasPrefix("HTTP/1."), let status = Int(first[1]), (100...599).contains(status) else { return nil }
+        var body = data[end.upperBound...]
+        for l in lines.dropFirst() {
+            let kv = l.split(separator: ":", maxSplits: 1)
+            if kv.count == 2, kv[0].lowercased() == "content-length",
+               let n = Int(kv[1].trimmingCharacters(in: .whitespaces)), n >= 0 {
+                guard body.count >= n else { return nil }   // cut short
+                body = body.prefix(n)
+            }
+        }
+        let o = (try? JSONSerialization.jsonObject(with: Data(body))) as? [String: Any] ?? [:]
+        return (status, o)
+    }
+
+    /// Sends the request on the relay socket and reads the answer until the
+    /// Bridge closes (at most 1 MB, `timeout` in all).
+    static func exchange(_ fd: Int32, _ request: Data) -> (Int, [String: Any]) {
+        let failed = (0, ["error": "OmacVM Bridge does not answer on this Mac"] as [String: Any])
+        let deadline = Date().addingTimeInterval(timeout)
+        func setTimeout(_ option: Int32) {
+            let left = max(0.001, deadline.timeIntervalSinceNow)
+            var tv = timeval(tv_sec: Int(left), tv_usec: Int32((left - left.rounded(.down)) * 1_000_000))
+            setsockopt(fd, SOL_SOCKET, option, &tv, socklen_t(MemoryLayout<timeval>.size))
+        }
+        setTimeout(SO_SNDTIMEO)
+        guard (try? NativeBridgeSocket.writeAll(request, to: fd, label: "Bridge relay")) != nil else { return failed }
+        var answer = Data(), chunk = [UInt8](repeating: 0, count: 16384)
+        while answer.count <= 1 << 20, deadline.timeIntervalSinceNow > 0 {
+            setTimeout(SO_RCVTIMEO)
+            let n = chunk.withUnsafeMutableBytes { Darwin.read(fd, $0.baseAddress, $0.count) }
+            if n > 0 { answer.append(contentsOf: chunk[0..<n]); continue }
+            if n < 0 && errno == EINTR { continue }
+            break
+        }
+        return parseResponse(answer) ?? failed
     }
 }

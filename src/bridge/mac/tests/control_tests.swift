@@ -338,7 +338,12 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     var inB = 0, inMac = 0
     for _ in 0..<40 where g.enter("vm parallels/B", known: true) { inB += 1 }
     for _ in 0..<40 where g.enter("mac", known: true) { inMac += 1 }
-    expect(inB == 12 && inMac == 12, "another VM and the app relay still get all theirs (\(inB), \(inMac))")
+    expect(inB == 12 && inMac == 12, "another VM and this Mac still get all theirs (\(inB), \(inMac))")
+    // OmacVM.app's guests (all from 127.0.0.1, key "mac") hold all of theirs:
+    // the relay socket's key still gets all of its own.
+    var inRelay = 0
+    for _ in 0..<40 where g.enter("relay", known: true) { inRelay += 1 }
+    expect(!g.enter("mac", known: true) && inRelay == 12, "app guests full, the relay still gets 12 (\(inRelay))")
     // Many known VMs fill the shared places: each still has its own 4.
     var g2 = ConnectionGate()
     for v in 0..<10 { for _ in 0..<12 { _ = g2.enter("vm parallels/V\(v)", known: true) } }
@@ -364,6 +369,13 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(g3.enterSlow("vm parallels/B"), "another VM's long request")
     g3.leaveSlow("vm parallels/A")
     expect(g3.enterSlow("vm parallels/A"), "one ended: another")
+
+    // ---- the relay socket's path ----
+    expect(relaySocketPathOK("/Users/max/Library/Application Support/omacvm-bridge/relay.sock"), "the usual path")
+    expect(!relaySocketPathOK("relay.sock"), "relative")
+    expect(relaySocketPathOK("/" + String(repeating: "a", count: 102)), "103 bytes fit")
+    expect(!relaySocketPathOK("/" + String(repeating: "a", count: 103)), "104 bytes do not (sun_path and its NUL)")
+    expect(!relaySocketPathOK("/tmp/a\u{0}b"), "a NUL")
 
     // ---- a key that does not match: look again (final review point 3) ----
     var c3 = VMListCache()

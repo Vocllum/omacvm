@@ -85,10 +85,12 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 - OmacVM.app's VMs use a virtio-serial port, `org.omacvm.control`: one JSON
   line per request (`{"id", "method", "path", "body", "proto", "version"}`)
   and per answer (`{"id", "status", "body"}`). The app passes each request
-  on to the Bridge on 127.0.0.1 with the relay key (`omacvm-bridge/relay-key`,
-  never given to a VM) and the VM's name, which only the app knows. The
-  Bridge applies the same list; without the relay key 127.0.0.1 still gets
-  `hello` only (the app's guests reach the Mac from there too).
+  on to the Bridge with the relay key (`omacvm-bridge/relay-key`, never
+  given to a VM) and the VM's name, which only the app knows, on the
+  Bridge's relay socket (`omacvm-bridge/relay.sock`, owner only), or on
+  127.0.0.1 to a Bridge older than the socket. The Bridge applies the same
+  list; without the relay key 127.0.0.1 still gets `hello` only (the app's
+  guests reach the Mac from there too).
 
 ## Consequences
 
@@ -115,6 +117,9 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
   the per-VM key above.
 - From 127.0.0.1 and the Mac's own addresses only `hello` is answered,
   unless OmacVM.app relays it with the relay key.
+- The app's guests share 127.0.0.1 with the relay, so a guest holding
+  connections there took the relay's places (and so every app VM's control
+  centre). The relay now has its own Unix socket and its own places.
 - Round 2's key travelled in a header (`X-OmacVM-VM-Key`). Every VM has the
   Bridge token, so a VM answering for 10.211.55.2 towards another (ARP on
   the shared network) passed /proof and got that VM's key. Round 3 signs

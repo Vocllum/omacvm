@@ -33,7 +33,8 @@
 //   GET  /camera/status    {"permission", "camera", "on", "readers", "connections"}
 //                          (both camera paths: 403 from 127.0.0.1 and the Mac's own addresses)
 //   /omacvm/...            the control centre's requests (control.swift, docs/adr/0031): hello, status,
-//                          updates, updates/check, settings/update-checks, jobs, jobs/<id>
+//                          updates, updates/check, settings/update-checks, jobs, jobs/<id>; OmacVM.app
+//                          relays its VMs' ones on the Unix socket omacvm-bridge/relay.sock (owner only)
 //   GET  /events           Server-Sent Events: "wifi", "audio", "display", "bluetooth" and "battery" on every change
 //                          (RSSI is re-read every 5 s), "scan" when new scan
 //                          results exist, "osd" on volume/mute/brightness/keyboard
@@ -139,6 +140,8 @@ let hub = Hub([
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
+// OmacVM.app's relay (server.swift); OMACVM_BRIDGE_RELAY_SOCKET for tests.
+let relaySocket = RelaySocket(path: env["OMACVM_BRIDGE_RELAY_SOCKET"] ?? supportDir + "/relay.sock")
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
@@ -159,6 +162,7 @@ hub.start()
 control.start()
 osdEvents.start()   // before the listeners: it hooks into the hub
 servers.forEach { $0.check() }
+relaySocket.check()
 mediaKeys.start()
 if config.menuBarIcon { menuBar.show() }
 log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps)")
@@ -166,7 +170,7 @@ log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(c
 log("keyboard light: \(KeyboardLight.get() != nil ? "found" : "none on this Mac")")
 let listenerTimer = DispatchSource.makeTimerSource(queue: .main)
 listenerTimer.schedule(deadline: .now() + tickSeconds, repeating: tickSeconds, leeway: .seconds(1))
-listenerTimer.setEventHandler { servers.forEach { $0.check() } }
+listenerTimer.setEventHandler { servers.forEach { $0.check() }; relaySocket.check() }
 listenerTimer.resume()
 
 let ws = NSWorkspace.shared.notificationCenter

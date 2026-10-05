@@ -217,9 +217,10 @@ final class Control {
     // settings: only a VM OmacVM set up, which proves it with its own key.
     // Programs on this Mac (and OmacVM.app's guests, which all come from
     // 127.0.0.1) get hello only, except OmacVM.app relaying a request from a
-    // VM's control port (relay key; the app names the VM).
+    // VM's control port (relay key; the app names the VM): on the relay
+    // socket (server.swift), or on 127.0.0.1 from an app older than it.
     let vm: VMEntry
-    if fromThisMac(fd, peer: peer) {
+    if peer == relayPeer || fromThisMac(fd, peer: peer) {
       guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
             let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
@@ -406,7 +407,8 @@ final class Control {
   /// For the connection limits (server.swift): the VM at this address, when
   /// the cache has it. Never waits for a run.
   func connectionKey(_ peer: String) -> (key: String, known: Bool) {
-    if peer.hasPrefix("127.") { return ("mac", true) }   // this Mac and OmacVM.app's relay
+    if peer == relayPeer { return ("relay", true) }      // OmacVM.app's relay socket
+    if peer.hasPrefix("127.") { return ("mac", true) }   // this Mac and OmacVM.app's guests (and an older app's relay)
     if let vm = q.sync(execute: { vms.vm(at: peer) }) { return ("vm " + vm, true) }
     return ("address " + peer, false)
   }

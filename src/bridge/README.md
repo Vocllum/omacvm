@@ -296,7 +296,13 @@ From 127.0.0.1 (OmacVM.app's guests, or any Mac program) everything but
 `hello` is refused, except OmacVM.app relaying a request from a VM's control
 port (`org.omacvm.control`): `X-OmacVM-Relay` with the key in
 `relay-key` beside the token (no VM gets it) and `X-OmacVM-App-VM` (the VM's
-name, base64). Every request goes to the log with the VM and the answer;
+name, base64). The app sends these on the relay socket,
+`omacvm-bridge/relay.sock` (mode 0600 in the 0700 folder; the Bridge checks
+the peer's user on every connection and serves only `/omacvm/...` there), so
+its guests, which share 127.0.0.1, cannot use up the relay's places. An app
+older than the socket still relays on 127.0.0.1. A path too long for a Unix
+socket (over 103 bytes: a very long home folder) leaves the socket out and
+says so in the log; the app then uses 127.0.0.1. Every request goes to the log with the VM and the answer;
 refusals (and 401s) once a minute per address, VM and reason, with the
 count left out.
 
@@ -310,8 +316,9 @@ most once a minute, when the list is 5 s old or more; the 403 then says
 "looking" (`"looking": true`) and the VM asks again instead of telling the
 person to run `omacvm apply`.
 
-Connections being handled: every VM the list knows, and 127.0.0.1 (this Mac:
-OmacVM.app's relay and its guests), has 4 places of its own; past them it
+Connections being handled: every VM the list knows, 127.0.0.1 (this Mac:
+its programs and OmacVM.app's guests) and the relay socket each have 4
+places of their own; past them it
 shares 48 places with the rest, at most 12 in all. Unknown addresses take at
 most 16 of the 48 together and 8 each. So a guest that holds all it can (its
 own 12 and the 16 unknown places) leaves the other VMs and the relay all
