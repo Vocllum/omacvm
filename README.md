@@ -125,6 +125,7 @@ omacvm features                 # switch features on or off
 omacvm update                   # the newest OmacVM, on the Mac and in every running VM
 omacvm check                    # what works and what to fix; it changes nothing
 omacvm vms                      # your VMs and their OmacVM version
+omacvm resources --vm NAME      # change its CPUs and memory
 ```
 
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
