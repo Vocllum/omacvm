@@ -17,6 +17,10 @@
 #    land falls back to the app switch, then to hiding the VM's app; the
 #    keyboard follows the pointer's display (test-escape.c, a made-up world
 #    of displays and Spaces: nothing swiped or activated).
+# 6. Scroll momentum takes only a trackpad's scrolling (built-in or Magic
+#    Trackpad, also one connected later): wheel mice, smooth-scrolling mice and
+#    a Magic Mouse go to the VM app one to one (test-scroll.c, made-up events
+#    and trackpad frames through the real callbacks).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d); trap 'kill ${PIDS:-} 2>/dev/null || true; rm -rf "$T"' EXIT
@@ -186,4 +190,10 @@ clang -O1 -Wall -Wno-unused-function -o "$T/test-escape" "$HERE/test-escape.c" "
   -framework CoreFoundation -framework AppKit
 "$T/test-escape" > "$T/escape" 2>&1 || fail=1
 grep -E '^(ok|FAIL) ' "$T/escape"
+# 6. Which scrolling scroll momentum takes.
+clang -O1 -Wall -Wno-unused-function -o "$T/test-scroll" "$HERE/test-scroll.c" "$HERE/scroll_ns.m" \
+  -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
+  -framework CoreFoundation -framework AppKit
+"$T/test-scroll" > "$T/scroll" 2>&1 || fail=1
+grep -E '^(ok|FAIL) ' "$T/scroll"
 (( fail == 0 )) || { cat "$T/out" "$T/out2" "$T/err" "$T/guest3" >&2; exit 1; }
