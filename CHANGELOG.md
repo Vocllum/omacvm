@@ -9,6 +9,10 @@ in more words.
   builds its UEFI firmware itself: the same edk2 as QEMU's, with QEMU's build
   flags, only the logo is new. If that build fails, the app keeps QEMU's
   firmware and says so.
+- Omanotch no longer asks for Accessibility. It picks the VM for the strip by
+  the full-screen window's app; with two VMs of one app it keeps the one it
+  serves (or takes the one that connected last) instead of reading window
+  titles.
 
 ## 2.7.0
 

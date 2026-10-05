@@ -389,7 +389,7 @@ a copy of the checkout, not from one you edit (bash reads scripts as it goes).
 - **Bridge from the guest**: `omacvm-bridge state|audio|display|events`; from the Mac:
   `curl -H "Authorization: Bearer $(cat ~/Library/Application\ Support/omacvm-bridge/token)" http://10.211.55.2:47831/state`.
 - **Permissions**: Location Services (bridge), Accessibility (bridge, gestures), Input Monitoring
-  (gestures), Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
+  (gestures), none for Omanotch, Camera (bridge on UTM and Fusion, OmacVM.app, Parallels Desktop; asked when a Linux app
   first uses it), Microphone (the VM's app). Reset: `tccutil reset Accessibility org.omacvm.bridge` (and `org.omacvm.gestures`,
   `ListenEvent`), then `launchctl kickstart -k gui/$(id -u)/org.omacvm.<app>`.
 - **Logs**: `~/Library/Logs/omacvm-{bridge,gestures}.log`; guest
