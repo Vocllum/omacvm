@@ -61,7 +61,9 @@ list as before.
 - A fence that ends during a long nap is reported up to 1 ms late: about 1%
   on a 100 ms GPU job, nothing on short frames.
 - One time-constraint thread in QEMU. Between two sleeps it spins at most
-  100 us in all, however many fences finish meanwhile; the rest of its
-  200 us budget is the work of reporting them. Between wakes it sleeps.
+  100 us in all, however many fences finish meanwhile, so the spin fits its
+  200 us budget. Reporting fences that are already done is not limited: a
+  long burst of them can run past the budget, and macOS then demotes the
+  thread for a while (nothing breaks). Between wakes it sleeps.
 - Going back is a rebuild without the patch; the app's `gpuSafeMode`
   ([0018](0018-gpu-safe-mode.md)) does not use the sync thread at all.
