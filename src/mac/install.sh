@@ -17,8 +17,8 @@
 # An app whose sources and options did not change since it was installed is
 # left as it is (--force rebuilds it; --force-app "OmacVM Gestures" only that
 # one, for a repair); --quiet only reports what changed.
-# An app that does not build or install is named, the one installed before
-# keeps running, and the others go on; the run then ends with exit code 5
+# An app that does not build or install is named (after a failed build the
+# one installed before keeps running), and the others go on; the run then ends with exit code 5
 # (the names in the file $OMACVM_MAC_FAILED_FILE, one per line, when set).
 # --skip-failed: an app that failed with these same sources is not tried
 # again (the control centre's jobs: a broken build does not run on every
@@ -74,7 +74,7 @@ install_app() {
   if ! "$R/$dir/install.sh" "$@"; then
     echo "$sum" > "$STAMPS/$name.failed"
     FAILED+=("$name")
-    printf '\033[1;31merror:\033[0m %s did not build or install (see above); one installed before keeps running\n' "$name" >&2
+    printf '\033[1;31merror:\033[0m %s did not build or install (see above); when only the build failed, the one installed before keeps running\n' "$name" >&2
     return 0
   fi
   rm -f "$STAMPS/$name.failed"
