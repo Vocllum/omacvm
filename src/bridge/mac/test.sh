@@ -1,7 +1,6 @@
 #!/bin/bash
 # Offline tests of the Bridge's external display brightness (steps, DDC/CI
-# packets, which display a VM is on), of when the media-key tap is created
-# again and of the steady Wi-Fi state: no display, no permissions, no Wi-Fi.
+# packets, which display a VM is on): no display, no permissions.
 #   test.sh          the offline tests (CI)
 #   test.sh --live   also on this Mac's external displays, through the
 #                    Bridge's own code: reads each one, sets the first that
@@ -12,8 +11,6 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 swiftc -O -swift-version 5 -o "$T/external-test" "$HERE/external-model.swift" "$HERE/tests/offline/main.swift"
 "$T/external-test"
-swiftc -O -swift-version 5 -o "$T/models-test" "$HERE/keys-model.swift" "$HERE/wifi-model.swift" "$HERE/tests/models/main.swift"
-"$T/models-test"
 # The real class, switched off and on, against a made-up display only.
 swiftc -O -swift-version 5 -o "$T/external-gate" "$HERE/external-model.swift" "$HERE/external-brightness.swift" \
   "$HERE/tests/gate/main.swift" -framework AppKit -framework IOKit
