@@ -25,7 +25,9 @@ sections 7-8 before fixing anything by hand.
 
 ## New VM
 
-1. `./omacvm vms --json`; then
+1. `./omacvm vms --json` (a UTM VM with `"state": "unknown"`: UTM does not
+   take orders from this terminal; over SSH it never does, so UTM VMs are
+   driven from a terminal app on the Mac that may control UTM); then
    `./omacvm build --plan --json --vm-type parallels|utm|fusion [--vm-name NAME] [--feature scroll-momentum=on]`.
 2. Show the plan (resources, features, `needs_human`), ask for the password
    and for changes.

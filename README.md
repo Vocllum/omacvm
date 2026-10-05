@@ -172,7 +172,7 @@ stays too: drag it to the Bin (its VMs stay in ~/Library/Application
 Support/OmacVM until you delete them).
 
 **OmacVM 2.7.0 and older: don't use `--purge` if you have OmacVM.app VMs.** It
-deletes them with the settings; fixed in the next release.
+deletes them with the settings. Fixed in 2.7.1: run `omacvm update` first.
 
 ## Credits
 
