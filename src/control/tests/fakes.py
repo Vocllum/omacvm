@@ -27,6 +27,7 @@ CHECKS_TSV = (
 class FakeMac:
     def __init__(self, old: bool = False, version: str = "2.7.0") -> None:
         self.old, self.version = old, version
+        self.job_end = ("done", "done")   # (state, text) a job ends with
         self.requests: list[tuple[str, str, dict]] = []
         self.jobs: dict[str, dict] = {}
         self.checks_enabled = True
@@ -80,7 +81,7 @@ class FakeMac:
                         return self.send(404, {"error": "no such job"})
                     j["polls"] += 1
                     if j["polls"] >= 2:
-                        j["state"], j["text"] = "done", "done"
+                        j["state"], j["text"] = fake.job_end
                     return self.send(200, {k: v for k, v in j.items() if k != "polls"})
                 if p in ("/state", "/scan?cached=1", "/bluetooth"):
                     return self.send(200, {"ssid": "ZorroNet 5G", "bssid": "a4:2b:b0:11:22:33",

@@ -1,6 +1,6 @@
 # 0031: Mac-side actions from the VM: a fixed list of Bridge requests
 
-Status: accepted (design), not built. Branch `control-centre`. Needs a
+Status: accepted, built (round 1). Branch `control-centre`. Needs a
 security review before merge.
 
 ## Context
@@ -54,3 +54,22 @@ Option 2. Requests under `/omacvm/`: `hello`, `status`, `updates`,
 - macOS permission prompts still appear on the Mac.
 - The Bridge app stays installed while control-centre is on, also with the
   bridge feature off (as for the camera).
+
+## Found while building
+
+- macOS's Local Network privacy counts a child of an app as the app: the
+  CLI's ssh to the VM was refused when the Bridge ran it (every check failed
+  on SSH). The Bridge spawns the CLI with its responsibility disclaimed
+  (`responsibility_spawnattrs_setdisclaim`, looked up at run time; Terminal
+  does the same for its shells), so the CLI answers for itself.
+- A job can outlive the Bridge: an update reinstalls the Bridge, which stops
+  it mid-job. Jobs run in their own session and write their output and exit
+  code to `omacvm-bridge/jobs/`; a restarted Bridge reports them from there
+  and still refuses a second job for that VM while one runs.
+- Identity is the VM's address on its network. A guest that takes another
+  VM's address could ask in that VM's name; the Bridge only maps an address
+  whose remembered SSH host key answered there in the last minute, and every
+  job reaches the VM over SSH with that key, so it acts only on the real VM.
+  Per-VM tokens would close this fully: a follow-up.
+- From 127.0.0.1 and the Mac's own addresses only `hello` is answered (Mac
+  programs, and OmacVM.app's VMs until the app's control port).

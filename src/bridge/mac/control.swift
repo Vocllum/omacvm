@@ -186,6 +186,11 @@ final class Control {
     let proto: Int
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
+    // Programs on this Mac (and OmacVM.app's VMs, which all come from
+    // 127.0.0.1) get hello only: the rest is for VMs.
+    if route != .hello && fromThisMac(fd, peer: peer) {
+      return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs switch features through the app (not yet): use omacvm on the Mac"))
+    }
 
     if route == .hello {
       let v = ProcessInfo.processInfo.operatingSystemVersion
@@ -257,7 +262,9 @@ final class Control {
           let list = o["vms"] as? [[String: Any]] else { return cached }
     let fresh = list.map { v in
       VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
-              ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "", setup: strictBool(v["setup"]) ?? false)
+              ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
+              // Set up by OmacVM, and its remembered SSH host key answered at that address just now.
+              setup: (strictBool(v["setup"]) ?? false) && (strictBool(v["reachable"]) ?? false))
     }
     q.sync { vms = (Date(), fresh) }
     return fresh

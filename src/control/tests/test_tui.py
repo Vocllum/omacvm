@@ -93,6 +93,23 @@ def test_space_switches_through_the_mac(world):
     asyncio.run(go())
 
 
+def test_failed_job_with_brackets_in_its_text(world):
+    world.job_end = ("rolled-back", "omacvm apply: rolled back [/] [bold]x[/bold")
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked)
+            names = [r.feature.name for r in a.rows]
+            from textual.widgets import DataTable
+            a.screen.query_one(DataTable).move_cursor(row=names.index("autologin"))
+            await pilot.press("space")
+            assert await settle(pilot, lambda: a.c.jobs and not any(j.active for j in a.c.jobs.values()))
+            await pilot.pause(0.5)
+            assert list(a.c.jobs.values())[-1].state == "rolled-back"
+    asyncio.run(go())
+
+
 def test_dependency_asks_first(world):
     async def go():
         a = app()

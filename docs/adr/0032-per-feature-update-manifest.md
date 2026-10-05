@@ -1,7 +1,9 @@
 # 0032: Updates: one signed manifest per release, digests per part
 
-Status: accepted (design), not built. Branch `control-centre`. Shares the
-release key question with the app self-update.
+Status: accepted; tooling and checks built (round 1). Branch
+`control-centre`. Shares the release key question with the app self-update;
+until a key is in `src/lib/release-key.pub` the Bridge reports "no release
+key yet" and offers nothing.
 
 ## Context
 
@@ -42,4 +44,11 @@ settable from the control centre.
   digests.
 - Release scripts gain a manifest step and need the private key: who holds
   it (the user's Mac or a CI secret) is the user's call.
-- Tests use `OMACVM_FEED_URL` and a test key in the Bridge's environment.
+- Tests use `OMACVM_FEED_URL` and `OMACVM_FEED_KEY` (a test key) in the
+  Bridge's environment.
+- Round 1 installs an update as one `omacvm update` (Mac and that VM); the
+  list shows only the changed parts, and parts that did not change are left
+  as they are where the installers already keep stamps (the Mac apps,
+  Omanotch). Restarting only what changed everywhere is a follow-up.
+- Still to wire: the release step that runs `manifest.py build` against the
+  previous release's manifest, signs it and attaches both files.

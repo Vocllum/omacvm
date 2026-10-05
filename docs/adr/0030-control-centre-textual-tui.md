@@ -1,6 +1,6 @@
 # 0030: The control centre is a Textual TUI
 
-Status: accepted (design), not built. Branch `control-centre`.
+Status: accepted, built (round 1). Branch `control-centre`.
 
 ## Context
 
@@ -36,7 +36,9 @@ check and the Mac answers fill in afterwards.
   `omarchy update` keeps it current.
 - If Textual is missing or broken, `omacvm` prints the same table as plain
   text with the commands to use: never an empty window.
-- Startup has to be re-measured on the slowest Mac we support (M1, 8 GB).
+- Startup in a Parallels VM on the M4 Max, in a pty, to the first full table:
+  0.36 s with cold caches, 0.20-0.23 s after. Still to measure on an M1 with
+  8 GB (budget 0.5 s).
 - Status glyphs are Nerd Font glyphs in theme colours, not emoji: ⚠️ with
   VS16 has different widths in Alacritty, Ghostty and Kitty and breaks the
   columns.

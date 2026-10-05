@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import time
 
+from rich.markup import escape
 from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
@@ -105,7 +106,7 @@ class ConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical() as v:
             v.border_title = self.title_text
-            yield Static(self.text)
+            yield Static(Text(self.text))
             yield Static("")
             yield Static(keys_line(("y", "go"), ("n", "cancel")))
 
@@ -179,7 +180,7 @@ class FeaturesScreen(Screen):
             t.update_cell(r.feature.name, "up", Text(look.UPDATE, style="magenta") if r.update else "")
         if 0 <= keep < len(rows):
             t.move_cursor(row=keep)
-        self.query_one("#banner", Static).update(app.banner())
+        self.query_one("#banner", Static).update(Text(app.banner()))
         self.query_one("#banner").set_class(bool(app.banner()), "show")
         box = self.query_one(".box")
         box.border_subtitle = app.subtitle()
@@ -617,6 +618,10 @@ class ControlCentre(App):
         return f"The Mac: {c.mac_error}"
 
     # ---- actions ----
+    def notify(self, message: str, **kw) -> None:   # type: ignore[override]
+        """Messages carry text from the Mac (job lines): never markup."""
+        super().notify(escape(str(message)), **kw)
+
     def can_ask(self) -> bool:
         if self.c.active_job() is not None:
             self.notify("a job runs: wait for it", severity="warning")
