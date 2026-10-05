@@ -287,7 +287,8 @@ final class MediaKeys {
     config.reloadIfChanged()
     logPermissions()
     let front = NSWorkspace.shared.frontmostApplication
-    let vm = front?.executableURL?.lastPathComponent == "OmacVM" ? front?.processIdentifier : nil
+    // An OmacVM.app VM, also when LaunchServices names no executable for QEMU.
+    let vm = VMApp.of(front) == .omacvm ? front?.processIdentifier : nil
     let again = rearm.front(vm)
     guard config.captureKeys else { return }
     if let tap {
