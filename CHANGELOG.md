@@ -3,6 +3,21 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## Unreleased (after 2.9.0)
+
+- OmacVM.app: Vulkan, WebGPU and GPU compute, experimental and off by
+  default: `omacvm enable vulkan --vm NAME`, then restart the VM. The VM
+  gets Vulkan on the Mac's GPU (Venus), OpenCL (darktable, ffmpeg's OpenCL
+  filters, Geekbench GPU), WebGPU in Firefox, and a "Chromium (WebGPU)"
+  menu entry with WebGPU on the Mac's GPU (the normal Chromium keeps its
+  software WebGPU). The first time, the VM builds a Mesa for it (a few
+  minutes). WebGPU matrix multiply in that Chromium: about 5,000-6,300
+  GFLOPS, 84 % of Chrome on the Mac in a locked batch; Geekbench 7 GPU
+  OpenCL 45 % of the Mac's own OpenCL. A 15-minute soak (OpenCL, WebGPU in
+  both browsers, ffmpeg OpenCL) passed in the app with no failure, and
+  the host's GPU memory went back down when the browsers closed.
+  `omacvm disable vulkan` removes it.
+
 ## 2.9.0 (unreleased)
 
 - OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
