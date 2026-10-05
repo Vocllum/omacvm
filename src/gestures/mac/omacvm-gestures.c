@@ -15,9 +15,12 @@
 // While the VM is full screen, the macOS pointer is hidden wherever the VM window
 // is what lies under it (the guest draws its own pointer); over anything else
 // (the Omanotch strip, the Dock, menus, another display) it shows.
-// Ctrl+Option+Cmd+Esc toggles capture off/on; it re-arms by itself when
-// Parallels becomes frontmost again. If this process dies, the event tap goes
-// with it and macOS gets its gestures back.
+// Ctrl+Option+Cmd+Esc in the full-screen VM hands everything back to macOS and
+// swipes the display under the pointer to the Space beside the VM's (macOS's
+// own animation); pressed there again in macOS, it swipes back into the VM
+// (escape section below).
+// Capture re-arms by itself when the VM is in front again. If this process
+// dies, the event tap goes with it and macOS gets its gestures back.
 // Each VM says on connect what it wants (the handshake below). Capture
 // only covers a full-screen VM whose connected daemon wants the trackpad, so a
 // VM with gestures off (or not connected yet) leaves macOS its gestures.
@@ -152,6 +155,10 @@ static void readFusionHost(void) {
 
 static volatile int frontIsVM, escaped, capturing;
 static pid_t frontPid;   // the full-screen VM app in front, else 0
+// The escape combo's way out and back: the last app in front that was no VM
+// app, and the last full-screen VM, each with its front window.
+static pid_t otherPid, vmPid, appPid;   // appPid: the app in front at the last check
+static CGWindowID otherWin, vmWin;
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -162,9 +169,17 @@ static volatile int frontNet = -1;
 static char frontTitle[512];      // the front VM app's window title (Accessibility)
 static pthread_mutex_t sendLock = PTHREAD_MUTEX_INITIALIZER;
 static CFMachPortRef tapPort;
+static CFRunLoopSourceRef tapSource;
+static CGEventMask tapMask;
+static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void *u);
 static int verbose;
 int ns_event_type(CGEventRef e);  // scroll_ns.m
 void ns_on_app_activate(void (*f)(void));
+int ns_activate(pid_t pid);
+int ns_hide(pid_t pid);
+int ns_is_regular(pid_t pid);
+static int isOther(pid_t pid, int net, const char *name, int regular);
+pid_t ns_finder_pid(void);
 static int trackpad = 1;          // 0 with --keys-only
 static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
@@ -332,7 +347,7 @@ static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int fram
 }
 
 // ---- capture mode: frontmost app + full-screen VM window ----
-static int vmFullScreen(pid_t pid) {
+static int vmFullScreen(pid_t pid, CGWindowID *win) {
   CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
   if (!wins) return 0;
   CGDirectDisplayID ds[16]; uint32_t nd = 0; CGGetActiveDisplayList(16, ds, &nd);
@@ -351,6 +366,24 @@ static int vmFullScreen(pid_t pid) {
       if (fabs(r.size.width - b.size.width) < 2 && r.size.height >= b.size.height - 80 &&
           fabs(r.origin.x - b.origin.x) < 2) { found = 1; break; }
     }
+    if (found) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, win);
+  }
+  CFRelease(wins);
+  return found;
+}
+
+// The app's front window on the current Space (the list is front to back), 0
+// for none (Finder with only the desktop).
+static CGWindowID frontWindow(pid_t pid) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  CGWindowID found = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && !found; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    if (owner == pid && layer == 0) CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, &found);
   }
   CFRelease(wins);
   return found;
@@ -392,31 +425,68 @@ static void windowTitle(pid_t pid, char *out, size_t cap) {
   if (win) CFRelease(win);
 }
 
-static void updateCapture(CFRunLoopTimerRef t, void *info) {
-  (void)info;
-  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
-  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
-  // Parallels' VM window, UTM's, or VMware Fusion's.
-  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
-          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
-          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
-  int front = net >= 0 && vmFullScreen(pid);
+// ---- the event tap: created again when a VM app starts after us ----
+// A new event tap goes to the head of the HID chain. QEMU's own one (OmacVM.app,
+// full grab) is created when the VM starts and then sits ahead of ours: it
+// sends the escape combo to the guest and returns nothing, so we never saw it
+// after OmacVM.app was restarted (brianmerchant, PR #39). So the tap is
+// created again whenever a different OmacVM VM comes to the front full screen,
+// and when macOS has invalidated it. The new tap goes in before the old one
+// is removed: no gap without one.
+static int installTap(void) {
+  CFMachPortRef newTap = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, tapMask, tapCb, NULL);
+  if (!newTap) return 0;
+  CFRunLoopSourceRef newSource = CFMachPortCreateRunLoopSource(NULL, newTap, 0);
+  if (!newSource) { CFMachPortInvalidate(newTap); CFRelease(newTap); return 0; }
+  CFRunLoopRef loop = CFRunLoopGetMain();
+  CFRunLoopAddSource(loop, newSource, kCFRunLoopCommonModes);
+  if (tapSource) {
+    CFRunLoopRemoveSource(loop, tapSource, kCFRunLoopCommonModes);
+    CFRunLoopSourceInvalidate(tapSource);
+    CFRelease(tapSource);
+  }
+  if (tapPort) { CFMachPortInvalidate(tapPort); CFRelease(tapPort); }
+  tapPort = newTap;
+  tapSource = newSource;
+  return 1;
+}
+
+// Main thread only. A failure (permission taken away) keeps the old tap and
+// is logged once until a re-creation works again.
+static void rearmTap(const char *why) {
+  static int failedLogged;
+  if (installTap()) {
+    logf_("event tap created again (%s)", why);
+    failedLogged = 0;
+  } else if (!failedLogged) {
+    logf_("cannot create the event tap again (%s): Accessibility or Input Monitoring taken away? Keeping the old one", why);
+    failedLogged = 1;
+  }
+}
+
+// What the capture check found (updateCapture, below): the front app's pid,
+// its VM network (-1: not a VM app), whether its VM window covers a display,
+// that window's title, the window, and whether the app is one the escape
+// combo may go back to (other). Main thread.
+static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
+  // Each OmacVM VM is its own QEMU process with its own tap: a different pid
+  // in front (frontPid is 0 while no VM is) may have put its tap ahead of ours.
+  if (front && net == NET_APP && pid != frontPid) rearmTap("an OmacVM VM came to the front");
   if (front) {
-    // Which of the app's VMs: its window title, on this check (every 0.2 s
-    // while a VM app is full screen in front) and on every app switch.
-    char title[sizeof frontTitle];
-    windowTitle(pid, title, sizeof title);
     pthread_mutex_lock(&sendLock);
     if (net != frontNet || strcmp(title, frontTitle)) {
       frontNet = net;
-      memcpy(frontTitle, title, sizeof frontTitle);
+      snprintf(frontTitle, sizeof frontTitle, "%s", title);
       retargetLocked(capturing);
     }
     pthread_mutex_unlock(&sendLock);
+    vmPid = pid; vmWin = win;
+  } else if (other) {
+    otherPid = pid; otherWin = win;
   }
+  appPid = pid;
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
   if (!front && escaped) escaped = 0;   // re-arm once the VM is left
   frontIsVM = front;
   int now = front && !escaped;
@@ -426,7 +496,43 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
     if (rec) fprintf(rec, "C\t%.4f\t%d\n", unixNow(), now);
     sendState(now ? "on" : (front ? "esc" : "off"));
   }
-  if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+  if (tapPort && !CFMachPortIsValid(tapPort)) rearmTap("macOS invalidated it");
+  else if (tapPort && !CGEventTapIsEnabled(tapPort)) CGEventTapEnable(tapPort, true);
+}
+
+// Its two permissions, logged at start and whenever one changes (looked at
+// every 10 s at most); omacvm check reads the last line. A missing one is
+// named, not just "waiting".
+static void logPermissions(void) {
+  static int last = -1; static CFAbsoluteTime at;
+  CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  if (last >= 0 && now - at < 10) return;
+  at = now;
+  int ax = AXIsProcessTrusted() != 0, im = CGPreflightListenEventAccess() != 0;
+  if ((ax | im << 1) == last) return;
+  last = ax | im << 1;
+  logf_("permissions: Accessibility %s, Input Monitoring %s", ax ? "granted" : "MISSING", im ? "granted" : "MISSING");
+}
+
+static void updateCapture(CFRunLoopTimerRef t, void *info) {
+  (void)info;
+  logPermissions();
+  ProcessSerialNumber psn; pid_t pid = 0; char name[64] = "";
+  if (GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr) proc_name(pid, name, sizeof name);
+  // Parallels' VM window, UTM's, or VMware Fusion's.
+  int net = !strcmp(name, "prl_client_app") ? 0 : !strcmp(name, "UTM") ? NET_UTM
+          : !strcmp(name, "VMware Fusion") && listenAddrs[NET_FUSION][0] ? NET_FUSION
+          : !strcmp(name, "OmacVM") ? NET_APP : -1;   // OmacVM.app's QEMU
+  CGWindowID win = 0;
+  int front = net >= 0 && vmFullScreen(pid, &win);
+  // Which of the app's VMs: its window title, on this check (every 0.2 s
+  // while a VM app is full screen in front) and on every app switch.
+  char title[sizeof frontTitle] = "";
+  if (front) windowTitle(pid, title, sizeof title);
+  int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
+  if (other) win = frontWindow(pid);
+  frontChanged(pid, net, front, title, win, other);
+  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
 }
 
 // ---- the macOS pointer over the full-screen VM ----
@@ -564,6 +670,526 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
   if (val == 0) { sendKey(56, 0); sendKey(29, 0); sendKey(42, 0); sendKey(125, 0); }
 }
 
+// ---- the escape combo: swipe the monitor under the pointer, and back ----
+// Ctrl+Option+Cmd+Esc in the captured full-screen VM hands the trackpad and
+// keys back to macOS at once ("S esc", Omarchy lets go of held keys). Then
+// the display under the pointer swipes to the Space beside the VM's, with
+// macOS's own animation (a Dock swipe, as three or four fingers make it): only
+// that display changes, and the keyboard goes to what it shows. Pressed again
+// there in macOS, it swipes back to the VM. The setting "EscapeSwipe" = "all"
+// (OmacVM.app's "Escape combo", or defaults write org.omacvm.gestures
+// EscapeSwipe all) swipes every display that shows the VM instead.
+// Never a trap: no swipe possible (no Spaces information, the VM's Space has
+// no neighbour), or the Space did not change -> the app from before comes to
+// the front instead (its Space, RC8's switch); refused too -> the VM's app is
+// hidden, so macOS has the keyboard whatever happens.
+enum { COMBO_PASS, COMBO_LEAVE, COMBO_CAPTURE, COMBO_ENTER };
+
+// haveVM: a full-screen VM to go back to, and its app is not the one in front
+// (a VM in a window keeps the combo, as before).
+static int comboAction(int vmFront, int esc, int haveVM) {
+  if (vmFront) return esc ? COMBO_CAPTURE : COMBO_LEAVE;
+  return haveVM ? COMBO_ENTER : COMBO_PASS;
+}
+
+static int alive(pid_t p) { return p > 0 && (kill(p, 0) == 0 || errno == EPERM); }
+
+// An app the combo may go back to: no VM app, not this helper, not the lock
+// screen, and a regular app (Raycast, Alfred, Spotlight or a password
+// manager's panel are in front only for a moment and show no window).
+static int isOther(pid_t pid, int net, const char *name, int regular) {
+  return net < 0 && pid > 0 && pid != getpid() && strcmp(name, "loginwindow") && regular;
+}
+
+// The app in front now (the capture check's way of asking).
+static pid_t frontNow(void) {
+  ProcessSerialNumber psn; pid_t pid = 0;
+  return GetFrontProcess(&psn) == noErr && GetProcessPID(&psn, &pid) == noErr ? pid : 0;
+}
+
+// This window still exists and belongs to pid: a VM app (Parallels, UTM,
+// Fusion) outlives its VM, and a pid may be used again.
+static int windowAlive(pid_t pid, CGWindowID win) {
+  if (!win) return 0;
+  CFArrayRef w = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, win);
+  int ok = 0;
+  if (w && CFArrayGetCount(w) > 0) {
+    int owner = 0;
+    CFNumberGetValue(CFDictionaryGetValue(CFArrayGetValueAtIndex(w, 0), kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    ok = owner == pid;
+  }
+  if (w) CFRelease(w);
+  return ok;
+}
+
+// Brings the app with this window to the front. The window server's own call
+// (SkyLight, private; window managers use it) works from a background helper
+// and across Spaces; NSRunningApplication's activate is the fallback, and
+// the way for an app without a known window.
+typedef CGError (*SetFrontFn)(ProcessSerialNumber *, uint32_t, uint32_t);
+static int bringToFront(pid_t pid, CGWindowID win) {
+  static SetFrontFn setFront; static int looked;
+  if (!looked) {
+    looked = 1;
+    dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+    setFront = (SetFrontFn)dlsym(RTLD_DEFAULT, "_SLPSSetFrontProcessWithOptions");
+    if (!setFront) logf_("escape combo: no SkyLight front-window call, using NSRunningApplication");
+  }
+  ProcessSerialNumber psn;
+  if (win && setFront && GetProcessForPID(pid, &psn) == noErr && setFront(&psn, win, 0x200 /* user generated */) == kCGErrorSuccess)
+    return 1;
+  return ns_activate(pid);
+}
+
+// ---- Spaces (SkyLight, private; looked up at run time) ----
+#define MAX_SPACES 32
+#define MAX_DISPLAYS 16
+typedef struct {
+  CGDirectDisplayID id;
+  CGRect bounds;
+  uint64_t spaces[MAX_SPACES];   // left to right
+  int n;
+  uint64_t current;
+} DisplaySpaces;
+
+typedef int (*ConnFn)(void);
+typedef CFArrayRef (*CopyDisplaySpacesFn)(int);
+typedef CFArrayRef (*CopySpacesForWindowsFn)(int, int, CFArrayRef);
+typedef CFUUIDRef (*DisplayUUIDFn)(CGDirectDisplayID);
+static ConnFn cgsConn;
+static CopyDisplaySpacesFn cgsDisplaySpaces;
+static CopySpacesForWindowsFn cgsWindowSpaces;
+static DisplayUUIDFn displayUUID;
+
+static int lookUpSpaces(void) {
+  static int looked;
+  if (!looked) {
+    looked = 1;
+    dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY);
+    cgsConn = (ConnFn)dlsym(RTLD_DEFAULT, "_CGSDefaultConnection");
+    cgsDisplaySpaces = (CopyDisplaySpacesFn)dlsym(RTLD_DEFAULT, "CGSCopyManagedDisplaySpaces");
+    cgsWindowSpaces = (CopySpacesForWindowsFn)dlsym(RTLD_DEFAULT, "CGSCopySpacesForWindows");
+    displayUUID = (DisplayUUIDFn)dlsym(RTLD_DEFAULT, "CGDisplayCreateUUIDFromDisplayID");
+    if (!cgsConn || !cgsDisplaySpaces || !displayUUID)
+      logf_("escape combo: macOS gives no Spaces information here: the combo switches apps instead of swiping");
+  }
+  return cgsConn && cgsDisplaySpaces && displayUUID;
+}
+
+static uint64_t spaceID(CFDictionaryRef s) {
+  int64_t v = 0;
+  CFNumberRef n = s ? CFDictionaryGetValue(s, CFSTR("ManagedSpaceID")) : NULL;
+  if (!n || CFGetTypeID(n) != CFNumberGetTypeID()) n = s ? CFDictionaryGetValue(s, CFSTR("id64")) : NULL;
+  if (n && CFGetTypeID(n) == CFNumberGetTypeID()) CFNumberGetValue(n, kCFNumberSInt64Type, &v);
+  return v > 0 ? (uint64_t)v : 0;
+}
+
+// Every active display with its Spaces, as macOS lists them (with "Displays
+// have separate Spaces" off, one list ("Main") for all). 0: not known.
+static int readSpaces(DisplaySpaces *out, int cap) {
+  if (!lookUpSpaces()) return 0;
+  CFArrayRef list = cgsDisplaySpaces(cgsConn());
+  if (!list) return 0;
+  CGDirectDisplayID ids[MAX_DISPLAYS]; uint32_t nd = 0;
+  CGGetActiveDisplayList(MAX_DISPLAYS, ids, &nd);
+  int k = 0;
+  for (uint32_t i = 0; i < nd && k < cap; i++) {
+    char uuid[64] = "";
+    CFUUIDRef u = displayUUID(ids[i]);
+    if (u) {
+      CFStringRef s = CFUUIDCreateString(NULL, u);
+      if (s) { CFStringGetCString(s, uuid, sizeof uuid, kCFStringEncodingUTF8); CFRelease(s); }
+      CFRelease(u);
+    }
+    CFDictionaryRef entry = NULL;
+    for (CFIndex j = 0; j < CFArrayGetCount(list) && !entry; j++) {
+      CFDictionaryRef e = CFArrayGetValueAtIndex(list, j);
+      CFStringRef d = CFGetTypeID(e) == CFDictionaryGetTypeID() ? CFDictionaryGetValue(e, CFSTR("Display Identifier")) : NULL;
+      char name[64] = "";
+      if (d && CFGetTypeID(d) == CFStringGetTypeID()) CFStringGetCString(d, name, sizeof name, kCFStringEncodingUTF8);
+      if ((uuid[0] && !strcasecmp(name, uuid)) || (!strcmp(name, "Main") && CFArrayGetCount(list) == 1)) entry = e;
+    }
+    if (!entry) continue;
+    DisplaySpaces *d = &out[k];
+    memset(d, 0, sizeof *d);
+    d->id = ids[i];
+    d->bounds = CGDisplayBounds(ids[i]);
+    d->current = spaceID(CFDictionaryGetValue(entry, CFSTR("Current Space")));
+    CFArrayRef sp = CFDictionaryGetValue(entry, CFSTR("Spaces"));
+    if (sp && CFGetTypeID(sp) == CFArrayGetTypeID())
+      for (CFIndex j = 0; j < CFArrayGetCount(sp) && d->n < MAX_SPACES; j++) {
+        uint64_t id = spaceID(CFArrayGetValueAtIndex(sp, j));
+        if (id) d->spaces[d->n++] = id;
+      }
+    if (d->n && d->current) k++;
+  }
+  CFRelease(list);
+  return k;
+}
+
+// The Space a window is on; 0: not known.
+static uint64_t readWindowSpace(CGWindowID win) {
+  if (!win || !lookUpSpaces() || !cgsWindowSpaces) return 0;
+  int32_t w = (int32_t)win;
+  CFNumberRef n = CFNumberCreate(NULL, kCFNumberSInt32Type, &w);
+  CFArrayRef ws = CFArrayCreate(NULL, (const void **)&n, 1, &kCFTypeArrayCallBacks);
+  CFRelease(n);
+  CFArrayRef r = cgsWindowSpaces(cgsConn(), 7 /* all Spaces */, ws);
+  CFRelease(ws);
+  int64_t v = 0;
+  if (r && CFArrayGetCount(r) > 0) CFNumberGetValue(CFArrayGetValueAtIndex(r, 0), kCFNumberSInt64Type, &v);
+  if (r) CFRelease(r);
+  return v > 0 ? (uint64_t)v : 0;
+}
+
+static int spaceIndex(const DisplaySpaces *d, uint64_t id) {
+  for (int i = 0; i < d->n; i++) if (d->spaces[i] == id) return i;
+  return -1;
+}
+
+// Out of the VM's Space: to the one on its left (where macOS puts the Space a
+// window went full screen from), else the one on its right. 0: no neighbour.
+static int stepOut(const DisplaySpaces *d) {
+  int i = spaceIndex(d, d->current);
+  if (i < 0) return 0;
+  return i > 0 ? -1 : i + 1 < d->n ? 1 : 0;
+}
+
+// One swipe toward `want`: only when it is right beside the current Space
+// (+1 right, -1 left); farther away or gone: 0 (then the app switch).
+static int stepToward(const DisplaySpaces *d, uint64_t want) {
+  int i = spaceIndex(d, d->current), j = spaceIndex(d, want);
+  return i < 0 || j < 0 || (j - i != 1 && i - j != 1) ? 0 : j - i;
+}
+
+// ---- the swipe: a Dock swipe, the events a three/four-finger swipe makes ----
+#define kCGSEventTypeField 55
+#define kCGEventGestureHIDType 110
+#define kCGEventGestureScrollY 119
+#define kCGEventGestureSwipeMotion 123
+#define kCGEventGestureSwipeProgress 124
+#define kCGEventGestureSwipeVelocityX 129
+#define kCGEventGestureSwipeVelocityY 130
+#define kCGEventGesturePhase 132
+#define kCGEventScrollGestureFlagBits 135
+#define kCGEventGestureZoomDeltaX 139
+#define kIOHIDEventTypeDockSwipe 23
+#define kCGSEventGesture 29
+#define kCGSEventDockControl 30
+#define kSwipeBegan 1
+#define kSwipeEnded 4
+
+// Which sign of the swipe's progress goes to the Space on the right. Not
+// documented: a swipe seen going the other way flips it (learnSign), kept in
+// the settings domain for the next start.
+static int swipeSign = 1;
+#define GESTURES_DOMAIN CFSTR("org.omacvm.gestures")
+
+static int dockSwipe(CGPoint at, int phase, int right) {
+  CGEventRef dock = CGEventCreate(NULL), gesture = CGEventCreate(NULL);
+  if (!dock || !gesture) {
+    if (dock) CFRelease(dock);
+    if (gesture) CFRelease(gesture);
+    return 0;
+  }
+  double s = right ? -1.0 : 1.0;   // fingers to the left reveal the Space on the right
+  CGEventSetIntegerValueField(gesture, kCGSEventTypeField, kCGSEventGesture);
+  CGEventSetIntegerValueField(dock, kCGSEventTypeField, kCGSEventDockControl);
+  CGEventSetIntegerValueField(dock, kCGEventGestureHIDType, kIOHIDEventTypeDockSwipe);
+  CGEventSetIntegerValueField(dock, kCGEventGesturePhase, phase);
+  CGEventSetIntegerValueField(dock, kCGEventScrollGestureFlagBits, right ? 1 : 0);
+  CGEventSetIntegerValueField(dock, kCGEventGestureSwipeMotion, 1);   // horizontal
+  CGEventSetDoubleValueField(dock, kCGEventGestureScrollY, 0);
+  CGEventSetDoubleValueField(dock, kCGEventGestureZoomDeltaX, 1.401298464e-45);   // FLT_TRUE_MIN, as the trackpad sends
+  if (phase == kSwipeEnded) {
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeProgress, s * 2.0);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityX, s * 400.0);
+    CGEventSetDoubleValueField(dock, kCGEventGestureSwipeVelocityY, 0);
+  }
+  CGEventSetLocation(dock, at);
+  CGEventSetLocation(gesture, at);
+  CGEventPost(kCGSessionEventTap, dock);
+  CGEventPost(kCGSessionEventTap, gesture);
+  CFRelease(dock); CFRelease(gesture);
+  return 1;
+}
+
+static CGPoint pointerNow(void) {
+  CGEventRef e = CGEventCreate(NULL);
+  CGPoint p = e ? CGEventGetLocation(e) : CGPointZero;
+  if (e) CFRelease(e);
+  return p;
+}
+
+// One swipe on that display (dir +1: to the Space on the right). The Dock
+// swipes the display the pointer is on; the events also carry it.
+static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
+  (void)d;
+  CGPoint p = pointerNow();
+  CGPoint at = CGRectContainsPoint(b, p) ? p : CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b));
+  int right = dir * swipeSign > 0;
+  return dockSwipe(at, kSwipeBegan, right) && dockSwipe(at, kSwipeEnded, right);
+}
+
+// The on-screen windows of pid (layer 0), front to back, as rectangles.
+static int windowsOf(pid_t pid, CGRect *out, int cap) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  int k = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && k < cap; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1; CGRect r;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    if (owner == pid && layer == 0 && CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) &&
+        r.size.width > 100 && r.size.height > 100)
+      out[k++] = r;
+  }
+  CFRelease(wins);
+  return k;
+}
+
+// The front app on a display now: the owner of its topmost normal window that
+// is not `skip`'s (the VM), with that window. 0: none (the desktop).
+static pid_t topAppOn(CGRect b, pid_t skip, CGWindowID *win) {
+  CFArrayRef wins = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements, kCGNullWindowID);
+  if (!wins) return 0;
+  pid_t found = 0;
+  for (CFIndex i = 0; i < CFArrayGetCount(wins) && !found; i++) {
+    CFDictionaryRef w = CFArrayGetValueAtIndex(wins, i);
+    int owner = 0, layer = -1; CGRect r;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowOwnerPID), kCFNumberIntType, &owner);
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowLayer), kCFNumberIntType, &layer);
+    if (owner == skip || owner == getpid() || layer != 0 ||
+        !CGRectMakeWithDictionaryRepresentation(CFDictionaryGetValue(w, kCGWindowBounds), &r) ||
+        r.size.width <= 100 || r.size.height <= 100 || !CGRectContainsPoint(b, CGPointMake(CGRectGetMidX(r), CGRectGetMidY(r))))
+      continue;
+    found = owner;
+    CFNumberGetValue(CFDictionaryGetValue(w, kCGWindowNumber), kCFNumberIntType, win);
+  }
+  CFRelease(wins);
+  return found;
+}
+
+// "EscapeSwipe": "all" swipes every display that shows the VM, anything else
+// (default) the display under the pointer only.
+static int escapeAll(void) {
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("EscapeSwipe"), GESTURES_DOMAIN);
+  int all = v && CFGetTypeID(v) == CFStringGetTypeID() && CFStringCompare((CFStringRef)v, CFSTR("all"), kCFCompareCaseInsensitive) == kCFCompareEqualTo;
+  if (v) CFRelease(v);
+  return all;
+}
+
+static void loadSwipeSign(void) {
+  CFPropertyListRef v = CFPreferencesCopyAppValue(CFSTR("SwipeSign"), GESTURES_DOMAIN);
+  int s = 0;
+  if (v && CFGetTypeID(v) == CFNumberGetTypeID()) CFNumberGetValue((CFNumberRef)v, kCFNumberIntType, &s);
+  if (v) CFRelease(v);
+  if (s == -1) swipeSign = -1;
+}
+
+static void saveSwipeSign(void) {
+  CFNumberRef n = CFNumberCreate(NULL, kCFNumberIntType, &swipeSign);
+  CFPreferencesSetAppValue(CFSTR("SwipeSign"), n, GESTURES_DOMAIN);
+  CFPreferencesAppSynchronize(GESTURES_DOMAIN);
+  CFRelease(n);
+}
+
+// Seams for the offline test (test-escape.c): the window server is not asked.
+static int (*activateFn)(pid_t, CGWindowID) = bringToFront;
+static pid_t (*finderFn)(void) = ns_finder_pid;
+static pid_t (*frontFn)(void) = frontNow;
+static int (*vmWindowFn)(pid_t, CGWindowID) = windowAlive;
+static int (*spacesFn)(DisplaySpaces *, int) = readSpaces;
+static uint64_t (*windowSpaceFn)(CGWindowID) = readWindowSpace;
+static int (*swipeFn)(CGDirectDisplayID, CGRect, int) = postSwipe;
+static CGPoint (*pointerFn)(void) = pointerNow;
+static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
+static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
+static int (*hideFn)(pid_t) = ns_hide;
+static int (*escapeAllFn)(void) = escapeAll;
+static void (*saveSignFn)(void) = saveSwipeSign;
+static double verifyAfter = 0.8;   // s: a swipe's animation is over by then
+
+static void after(void (^f)(void)) {
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(verifyAfter * NSEC_PER_SEC)), dispatch_get_main_queue(), f);
+}
+
+// The Space each display showed the VM on when the combo left it (pressing
+// it again there swipes back to it), and the swipes of the last press.
+static struct { CGDirectDisplayID id; uint64_t space; } left[MAX_DISPLAYS];
+typedef struct { CGDirectDisplayID id; uint64_t from, to; int dir; } Swipe;
+static Swipe swiped[MAX_DISPLAYS];
+static int nSwiped;
+
+static void rememberLeft(CGDirectDisplayID id, uint64_t space) {
+  for (int i = 0; i < MAX_DISPLAYS; i++)
+    if (left[i].id == id || !left[i].id) { left[i].id = id; left[i].space = space; return; }
+}
+
+static uint64_t leftOn(CGDirectDisplayID id) {
+  for (int i = 0; i < MAX_DISPLAYS && left[i].id; i++) if (left[i].id == id) return left[i].space;
+  return 0;
+}
+
+static const DisplaySpaces *displayIn(const DisplaySpaces *ds, int n, CGDirectDisplayID id) {
+  for (int i = 0; i < n; i++) if (ds[i].id == id) return &ds[i];
+  return NULL;
+}
+
+// Brings an app to the front; after a moment it must be there, else the usual
+// activation once more. done(1) once it is in front, done(0) if not.
+static void goTo(pid_t pid, CGWindowID win, const char *what, void (^done)(int)) {
+  char name[64] = "";
+  proc_name(pid, name, sizeof name);
+  int ok = activateFn(pid, win);
+  logf_("escape combo: %s %s (pid %d, window %u)%s", what, name, pid, win, ok ? "" : ": macOS refused, trying again");
+  after(^{
+    if (frontFn() == pid) { if (done) done(1); return; }
+    int again = activateFn(pid, 0);
+    after(^{
+      char who[64] = "";
+      proc_name(pid, who, sizeof who);
+      int in = frontFn() == pid;
+      logf_("escape combo: %s %s (second try %s)", who, in ? "is in front" : "did not come to the front", again ? "taken" : "refused");
+      if (done) done(in);
+    });
+  });
+}
+
+// The last way out: the VM's app hidden, so it cannot keep the keyboard.
+static void hideVM(void) {
+  if (frontFn() != vmPid) return;
+  char name[64] = "";
+  proc_name(vmPid, name, sizeof name);
+  int ok = hideFn(vmPid);
+  logf_("escape combo: %s kept the front: hidden%s, macOS has the keyboard (the combo brings it back)", name, ok ? "" : " (refused!)");
+}
+
+// Out by switching apps (RC8): the app from before, else Finder; refused: hide.
+static void leaveBySwitch(void) {
+  pid_t to = alive(otherPid) ? otherPid : finderFn();
+  CGWindowID w = to == otherPid ? otherWin : 0;
+  if (to <= 0) { logf_("escape combo: no app to go back to"); hideVM(); return; }
+  goTo(to, w, to == otherPid ? "back to" : "back to (the app from before has quit)", ^(int ok) { if (!ok) hideVM(); });
+}
+
+// After a swipe out: the keyboard follows the pointer's display. The VM may
+// still be in front (its window on another display, or macOS kept it there):
+// then the app on top of the pointer's display, else Finder.
+static void focusPointerDisplay(void) {
+  if (frontFn() != vmPid) return;
+  CGPoint p = pointerFn();
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+  CGRect b = CGRectNull;
+  for (int i = 0; i < nd; i++) if (CGRectContainsPoint(ds[i].bounds, p)) b = ds[i].bounds;
+  CGWindowID w = 0;
+  pid_t to = CGRectIsNull(b) ? 0 : topAppFn(b, vmPid, &w);
+  if (to <= 0) { to = finderFn(); w = 0; }
+  if (to <= 0) { hideVM(); return; }
+  goTo(to, w, "keyboard to", ^(int ok) { if (!ok) hideVM(); });
+}
+
+// Did each swipe of the last press land? A Space that moved the other way
+// teaches the sign (kept); none moved: the swipe does not work here.
+static int swipesLanded(void) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), landed = 0;
+  for (int i = 0; i < nSwiped; i++) {
+    const DisplaySpaces *d = displayIn(ds, nd, swiped[i].id);
+    if (!d) continue;
+    if (d->current == swiped[i].to) { landed++; continue; }
+    int from = spaceIndex(d, swiped[i].from), now = spaceIndex(d, d->current);
+    if (from >= 0 && now == from - swiped[i].dir) {
+      swipeSign = -swipeSign;
+      saveSignFn();
+      logf_("escape combo: the swipe went the other way: direction learned");
+    }
+  }
+  return landed;
+}
+
+static void checkLeave(void) {
+  if (!swipesLanded()) {
+    logf_("escape combo: the Space did not change: switching apps instead");
+    leaveBySwitch();
+    return;
+  }
+  focusPointerDisplay();
+}
+
+static void checkEnter(void) {
+  if (!swipesLanded()) {
+    logf_("escape combo: the Space did not change: switching to the VM instead");
+    goTo(vmPid, vmWin, "back into the VM:", NULL);
+    return;
+  }
+  // The keyboard to the VM now on the pointer's display (a full-screen Space
+  // usually brings its app; the notch's kind of full screen is a window).
+  if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
+}
+
+static int swipe(const DisplaySpaces *d, int dir, uint64_t to, const char *what) {
+  // "Displays have separate Spaces" off: one list for every display, swiped once.
+  for (int i = 0; i < nSwiped; i++) if (swiped[i].from == d->current) return 0;
+  if (!dir || nSwiped >= MAX_DISPLAYS || !swipeFn(d->id, d->bounds, dir)) return 0;
+  swiped[nSwiped++] = (Swipe){ d->id, d->current, to, dir };
+  logf_("escape combo: display %u swiped %s (%s)", d->id, dir > 0 ? "right" : "left", what);
+  return 1;
+}
+
+static int showsVM(const DisplaySpaces *d, const CGRect *wins, int nw) {
+  for (int i = 0; i < nw; i++)
+    if (CGRectContainsPoint(d->bounds, CGPointMake(CGRectGetMidX(wins[i]), CGRectGetMidY(wins[i])))) return 1;
+  return 0;
+}
+
+// Out of the VM: the pointer's display (or, with "all", each display that
+// shows the VM) swipes to the Space beside the VM's.
+static void leaveVM(void) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
+  CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+  CGPoint p = pointerFn();
+  nSwiped = 0;
+  int pointerOnVM = 0;
+  for (int i = 0; i < nd; i++) {
+    const DisplaySpaces *d = &ds[i];
+    int under = CGRectContainsPoint(d->bounds, p), vm = showsVM(d, wins, nw);
+    pointerOnVM |= under && vm;
+    if (!vm || !(all || under)) continue;
+    int dir = stepOut(d);
+    if (dir) { rememberLeft(d->id, d->current); swipe(d, dir, d->spaces[spaceIndex(d, d->current) + dir], "out of the VM"); }
+  }
+  if (nSwiped) { after(^{ checkLeave(); }); return; }
+  // The pointer is on a display without the VM: nothing to swipe there, the
+  // keyboard goes to what it shows.
+  if (nd && nw && !pointerOnVM && !all) { focusPointerDisplay(); return; }
+  logf_("escape combo: no swipe possible here (%s): switching apps", !nd ? "no Spaces information" : "the VM's Space has no neighbour");
+  leaveBySwitch();
+}
+
+// Into the VM again: the pointer's display (or, with "all", each display the
+// combo left) swipes back to the VM's Space when it is right beside it.
+static void enterVM(void) {
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
+  CGPoint p = pointerFn();
+  uint64_t vmSpace = windowSpaceFn(vmWin);
+  nSwiped = 0;
+  for (int i = 0; i < nd; i++) {
+    const DisplaySpaces *d = &ds[i];
+    if (!all && !CGRectContainsPoint(d->bounds, p)) continue;
+    uint64_t want = leftOn(d->id);
+    if (!want || spaceIndex(d, want) < 0) want = all ? 0 : vmSpace;
+    if (want && d->current != want) swipe(d, stepToward(d, want), want, "back into the VM");
+  }
+  if (nSwiped) { after(^{ checkEnter(); }); return; }
+  goTo(vmPid, vmWin, "back into the VM:", NULL);
+}
+
+// The switch runs after the tap's callback has returned (it talks to the
+// window server; the callback must stay quick).
+static void later(void (*f)(void)) { dispatch_async(dispatch_get_main_queue(), ^{ f(); }); }
+
 // ---- event tap: drop macOS gestures while capturing; escape combo ----
 static int swallowEscUp;
 
@@ -577,7 +1203,9 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     CGEventFlags f = CGEventGetFlags(e);
     int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
-    if (kc != ESC_KEYCODE || !combo || !frontIsVM) {
+    int act = kc == ESC_KEYCODE && combo
+              ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin)) : COMBO_PASS;
+    if (act == COMBO_PASS) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
         // UTM, VMware Fusion and OmacVM.app (without Accessibility for it) keep
         // Cmd shortcuts like Cmd+Space for macOS: in full screen they go to
@@ -604,10 +1232,15 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
       logf_("escape combo ignored: posted by pid %lld (%s), state %lld", srcPid, who, srcState);
       return e;
     }
-    escaped = !escaped;
-    capturing = frontIsVM && !escaped;
-    logf_("escape combo: capture %s", capturing ? "ON" : "off");
-    sendState(capturing ? "on" : "esc");
+    if (act == COMBO_ENTER) {
+      later(enterVM);
+    } else {
+      escaped = act == COMBO_LEAVE;
+      capturing = !escaped;
+      logf_("escape combo: capture %s", capturing ? "ON" : "off");
+      sendState(capturing ? "on" : "esc");
+      if (act == COMBO_LEAVE) later(leaveVM);
+    }
     swallowEscUp = 1;
     return NULL;
   }
@@ -636,7 +1269,8 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
   }
   // macOS recognized a pinch (NSEventTypeMagnify): tell the guest, so its
   // two-finger touch passes raw fingers from now on.
-  if ((type == 29 || type == 30) && !pinchSent && capturing && glideOn() && ns_event_type(e) == 30) {
+  if (!pinchSent && capturing && glideOn() &&
+      (type == 30 || (type == 29 && ns_event_type(e) == 30))) {
     sendLine("P\n", 2);
     pinchSent = 1;
     if (verbose) logf_("pinch (macOS)");
@@ -934,18 +1568,19 @@ int main(int argc, char **argv) {
   }
   signal(SIGPIPE, SIG_IGN);
 
-  CGEventMask m = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
+  tapMask = CGEventMaskBit(kCGEventKeyDown) | CGEventMaskBit(kCGEventKeyUp) | CGEventMaskBit(kCGEventScrollWheel);
   int gestureTypes[] = { 18, 19, 20, 29, 30, 31, 32, 34 };   // rotate, begin/end, gesture, magnify, swipe, smart magnify, pressure
-  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) m |= (CGEventMask)1 << gestureTypes[i];
+  for (size_t i = 0; i < sizeof gestureTypes / sizeof *gestureTypes; i++) tapMask |= (CGEventMask)1 << gestureTypes[i];
   // Needs Accessibility (to drop events) and Input Monitoring (to see the escape
   // combo). Ask once, then wait for the grant instead of exiting, so launchd
   // does not restart us into a loop of prompts.
   CFStringRef keys[] = { kAXTrustedCheckOptionPrompt }; CFTypeRef vals[] = { kCFBooleanTrue };
   CFDictionaryRef opts = CFDictionaryCreate(NULL, (const void **)keys, (const void **)vals, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   int asked = 0;
-  while (!(tapPort = CGEventTapCreate(kCGHIDEventTap, kCGHeadInsertEventTap, kCGEventTapOptionDefault, m, tapCb, NULL))) {
+  while (!installTap()) {
     if (!asked) {
       logf_("waiting for Accessibility and Input Monitoring permission");
+      logPermissions();   // which one is missing
       AXIsProcessTrustedWithOptions(opts);
       CGRequestListenEventAccess();
       asked = 1;
@@ -954,7 +1589,7 @@ int main(int argc, char **argv) {
   }
   CFRelease(opts);
   if (asked) logf_("permissions granted");
-  CFRunLoopAddSource(CFRunLoopGetCurrent(), CFMachPortCreateRunLoopSource(NULL, tapPort, 0), kCFRunLoopCommonModes);
+  logPermissions();
 
   // The trackpad only now, with the permissions granted and the run loop about
   // to run: opened while still waiting, its frames were never taken, and on a
@@ -983,6 +1618,7 @@ int main(int argc, char **argv) {
 
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   initKeymap();
+  loadSwipeSign();
   readFusionHost();
   for (size_t i = 0; i < sizeof listenAddrs / sizeof *listenAddrs; i++) {
     if (!listenAddrs[i][0] && i != NET_FUSION) continue;

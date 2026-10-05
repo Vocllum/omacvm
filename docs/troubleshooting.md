@@ -22,10 +22,36 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   Bluetooth); the panel says so too. A device that is off or out of range
   shows "Not in range?" after about 15 seconds.
 - **Gestures or the scroll momentum do nothing**: the VM must be full screen and in front;
-  ⌃⌥⌘ Esc may have handed the trackpad to macOS (press it again). Check the
-  Accessibility and Input Monitoring permissions of *OmacVM Gestures*. A VM
+  if ⌃⌥⌘ Esc left you in the VM without the trackpad, press it again. Check the
+  Accessibility and Input Monitoring permissions of *OmacVM Gestures*
+  (`omacvm check` names a missing one; the helpers' logs say
+  "permissions: ... MISSING").
+- **⌃⌥⌘ Esc does not swipe**: the swipe needs a Space beside the VM's on that
+  monitor (System Settings › Desktop & Dock › Mission Control: "Displays have
+  separate Spaces" decides whether each monitor has its own). Without one,
+  the app you were in before comes to the front instead; that needs "When
+  switching to an application, switch to a Space with open windows" (on by
+  default). The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
+  "escape combo: ...") says which way it took.
+- **Permissions asked again after updating to 2.9.0**: OmacVM Bridge and
+  OmacVM Gestures now come signed with OmacVM's Developer ID, which macOS
+  treats as a new app once. Turn them on again in System Settings › Privacy &
+  Security (Accessibility, Input Monitoring); an older entry of the same name
+  can go (select it, −). Later updates keep the permissions.
+- **Volume keys show macOS's greyed-out panel**: the output has no volume
+  macOS can set (an audio interface). With an OmacVM.app VM in front the keys
+  change the VM's own volume instead; with Parallels, UTM and Fusion they stay
+  macOS's. A VM
   OmacVM did not set up may need `omacvm update --vm NAME` once: the Mac lets in
   only VMs whose trackpad daemon says the Bridge's token.
+- **The brightness keys do not change the external display**: the VM must be
+  in front on it (Parallels, UTM and Fusion: in full screen). `omacvm check`
+  lists each external display: "not settable" means it does not take DDC/CI
+  on this connection. Switch DDC/CI on in the display's own menu, or try
+  another port: some Macs' built-in HDMI ports (M1/M2 Mac mini) and some docks
+  pass no DDC/CI (USB-C or DisplayPort usually do). A display that was asleep
+  when the Bridge looked is asked again after a minute (by the keys, the VM
+  or `omacvm check`) or when displays change.
 - **"answers with another SSH host key"**: OmacVM remembers each VM's SSH key.
   After rebuilding or reinstalling the VM: `omacvm apply --vm NAME --reset-host-key`.
 - **Scrolling feels too fast or slow in one app**: Chromium-based apps get their
