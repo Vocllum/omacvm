@@ -131,6 +131,11 @@ else:
     if v == "no-vmx": del files[B + "/Omarchy.vmx"]
     if v == "extra": files[B + "/Omarchy.vmx.lck"] = b"x"
 
+# The bundle itself a link to a VM already on the Mac, relative as from the
+# work folder to the user's own VM (no user name needed).
+if variant == "symlink-root":
+    files = {}; extra = [("sym", B, "../victim/" + B)]
+
 with tarfile.open(out, "w", format=tarfile.PAX_FORMAT) as t:
     dirs = sorted({p.rsplit("/", i)[0] for p in files if not p.startswith("/") and ".." not in p for i in (1, 2) if "/" in p})
     for d in dirs:
@@ -236,6 +241,20 @@ fusion text-vmdk
 fusion no-vmx
 fusion extra
 EOF
+
+# The bundle itself as a link to a good VM on the Mac: refused, that VM left as
+# it was and nothing in the work folder.
+tree_sum() { (cd "$T/victim" && ls -lRT . && find . -type f -exec shasum {} +) 2>&1 | shasum; }
+for route in parallels utm fusion; do
+  image "$route" good
+  rm -rf "$T/victim"; mkdir -p "$T/victim"; tar -xf "$T/img.tar" -C "$T/victim"
+  before=$(tree_sum)
+  image "$route" symlink-root
+  expect "$route symlink-root: refused" refused "$(try_install "$route")"
+  [[ -n ${VERBOSE:-} ]] && sed "s/^/       /" "$T/why"
+  expect "$route symlink-root: the VM it points at untouched" "$before" "$(tree_sum)"
+  expect "$route symlink-root: no work folder left" no "$([[ -e $T/work || -L $T/work ]] && echo yes || echo no)"
+done
 
 # Entries next to the bundle or at an absolute path are not taken at all.
 image parallels beside

@@ -56,6 +56,10 @@ def check_files(route, top, bundle, name):
     files = re.compile(files)
     if os.listdir(top) != [bundle]:
         raise Bad("the archive holds more than %s" % bundle)
+    # The bundle itself too: listdir() follows a link, and a link here would
+    # put a VM that is already on the Mac (the user's own) in its place.
+    if not stat.S_ISDIR(os.lstat(os.path.join(top, bundle)).st_mode):
+        raise Bad("%s is not a folder (a link?)" % bundle)
     found = set()
     todo = [""]
     while todo:
