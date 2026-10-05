@@ -1,7 +1,9 @@
 #!/bin/bash
-# Prebuilt manifests are untrusted: bad values must fail the lookup (the build
-# then happens here) and nothing from a manifest may run as code on the Mac.
-# No network, no VM: OMACVM_PREBUILT_SOURCE points at a temporary folder.
+# Prebuilt manifests and images are untrusted: bad values must fail the lookup
+# (the build then happens here), nothing from a manifest may run as code on
+# the Mac, and OmacVM.app's image gives a plain disk.img or nothing. Also the
+# seed's file mode and the free-space check. No network, no VM:
+# OMACVM_PREBUILT_SOURCE points at a temporary folder.
 #   src/tests/prebuilt-manifest.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
@@ -101,7 +103,74 @@ EOF
 python3 "$R/src/prebuilt/manifest.py" release "$T/rel.json" "$VERSION" parallels >/dev/null 2>&1
 expect "odd tags and URLs in the release list: none taken" 1 $?
 
-# No manifest value inside (( )) or $(( )) in the scripts that use them.
+# The other routes find their images the same way (one regex for all).
+for route in utm fusion app; do
+  touch "$OMACVM_PREBUILT_SOURCE/omacvm-prebuilt-$VERSION-$route.json"
+  expect "local lookup: $route" "omacvm-prebuilt-$VERSION-$route.json $VERSION" \
+    "$(python3 "$R/src/prebuilt/manifest.py" local "$OMACVM_PREBUILT_SOURCE" "$VERSION" "$route")"
+done
+
+# OmacVM.app's image: only <bundle>/disk.img comes out, as a plain file.
+# archive NAME: packs $T/a (tar + zstd) as the only part of the manifest.
+archive() {
+  local part=omacvm-prebuilt-$VERSION-app.tar.zst.part-aa
+  mkdir -p "$PREBUILT_CACHE/app"
+  COPYFILE_DISABLE=1 tar -cf - -C "$T/a" . | zstd -q -c > "$PREBUILT_CACHE/app/$part"
+  PB_MANIFEST=$PREBUILT_CACHE/app/m.json PB_BUNDLE=Omarchy
+  printf '{"parts": [{"name": "%s", "size": %s, "sha256": "%s"}]}' "$part" \
+    "$(stat -f %z "$PREBUILT_CACHE/app/$part")" "$SUM" > "$PB_MANIFEST"
+}
+take() { rm -f "$T/disk.img"; (prebuilt_unpack_disk "$T/u" "$T/disk.img") >/dev/null 2>&1 && echo taken || echo refused; }
+if command -v zstd >/dev/null; then
+  echo secret > "$T/victim"
+  rm -rf "$T/a"; mkdir -p "$T/a/Omarchy"; printf 'disk' > "$T/a/Omarchy/disk.img"; archive
+  expect "app image: a plain disk.img is taken" taken "$(take)"
+  expect "app image: its content" disk "$(cat "$T/disk.img" 2>/dev/null)"
+  expect "app image: the work folder is gone" no "$([[ -e $T/u ]] && echo yes || echo no)"
+  rm -rf "$T/a"; mkdir -p "$T/a/Omarchy"; ln -s "$T/victim" "$T/a/Omarchy/disk.img"; archive
+  expect "app image: disk.img as a symlink is refused" refused "$(take)"
+  expect "app image: the symlink's target is untouched" secret "$(cat "$T/victim")"
+  expect "app image: no disk left" no "$([[ -e $T/disk.img || -L $T/disk.img ]] && echo yes || echo no)"
+  rm -rf "$T/a"; mkdir -p "$T/a"; ln -s "$T" "$T/a/Omarchy"; archive
+  expect "app image: the bundle as a symlink is refused" refused "$(take)"
+  # A hard link to a file on the Mac (absolute, or out through ..): tar does
+  # not make it, or it is refused after.
+  for target in "$T/victim" ../../victim; do
+    python3 - "$T/raw.tar" "$target" <<'PY'
+import sys, tarfile
+with tarfile.open(sys.argv[1], "w") as t:
+    d = tarfile.TarInfo("Omarchy"); d.type = tarfile.DIRTYPE; d.mode = 0o755; t.addfile(d)
+    h = tarfile.TarInfo("Omarchy/disk.img"); h.type = tarfile.LNKTYPE; h.linkname = sys.argv[2]; t.addfile(h)
+PY
+    zstd -q -c "$T/raw.tar" > "$PREBUILT_CACHE/app/omacvm-prebuilt-$VERSION-app.tar.zst.part-aa"
+    expect "app image: disk.img as a hard link to $target is refused" refused "$(take)"
+    expect "app image: hard link to $target: target untouched, one link" "secret 1" "$(cat "$T/victim") $(stat -f %l "$T/victim")"
+  done
+  rm -rf "$T/a"; mkdir -p "$T/a/Omarchy"; printf 'x' > "$T/a/Omarchy/other.img"; archive
+  expect "app image: no disk.img is refused" refused "$(take)"
+else
+  echo "skip app image tests: no zstd"
+fi
+
+# The seed: mode 600 from the start, its work folder gone on every path.
+mkdir -p "$T/tmp" "$T/seed"; ssh-keygen -q -t ed25519 -N "" -f "$T/key"
+seed_vars() { U=anna FULL="Anna B" HASH='$6$salt$hash' HOST=omarchy KB=us TZ_MAC=UTC LANG_VM=en_US.UTF-8 TYPE=app KEY=$T/key; }
+( seed_vars; TMPDIR=$T/tmp; umask 022; prebuilt_seed "$T/seed/seed.iso" ) >/dev/null 2>&1
+expect "seed: made" yes "$([[ -s $T/seed/seed.iso ]] && echo yes || echo no)"
+expect "seed: mode 600" 600 "$(stat -f %Lp "$T/seed/seed.iso" 2>/dev/null)"
+expect "seed: no work folder left" "" "$(ls "$T/tmp")"
+( seed_vars; TMPDIR=$T/tmp; prebuilt_seed "$T/nope/seed.iso" ) >/dev/null 2>&1
+expect "seed: hdiutil fails: an error" 1 $?
+expect "seed: hdiutil fails: no work folder left" "" "$(ls "$T/tmp")"
+
+# Free space: an image bigger than the disk is refused with a message.
+out=$( (PB_SIZE=1000 PB_UNPACKED_KB=999999999999; prebuilt_space_ok "$T") 2>&1); rc=$?
+expect "free space: too little: refused" 1 "$rc"
+expect "free space: too little: says so" yes "$([[ $out == "not enough free space"* ]] && echo yes || echo "$out")"
+expect "free space: enough" 0 "$( (PB_SIZE=1000 PB_UNPACKED_KB=1000; prebuilt_space_ok "$T") >/dev/null 2>&1; echo $?)"
+
+# No manifest value inside (( )) or $(( )) in the scripts that use them, except
+# behind 10# (then a value with letters is an error, never an expression).
 expect "no PB_ value in bash arithmetic" "" "$(grep -nE '\(\([^)]*\bPB_[A-Z_]+' "$R"/src/prebuilt/*.sh "$R"/src/cmd/build.sh "$R"/app/scripts/*.sh 2>/dev/null |
   sed -E -e 's/10#\$PB_[A-Z_]+//g' -e 's/PB_OK//g' | grep -E '\(\([^)]*\bPB_[A-Z_]+')"
 

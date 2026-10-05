@@ -161,6 +161,24 @@ printable() {
   LC_ALL=C sed -l -e $'s/\x1b\\[[0-9;]*m//g' -e 's/[^[:print:][:blank:]]//g' -e 's/^\(.\{240\}\).*/\1/'
 }
 
+# prebuilt_unpack_disk WORK DEST: OmacVM.app's image is <bundle>/disk.img and
+# nothing else. Only that path comes out of the archive (into WORK, emptied
+# first), and only as a plain file with one link: a symbolic or hard link would
+# have the grow and QEMU write to some other file on the Mac. Then it moves to
+# DEST and WORK goes.
+prebuilt_unpack_disk() {
+  local u=$1 f
+  rm -rf "$u"
+  prebuilt_unpack "$u" "$PB_BUNDLE/disk.img"
+  f=$u/$PB_BUNDLE/disk.img
+  [[ $(cd "$u" && find . -mindepth 1 | LC_ALL=C sort | tr '\n' '|') == "./$PB_BUNDLE|./$PB_BUNDLE/disk.img|" ]] ||
+    { rm -rf "$u"; die "the image holds something other than $PB_BUNDLE/disk.img: not used"; }
+  [[ -d $u/$PB_BUNDLE && ! -L $u/$PB_BUNDLE && -f $f && ! -L $f && $(stat -f %l "$f") == 1 ]] ||
+    { rm -rf "$u"; die "the image's disk.img is not a plain file: not used"; }
+  mv "$f" "$2"
+  rm -rf "$u"
+}
+
 prebuilt_cleanup() {   # the downloaded parts (kept with OMACVM_PREBUILT_KEEP=1)
   [[ ${OMACVM_PREBUILT_KEEP:-0} == 1 ]] && return 0
   local dir; dir=$(dirname "$PB_MANIFEST")

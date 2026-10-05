@@ -39,6 +39,13 @@ in more words.
   On OmacVM.app a feature turned on while the VM runs gets its link to the
   Mac at the VM's next start: `omacvm apply` names it and `omacvm check`
   says to shut the VM down and start it again.
+- OmacVM.app can make its VM from a prebuilt image, like the other apps:
+  "Download a prebuilt VM" in the app's setup, or
+  `omacvm build --vm-type app --prebuilt`. The parts are checked against
+  the release's SHA-256 sums; the first boot (without a window) sets up your
+  user, password, keyboard and timezone from a seed that is deleted after.
+  The images come with a release after 2.9.0; until then the app builds its
+  VM as before. See [docs/prebuilt.md](docs/prebuilt.md).
 
 ## 2.9.0 (unreleased)
 

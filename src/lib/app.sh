@@ -13,8 +13,12 @@
 #   app_other_running NAME  another app VM that runs, if any
 #   app_bundle          the installed OmacVM.app (any name it was installed under;
 #                       ~/Applications first, then /Applications)
-#   app_create DIR KEY=VALUE...  a new VM in DIR through the app's own create
-#                       script (the password on stdin), as when built in the app
+#   app_create [--prebuilt] DIR KEY=VALUE...  a new VM in DIR through the app's
+#                       own create script (the password on stdin), as when built
+#                       in the app; --prebuilt: from a prebuilt image
+#   app_has_prebuilt APP    that app can make a VM from a prebuilt image
+#   app_prebuilt_lookup APP the image that app would use (its own version):
+#                       sets PB_TAG PB_SIZE PB_OMARCHY PB_VERSION
 #   app_published VERSION   that OmacVM release has OmacVM-VERSION.zip
 #   app_install VERSION [APP]  download, check and install it (in ~/Applications,
 #                       or in place of APP, /Applications too); prints the path
@@ -179,13 +183,27 @@ app_free_port() {   # the VM's SSH port: free now, and in no other VM's vm.env
 # KEY=VALUE: NAME CPUS MEM_MB DISK_GB SSH_PORT VM_USER VM_FULLNAME VM_HOSTNAME
 # VM_TZ VM_LANG KEYBOARD FEATURES ("bridge=on wallpaper=on ...").
 app_create() {
-  local dir=$1 a kv v q="'"; shift
+  local script=create-vm.sh dir a kv v q="'"
+  [[ $1 == --prebuilt ]] && { script=prebuilt-vm.sh; shift; }
+  dir=$1; shift
   a=$(app_bundle) || return 1
   mkdir -p "$dir"
   for kv in "$@"; do
     v=${kv#*=}; printf "%s='%s'\n" "${kv%%=*}" "${v//$q/$q\\$q$q}"
   done > "$dir/vm.env"
-  /bin/bash "$a/Contents/Resources/scripts/create-vm.sh" "$dir"
+  /bin/bash "$a/Contents/Resources/scripts/$script" "$dir"
+}
+
+app_has_prebuilt() { [[ -f $1/Contents/Resources/scripts/prebuilt-vm.sh ]]; }
+
+# Asks the app's own script, so omacvm build offers the image the app then
+# downloads (the app looks with its version, not this omacvm's).
+app_prebuilt_lookup() {
+  local out
+  out=$(/bin/bash "$1/Contents/Resources/scripts/prebuilt-vm.sh" --lookup 2>/dev/null < /dev/null) || return 1
+  read -r PB_TAG PB_SIZE PB_OMARCHY PB_VERSION <<<"$out"
+  [[ $PB_TAG =~ ^[A-Za-z0-9._-]{1,80}$ && $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_OMARCHY =~ ^[!-~]{1,80}$ &&
+     ${PB_VERSION:-} =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]]
 }
 
 app_zip_url() { echo "$APP_DOWNLOADS/v$1/OmacVM-$1.zip"; }   # VERSION
