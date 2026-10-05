@@ -4,6 +4,7 @@
 # 127.0.0.1:PORT (gssh understands that).
 #   app_list            NAME<TAB>app<TAB>running|stopped, one line per VM
 #   app_dir NAME        the VM's folder
+#   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
 #   app_ip NAME         127.0.0.1:PORT while it runs (fast network: its vmnet address)
 #   app_any_fast_network  one of the VMs has the fast network on
 #   app_start NAME      start it in the app (its window opens)
@@ -47,6 +48,14 @@ app_list() {
     n=$(app_env "$d" NAME); [[ -n $n ]] || n=$(basename "$d")
     printf '%s\tapp\t%s\n' "$n" "$(app_running_dir "$d" && echo running || echo stopped)"
   done
+}
+
+# app_features_write DIR "bridge=on gestures=off ...": the VM's features for
+# the app, which reads them at each start of the VM (MacLinks.swift: a
+# feature that is off gets nothing of the Mac). Status 0 if they changed.
+app_features_write() {
+  [[ $(cat "$1/features" 2>/dev/null) != "$2" ]] || return 1
+  printf '%s\n' "$2" > "$1/features"
 }
 
 app_dir() {

@@ -131,8 +131,10 @@ final class Runner {
         env["OMACVM_PRODUCT_NAME"] = Product.name
         if let icon = Paths.icon { env["OMACVM_ICON"] = icon.path }
         // The VM reaches the Mac's 127.0.0.1 (as 10.0.2.2) only on OmacVM's
-        // ports: Omanotch, Gestures and Bridge (patched libslirp).
-        env["OMACVM_SLIRP_HOST_PORTS"] = "47811,47830,47831"
+        // ports (patched libslirp), and only for its features that are on:
+        // Omanotch, Gestures, Bridge.
+        links = MacLinks.load(folder: c.folder)
+        env["OMACVM_SLIRP_HOST_PORTS"] = links.hostPorts
         env["OMACVM_NOTCH"] = Settings.useNotch && Mac.hasNotch ? "1" : "0"
         // Video decoding on the Mac's media engine (H.264, VP9, HEVC). AV1 only for
         // VMs whose VA-API shim keeps it to Chromium (omacvm apply writes
@@ -150,6 +152,7 @@ final class Runner {
         // Which network this start took, for omacvm check and the omacvm command
         // (SSH: the VM's vmnet address, else 127.0.0.1:SSH_PORT).
         log.write(Data("OmacVM: network: \(network.record)\n".utf8))
+        log.write(Data("OmacVM: Mac links: \(links.record)\n".utf8))
         try? Data("\(network.record)\n".utf8).write(to: c.folder.appendingPathComponent("logs/network"))
         if !Runner.micAllowed {
             log.write(Data("OmacVM: no microphone permission yet: the VM records nothing until its next start\n".utf8))
@@ -176,9 +179,13 @@ final class Runner {
         if network.vmnet { watchFastNetwork() }
         observeSleep()
         startClipboard()
-        startBattery()
-        startCamera()
+        // A feature that is off: nothing of the Mac on its port.
+        if links.battery { startBattery() }
+        if links.camera { startCamera() }
     }
+
+    /// What of the Mac this start of the VM may use (its features).
+    private(set) var links = MacLinks()
 
     /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet
     /// may not start, or the daemon may go away later: then QEMU only tries
