@@ -17,9 +17,19 @@ in QEMU's process on macOS, virgl-darwin-venus-in-process.patch), each process
 has its own count. Venus resources only the guest's kernel sees (guest memory
 blobs) are not host memory and are not charged.
 Upstream: not sent.
+What the app sees: guest Mesa venus allocates asynchronously by default, so
+vkAllocateMemory returns VK_SUCCESS in the guest; the app's next use of that
+memory finds no object, the context is lost and the guest's Mesa ends the app
+(like any Venus loss, virgl-context-loss-report.patch). With
+VN_PERF=no_async_mem_alloc in the guest the app gets VK_ERROR_OUT_OF_DEVICE_MEMORY
+and can go on.
 Tests: Tests/virgl/test-resource-budget.c still passes (the GL side uses the
-shared counter); the Venus side in a Venus VM (gpu-2.9.0 runtime, guest vk-alloc
-allocating 256 MB blocks until VK_ERROR_OUT_OF_DEVICE_MEMORY).
+shared counter). Venus in a test VM (gpu-2.9.0 runtime with this patch,
+OMACVM_GPU_MEMORY_MB=2048, tests/graphics/guest/vk-alloc.c, 256 MB blocks):
+synchronous, the 7th block (1902 MB in use with the desktop) gets
+VK_ERROR_OUT_OF_DEVICE_MEMORY and, after freeing, allocations work again; async,
+the app ends at vkFreeMemory and the VM, desktop and the next Vulkan app go on.
+Without the patch all 24 blocks (6 GB) are made.
 --- a/src/venus/vkr_common.h
 +++ b/src/venus/vkr_common.h
 @@ -34,6 +34,7 @@
