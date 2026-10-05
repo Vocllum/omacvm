@@ -193,8 +193,10 @@ final class Runner {
         }
         p.standardOutput = log
         p.standardError = log
+        let agentPath = c.agentSocket.path
         p.terminationHandler = { [weak self] proc in
             let status = proc.terminationStatus
+            GuestAgent.release(socketPath: agentPath)
             Task { @MainActor in
                 self?.stopObserving()
                 self?.clipboard?.stop()
@@ -215,6 +217,8 @@ final class Runner {
         startClipboard()
         startBattery()
         startCamera()
+        // Held while QEMU runs, so qemu-ga in the VM sleeps (GuestAgent).
+        Thread.detachNewThread { GuestAgent.hold(socketPath: agentPath) }
     }
 
     /// omacvm-netd may still refuse QEMU (another build, the limit), vmnet
