@@ -57,8 +57,9 @@ print(s.server_port, flush=True)
 s.serve_forever()
 PY
 python3 "$T/bridge.py" "$T/token" "$T/requests" > "$T/port" & PID=$!
-for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
-PORT=$(cat "$T/port")
+for _ in $(seq 300); do [[ -s $T/port ]] && break; sleep 0.1; done
+PORT=$(cat "$T/port"); [[ $PORT =~ ^[0-9]+$ ]] || { echo "FAIL  the stand-in Bridge did not start"; exit 1; }
+touch "$T/requests"
 # The focused output for the non-app routes (hyprctl stand-in).
 printf '#!/bin/bash\necho %s\n' "'[{\"name\": \"Virtual-1\", \"focused\": false}, {\"name\": \"Virtual-2\", \"focused\": true}]'" > "$T/bin/hyprctl"
 chmod +x "$T/bin/hyprctl"
@@ -84,6 +85,9 @@ is "$(bus_of Virtual-3)" "" "detect: not a disconnected output"
 
 # 2. OmacVM.app: the box goes along.
 is "$(ddc --bus 2 --skip-ddc-checks getvcp 10 --brief)" "VCP 10 C 35 100" "getvcp 10: ddcutil's --brief answer"
+# Why, when it fails: the client's own words.
+[[ -s $T/requests ]] || env XDG_RUNTIME_DIR="$T/run" OMACVM_VM_TYPE=app OMACVM_BRIDGE_URL="http://127.0.0.1:$PORT" \
+  OMACVM_BRIDGE_TOKEN_FILE="$T/token" bash -x "$R/src/bridge/guest/omacvm-bridge" external-brightness --output Virtual-2 2>&1 | tail -15
 is "$(last)" "GET /display/external-brightness?x=0&y=0&width=1920&height=1200 " "getvcp: Virtual-2's box from the layout"
 ddc --bus 2 --skip-ddc-checks --noverify setvcp 10 44 >/dev/null
 is "$(last)" 'POST /display/external-brightness?x=0&y=0&width=1920&height=1200 {"brightness": 44}' "setvcp 10 44"
