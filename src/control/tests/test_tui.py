@@ -417,7 +417,7 @@ def test_failed_update_says_the_mac_kept_it_and_the_way_out(world, monkeypatch, 
             assert await settle(pilot, lambda: bool(a.last_result), 10)
             r = a.last_result
             assert r.startswith("Update: camera was not set up. The Mac keeps OmacVM 2.9.1; "
-                                "this VM went back to OmacVM 2.7.0 and its features."), r
+                                f"this VM went back to OmacVM {a.c.local.version} and its features."), r
             assert "Turn the Mac's camera off (space) or repair it (r)" in r
             assert "omacvm apply --vm 'My Omarchy'" in r
     asyncio.run(go())
@@ -513,7 +513,7 @@ def test_repair_that_went_back_on_an_older_vm(world):
             await pilot.press("r")
             assert await settle(pilot, lambda: bool(a.last_result))
             assert a.last_result == ("Repair The Mac's camera: The Mac's camera was not set up. The Mac keeps OmacVM 2.9.1; "
-                                     "this VM went back to OmacVM 2.7.0 and its features. Turn the Mac's camera off (space) "
+                                     f"this VM went back to OmacVM {a.c.local.version} and its features. Turn the Mac's camera off (space) "
                                      "to go on without it, or r tries again; on the Mac: omacvm apply --vm NAME. "
                                      "! reports the problem."), a.last_result
     asyncio.run(go())

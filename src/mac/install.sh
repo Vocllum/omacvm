@@ -56,10 +56,11 @@ install_app() {
   fi
   printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m\n' "$name"
   "$R/$dir/install.sh" "$@"
+  # No stamp yet: a first install, which macOS asks permissions for.
+  [[ -e $STAMPS/$name ]] || INSTALLED+=("$name")
   echo "$sum" > "$STAMPS/$name"
-  INSTALLED+=("$name")
 }
-INSTALLED=()
+INSTALLED=()   # installed for the first time (an update keeps the permissions)
 source "$R/lib/mac.sh"
 # The omacvm the Bridge runs for the control centre's requests (control.swift
 # checks it belongs to this user and nobody else can write it): only the
