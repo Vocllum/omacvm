@@ -5,6 +5,23 @@ in more words.
 
 ## Unreleased
 
+- OmacVM.app: a Linux app switching the screen between large modes in a loop
+  grew the VM's GPU memory on the Mac by up to 1.1 GB per switch and never gave
+  it back, until the Mac ran out of memory (2.6.0 and 2.7.0 too). Two GL
+  contexts were never flushed; both are now, and the memory stays flat.
+- OmacVM.app: the textures and buffers a VM's apps make have a memory budget
+  on the Mac, a quarter of its memory (`OMACVM_GPU_MEMORY_MB` changes it, 0
+  turns it off). Past it, the app's GPU context stops; the VM and the Mac go on.
+  Screens and cursors may go 256 MB past it, so the desktop keeps working.
+- OmacVM.app: a Linux app could make the Mac's GPU read outside a buffer (a
+  draw past the end of its buffers, an unbound uniform block); the GPU
+  faulted and macOS restarted. The app now checks every buffer range a draw
+  reaches before the GPU sees it, and skips draws that would leave one.
+- OmacVM.app: a shader the Mac refuses skips its draws instead of stopping the
+  whole app's GPU context.
+- OmacVM.app: a WebGL 2 or OpenGL ES app using transform feedback could stop
+  the VM (QEMU crashed in Apple's OpenGL when it ended the recording). Fixed in
+  the app's virglrenderer, with a build-time test.
 - OmacVM.app: a VM starts with Omarchy's logo instead of TianoCore's. The app
   builds its UEFI firmware itself: the same edk2 as QEMU's, with QEMU's build
   flags, only the logo is new. If that build fails, the app keeps QEMU's

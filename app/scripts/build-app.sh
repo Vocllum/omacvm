@@ -36,9 +36,11 @@ RT=$ROOT/runtime/.build
 # What the runtime was built from: its build scripts, patches and the tests
 # the build runs, and which UEFI firmware (OMACVM_FIRMWARE=qemu: QEMU's
 # prebuilt one, TianoCore logo).
-INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c
+INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h
   echo "firmware=${OMACVM_FIRMWARE:-omacvm}"; } | shasum -a 256 | cut -d' ' -f1)
+# A runtime built with OMACVM_RUNTIME_TEST_HOOKS=1 (test hooks) is never shipped.
 if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
+      || -e $RT/qemu-gpu-runtime.test-hooks
       || $(cat "$RT/inputs.sha256" 2>/dev/null) != "$INPUTS" ]]; then
   log "QEMU (from source)"
   "$ROOT/runtime/build-qemu-gpu-runtime.sh"
