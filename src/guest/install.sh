@@ -205,7 +205,9 @@ case $TYPE in
   utm)
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
   app)
-    log "OmacVM.app"; "$R/app/guest/install.sh" "$U" ;;
+    log "OmacVM.app"; "$R/app/guest/install.sh" "$U"
+    log "Chromium video decoding"
+    "$R/vdec/guest/install.sh" "$U" on || log "Chromium video decoding: not set up (see above)" ;;
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac

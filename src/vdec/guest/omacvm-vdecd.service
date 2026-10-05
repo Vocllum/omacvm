@@ -1,0 +1,40 @@
+[Unit]
+Description=OmacVM: Chromium's video decoding on the Mac's media engine (V4L2 -> VA-API)
+# The module comes from DKMS; until it is built for this kernel there is
+# nothing to serve, and Chromium decodes on the CPU.
+ConditionPathExists=/dev/omacvm-vdec
+After=systemd-modules-load.service systemd-udev-settle.service
+# Before the desktop: Chromium looks for decoders once, when it starts.
+Before=display-manager.service getty@tty1.service
+
+[Service]
+ExecStart=/usr/local/bin/omacvm-vdecd
+# Exit 0 = no VA-API decoding here (another hypervisor, or OMACVM_VIDEO_DECODE=0
+# on the Mac): stay down, Chromium decodes on the CPU.
+Restart=on-failure
+RestartSec=2
+User=omacvm-vdec
+Group=omacvm-vdec
+SupplementaryGroups=render video
+RuntimeDirectory=omacvm-vdec
+Environment=LIBVA_DRIVER_NAME=omacvm LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri MESA_SHADER_CACHE_DISABLE=true
+# It parses video from web pages: keep it small.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+DevicePolicy=closed
+DeviceAllow=/dev/omacvm-vdec rw
+DeviceAllow=/dev/dri/renderD128 rw
+
+[Install]
+WantedBy=multi-user.target

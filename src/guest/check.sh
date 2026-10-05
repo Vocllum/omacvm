@@ -321,6 +321,16 @@ app)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
+  # Arch Linux ARM's Chromium decodes through V4L2 (omacvm-vdec + omacvm-vdecd).
+  if command -v chromium >/dev/null; then
+    s=$(cat /run/omacvm-vdec/status 2>/dev/null || true)
+    if [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
+    elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
+    elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
+    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then bad "video decoding in Chromium" "omacvm-vdecd not running (journalctl -u omacvm-vdecd)"
+    elif ! as_user /usr/local/lib/omacvm/chromium-flags.py check; then bad "video decoding in Chromium" "AcceleratedVideoDecoder missing in Chromium's flags: omacvm apply"
+    else ok "video decoding in Chromium" "V4L2 -> the Mac's media engine: $s"; fi
+  fi
   if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
     check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
       grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
