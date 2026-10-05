@@ -28,13 +28,19 @@ OmacVM's version.
 - Setup in the app: VM name, user, password, resources, disk size, where the
   disk goes (any APFS or Mac OS Extended drive).
 - Where things are: the app in `~/Applications` (or `/Applications`, where
-  older versions put it), the VMs in `~/OmacVM/<VM name>/` (Spotlight skips
-  the folder). VMs from before 2.9.0 in
-  `~/Library/Application Support/OmacVM/VMs` stay there and are used while
-  `~/OmacVM` does not exist. A folder picked in the setup wins over both.
-- A VM folder from another Mac: copy it into `~/OmacVM/` (the app runs one VM
-  at a time, the first folder by name), open the app and start it. Then, with
-  the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
+  older versions put it), the VMs in `~/OmacVM/<VM name>/`. VMs from before
+  2.9.0 in `~/Library/Application Support/OmacVM/VMs` stay there and are used
+  while `~/OmacVM` does not exist. A folder picked in the setup wins over
+  both. Spotlight lists the file names in `~/OmacVM` but never reads inside a
+  VM disk; to hide the folder from it, add it under System Settings ›
+  Spotlight › Search Privacy.
+- A VM folder from another Mac: copy it into `~/OmacVM/` once (the app runs
+  one VM at a time, the first folder by name). Check that the app looks there:
+  `~/Applications/OmacVM.app/Contents/MacOS/OmacVM --vms-folder` (or the
+  same under `/Applications`) must print the same as `echo ~/OmacVM` (a home
+  folder can be on another drive, under `/Volumes`). If it prints another
+  folder, move the VM folder there and use that path below. Open the app and
+  start the VM. Then, with the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
   `bash ~/Applications/OmacVM.app/Contents/Resources/scripts/apply-vm.sh ~/OmacVM/<VM name>`
   (or `omacvm apply --vm "<VM name>" --vm-type app`). If it says there is no
   SSH access, the VM does not know this Mac's key yet: `omacvm apply` prints
