@@ -25,7 +25,9 @@ The wallpaper is also decoded at the size it is shown at (the display's pixels),
 not at the image's own: Omarchy's 6016x3384 images made an 81 MB texture per
 display, and on a QEMU that limits a buffer's memory entries (UTM's; OmacVM.app
 before 2.8.0) such an upload in fragmented memory failed and the shell lost its
-GPU context: black displays without bar.
+GPU context: black displays without bar. At the display's size this stays under
+that limit (16384 entries) up to about 4K (3840x2160: ~8100 pages); 5K
+(~14400 pages) is close to it and 6K (~19900) can still be refused there.
 
 The patch is versioned like the bar patch; an older version is restored from
 <Background.qml>.before-notchbar (kept by install.sh) and patched again.

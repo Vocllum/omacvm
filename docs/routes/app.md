@@ -218,7 +218,8 @@ window per guest screen:
   shell draws nothing there. The cause found: QEMU refused the memory of a
   big texture (the wallpaper) when it came in more than 16384 pieces, as it
   does in fragmented guest memory, and virglrenderer then dropped the
-  shell's GPU context (`qemu-virtio-gpu-mapping-entries.patch` allows 1 GiB).
+  shell's GPU context (`qemu-virtio-gpu-mapping-entries.patch` allows 262144
+  pieces: at least 1 GiB even when every piece is a single 4 KiB page).
   `omacvm-displays` also looks at what each display shows (a small
   screenshot) after the shell starts and after the layout changes; a display
   that shows only the grey with no window on it gets the shell restarted

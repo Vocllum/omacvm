@@ -1,8 +1,10 @@
 From: OmacVM
 Subject: [PATCH] virtio-gpu: big buffers in fragmented guest memory attach
 
-What: allow up to 262144 memory entries (1 GiB in 4 KiB pages) when the guest
-attaches a buffer's backing, instead of 16384.
+What: allow up to 262144 memory entries when the guest attaches a buffer's
+backing, instead of 16384. An entry is one contiguous run of guest memory of
+any length, so this is a count, not a size: at least 1 GiB even when every
+entry is a single 4 KiB page.
 
 Why: Linux gives a buffer's pages as they lie in memory, one entry per
 contiguous run. A large texture upload in fragmented guest memory needs more
@@ -44,8 +46,8 @@ index ba6af7c..aba99f1 100644
 +     * memory easily needs more than 16384 entries (an 81 MB wallpaper
 +     * upload: 17867). The old limit failed the attach, virglrenderer then
 +     * dropped the app's whole GL context and it drew nothing again. Allow
-+     * 1 GiB in 4 KiB pages (16384 x 16384 RGBA, the largest texture); the
-+     * entry list is then at most 4 MiB.
++     * 262144 entries: 1 GiB even if each is one 4 KiB page (16384^2 RGBA,
++     * the largest texture); the entry list is then at most 4 MiB.
 +     */
 +    if (nr_entries > VIRTIO_GPU_MAX_MAPPING_ENTRIES) {
          qemu_log_mask(LOG_GUEST_ERROR,
