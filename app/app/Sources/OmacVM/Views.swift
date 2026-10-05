@@ -243,6 +243,7 @@ struct ReadyView: View {
     @State private var fastNetOn = false
     @State private var fastNetBusy = false
     @State private var fastNetNote: String?
+    @State private var fastNetStatus = ""
 
     /// The create screen's tiers; resources set some other way show as Custom.
     private var tier: Binding<Int> {
@@ -299,7 +300,8 @@ struct ReadyView: View {
                     .keyboardShortcut(.defaultAction)
             }
         }
-        .onAppear { fastNetOn = FastNetwork.isOn(state.config) }
+        .onAppear { refreshFastNetwork() }
+        .onChange(of: state.config) { _, _ in refreshFastNetwork() }
     }
 
     /// The fast network (experimental): a button, never automatic. Turning it
@@ -318,12 +320,26 @@ struct ReadyView: View {
         }
     }
 
-    private var fastNetStatus: String {
-        guard fastNetOn else {
-            return "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once."
+    /// What the switch says, worked out off the main thread (the service
+    /// check verifies QEMU's code signature, which reads the whole binary).
+    nonisolated private static func fastNetworkStatus(_ c: VMConfig) -> (Bool, String) {
+        guard FastNetwork.isOn(c) else {
+            return (false, "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once.")
         }
-        if let why = FastNetwork.serviceProblem() { return "On, but \(why): Turn Off, then On again." }
-        return FastNetwork.lastRecord(state.config) == "vmnet" ? "On." : "On from the VM's next start."
+        if let why = FastNetwork.serviceProblem() { return (true, "On, but \(why): Turn Off, then On again.") }
+        return (true, FastNetwork.lastRecord(c) == "vmnet" ? "On." : "On from the VM's next start.")
+    }
+
+    private func refreshFastNetwork() {
+        let c = state.config
+        fastNetOn = FastNetwork.isOn(c)
+        Task.detached {
+            let (on, text) = Self.fastNetworkStatus(c)
+            await MainActor.run {
+                fastNetOn = on
+                fastNetStatus = text
+            }
+        }
     }
 
     private func toggleFastNetwork() {
@@ -332,10 +348,12 @@ struct ReadyView: View {
         fastNetNote = nil
         Task.detached {
             let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c)
+            let (now, text) = Self.fastNetworkStatus(c)
             await MainActor.run {
                 fastNetBusy = false
                 fastNetNote = err
-                fastNetOn = FastNetwork.isOn(c)
+                fastNetOn = now
+                fastNetStatus = text
             }
         }
     }
