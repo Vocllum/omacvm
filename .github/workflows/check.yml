@@ -135,3 +135,6 @@ jobs:
 
       - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
         run: src/tests/app-storage.sh
+
+      - name: Benchmark chart and the pages that quote it agree
+        run: src/tests/bench-docs.sh
