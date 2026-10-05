@@ -210,7 +210,10 @@ window per guest screen:
   points lower than the screen's safe area. Each output gets its window's
   real size once the window is in full screen
   (`omacvm-cocoa-fullscreen-size.patch`), so the picture is not squeezed
-  and the pointer is exact.
+  and the pointer is exact. For the main window that size is the area macOS
+  gives full screen, not the view: the view is letterboxed while the guest
+  reboots, and sizing from it shrank the output on every reboot
+  (`omacvm-cocoa-fullscreen-area.patch`).
 - Two outputs switched at once could leave Linux with an old list (it
   clears the display event after reading); a small virtio-gpu patch
   (`qemu-virtio-gpu-display-event-race.patch`) raises the event again.
