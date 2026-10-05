@@ -4,14 +4,16 @@ Nothing is uploaded by OmacVM: the browser opens a form the person submits.
 
 Redaction, in this order:
  1. Known values (exact, case-insensitive, longest first): user, full and
-    first names, host names (and the owner in "Anna's MacBook Pro"), VM
-    names, Wi-Fi names and BSSIDs, Bluetooth names and addresses, the Bridge
-    token, home folders.
+    first names (always, also "Max"), host names (and the owner in "Anna's
+    MacBook Pro"), VM names, Wi-Fi names and BSSIDs (whole words only),
+    Bluetooth names and addresses, the Bridge token, home folders.
  2. Patterns: the names in the Bridge's own log lines (its connected
-    Bluetooth devices, the Wi-Fi name after ssid=, ...), an owner's name with
-    a device word ("Anna's AirPods", "AirPods von Anna", "iPhone de Jean-Luc",
-    "MacBook-Pro-von-Anna", known or not), PEM blocks, SSH keys, bearer/Basic/GitHub tokens, key=value
-    and "--passphrase value" secrets, e-mail
+    Bluetooth devices, the Wi-Fi name after ssid=, audio devices, the camera,
+    Omanotch's VM names, ...), an owner's name with a device word ("Anna's
+    AirPods", "AirPods von Anna", "iPhone de Jean-Luc", "MacBook-Pro-von-Anna",
+    "iPhone (Anna)", known or not), PEM blocks, SSH keys, bearer, Basic,
+    GitHub, Anthropic, Slack, AWS and GitLab tokens, key=value and
+    "--passphrase value" secrets, e-mail
     addresses, hardware addresses, UUIDs, serial numbers, IPv4/IPv6
     addresses (the Mac's VM-network addresses get a label), long hex and
     base64 runs.
@@ -40,7 +42,7 @@ LABELS = {"user": "<user>", "host": "<host>", "vm": "<vm>", "wifi": "<wifi>",
 NOUNS = {"user": "user name", "host": "host name", "vm": "VM name", "wifi": "Wi-Fi name",
          "bt": "Bluetooth device", "secret": "secret", "home": "home folder", "ip": "address",
          "hw": "hardware address", "email": "e-mail address", "key": "key", "uuid": "ID",
-         "serial": "serial number"}
+         "serial": "serial number", "audio": "audio device", "camera": "camera"}
 
 
 class RedactionFailed(Exception):
@@ -62,32 +64,51 @@ class Known:
         lst = getattr(self, kind)
         for v in values:
             v = norm(str(v or "")).strip()
-            # Product words are no one's personal data: a VM named "Omarchy"
-            # with host name "omarchy" must not turn "Omarchy 4.0.3" into "<vm> 4.0.3".
-            if kind != "secret" and kind != "home" and (product_only(v) or common_only(v)):
+            if kind not in ("secret", "home"):
+                # Product words are no one's personal data: a VM named "Omarchy"
+                # with host name "omarchy" must not turn "Omarchy 4.0.3" into "<vm> 4.0.3".
+                # Nor is an account called "user" or "admin".
+                if product_only(v) or (kind == "user" and v.casefold() in GENERIC_ACCOUNTS):
+                    continue
+            # The owner in a device or Mac name ("Zorro's AirPods", "Mac mini
+            # von Gilles", "AirPods von Max"): a person's name, also where it
+            # stands alone. Before the device-word test below: "AirPods von
+            # Max" is device and plain words alone, but Max is someone.
+            if kind in ("bt", "host") and re.search(r"\b" + DEVICE_WORDS, v, re.IGNORECASE):
+                for m in OWNER_AFTER.finditer(v):
+                    part = m.group(1) or m.group(2)
+                    if len(part) >= 2 and owner_word(part) and not self.has(part):
+                        self.user.append(part)
+            # Wi-Fi and Bluetooth names of device and plain words alone (a
+            # phone's hotspot "iPhone", "AirPods Pro") are nobody's name, and
+            # taking them out would take out every "iPhone" in the logs. So is
+            # a host or VM name like "MacBook-Pro". A user, first or full name
+            # always counts, even when it is a plain word ("Max", "Marshall").
+            if (kind in ("wifi", "bt") and common_only(v)) or \
+                    (kind in ("host", "vm") and common_only(v) and re.search(r"\b" + DEVICE_WORDS + r"\b", v, re.I)):
                 continue
             if len(v) >= 2 and not self.has(v):
                 lst.append(v)
-            # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann"),
-            # and the owner in a device or Mac name ("Zorro's AirPods",
-            # "Zorro's MacBook Pro": "Zorro", a person's name, also where it
-            # stands alone). Of a host name only its owner.
-            if kind in ("bt", "host") and re.search(r"\b" + DEVICE_WORDS, v, re.IGNORECASE):
-                # "Mac mini von Gilles", "iPhone de Jean-Luc", "MacBook-Pro-von-Dana"
-                for m in OWNER_AFTER.finditer(v):
-                    part = m.group(1) or m.group(2)
-                    if len(part) >= 2 and part.casefold() not in COMMON and not product_only(part) and not self.has(part):
-                        self.user.append(part)
+            # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann";
+            # the first one always, "Max Muster": "Max"). Of a host name only its owner.
             if kind in ("user", "bt", "host"):
-                for word in re.split(r"[\s_]+", v):
+                for i, word in enumerate(re.split(r"[\s_]+", v)):
                     owner = POSSESSIVE.match(word)
                     if kind == "host" and not owner:
                         continue
-                    part, k = (owner.group(1), "user") if owner else (word.strip("-"), kind)
                     if " " not in v and not owner:
                         continue   # a one-word value is in already
-                    if len(part) >= (2 if owner else 3) and part.casefold() not in COMMON and not product_only(part) \
-                            and not self.has(part):
+                    if owner:
+                        part, k = owner.group(1), "user"
+                        ok = len(part) >= 2 and owner_word(part)
+                    else:
+                        part, k = word.strip("-"), kind
+                        if kind == "user" and i == 0:
+                            ok = len(part) >= 2 and not product_only(part)
+                        else:
+                            ok = len(part) >= 3 and part.casefold() not in COMMON and part.casefold() not in PARTICLES \
+                                and not product_only(part)
+                    if ok and not self.has(part):
                         getattr(self, k).append(part)
 
     def has(self, v: str) -> bool:
@@ -111,6 +132,35 @@ COMMON = {"airpods", "pro", "max", "macbook", "magic", "keyboard", "mouse", "tra
           "centre", "center", "update", "helper", "helpers", "today", "everyone", "nobody", "someone",
           "desktop", "tools", "python", "textual", "swift", "mesa", "virgl", "metal", "venus", "apps", "app"}
 
+# Plain words that are first names too: an owner when written with a capital
+# ("Max's iPhone", "AirPods von Max"), a user name always.
+NAME_LIKE = {"max", "marshall"}
+# Accounts nobody is named after.
+GENERIC_ACCOUNTS = {"user", "admin", "administrator", "guest", "test", "tester", "demo", "default", "vagrant", "nobody"}
+# Name particles: not a name on their own ("Ludwig van Beethoven", "Ana de la Cruz").
+PARTICLES = {"de", "da", "di", "du", "do", "del", "della", "des", "la", "le", "los", "las", "zu", "zur", "y", "e",
+             "af", "av", "fra", "ten", "ter", "den", "dos", "das", "el", "bin", "ibn", "al", "van", "von", "der"}
+# Not an owner in "<Word>'s <Word>": contractions ("What's New", "Let's
+# Encrypt") and the apps Omarchy and OmacVM work with ("Chromium's GPU
+# process", "Waybar's Clock").
+NOT_OWNERS = {"what", "let", "there", "here", "it", "he", "she", "who", "where", "how", "when", "why", "one",
+              "yesterday", "tomorrow", "world", "chromium", "chrome", "google", "firefox", "waybar", "walker",
+              "alacritty", "ghostty", "kitty", "neovim", "nvim", "vim", "mako", "swayosd", "hyprlock", "hypridle",
+              "hyprpaper", "hyprsunset", "swaybg", "btop", "lazygit", "lazydocker", "spotify", "obsidian", "signal",
+              "typora", "docker", "pipewire", "wireplumber", "systemd", "nautilus", "localsend", "xournalpp",
+              "basecamp", "elephant", "uwsm", "sddm", "plymouth", "limine", "snapper", "pacman", "github", "gnome",
+              "gtk", "mpv", "imv", "libreoffice", "zoom", "discord", "whatsapp", "claude", "cursor", "omanotch",
+              "impala", "bluetui", "wiremix", "fastfetch", "chatgpt", "dropbox", "safari", "finder", "xcode",
+              "electron", "vulkan", "kosmickrisp", "moltenvk", "blender", "steam", "spice", "virtio", "ssh"}
+
+
+def owner_word(w: str) -> bool:
+    """W can be an owner's name in a device name: not a plain or product
+    word, except the plain words that are names too, with a capital."""
+    if w.casefold() in NAME_LIKE and w[:1].isupper():
+        return True
+    return w.casefold() not in COMMON and not product_only(w)
+
 
 # Names of the products OmacVM works with, and the defaults they come with
 # (Arch Linux ARM's host name "alarm", Omarchy's "omarchy"): a value made of
@@ -129,9 +179,12 @@ def common_only(v: str) -> bool:
     """True when V is device and plain words alone ("iPhone", "AirPods Pro",
     a phone's hotspot): nobody's name, and taking it out everywhere would
     take out every "iPhone" in the logs."""
-    words = [w for w in re.split(r"[^\w-]+", v) if w]
-    return bool(words) and all(w.casefold() in COMMON or product_only(w) or re.fullmatch(DEVICE_WORDS, w, re.I)
-                               or re.fullmatch(r"\d{1,2}", w) for w in words)
+    def plain(w: str) -> bool:
+        return (w.casefold() in COMMON or product_only(w) or re.fullmatch(DEVICE_WORDS, w, re.I) is not None
+                or re.fullmatch(r"\d{1,2}", w) is not None)
+    words = [w for w in re.split(r"[^\w-]+", v) if w.strip("-")]
+    # "Wi-Fi" as one word, "MacBook-Pro" as its parts.
+    return bool(words) and all(plain(w) or all(plain(p) for p in w.split("-") if p) for w in words)
 
 
 # A name with "'s" ("Zorro's", after norm() made every apostrophe plain).
@@ -176,16 +229,58 @@ def variants(v: str) -> list:
     return out
 
 
-def _value_re(v: str) -> re.Pattern:
-    """Short values (< 4) only as whole words: "pi" must not eat "pipewire".
-    Never inside a label already put in ("User" in "<user>")."""
-    e = re.escape(v)
-    if len(v) < 4:
-        e = r"(?<![A-Za-z0-9])" + e + r"(?![A-Za-z0-9])"
-    return re.compile(r"(?<!<)" + e + r"(?![\w-]*>)", re.IGNORECASE)
+def edges(kind: str, v: str) -> tuple:
+    """Values matched as whole words only: short ones ("pi" must not eat
+    "pipewire"), plain words, and Wi-Fi names, which are often plain words:
+    a Wi-Fi called "Light" must not turn "backlight" or "keyboard-light"
+    into "back<wifi>". ("", "") for the rest: matched anywhere."""
+    if kind == "wifi":
+        return r"(?<![^\W_])(?<!-)", r"(?![^\W_])(?!-)"
+    if len(v) < 4 or common_only(v):
+        return r"(?<![^\W_])", r"(?![^\W_])"   # no letter or digit next to it
+    return "", ""
 
 
-LABEL = re.compile(r"<[a-z][a-z0-9-]*>")
+def _value_re(v: str, kind: str = "user") -> re.Pattern:
+    left, right = edges(kind, v)
+    return re.compile(left + re.escape(v) + right, re.IGNORECASE)
+
+
+# The labels redact() puts in: never matched by a known value ("User" in
+# "<user>"), and the gate looks past them. Anything else in angle brackets
+# ("<dana>") is text like any other.
+LABEL = re.compile(r"<(?:user|host|vm|wifi|bt-device|audio-device|camera|secret|key|ssh-key|email|serial|uuid|hw-addr"
+                   r"|ip-\d+|ip6-\d+|mac-parallels|mac-utm|mac-app)>")
+
+
+def outside_labels(text: str, fn) -> str:
+    """FN applied to the text between the labels put in."""
+    parts = LABEL.split(text)
+    marks = LABEL.findall(text)
+    out = [fn(parts[0])]
+    for mark, part in zip(marks, parts[1:]):
+        out += [mark, fn(part)]
+    return "".join(out)
+
+
+# Product names with a plain word that may also be someone's name ("Apple M4
+# Max", "AirPods Max"): kept apart while the known values go, so a user called
+# Max does not turn the chip into "M4 <user>".
+PRODUCT_NAMES = re.compile(r"\b(?:Apple )?M[1-9]\d?(?: (?:Pro|Max|Ultra))\b|\bAirPods Max\b"
+                           r"|\biPhone(?: \d{1,2})? Pro Max\b|\bMarshall (?:Major|Minor|Motif|Monitor|Acton|Stanmore"
+                           r"|Woburn|Emberton|Middleton|Willen|Tufton)\b")
+
+
+# "key: none", "token: (null)", "Using key: /path/to/key": no secret in them.
+NO_VALUE = {"", "none", "null", "(null)", "nil", "<null>", "true", "false", "yes", "no", "unset", "missing", "set",
+            "n/a", "-", "empty", "absent", "present", "ok", "on", "off", "default", "required", "not"}
+
+
+def not_a_secret(name: str, v: str) -> bool:
+    if v.casefold() in NO_VALUE:
+        return True
+    # A key's file, not the key ("key: /home/x/.ssh/id_ed25519"; homes go apart).
+    return name.casefold().endswith("key") and re.fullmatch(r"(?:~|\.{0,2})/[\w./~-]*", v) is not None
 
 
 PATTERNS = [
@@ -195,13 +290,16 @@ PATTERNS = [
     ("secret", re.compile(r"(?i)\b(Bearer)\s+[^\s\"']+"), r"\1 <secret>"),
     # GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_).
     ("secret", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"), "<secret>"),
+    # Anthropic, Slack, AWS and GitLab tokens.
+    ("secret", re.compile(r"\b(?:sk-ant-[A-Za-z0-9_-]{20,}|xox[abeoprs]-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}"
+                          r"|glpat-[A-Za-z0-9_-]{20,})"), "<secret>"),
     # name = value, name: value, "name": "value", 'name': 'value' (YAML, INI,
     # JSON, Python), also with escaped quotes (\"value\" in a logged command
     # line): the value goes, quoted (also with spaces) or not.
     ("secret", re.compile(r"""(?i)\b(?P<name>(?:[a-z0-9]*[_-])*(?:token|password|passwd|pass|pwd|passphrase|secret|psk|api_?key|key|credentials?))"""
                           r"""(?P<sep>\\*["']?\s*[=:]\s*)(?:(?P<q>\\*["'])(?P<v>[^\n]*?)(?P=q)|(?P<bare>(?!<)(?!\\*["'])[^\s"',;}\\]+))"""),
-     lambda m: m.group(0) if m.group("v") == "<secret>" else
-     m.group("name") + m.group("sep") + (m.group("q") or "") + "<secret>" + (m.group("q") or "")),
+     lambda m: m.group(0) if m.group("v") == "<secret>" or not_a_secret(m.group("name"), m.group("v") if m.group("v") is not None else m.group("bare") or "")
+     else m.group("name") + m.group("sep") + (m.group("q") or "") + "<secret>" + (m.group("q") or "")),
     # Basic auth: base64 that does not look like a word ("Basic setup" stays).
     ("secret", re.compile(r"\b((?i:Basic))\s+((?=[A-Za-z0-9+/]*(?:[0-9+/=]|[A-Z][a-z]*[A-Z]))[A-Za-z0-9+/]{6,}={0,2})"),
      r"\1 <secret>"),
@@ -243,7 +341,7 @@ POSSESSIVE_ANY = re.compile(r"(?<![\w<'])([^\W\d_][\w.-]*?)'s?(?=[ \t]+(?:[^\W\d
 # The same without the apostrophe ("Annas iPhone", Nordic and German style):
 # only before a personal device.
 GENITIVE_S = re.compile(r"(?<![\w<'])([^\W\d_][^\W\d_]+?)s(?=[ \t]+(?:AirPods|iPhone|iPad|MacBook|iMac|Apple Watch"
-                        r"|Watch|HomePod|AirTag|Galaxy|Pixel|Buds|Headphones)\b)")
+                        r"|Watch|HomePod|AirTag|Galaxy|Pixel|Buds|Headphones|Omarchy)\b)")
 HOST_OWNER = re.compile(r"(?<![\w<-])([A-Z][^\W\d_]+?)s?(?=-(?:MacBook|iMac|Mac-mini|Mac-Studio|Mac-Pro|iPhone|iPad)\b)")
 # macOS in other languages names a device after its owner the other way round:
 # "AirPods von Dana", "iPhone de Jean-Luc", "AirPods di Marco", "iPad van Jan",
@@ -253,8 +351,14 @@ PREPS = r"(?:von|vom|van|de|di|du|da|do|del|della|des|af|av|fra)"
 # there the name must start with a capital.
 PREPS_CAPITAL = {"de", "da", "do"}
 NAME = r"[^\W\d_][\w'-]*"
-OWNER_SPACED = re.compile(r"\b(" + DEVICE_WORDS + r"(?:[ \t]+(?!" + PREPS + r"[ \t])[\w().+]+){0,3}?)[ \t]+(" + PREPS +
-                          r")[ \t]+(" + NAME + r")(?:[ \t]+(" + NAME + r"))?", re.IGNORECASE)
+# A VM is named the same way ("Omarchy von Dana").
+OWNED = r"(?:" + DEVICE_WORDS + r"|Omarchy|OmacVM)"
+OWNER_SPACED = re.compile(r"\b(" + OWNED + r"(?:[ \t]+(?!" + PREPS + r"[ \t])[\w().+]+){0,3}?)[ \t]+(" + PREPS +
+                          r")[ \t]+(" + NAME + r")(?:[ \t]+(" + NAME + r"))?(?:[ \t]+(" + NAME + r"))?", re.IGNORECASE)
+# The owner in brackets after a device ("iPhone (Dana)", "AirPods Pro (Dana Keller)").
+CAP_NAME = r"[A-Z][^\W\d_A-Z]+(?:['-][^\W\d_]+)*"   # "Dana", "Jean-Luc"; not "USB"
+OWNER_BRACKETS = re.compile(r"\b(" + DEVICE_WORDS + r"(?:[ \t]+[\w.+-]+){0,3}?[ \t]*\()(" + CAP_NAME + r"(?:[ \t]+" + CAP_NAME +
+                            r"){0,2})(\))")
 OWNER_HYPHEN = re.compile(r"\b(" + DEVICE_WORDS + r"(?:-(?!" + PREPS + r"-)[A-Za-z0-9]+){0,3}?)-(" + PREPS +
                           r")-([^\W\d_][\w-]*)", re.IGNORECASE)
 OWNER_ELIDED = re.compile(r"\b(" + DEVICE_WORDS + r"(?:[ \t]+[\w().+]+){0,3}?)[ \t]+d'(" + NAME + r")", re.IGNORECASE)
@@ -266,8 +370,10 @@ def device_owners(text: str) -> tuple[str, int]:
     n = 0
 
     def plain(w: str) -> bool:
-        return (w.casefold() in COMMON or (w + "s").casefold() in COMMON or product_only(w)
-                or product_only(w + "s"))
+        if w.casefold() in NAME_LIKE and w[:1].isupper():
+            return False   # "AirPods von Max", "Max's iPhone"
+        return (w.casefold() in COMMON or (w + "s").casefold() in COMMON or w.casefold() in NOT_OWNERS
+                or product_only(w) or product_only(w + "s"))
 
     def owner(m: re.Match) -> str:
         nonlocal n
@@ -282,16 +388,25 @@ def device_owners(text: str) -> tuple[str, int]:
 
     def after(m: re.Match) -> str:
         nonlocal n
-        dev, prep, name = m.group(1), m.group(2), m.group(3)
-        second = m.group(4) if m.lastindex and m.lastindex >= 4 else None
+        prep, name = m.group(2), m.group(3)
         if plain(name) or (prep.casefold() in PREPS_CAPITAL and not name[0].isupper()):
             return m.group(0)
         n += 1
-        out = m.group(0)[:m.start(3) - m.start(0)] + "<user>"
-        # A second name ("von Anna Maria"), when it is one.
-        if second and second[0].isupper() and not plain(second) and not re.fullmatch(DEVICE_WORDS, second, re.I):
-            return out
-        return out + m.group(0)[m.end(3) - m.start(0):]
+        end = 3
+        # A second and third name ("von Anna Maria", "von Hans Peter Müller"), when they are names.
+        for g in range(4, (m.re.groups or 3) + 1):
+            more = m.group(g)
+            if not more or not more[0].isupper() or plain(more) or re.fullmatch(DEVICE_WORDS, more, re.I):
+                break
+            end = g
+        return m.group(0)[:m.start(3) - m.start(0)] + "<user>" + m.group(0)[m.end(end) - m.start(0):]
+
+    def brackets(m: re.Match) -> str:
+        nonlocal n
+        if any(plain(w) for w in m.group(2).split()) or re.search(DEVICE_WORDS, m.group(2), re.I):
+            return m.group(0)
+        n += 1
+        return m.group(1) + "<user>" + m.group(3)
 
     def elided(m: re.Match) -> str:
         nonlocal n
@@ -302,6 +417,7 @@ def device_owners(text: str) -> tuple[str, int]:
     text = OWNER_HYPHEN.sub(after, text)
     text = OWNER_SPACED.sub(after, text)
     text = OWNER_ELIDED.sub(elided, text)
+    text = OWNER_BRACKETS.sub(brackets, text)
     text = DEVICE_OWNER.sub(owner, text)
     text = POSSESSIVE_ANY.sub(capital_owner, text)
     text = GENITIVE_S.sub(capital_owner, text)
@@ -319,6 +435,17 @@ BRIDGE_BT_ACTION = re.compile(r"(/bluetooth/(?:connect|disconnect|forget) from \
 BRIDGE_BT_SAID = (("connected ", ""), ("disconnected ", ""), ("forgot ", ""), ("", " already connected"),
                   ("", " not connected"), ("", " did not connect (is it on and in range?)"), ("", " did not disconnect"))
 BRIDGE_VM = re.compile(r"(\bcontrol: \S+ \S+ from \S+ \()(?!-\))(?!<vm>\))([^\n]+?)(\): \d{3}\b)")
+# audio: output=<name> (<transport>) vol=0.5 muted=0 input=<name> (...) ...
+BRIDGE_AUDIO = re.compile(r"(\b(?:output|input)=)(?!-(?:[ \t]|$))(?!<audio-device> \()([^\n]+?)( \([\w -]+\) vol=)")
+# camera: on (<name>), camera: back: <name>
+BRIDGE_CAMERA = re.compile(r"(\bcamera: (?:on \(|back: ))(?!<camera>)([^\n]+?)(\)?[ \t]*$)", re.M)
+# Omanotch: guest 3 is VM "<name>", strip serves guest 3 ("<name>")
+OMANOTCH_VM = re.compile(r'(\bguest \d+ is VM "|\bstrip serves guest \d+ \(")((?:[^"\\\n]|\\.)+)(")')
+# The names macOS gives a Mac's own audio devices and cameras: kept.
+BUILT_IN = re.compile(r"(?:MacBook (?:Pro|Air) |Mac mini |iMac |Mac Studio |Studio Display |External |LG UltraFine Display )?"
+                      r"(?:Speakers|Microphone|Headphones|FaceTime HD Camera|Camera)(?: \(Built-in\))?|FaceTime HD Camera"
+                      r"|BlackHole \d+ch|Microsoft Teams Audio|ZoomAudioDevice|Multi-Output Device|Aggregate Device"
+                      r"|OmacVM test picture")
 
 
 def bridge_lines(text: str) -> tuple[str, dict]:
@@ -361,11 +488,26 @@ def bridge_lines(text: str) -> tuple[str, dict]:
     def password(m: re.Match) -> str:
         bump("wifi")
         return m.group(1) + "<wifi>" + m.group(3)
+
+    def device(kind: str, label: str):
+        def sub(m: re.Match) -> str:
+            if BUILT_IN.fullmatch(m.group(2).strip()):
+                return m.group(0)
+            bump(kind)
+            return m.group(1) + label + m.group(3)
+        return sub
+
+    def omanotch(m: re.Match) -> str:
+        bump("vm")
+        return m.group(1) + "<vm>" + m.group(3)
     text = BRIDGE_CONNECTED.sub(connected, text)
     text = BRIDGE_SSID.sub(ssid, text)
     text = BRIDGE_PASSWORD.sub(password, text)
     text = BRIDGE_BT_ACTION.sub(action, text)
     text = BRIDGE_VM.sub(vm, text)
+    text = BRIDGE_AUDIO.sub(device("audio", "<audio-device>"), text)
+    text = BRIDGE_CAMERA.sub(device("camera", "<camera>"), text)
+    text = OMANOTCH_VM.sub(omanotch, text)
     return text, counts
 
 
@@ -379,6 +521,7 @@ IPV4 = re.compile(r"(?<!\d)(?<!\d\.)((?:25[0-5]|2[0-4]\d|[01]?\d?\d)(?:\.(?:25[0
 IPV6 = re.compile(r"(?<![0-9A-Fa-f:])((?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,6}(?::[0-9A-Fa-f]{1,4}){1,6})(?![0-9A-Fa-f:])")
 HOMES = re.compile(r"(/Users|/home)/(?!<)[^/\s:'\"]+")
 TIME_LIKE = re.compile(r"^\d{1,2}(?::\d{2}){1,2}$")
+PCI = re.compile(r"[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}")
 
 
 def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str, dict]:
@@ -405,10 +548,18 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
     for kind, n in c.items():
         bump(kind, n)
     # 1. Known values, longest first over all kinds (a VM named after its user).
+    kept = PRODUCT_NAMES.findall(text)
+    text = PRODUCT_NAMES.sub(lambda m: "\ue000" + str(kept.index(m.group(0))) + "\ue001", text)
     for kind, v in sorted(known.items(), key=lambda kv: len(kv[1]), reverse=True):
         for w in variants(v):
-            text, n = _value_re(w).subn(LABELS[kind], text)
-            bump(kind, n)
+            rx = _value_re(w, kind)
+
+            def sub(t: str, rx=rx, kind=kind) -> str:
+                t, n = rx.subn(LABELS[kind], t)
+                bump(kind, n)
+                return t
+            text = outside_labels(text, sub)
+    text = re.sub("\ue000(\\d+)\ue001", lambda m: kept[int(m.group(1))], text)
     # 2. Patterns: device owners first, then the rest. (A known value that is
     # a device word alone, a phone's hotspot "iPhone", is not taken: it would
     # break up "iPhone-de-Jean-Luc" before this.)
@@ -444,6 +595,8 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
         a = m.group(1)
         if a in ("::1", "::") or TIME_LIKE.match(a) or a.count(":") < 2:
             return a
+        if PCI.fullmatch(a) and re.match(r"\.[0-7]\b", m.string[m.end():m.end() + 3]):
+            return a   # a PCI address, 0000:00:02.0
         if a not in seen:
             seen[a] = f"<ip6-{sum(1 for k in seen if ':' in k) + 1}>"
         bump("ip")
@@ -456,15 +609,14 @@ def gate(text: str, known: Known) -> None:
     """Refuse when any known value survived (normalised as norm(), case
     folded, also URL-encoded)."""
     import urllib.parse as up
-    t = LABEL.sub(" ", norm(text)).casefold()                      # the labels put in are no survivors
-    t2 = LABEL.sub(" ", norm(up.unquote_plus(text))).casefold()
+    def clean(t: str) -> str:   # the labels put in and product names are no survivors
+        return PRODUCT_NAMES.sub(" ", LABEL.sub(" ", norm(t))).casefold()
+    t, t2 = clean(text), clean(up.unquote_plus(text))
     for kind, v in known.items():
         w = norm(v).casefold()
         for x in (t, t2):
-            if len(w) < 4:
-                if re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", x):
-                    raise RedactionFailed(kind)
-            elif w in x:
+            left, right = edges(kind, v)
+            if re.search(left + re.escape(w) + right, x):
                 raise RedactionFailed(kind)
 
 

@@ -470,3 +470,157 @@ def test_device_word_as_a_known_value():
     out, _ = R.redact("MacBook-Pro-von-Dana.local; iPhone-de-Jean-Luc; my iPhone; Zuhause Dana", k)
     R.gate(out, k)
     assert "Dana" not in out and "Jean" not in out and "my iPhone" in out, out
+
+
+# ---- final review: names that are plain words, readable logs, more Bridge lines ----
+
+def test_a_user_called_max_is_taken_out():
+    """Max is a plain word (AirPods Max, M4 Max) and one of the most common
+    first names: as the user's name it is always a known value."""
+    k = R.Known()
+    k.add("user", "max", "Max Muster", "Max")
+    k.add("bt", "AirPods von Max", "AirPods Max")
+    assert [v.casefold() for v in k.user] == ["max", "max muster", "muster"] and k.bt == []
+    text = ("AirPods von Max connected; Max's iPhone; iPhone de Max; Hi Max; ssh max@10.211.55.5; "
+            "Max Muster wrote; MAX in capitals; chip Apple M4 Max; AirPods Max connected; iPhone 15 Pro Max")
+    out, counts = R.redact(text, k)
+    R.gate(out, k)
+    assert "Muster" not in out and "max@" not in out and "Hi Max" not in out and "von Max" not in out, out
+    assert "<user>'s iPhone" in out and "AirPods von <user>" in out and "Hi <user>" in out
+    assert "Apple M4 Max" in out and "AirPods Max connected" in out and "iPhone 15 Pro Max" in out, out
+
+
+def test_full_names_with_plain_words():
+    k = R.Known()
+    k.add("user", "marshall", "Marshall Swift", "Ludwig van Beethoven", "user")
+    names = [v.casefold() for v in k.user]
+    assert "marshall" in names and "swift" not in names and "van" not in names and "user" not in names, names
+    out, _ = R.redact("Marshall Swift and Marshall; Ludwig van Beethoven; Swift 6.2 builds; the user name", k)
+    R.gate(out, k)
+    assert "Marshall" not in out and "Ludwig" not in out and "Beethoven" not in out, out
+    assert "Swift 6.2 builds" in out and "the user name" in out
+
+
+def test_owner_named_like_a_plain_word_without_known_values():
+    for line, gone in [("AirPods von Max verbunden", "Max"), ("Max's iPhone", "Max"), ("iPhone de Max", "Max"),
+                       ("Marshall's Headphones", "Marshall")]:
+        out, _ = R.redact(line, R.Known())
+        assert gone not in out, out
+    for line in ("AirPods Max connected", "MacBook Pro M4 Max", "Marshall Major IV connected", "max 5 retries"):
+        assert R.redact(line, R.Known())[0] == line
+
+
+def test_known_host_and_vm_names_of_plain_words():
+    """A host or VM name like "MacBook-Pro" is no one's; one called "Max" or
+    "Work" is kept, as a whole word ("network" stays)."""
+    k = R.Known()
+    k.add("host", "MacBook-Pro", "max")
+    k.add("vm", "Work", "Mac mini")
+    assert k.host == ["max"] and k.vm == ["Work"]
+    out, _ = R.redact("VM Work on max; network up; homework; MacBook-Pro; Mac mini", k)
+    R.gate(out, k)
+    assert out == "VM <vm> on <host>; network up; homework; MacBook-Pro; Mac mini", out
+
+
+def test_wifi_names_only_as_whole_words():
+    k = R.Known()
+    k.add("wifi", "Light", "Garden", "ZorroNet 5G")
+    text = ("backlight on; keyboard-light 40%; nightlight; Light connected; ssid=Garden ch=1; gardener; "
+            "joined ZorroNet 5G; ZorroNet_5G")
+    out, _ = R.redact(text, k)
+    R.gate(out, k)
+    assert out.startswith("backlight on; keyboard-light 40%; nightlight; <wifi> connected; ssid=<wifi> ch=1; gardener; ")
+    assert "Zorro" not in out, out
+
+
+@pytest.mark.parametrize("line", [
+    "Chromium's GPU process crashed", "Firefox's WebGL is off", "Walker's Menu", "Waybar's Clock", "What's New",
+    "Let's Encrypt", "There's A problem", "It's Fine", "Here's What", "Hyprlock's Fingerprint", "Docker's Network",
+])
+def test_contractions_and_app_names_stay(line):
+    assert R.redact(line, R.Known())[0] == line
+
+
+@pytest.mark.parametrize("line", [
+    "virtio-gpu 0000:00:02.0: [drm] initialized", "pci 0000:00:1f.3 audio", "Using key: /etc/omacvm/key",
+    "key: none", "token: (null)", "password: not set", "api_key = false", "password: ''", 'token=""',
+])
+def test_pci_addresses_and_empty_keys_stay(line):
+    assert R.redact(line, R.Known())[0] == line
+
+
+def test_ipv6_still_goes():
+    out, _ = R.redact("peer fe80::1c2b:3dff:fe4e:5f60 and 2a02:1210:abcd::42 and abcd:12:34", R.Known())
+    assert "fe80" not in out and "2a02" not in out and "abcd" not in out, out
+
+
+BRIDGE_MORE = """\
+2026-10-05 07:01:02 omacvm-bridge: audio: output=Kopfhörer von Jürgen (bluetooth) vol=0.5 muted=0 input=MacBook Pro Microphone (built-in) vol=0.8 muted=0 devices=4
+2026-10-05 07:01:03 omacvm-bridge: audio: output=MacBook Pro Speakers (built-in) vol=0.5 muted=0 input=Danas Mikro (2) (usb) vol=1.0 muted=1 devices=3
+2026-10-05 07:01:04 omacvm-bridge: audio: output=- input=- devices=0
+2026-10-05 07:01:05 omacvm-bridge: camera: on (iPhone-Kamera von Dana)
+2026-10-05 07:01:06 omacvm-bridge: camera: back: Danas Webcam
+2026-10-05 07:01:07 omacvm-bridge: camera: on (FaceTime HD Camera)
+2026-10-05 07:01:08 omacvm-bridge: camera: off (no VM reads it)
+2026-10-05 07:01:09 omanotch: guest 3 is VM "Danas Omarchy"
+2026-10-05 07:01:10 omanotch: strip serves guest 3 ("Zoés Linux"), was guest 2
+2026-10-05 07:01:11 omanotch: guest 4 is VM (name not readable)
+"""
+
+
+def test_bridge_audio_camera_and_omanotch_lines_go_whole():
+    out, counts = R.redact(BRIDGE_MORE, R.Known())
+    for gone in ("Jürgen", "Kopfhörer", "Danas", "Mikro", "Dana", "Webcam", "Zoé"):
+        assert gone not in out, (gone, out)
+    assert "output=<audio-device> (bluetooth) vol=0.5" in out
+    assert "input=MacBook Pro Microphone (built-in)" in out and "output=MacBook Pro Speakers (built-in)" in out
+    assert "input=<audio-device> (usb) vol=1.0" in out and "output=- input=- devices=0" in out
+    assert "camera: on (<camera>)" in out and "camera: back: <camera>" in out
+    assert "camera: on (FaceTime HD Camera)" in out and "camera: off (no VM reads it)" in out
+    assert 'guest 3 is VM "<vm>"' in out and 'strip serves guest 3 ("<vm>"), was guest 2' in out
+    assert "guest 4 is VM (name not readable)" in out
+    assert counts["audio"] == 2 and counts["camera"] == 2 and counts["vm"] == 2
+
+
+def test_known_names_in_angle_brackets():
+    k = R.Known()
+    k.add("user", "dana", "Dana Keller")
+    k.add("host", "dana-keller")
+    out, _ = R.redact("From: <dana>, host <dana-keller>, <Dana Keller>; label <user> stays", k)
+    R.gate(out, k)
+    assert "dana" not in out.lower() and "keller" not in out.lower() and "label <user> stays" in out, out
+    with pytest.raises(R.RedactionFailed):
+        R.gate("hello <dana>", k)
+
+
+@pytest.mark.parametrize("line,gone", [
+    ("iPhone (Dana) connected", "Dana"),
+    ("AirPods Pro (Dana Keller)", "Keller"),
+    ("Omarchy von Dana started", "Dana"),
+    ("VM Danas Omarchy", "Dana"),
+    ("AirPods von Hans Peter Müller", "Müller"),
+    ("Apple Watch von Anna Maria Rossi", "Rossi"),
+])
+def test_more_owner_forms(line, gone):
+    out, counts = R.redact(line, R.Known())
+    assert gone not in out and counts.get("user", 0) >= 1, out
+
+
+@pytest.mark.parametrize("line", [
+    "iPhone (USB) connected", "Magic Keyboard (Bluetooth)", "MacBook Pro (16-inch) M4 Max", "AirPods (2)",
+    "Omarchy von Apple", "iPhone (Pro Max)",
+])
+def test_brackets_that_are_no_owner_stay(line):
+    assert R.redact(line, R.Known())[0] == line
+
+
+# Put together here, so no token-shaped text sits in the repository.
+@pytest.mark.parametrize("token", [
+    "sk-" + "ant-api03-" + "Zz9fake" * 6,
+    "xo" + "xb-" + "0" * 10 + "-" + "fake-not-a-token",
+    "AK" + "IA" + "FAKE" * 4,
+    "gl" + "pat-" + "fake" * 5,
+])
+def test_more_token_forms(token):
+    out, counts = R.redact(f"export X={token[:4]}; using {token} now", R.Known())
+    assert token not in out and "using <secret> now" in out, out
