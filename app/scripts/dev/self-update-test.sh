@@ -23,7 +23,9 @@ PORT=${PORT:-18765}
 SIGN_ID=${OMACVM_SIGN_ID:?set OMACVM_SIGN_ID (a Developer ID of team 722686Y34B)}
 die() { echo "ERROR: $*" >&2; exit 1; }
 [[ ! -e $HOME/.omacvm-user-testing ]] || die "the user is testing (~/.omacvm-user-testing): no VMs on this Mac now"
-[[ $(defaults read "$SRC/Contents/Info" CFBundleIdentifier) == "$ID" ]] || die "$SRC is not a $ID test build"
+SRC=$(cd "$(dirname "$SRC")" && pwd)/$(basename "$SRC")
+[[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$SRC/Contents/Info.plist" 2>/dev/null) == "$ID" ]] ||
+  die "$SRC is not a $ID test build"
 mkdir -p "$WORK"; WORK=$(cd "$WORK" && pwd)
 [[ $WORK != /Applications* ]] || die "not in /Applications"
 
@@ -50,11 +52,19 @@ fingerprint() {
 }
 FP_BEFORE=$(fingerprint)
 
-cleanup() {
+# Swap scripts first (one waiting for a marker would bring an app back),
+# then every app and VM from WORK.
+stop_all() {
+  pkill -f "update-swap.sh .*$WORK/" 2>/dev/null
   pkill -f "$WORK/.*/Contents/" 2>/dev/null
+  sleep 1
+}
+cleanup() {
+  stop_all
   [[ -n ${SERVER:-} ]] && kill "$SERVER" 2>/dev/null
 }
 trap cleanup EXIT
+stop_all   # leftovers of an earlier run
 
 # ---- versions ----
 log "test versions"
@@ -108,7 +118,9 @@ ENV=(--env "OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json" --env
      --env "OMACVM_SETTINGS_DIR=$SETTINGS" --env OMACVM_COCOA_HIDDEN=1 --env OMACVM_UPDATE_WAIT=20)
 start_app() { open -n "${ENV[@]}" "$1" --args "${@:2}"; }
 launcher_pid() { pgrep -f "$1/Contents/MacOS/OmacVM" | head -1; }
-quit_app() { local p; p=$(launcher_pid "$1"); [[ -z $p ]] || { kill "$p"; sleep 1; }; }
+# A swap that is still on (waiting for the new app's answer) ends first.
+wait_swaps() { local i; for ((i = 0; i < 180; i++)); do pgrep -f "update-swap.sh .*$WORK/" >/dev/null || return 0; sleep 0.5; done; return 1; }
+quit_app() { local p; wait_swaps; p=$(launcher_pid "$1"); [[ -z $p ]] || { kill "$p"; sleep 1; }; }
 # PlistBuddy, not defaults: cfprefsd caches a plist it read by path.
 version() { /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$1/Contents/Info.plist" 2>/dev/null; }
 wait_for() {   # SECONDS CONDITION
@@ -178,6 +190,7 @@ check "after the VM stopped: 2.7.1 in place" 'wait_for 60 "[[ \$(version \"\$APP
 check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.0 2.7.1\" \"\$UPD/update.log\""'
 check "2.7.0 kept for one step back" '[[ $(version "$UPD/previous/$NAME.app") == 2.7.0 ]]'
 check "2.7.1 runs" 'wait_for 10 "[[ -n \$(launcher_pid \"\$APP\") ]]"'
+check "2.7.1 read the result (its window says it updated)" 'wait_for 10 "[[ ! -e \"\$UPD/result\" ]]"'
 check "installed app keeps the Developer ID" 'codesign --verify --deep --strict -R="$DEVID" "$APP" 2>/dev/null'
 quit_app "$APP"; logtail
 
@@ -233,6 +246,7 @@ check "renamed copy updated to 2.7.1" 'wait_for 90 "[[ \$(version \"\$REN\") == 
 check "it keeps its name" '[[ $(/usr/libexec/PlistBuddy -c "Print :CFBundleName" "$REN/Contents/Info.plist") == "Omarchy SU" ]]'
 check "its signature is valid" 'codesign --verify --deep --strict "$REN" 2>/dev/null'
 check "its QEMU keeps the Developer ID" 'codesign --verify -R="$DEVID" "$REN/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null'
+check "it started (no rollback)" 'wait_swaps && [[ $(version "$REN") == 2.7.1 ]] && [[ -n $(launcher_pid "$REN") ]]'
 quit_app "$REN"; logtail
 
 log "the installed OmacVM and the shared settings untouched"
