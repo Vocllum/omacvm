@@ -140,6 +140,12 @@ static CGEventRef key(int down, CGEventFlags f, int64_t state, int repeat) {
   return e;
 }
 
+// Runs the main queue until the combo's steps are all done (a slow CI
+// machine takes longer than this Mac), at most 5 s.
+static void settleSteps(void) {
+  for (int i = 0; i < 250 && (i < 2 || pendingSteps > 0); i++) CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.02, false);
+}
+
 // Press and release; 1 if both were eaten, 0 if both passed, -1 mixed. Runs
 // the main queue so the swipe, its check and the fallbacks happen.
 static int press(CGEventFlags f, int64_t state, int repeat) {
@@ -147,7 +153,7 @@ static int press(CGEventFlags f, int64_t state, int repeat) {
   CGEventRef d = key(1, f, state, repeat), u = key(0, f, state, 0);
   CGEventRef rd = tapCb(NULL, kCGEventKeyDown, d, NULL), ru = tapCb(NULL, kCGEventKeyUp, u, NULL);
   CFRelease(d); CFRelease(u);
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.15, false);
+  settleSteps();
   return !rd && !ru ? 1 : rd && ru ? 0 : -1;
 }
 
@@ -361,7 +367,7 @@ int main(void) {
   end(terminal); terminal = child(); owner[101] = terminal;   // the app from before has quit: Finder is next
   swipesIgnored = 1; unfs = 0;
   check(press(C|O|M, HID, 0) == 1 && swipes == 2 && wentTo == finder, "mini, nothing swipes: back to Finder (no window)");
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.15, false);
+  settleSteps();
   check(unfs == 1 && hidden == 1 && world[0].cur == 101 && front != vm,
         "... the VM's Space still showed: out of full screen and hidden, the user is out");
   swipesIgnored = 0;
@@ -376,7 +382,7 @@ int main(void) {
   front = vm; world[0].cur = 102; frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
   unfs = 0;
   check(press(C|O|M, HID, 0) == 1 && world[0].cur == 101, "a swipe that lands: out");
-  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+  settleSteps();
   check(!unfs && !hidden, "... and nothing more (no un-full-screen, no hiding)");
   sent(); settle(vm, NET_APP);
   front = vm; world[0].cur = 102; settle(vm, NET_APP); sent();
