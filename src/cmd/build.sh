@@ -207,8 +207,10 @@ elif (( BATTERY )) && ! feature_available "$i"; then (( JSON )) || info "${FTITL
 # ---------- build it here, or download a prebuilt VM ----------
 build_minutes() { case $TYPE in fusion) echo "45 to 85" ;; app) echo "10 to 30" ;; *) echo "30 to 70" ;; esac; }
 PB_OK=0
-# OmacVM.app has no prebuilt VMs: it builds its own.
-if [[ $SOURCE != build ]] && ! (( IMAGE )) && [[ $TYPE != app ]]; then
+# An older installed OmacVM.app has no script for images (omacvm update brings it).
+APP_OLD=0
+[[ $TYPE == app && -n ${APP:-} ]] && ! app_has_prebuilt "$APP" && APP_OLD=1
+if [[ $SOURCE != build ]] && ! (( IMAGE || APP_OLD )); then
   prebuilt_lookup "$TYPE" 2>/dev/null && PB_OK=1
 fi
 if [[ -z $SOURCE ]]; then
@@ -221,7 +223,11 @@ if [[ -z $SOURCE ]]; then
   fi
 elif [[ $SOURCE == prebuilt ]] && ! (( PB_OK )); then
   # No image for this app and OmacVM version (or no connection): build it here.
-  (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
+  if (( APP_OLD )); then
+    (( PLAN && JSON )) || info "OmacVM.app $(app_version "$APP") makes no VMs from prebuilt images (omacvm update updates it): building it here instead (about $(build_minutes) minutes)."
+  else
+    (( PLAN && JSON )) || info "No prebuilt $TYPE VM for OmacVM $(cut -d. -f1 < "$R/src/VERSION").x up to $(cat "$R/src/VERSION"): building it here instead (about $(build_minutes) minutes)."
+  fi
   SOURCE=build
 fi
 # OmacVM.app also takes at most 64 characters and no '..' (VMConfig.validName).
@@ -575,7 +581,7 @@ fi
 
 # From here on: numbered steps, and everything also into a log file.
 STEP=0; STEPS=$(case $TYPE in (parallels) (( IMAGE )) && echo 5 || echo 6 ;; (app) echo 2 ;; (*) echo 5 ;; esac)
-[[ $SOURCE == prebuilt ]] && STEPS=4
+[[ $SOURCE == prebuilt && $TYPE != app ]] && STEPS=4
 step() { STEP=$((STEP + 1)); ui_step "$STEP" "$STEPS" "$*"; }
 BUILD_LOG=~/Library/Logs/omacvm-build-$(date +%Y%m%d-%H%M%S).log
 mkdir -p "$HOME/Library/Logs"
@@ -600,14 +606,22 @@ started=$(date +%s)
 if [[ $TYPE == app ]]; then
 # ---------- OmacVM.app: its own create script, then omacvm apply ----------
 # The same script the app runs when you build in it (live installer, Arch
-# Linux ARM, Omarchy, OmacVM from the copy inside the app); it leaves the VM
-# shut down. Its STEP lines become ==> lines, curl's progress bar is dropped.
-step "OmacVM.app builds the VM (10-30 minutes, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+# Linux ARM, Omarchy, OmacVM from the copy inside the app), or with --prebuilt
+# the one that makes it from the image (download, first boot with a seed); it
+# leaves the VM shut down. Its STEP lines become ==> lines, curl's progress
+# bar is dropped.
+pb_arg=()
+if [[ $SOURCE == prebuilt ]]; then
+  pb_arg=(--prebuilt)
+  step "OmacVM.app makes the VM from the prebuilt image ($(pb_gb "$PB_SIZE") GB download, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+else
+  step "OmacVM.app builds the VM (10-30 minutes, its logs in $(sed "s|^$HOME|~|" <<<"$VM_DIR/$VM")/logs)"
+fi
 port=$(app_free_port) || die "no free port for the VM's SSH (52222-52421)"
 fv=""
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do fv+=" ${FEATS[$k]}=$(onoff "${FEATS[k+1]}")"; done
 # --no-mac: the app's own build leaves the Mac's helpers alone too.
-printf '%s\n' "$PW" | OMACVM_CREATE_NO_MAC=${NO_MAC:-0} app_create "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
+printf '%s\n' "$PW" | OMACVM_CREATE_NO_MAC=${NO_MAC:-0} app_create ${pb_arg[@]+"${pb_arg[@]}"} "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
   SSH_PORT="$port" VM_USER="$U" VM_FULLNAME="$FULL" VM_HOSTNAME="$HOST" VM_TZ="$TZ_MAC" VM_LANG="$LANG_VM" \
   KEYBOARD="$KB" FEATURES="${fv# }" 2>&1 |
   sed -l -e $'s/.*\r//' -e '/^#.*%$/d' -e '/^READY /d' -e 's|^STEP \([0-9]*/[0-9]*\) |==> \1 |' |
