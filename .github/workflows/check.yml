@@ -68,3 +68,6 @@ jobs:
 
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
+
+      - name: OmacVM.app notch switch (default on, choice kept, off without a notch)
+        run: src/tests/app-notch.sh

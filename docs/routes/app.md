@@ -46,8 +46,8 @@ OmacVM's version.
 - Quit, the window's close button, logging out and restarting the Mac shut
   Omarchy down cleanly first. The Mac's sleep pauses the VM; after waking,
   the VM's clock is set to the Mac's.
-- Full screen in its own Space, below the notch, like Parallels; Omanotch puts
-  Omarchy's bar into the strip beside the notch, as on the other routes.
+- Full screen, like Parallels; on a MacBook with a notch Omarchy's bar goes
+  beside the notch ("Use the notch for the menu bar", below).
 - Every Mac display in full screen: with an external display connected, full
   screen opens a window on each Mac display (each in its own Space) and
   Omarchy gets one output per display (Virtual-1 the main window, Virtual-2,
@@ -65,9 +65,12 @@ OmacVM's version.
   OmacVM Gestures, as on UTM: the app needs no Accessibility of its own.
   With the gestures feature off the VM does not talk to Gestures, so these
   shortcuts stay with macOS.
-- Optional notch-strip mode (a switch in the app): the window covers the
-  strip itself and Omarchy's bar moves there, but that full screen has no
-  Space of its own (macOS 15 keeps full-screen Spaces below the notch).
+- On a MacBook with a notch, "Use the notch for the menu bar" (on by
+  default): full screen covers the strip beside the notch too and Omarchy's
+  bar goes there, but that full screen has no Space of its own (macOS 15
+  keeps full-screen Spaces below the notch). Switched off, full screen is in
+  its own Space below the notch. The switch shows only while the Mac's
+  built-in display has a notch; elsewhere it is off.
 - Install under a name: OmacVM, Omarchy or your own; it shows in the Dock.
 - Clipboard both ways, text and images (try-omarchy's agent, over a virtio
   port, not the network).

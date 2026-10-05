@@ -29,6 +29,10 @@ in more words.
   the Cmd shortcuts and connected to the Mac's Gestures anyway; Cmd as Super
   there now comes with the gestures feature. `omacvm apply` stops the service
   in VMs that have gestures off.
+- OmacVM.app: "Use the notch for the menu bar" is on by default (Omarchy's
+  bar beside the notch in full screen). It shows only on a Mac whose
+  built-in display has a notch, checked again when displays change; if you
+  switched it off before, it stays off.
 
 ## 2.8.0
 

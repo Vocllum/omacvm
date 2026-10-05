@@ -15,8 +15,12 @@ final class AppState: ObservableObject {
     @Published var screen: Screen = .setup
     @Published var config: VMConfig
     @Published var message: String?
+    /// This Mac's built-in display has a notch right now (follows displays
+    /// being plugged in, the lid and resolution changes).
+    @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
     var startVM: () -> Void = {}
+    private var screensObserver: NSObjectProtocol?
 
     init() {
         if let existing = VMConfig.existing() {
@@ -37,6 +41,10 @@ final class AppState: ObservableObject {
         }
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
+        screensObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
+        }
     }
 
     /// What the window shows once the install question is answered.
@@ -282,8 +290,9 @@ struct ReadyView: View {
             }
             Toggle("Start in full screen", isOn: $fullScreen)
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
-            if Mac.hasNotch {
-                Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
+            if state.hasNotch {
+                Toggle("Use the notch for the menu bar", isOn: $notch)
+                    .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
             if let m = state.message { Text(m).foregroundStyle(.red) }
