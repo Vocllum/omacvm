@@ -120,8 +120,9 @@ log "system: SSH from the Mac, bootable snapshots, DNS fallback"
 # network) may still reach SSH.
 ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
 # OmacVM.app's fast network (vmnet): the Mac reaches SSH from 192.168.77.1
-# (only the Mac: other VMs on that network do not).
-if [[ ${F[fast-network]} == on ]]; then
+# (only the Mac: other VMs on that network do not). For every app VM, since
+# the app's own button can turn the fast network on without an apply.
+if [[ $TYPE == app ]]; then
   ufw allow from 192.168.77.1 to any port 22 proto tcp comment "omacvm: ssh from the Mac (fast network)" >/dev/null 2>&1 || true
 else
   ufw delete allow from 192.168.77.1 to any port 22 proto tcp >/dev/null 2>&1 || true

@@ -16,3 +16,16 @@ int main(void) { sleep(120); return 0; }' | xcrun clang -x c -o "$T/InternetShar
 "$T/InternetSharing" & FAKE=$!; disown "$FAKE"
 trap 'kill "$FAKE" 2>/dev/null; rm -rf "$T"' EXIT
 NETD_STATE=$T/state NETD_FAKE_SHARING=$FAKE "$T/test-netd" 2>"$T/log" || { cat "$T/log" >&2; exit 1; }
+
+# The app's button: install.sh's root script and its arguments reach /bin/sh
+# through osascript unchanged (here without the password dialog).
+eval "$(sed -n '/^shq() /p; /^root_cmd() /p' "$HERE/install.sh")"
+args=("$T/args" "it's" $'two\nlines' '$(id) `id` "q" \\ ;&|' "")
+cmd=$(root_cmd 'f=$1; shift; printf "[%s]\n" "$@" > "$f"' _ "${args[@]}")
+/usr/bin/osascript - "$cmd" <<'AS' >/dev/null
+on run argv
+  do shell script (item 1 of argv)
+end run
+AS
+[[ $(cat "$T/args") == "$(printf '[%s]\n' "${args[@]:1}")" ]] && echo "ok   password dialog path: the root script's arguments arrive unchanged" ||
+  { echo "FAIL password dialog path: got"; cat "$T/args"; exit 1; }

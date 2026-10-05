@@ -142,6 +142,10 @@ fi
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
 BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
+# OmacVM.app's fast network: its fast-network file is the switch (the app's
+# button and omacvm enable/disable both set it).
+FAST_NET=$(feat fast_network off)
+if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-network ]] && FAST_NET=on || FAST_NET=off; fi
 
 # OmacVM.app's fast network: the service on the Mac, and which network this
 # start of the VM took (the app writes it to logs/network).
@@ -153,7 +157,7 @@ netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, 
   return 0
 }
 if [[ $TYPE == app ]]; then
-  if [[ $(feat fast_network off) == on ]]; then
+  if [[ $FAST_NET == on ]]; then
     case $("$R/src/net/mac/install.sh" --status 2>/dev/null) in
       ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
       old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
@@ -335,6 +339,10 @@ else skip "Omanotch (Mac)" "not running (omacvm update)"; fi
 if [[ $TYPE == app && $(feat omanotch off) == on ]]; then
   rc=0; omanotch_serves_app || rc=$?
   (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old: it does not serve 127.0.0.1, so this VM's strip stays empty (omacvm update)"
+  if (( rc == 0 )) && [[ $FAST_NET == on ]]; then
+    rc=0; omanotch_serves_fast_network || rc=$?
+    (( rc != 1 )) || bad "Omanotch for OmacVM.app" "too old for the fast network: it does not listen on 192.168.77.1, so this VM's strip stays empty (omacvm update)"
+  fi
 fi
 if [[ $TYPE == app ]]; then
   # The app's own notch-strip mode (a switch in the app; Omanotch then leaves the strip alone).

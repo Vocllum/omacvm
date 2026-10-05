@@ -240,6 +240,9 @@ struct ReadyView: View {
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
     @State private var resourcesNote: String?
+    @State private var fastNetOn = false
+    @State private var fastNetBusy = false
+    @State private var fastNetNote: String?
 
     /// The create screen's tiers; resources set some other way show as Custom.
     private var tier: Binding<Int> {
@@ -286,6 +289,7 @@ struct ReadyView: View {
                 Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
+            fastNetwork
             if let m = state.message { Text(m).foregroundStyle(.red) }
             HStack {
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
@@ -293,6 +297,45 @@ struct ReadyView: View {
                 Spacer()
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
+            }
+        }
+        .onAppear { fastNetOn = FastNetwork.isOn(state.config) }
+    }
+
+    /// The fast network (experimental): a button, never automatic. Turning it
+    /// on installs a small system service, so macOS asks for the password once.
+    private var fastNetwork: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Fast network (experimental)")
+                Spacer()
+                if fastNetBusy { ProgressView().controlSize(.small) }
+                Button(fastNetOn ? "Turn Off…" : "Turn On…") { toggleFastNetwork() }
+                    .disabled(fastNetBusy)
+            }
+            Text(fastNetStatus).font(.caption).foregroundStyle(.secondary)
+            if let n = fastNetNote { Text(n).font(.caption).foregroundStyle(.red) }
+        }
+    }
+
+    private var fastNetStatus: String {
+        guard fastNetOn else {
+            return "Off: QEMU's own network. On: macOS's VM network (as Parallels and UTM), faster to and from the Mac; macOS asks for your password once."
+        }
+        if let why = FastNetwork.serviceProblem() { return "On, but \(why): Turn Off, then On again." }
+        return FastNetwork.lastRecord(state.config) == "vmnet" ? "On." : "On from the VM's next start."
+    }
+
+    private func toggleFastNetwork() {
+        let c = state.config, on = !fastNetOn
+        fastNetBusy = true
+        fastNetNote = nil
+        Task.detached {
+            let err = on ? FastNetwork.turnOn(c) : FastNetwork.turnOff(c)
+            await MainActor.run {
+                fastNetBusy = false
+                fastNetNote = err
+                fastNetOn = FastNetwork.isOn(c)
             }
         }
     }
