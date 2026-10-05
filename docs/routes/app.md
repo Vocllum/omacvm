@@ -16,7 +16,10 @@ OmacVM's version.
   [releases](https://github.com/gillesgoetsch/omacvm/releases) (signed with
   a Developer ID), unzip it and open it: it offers to install itself in
   Applications, keeping that signature (under another name it is signed
-  again ad hoc). Downloaded with a
+  again ad hoc). A newer download starts on the name and folder of the copy
+  you installed before, so Install replaces it in place. Run Without
+  Installing counts for that copy only: the next download asks again. Updates
+  (`omacvm update`) never ask. Downloaded with a
   browser, macOS blocks it the first time: click Open Anyway in System
   Settings › Privacy & Security.
 

@@ -46,6 +46,9 @@ jobs:
         working-directory: app/app
         run: swift build
 
+      - name: Install dialog defaults (previous copy, Run Without Installing)
+        run: src/tests/install-defaults.sh
+
       - name: Mac helpers build (Gestures, Bridge)
         run: |
           src/gestures/mac/build.sh
