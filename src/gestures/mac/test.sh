@@ -23,7 +23,11 @@
 #    and trackpad frames through the real callbacks).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-T=$(mktemp -d); trap 'kill ${PIDS:-} 2>/dev/null || true; rm -rf "$T"' EXIT
+T=$(mktemp -d)
+# A process and what it started (the guest runs python3 in a subshell).
+killtree() { local p; for p in "$@"; do pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true; done; }
+trap 'killtree ${PIDS:-}; rm -rf "$T"' EXIT
+trap 'exit 130' INT TERM
 clang -O1 -Wall -Wno-unused-function -o "$T/test-gestures" "$HERE/test-gestures.c" "$HERE/scroll_ns.m" \
   -F/System/Library/PrivateFrameworks -framework MultitouchSupport -framework ApplicationServices -framework Carbon \
   -framework CoreFoundation -framework AppKit
@@ -170,7 +174,7 @@ t0=$(date +%s)
 echo 10.0.2.2 > "$T/gw"   # the app moved the VM: its default gateway changed
 wait "$MAC" || true
 took=$(( $(date +%s) - t0 ))
-kill "$GUEST" 2>/dev/null; wait "$GUEST" 2>/dev/null || true
+killtree "$GUEST"; wait "$GUEST" 2>/dev/null || true
 expect "$T/guest3" "guest: connect 10.0.2.2"
 expect "$T/out2" "accepted 2"
 if (( took <= 4 )); then echo "ok   connected again ${took} s after the switch"; else echo "FAIL connected again only after ${took} s" >&2; fail=1; fi
