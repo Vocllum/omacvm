@@ -6,7 +6,7 @@
 #                    [--display WxH@Hz] [--feature NAME=on|off]... [--clock-format-b64 FMT]
 #                    [--vm-name-b64 NAME]   (or --vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, fast-network) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, fast-network, chromium-video) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -93,6 +93,8 @@ esac
 [[ $TYPE == parallels ]] && F[battery]=off
 # The fast network is OmacVM.app's (the other apps have vmnet themselves).
 [[ $TYPE == app ]] || F[fast-network]=off
+# Chromium's video through V4L2 needs OmacVM.app's VA-API decoding.
+[[ $TYPE == app ]] || F[chromium-video]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 if [[ $TYPE == fusion ]]; then trap '"$R/fusion/guest/dns.sh" off' EXIT; fi
@@ -206,8 +208,12 @@ case $TYPE in
     log "UTM";        "$R/utm/guest/install.sh" "$U" "$MODE" ;;
   app)
     log "OmacVM.app"; "$R/app/guest/install.sh" "$U"
-    log "Chromium video decoding"
-    "$R/vdec/guest/install.sh" "$U" on || log "Chromium video decoding: not set up (see above)" ;;
+    if [[ ${F[chromium-video]} == on ]]; then
+      log "Chromium video on the Mac's media engine"
+      "$R/vdec/guest/install.sh" "$U" on || log "Chromium video: not set up (see above)"
+    else
+      "$R/vdec/guest/install.sh" "$U" off || log "Chromium video: not removed (see above)"
+    fi ;;
   fusion)
     log "VMware Fusion"; "$R/fusion/guest/install.sh" "$U" "$MODE" ;;
 esac
