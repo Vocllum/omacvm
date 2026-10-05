@@ -19,9 +19,10 @@ block=$(awk '/^# Gestures off means the daemon is off/ {on = 1} on {print} on &&
 # macOS's bash 3.2 has no associative arrays: the feature as a plain variable.
 block=${block//'${F[gestures]}'/'$FG'}
 
-guest() {   # TYPE GESTURES SERVICE(enabled|active|none) -> what the block did
-  ( TYPE=$1 FG=$2 U=me R=/repo SERVICE=$3 CALLS=""
+guest() {   # TYPE GESTURES SERVICE(enabled|active|none) [ONLY] -> what the block did
+  ( TYPE=$1 FG=$2 U=me R=/repo SERVICE=$3 ONLY=${4:-} CALLS=""
     log() { :; }
+    want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }   # as in src/guest/install.sh (a repair of some features)
     systemctl() {
       case "$1 $2" in
         "is-enabled -q") [[ $SERVICE == enabled ]] ;;
@@ -38,6 +39,8 @@ for t in parallels utm fusion app; do
   expect "$t, gestures off: enabled daemon disabled and stopped" "systemctl disable --now omacvm-gestures" "$(guest $t off enabled)"
   expect "$t, gestures off: running daemon (not enabled) stopped" "systemctl disable --now omacvm-gestures" "$(guest $t off active)"
   expect "$t, gestures off, no daemon: nothing" "" "$(guest $t off none)"
+  expect "$t, repair of the Bridge only: gestures left alone" "" "$(guest $t off enabled ,bridge,)"
+  expect "$t, repair of scroll momentum: gestures off applied" "systemctl disable --now omacvm-gestures" "$(guest $t off enabled ,scroll-momentum,)"
 done
 
 # The Mac side of omacvm apply: Gestures and the token only for gestures on.
