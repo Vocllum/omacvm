@@ -63,7 +63,14 @@ enum Brightness {
   }
 
   static func get() -> Float? {
-    guard let getFn, let d = display else { return nil }
+    guard let d = display else { return nil }
+    return level(d)
+  }
+
+  /// Any display macOS dims itself (built-in, Apple's and LG UltraFine
+  /// displays); nil for the others (DDC/CI monitors).
+  static func level(_ d: CGDirectDisplayID) -> Float? {
+    guard let getFn else { return nil }
     var v: Float = 0
     return getFn(d, &v) == 0 ? v : nil
   }
@@ -219,6 +226,8 @@ final class MediaKeys {
   private let vmKeys = VMKeys()
   private var once = OnceLog()          // main thread
   private var permissions: String?      // main thread: the last "permissions:" line
+  private let brightnessKeys = BrightnessKeys()
+  private var brightnessOnce = BrightnessOnce()   // main thread
 
   var status: String {
     if !config.captureKeys { return "Media keys: off (macOS handles them)" }
@@ -237,6 +246,7 @@ final class MediaKeys {
   }
 
   func start() {
+    brightnessKeys.onKey = { [weak self] key in self?.keyboardBrightness(key) }
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
@@ -258,6 +268,7 @@ final class MediaKeys {
     let vm = isVM ? front?.processIdentifier : nil
     let again = rearm.front(vm)
     guard config.captureKeys else { return }
+    brightnessKeys.ensure()
     if let tap {
       if !CFMachPortIsValid(tap) { install(again: "macOS invalidated it") }
       else if again { install(again: "an OmacVM VM came to the front") }
@@ -274,9 +285,11 @@ final class MediaKeys {
 
   /// The new tap goes in before the old one is removed: no gap without one.
   /// A failed re-creation keeps the old tap and is logged once.
+  /// At the HID level: on macOS 27 (Mac mini, Magic Keyboard) the volume keys
+  /// never reach a session-level tap, only play/next/previous do.
   private func install(again why: String?) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
-    guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
+    guard let t = CGEvent.tapCreate(tap: .cghidEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
       // check() may create a new tap and invalidate this one: not from inside its own callback.
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { DispatchQueue.main.async { mediaKeys.check() } }
@@ -339,19 +352,17 @@ final class MediaKeys {
     return (vm, app.processIdentifier)
   }
 
-  /// Runs in the tap callback (main thread): true = swallow the event. Where
-  /// each key goes: MediaRoute (keys-model.swift).
-  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
-    guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
-          let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
-    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
-    guard var key = MediaKey(rawValue: code) else { return false }
+  /// The VM in front and its pid, the key after Shift (as in Omarchy: Shift +
+  /// brightness keys = keyboard backlight, a MacBook has no keys of its own
+  /// for it; Option + brightness keys = small steps) and where it goes
+  /// (MediaRoute, keys-model.swift). nil: no VM in front.
+  private func decide(_ pressed: MediaKey, _ flags: CGEventFlags)
+    -> (vm: FrontVM, pid: pid_t, key: MediaKey, route: KeyRoute, fine: Bool)? {
     let front = frontVM()
     vmInFront = front != nil
-    guard let (vm, pid) = front else { return false }   // no VM in front: macOS's keys
-    // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
-    // no keys of its own for it), Option + brightness keys = small steps.
-    let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
+    guard let (vm, pid) = front else { return nil }
+    var key = pressed
+    let shift = flags.contains(.maskShift), option = flags.contains(.maskAlternate)
     if shift && !option {
       if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
     }
@@ -363,6 +374,18 @@ final class MediaKeys {
                                  macBrightness: brightness ? Brightness.displayID : nil,
                                  external: .no("the Bridge sets only the display macOS dims itself here"),
                                  keyboardLight: [.keyboardUp, .keyboardDown, .keyboardToggle].contains(key) && KeyboardLight.get() != nil)
+    return (vm, pid, key, route, option)
+  }
+
+  /// Runs in the tap callback (main thread): true = swallow the event. Where
+  /// each key goes: MediaRoute (keys-model.swift).
+  func handle(_ type: CGEventType, _ event: CGEvent) -> Bool {
+    guard config.captureKeys, type.rawValue == 14, event.getIntegerValueField(.eventSourceUserData) != VMKeys.marker,
+          let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
+    let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
+    guard let pressed = MediaKey(rawValue: code) else { return false }
+    guard let d = decide(pressed, event.flags) else { return false }   // no VM in front: macOS's keys
+    let (vm, pid, key, route, option) = d
     switch route {
     case .macOS(let why):
       // Never swallowed without a word: macOS gets it, and the log says why once.
@@ -371,6 +394,9 @@ final class MediaKeys {
     case .external:
       return false   // no external display brightness in this Bridge
     case .mac:
+      // The same press read from the keyboard already acted (BrightnessKeys): swallowed only.
+      let brightness = pressed == .brightnessUp || pressed == .brightnessDown
+      if down, brightness, !brightnessOnce.take(.tap, pressed, at: ProcessInfo.processInfo.systemUptime) { return true }
       if down { work.async { self.apply(key, fine: option) } }   // key-up is swallowed too
     case .vm(let qcode):
       guard down else { return true }
@@ -381,6 +407,37 @@ final class MediaKeys {
       }
     }
     return true
+  }
+
+  /// A brightness key read from the keyboard (main thread). Only while an
+  /// OmacVM VM is in front, to the display the rule picks (MediaRoute);
+  /// anything else is macOS's, which handles these keys itself.
+  private func keyboardBrightness(_ pressed: MediaKey) {
+    guard config.captureKeys, let d = decide(pressed, CGEventSource.flagsState(.combinedSessionState)),
+          d.vm.omacvm else { return }
+    let (vm, _, key, route, fine) = d
+    let display: CGDirectDisplayID?
+    switch route {
+    case .macOS(let why):
+      if let why, once.first("keyboard \(key) \(vm.display) \(why)") { log("brightness key \(key) (from the keyboard): left to macOS: \(why)") }
+      return
+    case .vm, .external: return   // no external display brightness in this Bridge
+    case .mac: display = key == .keyboardUp || key == .keyboardDown ? nil : Brightness.displayID
+    }
+    guard brightnessOnce.take(.keyboard, pressed, at: ProcessInfo.processInfo.systemUptime) else { return }
+    if once.first("keyboard brightness") { log("brightness keys: read from the keyboard while an OmacVM VM is in front (macOS gives no key event for them)") }
+    let act = { [self] in work.async { self.apply(key, fine: fine) } }
+    // macOS may still handle the key itself (it reaches no tap, so it cannot be
+    // swallowed): a moment later, a display macOS dims that already changed is
+    // not stepped again.
+    guard let display, let before = Brightness.level(display) else { act(); return }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [self] in
+      if BrightnessOnce.macOSDidIt(before: before, after: Brightness.level(display)) {
+        if once.first("macOS brightness \(display)") { log("brightness key \(key): macOS changed display \(display) itself: not stepped again") }
+        return
+      }
+      act()
+    }
   }
 
   /// After a key went to the VM (main thread): the first one per VM is

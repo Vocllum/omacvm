@@ -69,6 +69,9 @@ jobs:
       - name: Bridge offline tests (media-key tap, where each media key goes, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
 
+      - name: Bridge brightness keys read from the keyboard (made-up keyboards)
+        run: src/bridge/mac/test-hid.sh
+
       - name: OmacVM.app's signed Mac helpers are used only for the same sources
         run: src/tests/prebuilt-helpers.sh
 
