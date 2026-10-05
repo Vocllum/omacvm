@@ -137,7 +137,7 @@ virgl_native_patch_sha256=692ed73cf88780b4c0e04c56e3cfb21cec761768dea909d755624e
 virgl_int_tex_patch_sha256=5336df08e7096fb0e4b977ebedf36aac29c6c053df7edbdea7ff5e45273f57e4
 virgl_videotoolbox_patch_sha256=12c0863d818a1b26da3be9c59220ee22ce55a037887297cd6dac53e62dbc37c3
 virgl_row_size_patch_sha256=c1994d82562625ba8211d1443423b23763b8932fbfe610a416ae6f556010da9f
-hidden_window_patch_sha256=21e1d8bf7c26c748266f9c4d6a3c1784bbc62f91d4cc189c2a04b9deb9b508b3
+hidden_window_patch_sha256=22d61f49590966a65f44cb5dd74e2e6254e80e6045f1686e5f379c617745d303
 virgl_skip_draws_patch_sha256=7611495f5afd94b016c9cd7126a457bfdcb13f60df46b5a754cb3d584a4002f1
 virgl_loss_report_patch_sha256=cfef9d4417fabb60cc559f970598fa7f7da069ff747ff652baddb922ca29905a
 virgl_test_fault_patch_sha256=4b09b62f5d1ac73ff056a93891ca4041cfe6ee0f93f7b6bbbcee0fb7b3c94728
@@ -320,9 +320,10 @@ remove_work_dir() {
 cleanup() {
   local exit_status=$?
   trap - EXIT HUP INT TERM
-  # OMACVM_RUNTIME_KEEP_WORK=1 keeps the sources and build trees (for
-  # rebuilding one library by hand while working on a patch).
-  if [[ -n $work_dir && ${OMACVM_RUNTIME_KEEP_WORK:-} == 1 ]]; then
+  # OMACVM_RUNTIME_KEEP_WORK=1 (or OMACVM_RUNTIME_KEEP_SCRATCH=1) keeps the
+  # sources and build trees (for rebuilding one library by hand while working
+  # on a patch: ninja in place).
+  if [[ -n $work_dir && ( ${OMACVM_RUNTIME_KEEP_WORK:-} == 1 || -n ${OMACVM_RUNTIME_KEEP_SCRATCH:-} ) ]]; then
     echo "[qemu-source-build] kept work dir: $work_dir" >&2
   else
     [[ -z $work_dir ]] || remove_work_dir "$work_dir" || true
@@ -393,6 +394,24 @@ verify_file_sha() {
     die "could not hash $label"
   [[ $actual == "$expected" ]] || \
     die "$label checksum mismatch: expected $expected, got $actual"
+}
+
+# Every patch file is pinned in patches/SHA256SUMS: a changed patch, or one
+# that is not listed, stops the build. After changing a patch on purpose:
+#   (cd patches && shasum -a 256 *.patch > SHA256SUMS)
+verify_patch_manifest() {
+  local manifest="$native_dir/patches/SHA256SUMS" expected name path
+  local listed=" "
+  [[ -f $manifest ]] || die "patches/SHA256SUMS is missing"
+  while read -r expected name; do
+    [[ -n $name ]] || continue
+    verify_file_sha "patch $name" "$native_dir/patches/$name" "$expected"
+    listed+="$name "
+  done < "$manifest"
+  for path in "$native_dir"/patches/*.patch; do
+    name=$(basename "$path")
+    [[ $listed == *" $name "* ]] || die "patch not pinned in patches/SHA256SUMS: $name"
+  done
 }
 
 validate_tar_root() {
@@ -469,6 +488,7 @@ validate_tar_root "libslirp source" "$slirp_archive" "$slirp_source_root" "$list
 validate_tar_root "Meson" "$meson_archive" "$meson_root" "$listing_dir/meson.txt"
 tar -xzf "$slirp_archive" -C "$source_parent"
 tar -xzf "$meson_archive" -C "$tool_root"
+verify_patch_manifest
 verify_file_sha "Darwin ICMP reply matching patch" "$slirp_patch" "$slirp_patch_sha256"
 patch -d "$source_parent/$slirp_source_root" -p1 -f -i "$slirp_patch"
 verify_file_sha "IPv4 UDP reply translation patch" "$udp_patch" "$udp_patch_sha256"
@@ -571,7 +591,8 @@ patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-modifiers-input
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-sdl-audio-capture-thread.patch"
 # OmacVM: a window per Mac display in full screen (Virtual-2, Virtual-3, ...).
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-displays.patch"
-# Test runs without a window (OMACVM_COCOA_HIDDEN=1); on top of the displays patch.
+# OmacVM tests: OMACVM_COCOA_HIDDEN=1 (no window), OMACVM_BACKGROUND=1 (window
+# behind, never the focus); after the display patch, which has its own test mode.
 verify_file_sha "Cocoa hidden-window patch" "$hidden_window_patch" "$hidden_window_patch_sha256"
 patch -d "$source_dir" -p1 -f -i "$hidden_window_patch"
 # OmacVM: outputs switched on or off together reach the guest (virtio-gpu).
@@ -613,6 +634,14 @@ verify_file_sha "QEMU virgl 2D resources as screens" \
 patch -d "$source_dir" -p1 -f -i "$virgl_2d_scanout_patch"
 grep -q 'args.bind = (1 << 1) | (1 << 18);' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
   die "virgl_cmd_create_resource_2d does not make 2D resources as screens"
+# OmacVM GPU (docs/architecture/graphics.md): fences reported by virglrenderer's
+# sync thread (no 1 ms polling); blobs on 16 KiB host pages, so Venus memory
+# maps into the guest; frames shown when the guest flushes, as IOSurfaces.
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-async-fence.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-virtio-gpu-blob-alignment.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-on-flush.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-cocoa-gl-present-iosurface.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/qemu-hvf-virgl-blob-subregion.patch"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"
@@ -809,6 +838,19 @@ if [[ ${OMACVM_RUNTIME_TEST_HOOKS:-} == 1 ]]; then
   verify_file_sha "Shader fault test hook" "$virgl_test_fault_patch" "$virgl_test_fault_patch_sha256"
   patch -d "$virgl_source" -p1 -f -i "$virgl_test_fault_patch"
 fi
+# OmacVM GPU: eventfd for the sync thread on macOS; Venus render server in process.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-thread-sync.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-fence-wait.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-in-process.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-fence-waiting-ctx.patch"
+# OmacVM GPU: fences are polled when the sync thread cannot start.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-thread-sync-fallback.patch"
+# OmacVM Venus: the Vulkan loader and driver come from the app's runtime.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-vulkan-beside.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-stream-sockets.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-heap-check.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-ext-table.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-host-pages.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -822,7 +864,7 @@ env MACOSX_DEPLOYMENT_TARGET="$macos_deployment_target" \
   LDFLAGS="-mmacosx-version-min=$macos_deployment_target -Wl,-headerpad_max_install_names" \
   python3 "$meson" setup "$virgl_build" "$virgl_source" \
     --prefix="$virgl_root" --libdir=lib --buildtype=debugoptimized -Db_ndebug=false --wrap-mode=nodownload \
-    -Ddrm-renderers=[] -Dvenus=true -Dtests=false -Dvideo=true -Dtracing=none
+    -Ddrm-renderers=[] -Dvenus=true -Drender-server-worker=thread -Dtests=false -Dvideo=true -Dtracing=none
 "$ninja" ${ninja_jobs[@]+"${ninja_jobs[@]}"} -C "$virgl_build"
 # These test the actual shader generator and blend-state transitions, without a VM.
 env DYLD_LIBRARY_PATH="$private_libraries" \

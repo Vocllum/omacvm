@@ -330,6 +330,14 @@ enum Mac {
 
 /// The launcher's own preferences.
 enum Settings {
+    /// The fence and frame path of 2.6.0 (fences polled every 1 ms, frames
+    /// drawn by a CAOpenGLLayer on QEMU's 30 ms refresh), if the faster one
+    /// ever misbehaves on a Mac. Everything else of the GPU stays as it is.
+    /// Hidden: defaults write org.omacvm.app gpuSafeMode -bool true
+    static var gpuSafeMode: Bool { UserDefaults.standard.bool(forKey: "gpuSafeMode") }
+    /// Vulkan in the VM (Venus on MoltenVK), experimental: the guest needs
+    /// Mesa 26.2.4 or newer. Hidden: defaults write org.omacvm.app venus -bool true
+    static var venus: Bool { UserDefaults.standard.bool(forKey: "venus") }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }

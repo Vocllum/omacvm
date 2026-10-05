@@ -47,7 +47,8 @@ final class Runner {
             "-device", "virtio-net-pci,netdev=net0,mac=52:54:00:12:34:56,romfile=",
             // One output per Mac display in full screen (Virtual-1 is the window;
             // QEMU's window code opens the others): the built-in and four more.
-            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=",
+            // Venus (Vulkan) needs blobs and a host memory window for them.
+            "-device", "virtio-gpu-gl-pci,max_outputs=\(Runner.maxOutputs),xres=1920,yres=1080,romfile=\(Settings.venus ? ",blob=true,venus=true,hostmem=4G" : "")",
             "-display", "cocoa,gl=on,show-cursor=\(guestPointer ? "off" : "on"),zoom-to-fit=on,full-screen=\(Settings.startFullScreen ? "on" : "off"),full-grab=on,immersive=on,swap-opt-cmd=off",
             "-device", "virtio-keyboard-pci,romfile=",
             "-device", "virtio-tablet-pci,romfile=",
@@ -121,6 +122,11 @@ final class Runner {
         }
         // QEMU's window code talks to the VM's display agent over this port.
         env["OMACVM_DISPLAY_SOCKET"] = c.displaySocket.path
+        if Settings.gpuSafeMode {
+            env["OMACVM_VIRGL_POLL_FENCES"] = "1"
+            env["OMACVM_GL_PRESENT"] = "layer"
+            env["OMACVM_GL_PRESENT_ON_TICK"] = "1"
+        }
         p.environment = env
         let logURL = c.folder.appendingPathComponent("logs/qemu.log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)

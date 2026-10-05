@@ -14,6 +14,8 @@ we found along the way. To set OmacVM up, start with the
 | [routes/utm.md](routes/utm.md) | Everything about the UTM route: why UTM 5, what to keep in mind |
 | [routes/vmware-fusion.md](routes/vmware-fusion.md) | Everything about the VMware Fusion route: what you need, what OmacVM does differently there, what works, fixes |
 | [routes/parallels.md](routes/parallels.md) | Everything about the Parallels route: editions, the Cmd setting, what Parallels does itself |
+| [architecture/graphics.md](architecture/graphics.md) | OmacVM.app's graphics and display stack: the chain, threads, fences, memory, settings, security, tests; what is shipped, built or planned |
+| [adr/](adr/) | Decision records for the graphics stack (IOSurface present, async fences, Venus, MoltenVK/KosmicKrisp, VideoToolbox, a window per display) |
 | [prebuilt.md](prebuilt.md) | Prebuilt VMs: using one, downloading one by hand, how they are made and checked, licences |
 | [benchmarks/README.md](benchmarks/README.md) | How we benchmark the routes against the Mac, step by step, and the results so far |
 | [troubleshooting.md](troubleshooting.md) | Common problems and what to do, then the non-obvious problems we hit, each as symptom, cause, fix and where in the code |
