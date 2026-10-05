@@ -70,14 +70,16 @@ VM is on:
   Bridge instead: "set the brightness of the display this output is on, 0 to
   100". The Bridge checks which display that is itself and only ever touches
   an external display with a VM window on it: the VM never reaches the
-  display's I2C bus.
+  display's I2C bus. Its writes go out at most every 250 ms (some displays
+  save the level on every write).
 - **What works where.** `omacvm check` lists each external display: DDC/CI,
   its own control (Apple displays), or why not. No DDC/CI: on some Macs'
   built-in HDMI ports (try USB-C or DisplayPort), through some docks, or when
   DDC/CI is switched off in the display's own menu.
 - **Off.** `omacvm disable external-brightness` takes it out of the VM and,
   through the Bridge's `config.json` (`external_brightness`), out of the
-  keys. The Bridge is one for all VMs, so the last `omacvm apply` decides.
+  keys. Off means no DDC/CI at all: the Bridge then does not even read the
+  displays. The Bridge is one for all VMs, so the last `omacvm apply` decides.
 
 ## macOS-native scroll momentum
 

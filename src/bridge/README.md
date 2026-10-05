@@ -140,8 +140,10 @@ The brightness of the external display a VM is on (feature
 `external-brightness`, `external-brightness.swift`): DDC/CI (VCP 0x10) over
 IOAVService on Apple Silicon, or DisplayServices for the displays macOS dims
 itself (Studio Display, Pro Display XDR). Which one works is found per display
-when the Bridge starts and after every display change; the built-in display
-is never set here.
+when the Bridge starts, after every display change and, for a display where
+nothing worked, again a minute later when it is asked (keys, the VM, `omacvm
+check`); the built-in display is never set here. With `external_brightness:
+false` the Bridge sends no DDC/CI at all, not even reads.
 
 `GET /display/external`: every external display and how its brightness is
 set (`ddc`, `apple`, or `none` with the reason), for `omacvm check`:
@@ -161,8 +163,11 @@ place matches; without, the display of the VM window in front (under the
 pointer when it covers several). Only an external display with a VM window
 on it: `404` when there is none, `409` for the built-in display, a display
 without DDC/CI or `external_brightness: false`, `503` when it does not answer.
-The VM only names its output and a level; it never reaches the I2C bus. A
-request shows no popup from here (Omarchy's command shows its own).
+The VM only names its output and a level; it never reaches the I2C bus, and
+its writes go out at most every 250 ms (the latest level). A request shows
+no popup from here (Omarchy's command shows its own). Off, `GET
+/display/external` answers `{"enabled": false, "displays": []}` without
+asking any display.
 
 In the VM, `/usr/local/bin/ddcutil` (`guest/omacvm-ddcutil`) answers the three
 calls Omarchy's `omarchy-brightness-display-ddc` makes (`detect`, `getvcp 10`,
@@ -325,7 +330,8 @@ With the VM in front on an external display, the display brightness keys
 set that display instead (see External displays): OmacVM.app's VMs also in a
 window, Parallels, UTM and Fusion in full screen; 16 steps (Option: 64),
 read from the display first, writes at most every 50 ms (the latest level),
-never waiting in the key path; the popup names the display. A display
+never waiting in the key path; Omarchy's popup shows the level (not the
+display's name). A display
 without DDC/CI keeps the keys as before (the Mac's built-in display, in full
 screen). `"external_brightness": false` in `config.json` switches it off.
 

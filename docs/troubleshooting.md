@@ -30,9 +30,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   in front on it (Parallels, UTM and Fusion: in full screen). `omacvm check`
   lists each external display: "not settable" means it does not take DDC/CI
   on this connection. Switch DDC/CI on in the display's own menu, or try
-  another port: some Macs' built-in HDMI ports and some docks pass no DDC/CI
-  (USB-C or DisplayPort usually do). A display that was asleep when the Bridge
-  looked is asked again after a minute or when displays change.
+  another port: some Macs' built-in HDMI ports (M1/M2 Mac mini) and some docks
+  pass no DDC/CI (USB-C or DisplayPort usually do). A display that was asleep
+  when the Bridge looked is asked again after a minute (by the keys, the VM
+  or `omacvm check`) or when displays change.
 - **"answers with another SSH host key"**: OmacVM remembers each VM's SSH key.
   After rebuilding or reinstalling the VM: `omacvm apply --vm NAME --reset-host-key`.
 - **Scrolling feels too fast or slow in one app**: Chromium-based apps get their

@@ -115,4 +115,12 @@ is "$(wc -l < "$T/requests")" "$n" "none of them reached the Bridge"
 rc=0; ddc --version >/dev/null 2>&1 || rc=$?
 is "$rc" 1 "other commands: the real ddcutil (none here: fails)"
 
+# 5. The popup for an external display (the Bridge's osd event, as for the
+#    brightness keys): Omarchy's brightness popup with the level; the display's
+#    name stays out (omarchy-osd shows an icon and a level).
+printf '#!/bin/bash\necho "$*" >> "%s/osd"\n' "$T" > "$T/bin/omarchy-osd"; chmod +x "$T/bin/omarchy-osd"
+( PATH="$T/bin:$PATH"; source "$R/src/bridge/guest/omacvm-bridge-osd"
+  show '{"type":"osd","kind":"brightness","value":44,"muted":false,"source":"keys","device":"Pi-X9"}' )
+is "$(cat "$T/osd" 2>/dev/null)" "-i brightness -p 44" "popup: Omarchy's brightness OSD with the level, no name"
+
 exit $fail
