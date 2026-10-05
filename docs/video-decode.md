@@ -2,9 +2,10 @@
 
 In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 (the media engine) instead of the VM's CPU. YouTube in 4K at 60 frames per
-second plays in Google Chrome with the VM's CPU nearly idle: 0.3 cores busy
-instead of 1.2 to 1.6 (single runs on a busy Mac, see [Numbers](#numbers)).
-Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
+second plays in Google Chrome and in Omarchy's own Chromium with the VM's CPU
+nearly idle: 0.3 to 0.4 cores busy instead of 1.0 to 1.6 (see
+[Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Firefox
+decodes in hardware too, but its VM stays at about 0.9 cores.
 
 ## What works
 
@@ -12,7 +13,7 @@ Firefox decodes in hardware too, but its VM stays at about 0.9 cores.
 |---|---|---|---|---|
 | H.264 | yes | patch tested, see below | no | no |
 | VP9 (YouTube) | yes | patch tested, see below | no | no |
-| AV1 (YouTube) | yes, Chromium-based browsers | – | no | no |
+| AV1 (YouTube) | yes: Google Chrome, Brave | – | no | no |
 | HEVC | yes: mpv, FFmpeg, GStreamer, Chrome | – | no | no |
 | 10-bit (VP9 profile 2, HEVC Main 10, AV1) | yes | – | no | no |
 
@@ -29,8 +30,11 @@ Browsers in an OmacVM.app VM:
   Firefox spends it is not measured yet.
 - **Brave** (Linux ARM, from Brave's `.deb`): like Chrome. YouTube 4K at
   60 fps in VP9 and AV1 (Brave 1.96).
-- **Chromium from Arch Linux ARM** (Omarchy's default browser): no. Arch Linux
-  ARM builds it without VA-API, so it always decodes on the CPU.
+- **Chromium from Arch Linux ARM** (Omarchy's default browser): H.264 and
+  VP9, YouTube included, through a V4L2 decoder that `omacvm apply` adds to
+  the VM ([below](#chromium-from-arch-linux-arm)); on YouTube a small
+  extension has it send VP9 instead of AV1. HEVC, AV1 and 10-bit stay on the
+  CPU.
 - **mpv, FFmpeg** (`--hwdec=vaapi`, `-hwaccel vaapi`) and **GStreamer**
   (`vah264dec`, `vah265dec`, `vavp9dec` from the `gst-plugin-va` package;
   Celluloid and other GStreamer players): H.264, VP9 and HEVC. 8-bit frames
@@ -109,6 +113,82 @@ Switches on the Mac (QEMU's environment): `OMACVM_VIDEO_DECODE=0` turns it
 off, `OMACVM_VIDEO_DEBUG=1` logs each stream and the time per frame,
 `OMACVM_VIDEO_AV1=1` offers AV1 (the app sets it for VMs whose `omacvm apply`
 put the shim in: the VM folder's `video-decode` file).
+
+## Chromium from Arch Linux ARM
+
+Arch Linux ARM builds Chromium without VA-API: its only hardware decoder is
+V4L2, Linux's video device interface. In OmacVM.app VMs `omacvm apply` adds
+such a device whose decoding is done by the VA-API path above
+([ADR 0025](adr/0025-chromium-video-through-v4l2.md) has the why):
+
+```
+Chromium ─V4L2─▶ /dev/videoN (omacvm-vdec module) ─▶ omacvm-vdecd
+                                                       │ FFmpeg, VA-API
+                                                       ▼
+                         Mac's media engine (as above: VideoToolbox)
+                                                       │ NV12 picture
+Chromium ◀─ its GPU buffer (ARGB) ◀─ GPU pass in omacvm-vdecd
+```
+
+- `omacvm-vdec` (`src/vdec/guest/module`) is a kernel module, built by DKMS
+  for every kernel that comes with its headers: a V4L2 stateful decoder that
+  does no decoding itself and hands each bitstream buffer to the daemon.
+- `omacvm-vdecd` decodes it with FFmpeg's VA-API decoder and writes the
+  picture into Chromium's buffer, converted to ARGB by the GPU. Those buffers
+  are GPU buffers the daemon allocates, so Chromium's compositor can show
+  them (ARGB is what Chromium shows from a decoder with OpenGL). The daemon
+  runs as its own user in a sandboxed service without network.
+- Chromium gets `AcceleratedVideoDecoder` (its V4L2 decoder, off by default
+  in builds without VA-API) and the extension in `~/.config/chromium-flags.conf`,
+  merged into Omarchy's last `--enable-features` and `--load-extension` (Chromium
+  takes only the last of each). The extension tells YouTube that AV1 is not
+  supported, so YouTube sends VP9: this Chromium decodes AV1 only on the CPU.
+- Check: `omacvm check` shows *video decoding in Chromium*, and
+  `chrome://media-internals` *V4L2VideoDecoder*.
+
+YouTube *Big Buck Bunny* at 60 fps, Arch Linux ARM's Chromium 153, 60
+seconds with `src/bench/video-bench.py` (`--quality hd1080` for 1080p), in a
+test VM (8 CPUs, 16 GB) on an M4 Max. CPU in cores busy:
+
+| | Codec | Dropped | VM's CPU | QEMU on the Mac |
+|---|---|---|---|---|
+| 4K, CPU decoding (before) | VP9 | 0.0 % | 1.03–1.11 | 1.44–1.62 |
+| 4K, Mac's media engine | VP9 | 0.0–0.6 % | 0.34–0.43 | 0.43–0.58 |
+| 1080p, CPU decoding (before: YouTube sent AV1) | AV1 | 0.0 % | 0.64–0.69 | 0.83–0.93 |
+| 1080p, CPU decoding | VP9 | 0.0 % | 0.57–0.71 | 0.80–1.03 |
+| 1080p, Mac's media engine | VP9 | 0.0 % | 0.35 | 0.42 |
+
+Ranges over 2 to 4 runs each, with the benchmark lock held (other test VMs
+on the Mac kept running). When those VMs kept the Mac's GPU busy, the media
+engine rows rose to about 0.6 cores in the VM and 0.9 for QEMU, with 1 to 7 %
+of the frames dropped; CPU decoding was not affected. So: in hardware, 4K
+takes a third of the CPU, and 1080p about half, but the hardware path shares
+the Mac's GPU with everything else. Google Chrome's VA-API path, for
+comparison: 0.33 and 0.45 at 4K (above).
+
+Switches: `OMACVM_VIDEO_DECODE=0` on the Mac turns it off with the rest (the
+daemon then finds no decoders and Chromium decodes on the CPU); in the VM
+`src/vdec/guest/install.sh USER off` takes it all out, the flags file
+included. `OMACVM_VDEC_DEBUG=1` in the service's environment logs every
+frame with its times. `src/vdec/guest/test/vdec-test FILE` checks the device
+against FFmpeg's software decoder (every picture, a seek, a drain, a size
+change).
+
+Limits:
+
+- **HEVC**: not offered. Chromium 153's V4L2 decoder for this kind of device
+  does not implement it (`OMACVM_VDEC_HEVC=1` offers it to other V4L2 apps).
+- **AV1**: not built into this Chromium. YouTube gets VP9 (the extension);
+  another site that sends AV1 plays on the CPU.
+- **10-bit** (VP9 profile 2): on the CPU; the pictures are 8-bit ARGB.
+- **Memory**: Chromium's buffers are pinned VM memory, about 33 MB each at
+  4K and 10 per video (8 MB each at 1080p).
+- **At most 8 videos** decode this way at once; more play on the CPU. One
+  daemon thread serves them in turn.
+- **If the daemon stops**, the video playing reports a decode error (reload
+  the page); systemd starts the daemon again within 2 seconds.
+- **A new kernel** without its headers in Arch Linux ARM's repository yet:
+  Chromium decodes on the CPU until `omacvm apply` finds them.
 
 ## Limits
 
