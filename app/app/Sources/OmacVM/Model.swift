@@ -348,6 +348,11 @@ enum Settings {
     /// module runs (omacvm-virtio-gpu-build in the VM, then a restart).
     /// Hidden: defaults write org.omacvm.app hdr -bool true
     static var hdr: Bool { UserDefaults.standard.bool(forKey: "hdr") }
+    /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
+    /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard.
+    /// Off: they all go to the VM then (only the escape combo is macOS's).
+    /// Hidden: defaults write org.omacvm.app macShortcuts -bool true
+    static var macShortcuts: Bool { UserDefaults.standard.bool(forKey: "macShortcuts") }
     /// HDR as the VM gets it: only while a display can show it.
     static var hdrActive: Bool { hdr && Mac.hasHDRDisplay }
     static var startFullScreen: Bool {

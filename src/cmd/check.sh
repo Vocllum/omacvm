@@ -294,6 +294,17 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
   esac
 fi
+# macOS's own shortcuts while an app VM has the keyboard (this run): to the
+# VM (switched off meanwhile), kept by the user's choice, or a fallback.
+if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
+  if grep -q 'macOS shortcuts stay with macOS' "$miclog"; then
+    skip "macOS shortcuts" "stay with macOS (defaults write org.omacvm.app macShortcuts -bool true)"
+  elif grep -q "macOS's switch for them was not found\|macOS shortcuts .*FAILED" "$miclog"; then
+    warn "macOS shortcuts" "some stay with macOS: macOS refused to switch them off (logs/qemu.log)"
+  elif grep -q 'macOS shortcuts off' "$miclog"; then
+    ok "macOS shortcuts" "go to the VM while it has the keyboard (⌃⌥⌘ Esc is macOS's)"
+  fi
+fi
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
