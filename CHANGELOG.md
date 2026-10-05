@@ -55,7 +55,8 @@ with the benchmark lock held.
   into the VM only in whole 16 KiB pages that belong to it. `omacvm check`
   names the Vulkan driver a VM uses.
 - KosmicKrisp, opt-in at build time: a runtime built with
-  `OMACVM_RUNTIME_KOSMICKRISP=1` (needs LLVM) also carries Mesa's Vulkan
+  `OMACVM_RUNTIME_KOSMICKRISP=1` (needs Xcode 26 and Homebrew's llvm,
+  spirv-llvm-translator and spirv-tools) also carries Mesa's Vulkan
   driver on Metal. On macOS 26 and newer Venus then runs on it (Vulkan 1.4,
   more features than MoltenVK); when it cannot start, Venus falls back to
   MoltenVK, says why in `qemu.log`, and `omacvm check` shows a warning. The
