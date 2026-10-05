@@ -109,3 +109,39 @@ def test_short_report_is_not_cut():
     rep = R.build([("Versions", "OmacVM 2.9.0")], R.Known(), "t")
     url, cut = R.issue_url(rep)
     assert not cut and url.startswith(R.ISSUES)
+
+
+def test_ipv4_at_the_end_of_a_sentence():
+    text, _ = R.redact("connect to 192.168.1.20. then peer 10.211.55.32. done (at 10.0.0.7.)", R.Known())
+    assert "192.168" not in text and "10.211" not in text and "10.0.0.7" not in text, text
+    assert text == "connect to <ip-1>. then peer <ip-2>. done (at <ip-3>.)"
+
+
+def test_dotted_versions_are_not_addresses():
+    for v in ("1.2.3.4.5", "kernel 6.12.10.1.2"):
+        assert R.redact(v, R.Known())[0] == v
+
+
+def test_product_words_are_not_personal():
+    k = R.Known()
+    k.add("vm", "Omarchy", "Omarchy ARM", "Zorro's Omarchy")
+    k.add("host", "omarchy", "alarm", "omarchy.local", "zorro-vm")
+    k.add("user", "root")
+    text, counts = R.redact("Omarchy 4.0.3 · /usr/share/omarchy/x · omarchy-menu · alarm clock · "
+                            "VM Zorro's Omarchy on zorro-vm", k)
+    assert text.startswith("Omarchy 4.0.3 · /usr/share/omarchy/x · omarchy-menu · alarm clock · "), text
+    assert "Zorro" not in text and "zorro-vm" not in text
+    assert counts.get("vm") == 1 and counts.get("host") == 1
+    R.gate(text, k)
+
+
+def test_mac_addresses_without_separators():
+    text, _ = R.redact("net0 001C42EE41A6 up; macaddr=a4b2c3d4e5f6; MAC address: A4B2C3D4E5F7; "
+                       "qemu 525400123456; cisco 001c.42ee.41a6", R.Known())
+    for v in ("001C42EE41A6", "a4b2c3d4e5f6", "A4B2C3D4E5F7", "525400123456", "001c.42ee.41a6"):
+        assert v.lower() not in text.lower(), (v, text)
+
+
+def test_short_commit_hashes_stay():
+    t = "OmacVM: the release (1b5c3f3a9e01) and 0123456789ab"
+    assert R.redact(t, R.Known())[0] == t

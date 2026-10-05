@@ -57,12 +57,16 @@ class Known:
         lst = getattr(self, kind)
         for v in values:
             v = norm(str(v or "")).strip()
+            # Product words are no one's personal data: a VM named "Omarchy"
+            # with host name "omarchy" must not turn "Omarchy 4.0.3" into "<vm> 4.0.3".
+            if kind != "secret" and kind != "home" and product_only(v):
+                continue
             if len(v) >= 2 and not self.has(v):
                 lst.append(v)
             # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann").
             if kind in ("user", "bt") and " " in v:
                 for part in v.replace("'s", " ").split():
-                    if len(part) >= 3 and part.lower() not in COMMON and not self.has(part):
+                    if len(part) >= 3 and part.lower() not in COMMON and not product_only(part) and not self.has(part):
                         lst.append(part)
 
     def has(self, v: str) -> bool:
@@ -77,6 +81,19 @@ class Known:
 # Words in device and person names that are not personal on their own.
 COMMON = {"airpods", "pro", "max", "macbook", "magic", "keyboard", "mouse", "trackpad", "iphone", "ipad",
           "the", "and", "von", "van", "der", "mini", "air", "studio", "imac", "headphones", "speaker"}
+
+
+# Names of the products OmacVM works with, and the defaults they come with
+# (Arch Linux ARM's host name "alarm", Omarchy's "omarchy"): a value made of
+# these words alone is not taken out.
+PRODUCT = {"omarchy", "omacvm", "parallels", "utm", "fusion", "vmware", "arch", "linux", "archlinux", "alarm",
+           "arm", "arm64", "aarch64", "vm", "mac", "macos", "qemu", "localhost", "local", "root", "omanotch"}
+
+
+def product_only(v: str) -> bool:
+    """True when every word of V is a product word ("Omarchy", "omarchy-arm")."""
+    words = [w for w in re.split(r"[^0-9a-z]+", v.casefold()) if w]
+    return bool(words) and all(w in PRODUCT for w in words)
 
 
 def norm(s: str) -> str:
@@ -102,12 +119,21 @@ PATTERNS = [
     ("serial", re.compile(r"(?i)(IOPlatformSerialNumber\"?\s*=?\s*\"?|Serial Number(?: \(system\))?:\s*)([A-Z0-9]{6,})"), r"\1<serial>"),
     ("uuid", re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<uuid>"),
     ("hw", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<hw-addr>"),
+    ("hw", re.compile(r"\b[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\.[0-9A-Fa-f]{4}\b"), "<hw-addr>"),
+    # Without separators (Parallels writes MACs so: 001C42EE41A6): with the
+    # VM apps' own prefixes, or right after a word that says it is one. Not any
+    # 12 hex digits: a short commit hash looks the same.
+    ("hw", re.compile(r"(?i)\b(?:001c42|525400|000c29|005056|000569|00163e)[0-9a-f]{6}\b"), "<hw-addr>"),
+    ("hw", re.compile(r"(?i)\b((?:mac|hw|hardware|ether|ethernet|bssid|lladdr)(?:[ _-]?(?:address|addr))?\"?\s*[=:]?\s*\"?)[0-9a-f]{12}\b"),
+     r"\1<hw-addr>"),
     ("secret", re.compile(r"\b[0-9a-fA-F]{32,}\b"), "<secret>"),
 ]
 # Base64 runs of 40 or more: only with digits and both cases, so a long path
 # (letters and slashes) stays.
 B64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}")
-IPV4 = re.compile(r"(?<![\d.])((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?![\d.])")
+# An address may end a sentence ("connect to 192.168.1.20."): only a digit, or
+# a dot and a digit (a longer dotted number), ends the match early.
+IPV4 = re.compile(r"(?<!\d)(?<!\d\.)((?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3})(?!\d)(?!\.\d)")
 IPV6 = re.compile(r"(?<![0-9A-Fa-f:])((?:[0-9A-Fa-f]{1,4}:){2,7}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,7}:|::(?:[0-9A-Fa-f]{1,4}:){0,6}[0-9A-Fa-f]{1,4}|(?:[0-9A-Fa-f]{1,4}:){1,6}(?::[0-9A-Fa-f]{1,4}){1,6})(?![0-9A-Fa-f:])")
 HOMES = re.compile(r"(/Users|/home)/(?!<)[^/\s:'\"]+")
 TIME_LIKE = re.compile(r"^\d{1,2}(?::\d{2}){1,2}$")
