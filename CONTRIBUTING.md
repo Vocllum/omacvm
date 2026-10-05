@@ -57,13 +57,22 @@ git ls-files -z '*.py' | xargs -0 python3 -m py_compile
 src/gestures/mac/build.sh && src/bridge/mac/build.sh
 src/omanotch/mac/test.sh
 src/bridge/mac/test.sh && src/tests/external-brightness.sh
+src/tests/install-defaults.sh
 src/tests/vm-names.sh
 src/tests/mac-install.sh
-src/tests/prebuilt-manifest.sh
+src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
+src/net/mac/test.sh
+src/gestures/mac/test.sh
+src/bridge/mac/test-models.sh
 src/tests/app-paths.sh
+app/runtime/Tests/display/test-pointer-guard.sh
 src/tests/app-notch.sh
+src/tests/keyboard-light.sh
 src/tests/features-off.sh
 src/tests/app-storage.sh
+(cd app/app && swift run update-tests)
+src/bridge/mac/tests/run.sh && python3 src/release/manifest.py parts > /dev/null
+(cd src/control && python3 -m pytest -q tests)   # in a venv with textual==8.2.8 and pytest
 ```
 
 `src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to
