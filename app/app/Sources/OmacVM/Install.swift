@@ -222,6 +222,8 @@ struct InstallView: View {
 /// Where VM disks may go: APFS or Mac OS Extended (sparse files), 30 GB free.
 enum VolumeCheck {
     static func problem(with folder: URL) -> String? {
+        if let drive = Storage.missingDrive(for: folder) { return "\(drive) is not connected." }
+        if folder.path.contains("\n") { return "That folder's name has a line break; pick another." }
         var st = statfs()
         let existing = sequence(first: folder) { $0.deletingLastPathComponent() }
             .first { FileManager.default.fileExists(atPath: $0.path) } ?? folder

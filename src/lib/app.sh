@@ -3,7 +3,9 @@
 # forwards the VM's SSH to 127.0.0.1:SSH_PORT, so its "IP" here is
 # 127.0.0.1:PORT (gssh understands that).
 #   app_list            NAME<TAB>app<TAB>running|stopped, one line per VM
-#   app_vms_root        the folder with the VM folders (~/OmacVM by default)
+#   app_vms_root        where new VMs go (~/OmacVM by default)
+#   app_vms_roots       every folder with VMs (older ones until their VMs move)
+#   app_missing_drive DIR  the drive DIR needs, when it is not connected
 #   app_dir NAME        the VM's folder
 #   app_features_write DIR FEATURES  the VM's features, for the app's Mac links
 #   app_links_stale DIR FEATURES on|off  links that differ from this start of the VM
@@ -33,22 +35,50 @@ APP_DOWNLOADS=https://github.com/gillesgoetsch/omacvm/releases/download
 # The app's settings (OMACVM_APP_ID: another bundle id, for tests only).
 APP_ID=${OMACVM_APP_ID:-org.omacvm.app}
 
-# The VMs folder, as the app finds it (app/app/Sources/OmacVM/VMsFolder.swift;
+# Where new VMs go, as the app decides (app/app/Sources/OmacVM/VMsFolder.swift;
 # src/tests/app-paths.sh checks that both agree): the folder set in the app,
-# else ~/OmacVM when it is there, else the old place while it holds VMs
-# (nothing is moved), else ~/OmacVM (the app makes it on first use).
+# else ~/OmacVM (the app makes it on first use), unless that name is taken by
+# something else: then the old place, ~/Library/Application Support/OmacVM/VMs.
 APP_VMS_OLD="Library/Application Support/OmacVM/VMs"
 app_vms_root() {
-  local r d new=$HOME/OmacVM
+  local r new=$HOME/OmacVM
   r=$(defaults read "$APP_ID" vmsRoot 2>/dev/null)
-  [[ -n $r ]] && { echo "$r"; return; }
+  [[ -n $r ]] && { echo "${r%/}"; return; }
   app_vms_ours "$new" && { echo "$new"; return; }
-  for d in "$HOME/$APP_VMS_OLD"/*; do
-    [[ -f $d/vm.env ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
-  done
   # Taken by something else (a file, ~/omacvm on a case-insensitive drive).
   [[ -e $new ]] && { echo "$HOME/$APP_VMS_OLD"; return; }
   echo "$new"
+}
+
+# Every folder with VMs, one per line: the one above first, then folders the
+# app still uses for VMs that did not move (its otherVMsRoots), then the old
+# place, whose VMs keep working there until they are moved.
+app_vms_roots() {
+  local r p i seen
+  r=$(app_vms_root); echo "$r"; seen=$'\n'"$r"$'\n'
+  p=$(defaults export "$APP_ID" - 2>/dev/null)
+  for ((i = 0; i < 64; i++)); do
+    r=$(plutil -extract "otherVMsRoots.$i" raw -o - - <<<"$p" 2>/dev/null) || break
+    r=${r%/}
+    [[ -n $r && $seen != *$'\n'"$r"$'\n'* ]] && { echo "$r"; seen+="$r"$'\n'; }
+  done
+  [[ $seen == *$'\n'"$HOME/$APP_VMS_OLD"$'\n'* ]] || echo "$HOME/$APP_VMS_OLD"
+}
+
+app_vm_dirs() {   # every app VM folder (with vm.env), one per line
+  local r d
+  while IFS= read -r r; do
+    for d in "$r"/*; do [[ -f $d/vm.env ]] && echo "$d"; done
+  done < <(app_vms_roots)
+}
+
+app_missing_drive() {   # DIR -> the drive it needs when that is not connected
+  # (a stale empty /Volumes/NAME folder counts as not connected)
+  local v
+  [[ $1 == /Volumes/?* ]] || return 1
+  v=${1#/Volumes/}; v=${v%%/*}
+  [[ -d /Volumes/$v && $(stat -f %d "/Volumes/$v") != "$(stat -f %d /Volumes)" ]] && return 1
+  echo "$v"
 }
 app_vms_ours() {   # DIR: a folder under exactly that name, no git clone
   [[ -d $1 && ! -e $1/.git ]] && ls -1 "$(dirname "$1")" 2>/dev/null | grep -xF -- "$(basename "$1")" >/dev/null   # no -q: pipefail
@@ -68,11 +98,11 @@ app_running_dir() { [[ -n $(app_pid_dir "$1") ]]; }
 
 app_list() {
   local d n
-  for d in "$(app_vms_root)"/*; do
-    [[ -f $d/vm.env && -f $d/disk.img ]] || continue
+  while IFS= read -r d; do
+    [[ -f $d/disk.img ]] || continue
     n=$(app_env "$d" NAME); [[ -n $n ]] || n=$(basename "$d")
     printf '%s\tapp\t%s\n' "$n" "$(app_running_dir "$d" && echo running || echo stopped)"
-  done
+  done < <(app_vm_dirs)
 }
 
 # app_features_write DIR "bridge=on gestures=off ...": the VM's features for
@@ -102,10 +132,9 @@ app_links_stale() {
 
 app_dir() {
   local d
-  for d in "$(app_vms_root)"/*; do
-    [[ -f $d/vm.env ]] || continue
+  while IFS= read -r d; do
     [[ $(app_env "$d" NAME) == "$1" || $(basename "$d") == "$1" ]] && { echo "$d"; return 0; }
-  done
+  done < <(app_vm_dirs)
   return 1
 }
 
@@ -123,7 +152,7 @@ app_vmnet_ip() {   # DIR -> the VM's address on vmnet's network (lease_ip, src/l
 
 app_any_fast_network() {   # one of this user's app VMs has the fast network on
   local d
-  for d in "$(app_vms_root)"/*; do [[ -s $d/fast-network ]] && return 0; done
+  while IFS= read -r d; do [[ -s $d/fast-network ]] && return 0; done < <(app_vm_dirs)
   return 1
 }
 
@@ -171,7 +200,7 @@ app_version() { defaults read "$1/Contents/Info" CFBundleShortVersionString 2>/d
 
 app_free_port() {   # the VM's SSH port: free now, and in no other VM's vm.env
   local d p used=" "
-  for d in "$(app_vms_root)"/*; do used+="$(app_env "$d" SSH_PORT) "; done
+  while IFS= read -r d; do used+="$(app_env "$d" SSH_PORT) "; done < <(app_vm_dirs)
   for ((p = 52222; p < 52422; p++)); do
     [[ $used == *" $p "* ]] && continue
     nc -z -G1 127.0.0.1 "$p" >/dev/null 2>&1 || { echo "$p"; return 0; }

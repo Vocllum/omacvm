@@ -47,6 +47,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.startRequested(name) }
         }
         state.startVM = { [weak self] in self?.startVM() }
+        state.storage.appBusy = { [weak self] in
+            guard let self else { return false }
+            return self.runner?.isRunning == true || self.state.screen == .building || Self.qemuApp != nil
+        }
+        state.storage.building = { [weak self] in self?.state.screen == .building }
+        // Half copies from a move cut short by a quit (no move runs yet), and
+        // Time Machine leaves VM folders out (those from before 3.0 too).
+        DispatchQueue.global(qos: .utility).async {
+            for u in Storage.removeStaleMoves(in: Paths.vmsRoots) {
+                FileHandle.standardError.write(Data("storage: removed the half copy \(u.path)\n".utf8))
+            }
+            for vm in VMConfig.all() { Storage.excludeFromBackup(vm.folder) }
+        }
         buildMenu()
         if state.config.isReady && CommandLine.arguments.contains("--start") {
             startVM()
@@ -72,6 +85,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var quitting = false
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if state.storage.moving != nil {
+            // A copy to another drive stops at once; its half copy is deleted
+            // (at the next launch if that takes longer than the 10 s wait) and
+            // the VM stays where it was.
+            state.storage.cancelMove()
+            func wait(_ tries: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    if self?.state.storage.moving == nil || tries == 0 {
+                        NSApp.reply(toApplicationShouldTerminate: true)
+                    } else {
+                        wait(tries - 1)
+                    }
+                }
+            }
+            wait(50)
+            return .terminateLater
+        }
         if runner?.isRunning == true {
             // Quit, logout and restart shut the VM down first and wait for it
             // (QEMU waits the same way); a VM that hangs is stopped after 90 s.
@@ -104,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showWindow() {
         reloadConfig()
+        defer { offerMoves() }
         NSApp.setActivationPolicy(.regular)
         if window == nil {
             let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable],
@@ -120,6 +151,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startVM() {
         reloadConfig()
+        if state.storage.moving != nil {
+            state.message = "A VM is being moved; start once that is done."
+            showWindow()
+            return
+        }
+        if let p = state.config.filesProblem {
+            state.message = p
+            showWindow()
+            return
+        }
         let r = Runner(config: state.config)
         r.onExit = { [weak self] status in
             guard let self else { return }
@@ -145,6 +186,88 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             state.message = "Could not start the VM: \(error.localizedDescription)"
             showWindow()
         }
+    }
+
+    // MARK: Offers made once (3.0)
+
+    /// The app in /Applications: offer ~/Applications. VMs in 2.9's hidden
+    /// folder: offer the visible VMs folder. Each asked once, never while a VM
+    /// runs or builds (then it waits for the next time the window opens).
+    private var offering = false
+    private func offerMoves() {
+        guard !offering, state.screen != .install, !state.storage.appBusy() else { return }
+        offering = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            defer { self.offering = false }
+            if self.offerAppMove() { return }
+            self.offerLegacyMove()
+        }
+    }
+
+    /// True when the app moved and a new copy opens.
+    private func offerAppMove() -> Bool {
+        let d = UserDefaults.standard
+        let app = Bundle.main.bundleURL.standardizedFileURL
+        let home = Installer.defaultFolder
+        guard !d.bool(forKey: "offeredAppMove"),
+              ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] == nil,
+              app.deletingLastPathComponent().path == "/Applications" else { return false }
+        d.set(true, forKey: "offeredAppMove")
+        let target = home.appendingPathComponent(app.lastPathComponent)
+        guard FileManager.default.isWritableFile(atPath: "/Applications"),
+              !FileManager.default.fileExists(atPath: target.path),
+              Storage.sameVolume(app, home) else { return false }
+        let alert = NSAlert()
+        alert.messageText = "Move \(Product.name) to your own Applications folder?"
+        alert.informativeText = "\(Product.name) now lives in ~/Applications: updates then never need an administrator. Your VMs stay where they are. \(Product.name) opens again from there."
+        alert.addButton(withTitle: "Move")
+        alert.addButton(withTitle: "Keep It Here")
+        guard alert.runModal() == .alertFirstButtonReturn else { return false }
+        do {
+            let new = try AppMover.move(app, into: home)
+            Installer.markInstalled(new)
+            let ls = Process()
+            ls.executableURL = URL(fileURLWithPath: "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+            ls.arguments = ["-f", new.path]
+            try? ls.run()
+            ls.waitUntilExit()
+            let config = NSWorkspace.OpenConfiguration()
+            config.createsNewApplicationInstance = true
+            config.arguments = ["--installed-by", String(ProcessInfo.processInfo.processIdentifier)]
+            NSWorkspace.shared.openApplication(at: new, configuration: config) { _, error in
+                DispatchQueue.main.async {
+                    if let error {
+                        self.state.message = "Moved to \(new.path), but it did not open: \(error.localizedDescription)"
+                    } else {
+                        NSApp.terminate(nil)
+                    }
+                }
+            }
+            return true
+        } catch {
+            state.message = "\(Product.name) stays in /Applications: \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    private func offerLegacyMove() {
+        let d = UserDefaults.standard
+        let vms = state.storage.legacyVMs
+        guard !d.bool(forKey: "offeredLegacyMove"), !vms.isEmpty,
+              Paths.vmsRoot.standardizedFileURL.path != Paths.legacyVMsRoot.standardizedFileURL.path,
+              VolumeCheck.problem(with: Paths.vmsRoot) == nil else { return }
+        d.set(true, forKey: "offeredLegacyMove")
+        let target = StorageModel.short(Paths.vmsRoot)
+        let alert = NSAlert()
+        alert.messageText = vms.count == 1 ? "Move \(vms[0].name) to \(target)?" : "Move your \(vms.count) VMs to \(target)?"
+        alert.informativeText = "\(Product.name) now keeps VMs in a folder you can see, one folder per VM. "
+            + "Yours are in a hidden folder (~/Library/Application Support/OmacVM/VMs) and keep working there. "
+            + (Storage.sameVolume(Paths.legacyVMsRoot, Paths.vmsRoot) ? "Same drive: it takes a moment." : "They are copied, checked and then deleted there.")
+            + " You can also move them later, under Storage in this window."
+        alert.addButton(withTitle: "Move")
+        alert.addButton(withTitle: "Not Now")
+        if alert.runModal() == .alertFirstButtonReturn { state.storage.moveLegacy() }
     }
 
     private func buildMenu() {

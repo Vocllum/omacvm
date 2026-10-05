@@ -63,7 +63,11 @@ src/tests/gestures-off.sh
 src/tests/app-paths.sh
 src/tests/app-notch.sh
 src/tests/features-off.sh
+src/tests/app-storage.sh
 ```
+
+`src/tests/app-storage-ui.sh DIR` renders OmacVM.app's storage screens to
+PNGs from a fixture home, without a window (not in CI).
 
 The Mac side runs on macOS's `/bin/bash` 3.2: no `declare -A`, `mapfile`
 or `${var,,}`.

@@ -364,7 +364,10 @@ fi
 case $TYPE in
   parallels) [[ ! -e $VM_DIR/$VM.pvm ]] || usage "$VM_DIR/$VM.pvm already exists (choose another --vm-name)" ;;
   fusion) [[ ! -e $(fusion_bundle "$VM") ]] || usage "$(fusion_bundle "$VM") already exists (choose another --vm-name)" ;;
-  app) [[ ! -e $VM_DIR/$VM ]] || usage "$VM_DIR/$VM already exists (choose another --vm-name)"
+  app) if d=$(app_missing_drive "$VM_DIR"); then
+         needs_person "$d is not connected, and OmacVM.app's VMs folder is on it ($VM_DIR): connect it, or pick another folder in the app"
+       fi
+       [[ ! -e $VM_DIR/$VM ]] || usage "$VM_DIR/$VM already exists (choose another --vm-name)"
        if [[ -d $VM_DIR ]]; then p=$(vm_dir_problem "$VM_DIR"); [[ -z $p ]] || needs_person "$VM_DIR (OmacVM.app's VMs): $p"; fi ;;
 esac
 

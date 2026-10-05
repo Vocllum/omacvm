@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Combine
 import SwiftUI
 
 /// What the launcher window shows.
@@ -8,6 +9,7 @@ enum Screen: Equatable {
     case setup
     case building
     case ready
+    case driveMissing
 }
 
 @MainActor
@@ -19,32 +21,53 @@ final class AppState: ObservableObject {
     /// being plugged in, the lid and resolution changes).
     @Published var hasNotch = Mac.hasNotch
     let creator = Creator()
+    let storage = StorageModel()
     var startVM: () -> Void = {}
     private var screensObserver: NSObjectProtocol?
 
     init() {
-        if let existing = VMConfig.existing() {
-            config = existing
-            screen = existing.isReady ? .ready : .setup
-        } else {
-            screen = .setup
-            var c = VMConfig()
-            let t = Mac.tier(1)
-            c.cpus = t.cpus
-            c.memoryMB = t.memoryGB * 1024
-            c.user = Mac.linuxUserName
-            c.fullName = NSFullUserName()
-            c.timeZone = Mac.timeZone
-            c.language = Mac.language
-            c.keyboard = Mac.keyboard
-            config = c
-        }
+        (config, screen) = Self.start()
         afterInstall = screen
         if !Installer.isInstalled { screen = .install }
         screensObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.hasNotch = Mac.hasNotch }
         }
+        storage.onMoved = { [weak self] in self?.reload() }
+        // The views read the storage through this state too (Start waits for a move).
+        storageChanges = storage.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+    private var storageChanges: AnyCancellable?
+
+    /// The VM to show and the screen for it: the VM the app finds, else a
+    /// new one (or the note that the VMs folder's drive is not connected).
+    private static func start() -> (VMConfig, Screen) {
+        if let existing = VMConfig.existing() {
+            return (existing, existing.isReady ? .ready : .setup)
+        }
+        var c = VMConfig()
+        let t = Mac.tier(1)
+        c.cpus = t.cpus
+        c.memoryMB = t.memoryGB * 1024
+        c.user = Mac.linuxUserName
+        c.fullName = NSFullUserName()
+        c.timeZone = Mac.timeZone
+        c.language = Mac.language
+        c.keyboard = Mac.keyboard
+        return (c, Storage.missingDrive(for: Paths.vmsRoot) != nil ? .driveMissing : .setup)
+    }
+
+    /// Looks again (after a move, a delete, a drive plugged in). The same VM
+    /// stays shown when it is still there, wherever it is now.
+    func reload() {
+        guard screen != .building && screen != .install else { storage.refresh(); return }
+        if let c = (config.location != nil ? VMConfig.named(config.name) : nil) {
+            config = c
+            screen = c.isReady ? .ready : .setup
+        } else {
+            (config, screen) = Self.start()
+        }
+        storage.refresh()
     }
 
     /// What the window shows once the install question is answered.
@@ -62,6 +85,7 @@ struct RootView: View {
             case .setup: SetupView(state: state)
             case .building: BuildView(state: state, creator: state.creator)
             case .ready: ReadyView(state: state)
+            case .driveMissing: DriveMissingView(state: state)
             }
         }
         .frame(width: 520)
@@ -77,7 +101,6 @@ struct SetupView: View {
     @State private var bridge = true
     @State private var gestures = true
     @State private var autologin = false
-    @State private var location = Paths.vmsRoot.path
     @State private var locationProblem: String?
     @State private var prebuilt = PrebuiltImage.Lookup.checking
     @State private var usePrebuilt = true
@@ -142,11 +165,9 @@ struct SetupView: View {
                 Picker("Disk", selection: $state.config.diskGB) {
                     ForEach([64, 128, 256, 512], id: \.self) { Text("\($0) GB (grows as it fills)").tag($0) }
                 }
-                HStack {
-                    Text("Location")
-                    Spacer()
-                    Text(location).lineLimit(1).truncationMode(.middle).foregroundStyle(.secondary)
-                    Button("Change…") { chooseLocation() }
+                VMsFolderRow(storage: state.storage)
+                if let n = state.storage.note, state.storage.noteIsError {
+                    Text(n).font(.caption).foregroundStyle(.red)
                 }
                 if let p = locationProblem {
                     Text(p).font(.caption).foregroundStyle(.red)
@@ -163,24 +184,6 @@ struct SetupView: View {
         }
         .task {
             if let pb = await PrebuiltImage.lookup() { prebuilt = .found(pb) } else { prebuilt = .none }
-        }
-    }
-
-    private func chooseLocation() {
-        let panel = NSOpenPanel()
-        panel.canChooseDirectories = true
-        panel.canChooseFiles = false
-        panel.canCreateDirectories = true
-        panel.prompt = "Use This Folder"
-        panel.message = "Where the VM's disk goes. An external drive works too (APFS)."
-        if panel.runModal() == .OK, let url = panel.url {
-            if let problem = VolumeCheck.problem(with: url) {
-                locationProblem = problem
-                return
-            }
-            locationProblem = nil
-            UserDefaults.standard.set(url.path, forKey: "vmsRoot")
-            location = url.path
         }
     }
 
@@ -205,6 +208,12 @@ struct SetupView: View {
         let on = { (b: Bool) in b ? "on" : "off" }
         // Omanotch off for now: see VMConfig.features.
         state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        locationProblem = nil
+        // A new VM goes into the VMs folder as it is now, under its name; the
+        // folder is kept (a default that changes later must not hide the VM).
+        Paths.vmsRoot = Paths.vmsRoot
+        state.config.location = nil
+        state.config.location = state.config.folder
         state.screen = .building
         var download = false
         if case .found = prebuilt { download = usePrebuilt }
@@ -262,9 +271,8 @@ extension ReadyView {
         }
         do {
             try FileManager.default.trashItem(at: state.config.folder, resultingItemURL: nil)
-            let fresh = AppState()
-            state.config = fresh.config
-            state.screen = fresh.config.isReady ? .ready : .setup
+            state.config.location = nil
+            state.reload()
         } catch {
             state.message = "Could not delete: \(error.localizedDescription)"
         }
@@ -326,13 +334,20 @@ struct ReadyView: View {
                     .help("Full screen also covers the strip beside the notch and Omarchy's bar goes there. That full screen has no Space of its own.")
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
             }
+            Divider()
+            StorageSection(storage: state.storage)
+            Divider()
             if let m = state.message { Text(m).foregroundStyle(.red) }
+            if let p = state.config.filesProblem {
+                Text(p).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([state.config.folder]) }
                 Button("Delete…") { deleteVM() }
+                    .disabled(state.storage.moving != nil)
                 Spacer()
                 Button("Start") { state.startVM() }
                     .keyboardShortcut(.defaultAction)
+                    .disabled(state.storage.moving != nil || state.config.filesProblem != nil)
             }
         }
     }

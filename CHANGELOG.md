@@ -46,6 +46,26 @@ in more words.
   user, password, keyboard and timezone from a seed that is deleted after.
   The images come with a release after 2.9.0; until then the app builds its
   VM as before. See [docs/prebuilt.md](docs/prebuilt.md).
+- OmacVM.app: the setup shows the VMs folder and its free space. Storage in
+  the app's window changes it (an external drive too) and moves the VMs: a
+  rename on the same drive, else copied, read back, compared and only then
+  deleted, with progress and Cancel; or New VMs Only, and the VMs stay
+  where they are and keep working. A VM that runs is never moved, nor one
+  whose files change during the move, nor a VM folder that is a link. A
+  half copy left by quitting during a move is deleted at the next launch.
+  Each VM's size with Show in Finder; Clear Downloads for
+  `~/Library/Caches/omacvm`.
+- A drive that is not connected is named as such ("SD4TB is not
+  connected"), and nothing is built into a stale /Volumes folder. A VM whose
+  files are missing says which and does not start.
+- VMs in the old hidden folder are found wherever the VMs folder is, and the
+  app offers once to move them to `~/OmacVM`; new VMs go to `~/OmacVM`.
+- An app in /Applications offers once to move itself to ~/Applications.
+- VM folders are left out of Time Machine.
+- Going back to 2.9.0: once 3.0 has made `~/OmacVM`, 2.9.0 shows only the
+  VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
+  old hidden folder or another folder are hidden from it, not deleted; 3.0
+  finds them again.
 
 ## 2.9.0 (unreleased)
 

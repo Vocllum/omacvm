@@ -99,3 +99,6 @@ jobs:
 
       - name: A feature that is off is off on every route (VM side, checks, Mac side)
         run: src/tests/features-off.sh
+
+      - name: OmacVM.app moves VM folders safely (fixtures, small disk images)
+        run: src/tests/app-storage.sh

@@ -28,15 +28,11 @@ OmacVM's version.
 
 ## What works
 
-- Setup in the app: VM name, user, password, resources, disk size, where the
-  disk goes (any APFS or Mac OS Extended drive).
-- Where things are: the app in `~/Applications` (or `/Applications`, where
-  older versions put it), the VMs in `~/OmacVM/<VM name>/`. VMs from before
-  2.9.0 in `~/Library/Application Support/OmacVM/VMs` stay there and are used
-  while `~/OmacVM` does not exist. A folder picked in the setup wins over
-  both. Spotlight lists the file names in `~/OmacVM` but never reads inside a
-  VM disk; to hide the folder from it, add it under System Settings ›
-  Spotlight › Search Privacy.
+- Setup in the app: VM name, user, password, resources, disk size, the VMs
+  folder (any APFS or Mac OS Extended drive).
+- Where things are: the app in `~/Applications`, the VMs in
+  `~/OmacVM/<VM name>/`; moves, other drives, sizes and downloads:
+  [where things are](#where-things-are).
 - A VM folder from another Mac: copy it into `~/OmacVM/` once (the app runs
   one VM at a time, the first folder by name). Check that the app looks there:
   `~/Applications/OmacVM.app/Contents/MacOS/OmacVM --vms-folder` (or the
@@ -139,12 +135,59 @@ OmacVM's version.
   tested yet with the Mac on battery (try-omarchy's bridge, over a virtio
   port; [how it works](../../src/battery/README.md)).
 
+## Where things are
+
+- **The app**: `~/Applications/OmacVM.app`, your own Applications folder
+  (updates need no administrator). An app in /Applications keeps working;
+  it offers once to move itself to ~/Applications (one rename on the Mac's
+  disk, the signature stays). `omacvm` and its updates find the app in
+  either place.
+- **The VMs**: `~/OmacVM/<VM name>/`, one folder per VM: `vm.env` (the
+  settings), `disk.img` (the disk; sparse: it takes what it holds, not its
+  full size), `efi-vars.fd`, `logs/`. To take a VM to another Mac, copy its
+  folder into that Mac's VMs folder (the VM must be shut down; above) with
+  `cp -R`, which keeps the disk sparse (`ditto` wrote it in full). Where
+  something else already has the name ~/OmacVM (a file, a git clone
+  ~/omacvm: the same folder on a case-insensitive disk), new VMs go to the
+  old place below instead.
+- **Another VMs folder** (an external drive, say): in the setup, or in the
+  settings under Storage › Change. With VMs there already, the app asks:
+  **Move** (on the same drive a rename; to another drive copied, read back
+  and compared, then deleted in the old place, with progress and a Cancel
+  that leaves the VM where it was), **New VMs Only** (the VMs stay where
+  they are and keep working from there) or Cancel. A VM that runs is never
+  moved: it stays, and the app says so. If a file in the VM's folder changes
+  or appears during a move (an `omacvm apply`, say), the copy is deleted and
+  the VM stays where it was; try again. A VM folder that is a link to
+  another folder is not moved: move the folder it points to in Finder. A
+  half copy (`.NAME.moving`) left by quitting during a move is deleted the
+  next time the app opens.
+- **A drive that is not connected**: the app says so ("SD4TB is not
+  connected") instead of offering a new VM, and builds nothing there (a
+  leftover empty /Volumes/NAME folder counts as not connected). A VM whose
+  files went missing says which, and does not start.
+- **2.9 and older** kept the VMs hidden in
+  `~/Library/Application Support/OmacVM/VMs`. They keep working there; the
+  app offers once to move them to ~/OmacVM (Storage › Move later too).
+  `omacvm` finds VMs in every folder the app does. Going back to 2.9.0
+  after that: it shows only the VMs in ~/OmacVM (or the picked folder); the
+  others are hidden from it, not deleted.
+- **Sizes**: the settings show each VM's size on disk (with Show in Finder)
+  and the downloads in `~/Library/Caches/omacvm` (try-omarchy's live system,
+  prebuilt VMs) with **Clear Downloads** (not while a build uses them).
+- **Backups and search**: Time Machine leaves VM folders out (the disk
+  changes all the time). Spotlight never reads a VM's disk (it has no
+  importer for it), but lists the files' names; macOS has no switch an app
+  can set for one folder, so to hide them add ~/OmacVM in System Settings ›
+  Spotlight › Search Privacy.
+
 ## From the omacvm command
 
 `omacvm build --vm-type app` (or OmacVM.app in the build's first question)
 builds the VM through the app instead of in it. The questions and the summary
 are the same as for the other routes; the VM goes into the app's VMs folder
-(set in the app; no `--vm-dir`). Then:
+(~/OmacVM, or the one set in the app; no `--vm-dir`; a drive that is not
+connected stops it, exit 3). Then:
 
 1. It finds the app in ~/Applications or /Applications by its bundle id
    (`org.omacvm.app`, under any name it was installed as). Not installed:

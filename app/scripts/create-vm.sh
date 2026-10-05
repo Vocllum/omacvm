@@ -27,6 +27,9 @@ STEPS=7
 step() { echo "STEP $1/$STEPS $2"; }
 LOG=$VM_DIR/logs
 mkdir -p "$LOG"
+# Time Machine leaves the VM out: its disk changes all the time (the sticky
+# flag, no admin needed; it moves with the folder).
+tmutil addexclusion "$VM_DIR" >/dev/null 2>&1 || true
 trap 'qemu_running && qemu_quit; rm -f "$VM_DIR/live.img"' EXIT
 
 # ---------- 1. the live system ----------
