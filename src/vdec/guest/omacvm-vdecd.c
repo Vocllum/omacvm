@@ -29,6 +29,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <EGL/egl.h>
@@ -59,6 +60,17 @@ static VADisplay va;
 static PFNEGLCREATEIMAGEKHRPROC create_image;
 static PFNEGLDESTROYIMAGEKHRPROC destroy_image;
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC image_target;
+static PFNEGLCREATESYNCKHRPROC create_sync;
+static PFNEGLCLIENTWAITSYNCKHRPROC wait_sync;
+static PFNEGLDESTROYSYNCKHRPROC destroy_sync;
+
+static double now_ms(void)
+{
+	struct timespec t;
+
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec * 1e3 + t.tv_nsec / 1e6;
+}
 
 static void log_msg(const char *fmt, ...)
 {
@@ -113,6 +125,9 @@ struct capbuf {
 	struct plane pl;
 	bool free;		/* queued by the app, ours to write */
 	uint64_t seq;
+	EGLSyncKHR fence;	/* converted, the GPU not done yet */
+	int64_t pts;
+	bool ok;
 };
 
 struct srcimg {			/* a decoder surface, imported once */
@@ -148,8 +163,10 @@ struct inst {
 
 	struct capbuf cap[OVD_MAX_CAPTURE];
 	int ncap, cap_width, cap_height;
+	int busy[OVD_MAX_CAPTURE], nbusy;	/* converted, in order */
 
 	bool draining, drain_flushed;
+	double decode_ms;		/* the last packet's, for OMACVM_VDEC_DEBUG */
 	struct srcimg *src;
 	AVBufferRef *src_frames;	/* the frames context src belongs to */
 	unsigned frames, errors;
@@ -292,8 +309,11 @@ static void receive_all(struct inst *in)
 
 /* ---- CAPTURE buffers ------------------------------------------------------------ */
 
+static void finish(struct inst *in, bool deliver);
+
 static void cap_free(struct inst *in)
 {
+	finish(in, false);
 	for (int i = 0; i < in->ncap; i++) {
 		plane_free(&in->cap[i].pl);
 		if (in->cap[i].bo)
@@ -544,9 +564,32 @@ static bool convert_frame(struct inst *in, AVFrame *f, struct capbuf *c)
 	set_matrix(f);
 	glUniform2i(u_cmax, (f->width + 1) / 2 - 1, (f->height + 1) / 2 - 1);
 	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-	/* The app's GPU process reads it next, from another context. */
-	glFinish();
-	return glGetError() == GL_NO_ERROR;
+	/* The app's GPU process reads it from another context: it gets the
+	 * buffer when this fence says the Mac's GPU is done (finish()). Waiting
+	 * later, not here, keeps the host busy with the next decode meanwhile. */
+	c->fence = create_sync(egl, EGL_SYNC_FENCE_KHR, NULL);
+	glFlush();
+	return c->fence != EGL_NO_SYNC_KHR && glGetError() == GL_NO_ERROR;
+}
+
+/* Waits for the converted pictures in order and hands them to the app
+ * (deliver), or only settles them (the buffers are being taken back). */
+static void finish(struct inst *in, bool deliver)
+{
+	for (int k = 0; k < in->nbusy; k++) {
+		struct capbuf *c = &in->cap[in->busy[k]];
+
+		if (c->fence) {
+			if (wait_sync(egl, c->fence, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR, EGL_FOREVER_KHR) !=
+			    EGL_CONDITION_SATISFIED_KHR)
+				c->ok = false;
+			destroy_sync(egl, c->fence);
+			c->fence = NULL;
+		}
+		if (deliver)
+			done(OVD_IOC_CAPTURE_DONE, in, in->busy[k], c->seq, c->pts, c->ok ? 0 : OVD_DONE_ERROR);
+	}
+	in->nbusy = 0;
 }
 
 /* ---- the work loop for one instance ------------------------------------------------ */
@@ -595,6 +638,7 @@ static bool output_frames(struct inst *in)
 			c = NULL;
 			if (in->ncap && !(c = cap_get(in)))
 				return progress;
+			finish(in, true);	/* the pictures before the change first */
 			if (!set_format(in, f)) {
 				frames_drop(in);
 				return true;
@@ -611,15 +655,19 @@ static bool output_frames(struct inst *in)
 		c = cap_get(in);
 		if (!c)
 			return progress;
+		double t0 = debug ? now_ms() : 0;
 		bool ok = convert_frame(in, f, c);
+		double t_conv = debug ? now_ms() - t0 : 0;
 
 		c->free = false;
-		done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, f->pts, ok ? 0 : OVD_DONE_ERROR);
+		c->pts = f->pts;
+		c->ok = ok;
+		in->busy[in->nbusy++] = c - in->cap;
 		if (!ok && in->errors++ < 10)
-			log_msg("vdecd: inst %u: copy failed", in->id);
+			log_msg("vdecd: inst %u: conversion failed", in->id);
 		if (debug)
-			log_msg("vdecd: inst %u: frame %u pts %lld -> buffer %td", in->id, in->frames,
-			     (long long)f->pts, c - in->cap);
+			log_msg("vdecd: inst %u: frame %u pts %lld -> buffer %td, convert %.1f ms, decode %.1f ms",
+				in->id, in->frames, (long long)f->pts, c - in->cap, t_conv, in->decode_ms);
 		in->frames++;
 		struct frame *fr = in->out;
 
@@ -648,7 +696,10 @@ static bool feed_input(struct inst *in)
 		ap->data = p->data;
 		ap->size = p->size;
 		ap->pts = p->ts;
+		double t0 = debug ? now_ms() : 0;
 		r = avcodec_send_packet(in->cc, ap);
+		if (debug)
+			in->decode_ms = now_ms() - t0;
 		av_packet_free(&ap);
 		if (r == AVERROR(EAGAIN)) {
 			receive_all(in);
@@ -689,6 +740,7 @@ static bool drain(struct inst *in)
 	c = cap_get(in);
 	if (!c)
 		return false;
+	finish(in, true);
 	c->free = false;
 	done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST | OVD_DONE_EOS);
 	if (in->cc)
@@ -702,7 +754,8 @@ static void pump(struct inst *in)
 	for (int guard = 0; guard < 1000; guard++) {
 		bool progress = output_frames(in);
 
-		progress |= feed_input(in);
+		progress |= feed_input(in);	/* the next decodes go out first */
+		finish(in, true);
 		progress |= drain(in);
 		if (!progress)
 			return;
@@ -778,6 +831,7 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 		break;
 	}
 	case OVD_MSG_FLUSH:
+		finish(in, true);
 		input_drop(in);
 		frames_drop(in);
 		if (in->cc)
@@ -797,6 +851,7 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 		}
 		break;
 	case OVD_MSG_CAPTURE_STOP:
+		finish(in, false);
 		for (int i = 0; i < in->ncap; i++)
 			in->cap[i].free = false;
 		break;
@@ -852,7 +907,11 @@ static bool gpu_init(void)
 	create_image = (void *)eglGetProcAddress("eglCreateImageKHR");
 	destroy_image = (void *)eglGetProcAddress("eglDestroyImageKHR");
 	image_target = (void *)eglGetProcAddress("glEGLImageTargetTexture2DOES");
-	if (!get_display || !create_image || !destroy_image || !image_target)
+	create_sync = (void *)eglGetProcAddress("eglCreateSyncKHR");
+	wait_sync = (void *)eglGetProcAddress("eglClientWaitSyncKHR");
+	destroy_sync = (void *)eglGetProcAddress("eglDestroySyncKHR");
+	if (!get_display || !create_image || !destroy_image || !image_target ||
+	    !create_sync || !wait_sync || !destroy_sync)
 		return false;
 	egl = get_display(EGL_PLATFORM_GBM_KHR, gbm, NULL);
 	if (!egl || !eglInitialize(egl, NULL, NULL) || !eglBindAPI(EGL_OPENGL_ES_API))
