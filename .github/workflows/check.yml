@@ -68,3 +68,6 @@ jobs:
 
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
+
+      - name: Full-screen pointer guard (motion maths)
+        run: app/runtime/Tests/display/test-pointer-guard.sh

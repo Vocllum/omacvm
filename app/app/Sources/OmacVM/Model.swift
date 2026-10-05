@@ -341,6 +341,14 @@ enum Settings {
         get { UserDefaults.standard.object(forKey: "useNotch") as? Bool ?? false }
         set { UserDefaults.standard.set(newValue, forKey: "useNotch") }
     }
+    /// Full screen hides the Dock and the menu bar on every display and keeps
+    /// the Mac's cursor off the screen corners and the Dock's edge, so neither
+    /// the Dock nor a hot corner comes up from inside the VM (QEMU's
+    /// immersive=on). Off: macOS's own full screen.
+    static var keepDockAway: Bool {
+        get { UserDefaults.standard.object(forKey: "keepDockAway") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "keepDockAway") }
+    }
 }
 
 extension Mac {

@@ -239,6 +239,7 @@ struct ReadyView: View {
     @ObservedObject var state: AppState
     @State private var fullScreen = Settings.startFullScreen
     @State private var notch = Settings.useNotch
+    @State private var keepDockAway = Settings.keepDockAway
     @State private var resourcesNote: String?
 
     /// The create screen's tiers; resources set some other way show as Custom.
@@ -282,6 +283,8 @@ struct ReadyView: View {
             }
             Toggle("Start in full screen", isOn: $fullScreen)
                 .onChange(of: fullScreen) { _, v in Settings.startFullScreen = v }
+            Toggle("Keep the Dock and hot corners away in full screen", isOn: $keepDockAway)
+                .onChange(of: keepDockAway) { _, v in Settings.keepDockAway = v }
             if Mac.hasNotch {
                 Toggle("Full screen covers the notch strip (Omarchy's bar goes there; no Space of its own)", isOn: $notch)
                     .onChange(of: notch) { _, v in Settings.useNotch = v }
