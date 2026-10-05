@@ -214,6 +214,7 @@ final class Runner {
         process = p
         if network.vmnet { watchFastNetwork() }
         observeSleep()
+        observeActivation()
         startClipboard()
         startBattery()
         startCamera()
@@ -472,7 +473,8 @@ final class Runner {
         return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
     }
 
-    private func observeSleep() {
+    /// The clipboard polls fast only while QEMU's window is the active app.
+    private func observeActivation() {
         let center = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification] {
             observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -482,6 +484,10 @@ final class Runner {
                 }
             })
         }
+    }
+
+    private func observeSleep() {
+        let center = NSWorkspace.shared.notificationCenter
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.willSleep() }
         })
