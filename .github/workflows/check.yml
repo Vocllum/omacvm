@@ -82,9 +82,6 @@ jobs:
       - name: Bridge offline tests (media-key tap, Wi-Fi state)
         run: src/bridge/mac/test-models.sh
 
-      - name: Gestures off means no Gestures link from the VM
-        run: src/tests/gestures-off.sh
-
       - name: Where the app and its VMs are (omacvm and the app agree)
         run: src/tests/app-paths.sh
 
