@@ -609,7 +609,8 @@ step "OmacVM.app builds the VM (10-30 minutes, its logs in $(sed "s|^$HOME|~|" <
 port=$(app_free_port) || die "no free port for the VM's SSH (52222-52421)"
 fv=""
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do fv+=" ${FEATS[$k]}=$(onoff "${FEATS[k+1]}")"; done
-printf '%s\n' "$PW" | app_create "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
+# --no-mac: the app's own build leaves the Mac's helpers alone too.
+printf '%s\n' "$PW" | OMACVM_CREATE_NO_MAC=${NO_MAC:-0} app_create "$VM_DIR/$VM" NAME="$VM" CPUS="$CPUS" MEM_MB=$((MEM_GB * 1024)) DISK_GB="$DISK_GB" \
   SSH_PORT="$port" VM_USER="$U" VM_FULLNAME="$FULL" VM_HOSTNAME="$HOST" VM_TZ="$TZ_MAC" VM_LANG="$LANG_VM" \
   KEYBOARD="$KB" FEATURES="${fv# }" 2>&1 |
   sed -l -e $'s/.*\r//' -e '/^#.*%$/d' -e '/^READY /d' -e 's|^STEP \([0-9]*/[0-9]*\) |==> \1 |' |
@@ -619,6 +620,7 @@ unset PW PW2
 
 step "OmacVM: the Mac side, then the VM side (the VM starts in OmacVM.app)"
 args=(--vm "$VM" --vm-type app --user "$U" --keyboard "$KB" --reset-host-key)
+(( ${NO_MAC:-0} )) && args+=(--no-mac)
 for ((k = 0; k < ${#FEATS[@]}; k += 2)); do
   args+=(--feature "${FEATS[$k]}=$( ((FEATS[k+1])) && echo on || echo off)")
 done
