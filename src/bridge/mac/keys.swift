@@ -241,6 +241,8 @@ enum MediaKey: Int {   // NX_KEYTYPE_* (IOKit/hidsystem/ev_keymap.h)
 
 final class MediaKeys {
   private var tap: CFMachPort?
+  private var source: CFRunLoopSource?
+  private var rearm = TapRearm()
   private var askedAX = false
   private let work = DispatchQueue(label: "omacvm-bridge.keys")
   private(set) var vmFullScreen = false
@@ -255,31 +257,58 @@ final class MediaKeys {
     let t = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.check() }
     t.tolerance = 0.5
     RunLoop.main.add(t, forMode: .common)
+    // An app switch is checked at once, not up to 2 s later.
+    NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                      object: nil, queue: .main) { [weak self] _ in self?.check() }
     check()
   }
 
-  /// Creates the tap once Accessibility is granted; keeps it enabled.
+  /// Creates the tap once Accessibility is granted; keeps it enabled, and
+  /// creates it again when an OmacVM VM comes to the front (TapRearm) or
+  /// macOS invalidated it. Main thread.
   func check() {
     config.reloadIfChanged()
+    let front = NSWorkspace.shared.frontmostApplication
+    let vm = front?.executableURL?.lastPathComponent == "OmacVM" ? front?.processIdentifier : nil
+    let again = rearm.front(vm)
     guard config.captureKeys else { return }
-    if let tap { if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }; return }
+    if let tap {
+      if !CFMachPortIsValid(tap) { install(again: "macOS invalidated it") }
+      else if again { install(again: "an OmacVM VM came to the front") }
+      else if !CGEvent.tapIsEnabled(tap: tap) { CGEvent.tapEnable(tap: tap, enable: true) }
+      return
+    }
     if !AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue(): !askedAX] as CFDictionary) {
       if !askedAX { log("media keys: waiting for Accessibility permission (System Settings > Privacy & Security > Accessibility > OmacVM Bridge)") }
       askedAX = true
       return
     }
+    install(again: nil)
+  }
+
+  /// The new tap goes in before the old one is removed: no gap without one.
+  /// A failed re-creation keeps the old tap and is logged once.
+  private func install(again why: String?) {
     let mask = CGEventMask(1 << 14)   // NX_SYSDEFINED: media/brightness/illumination keys
     guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                     eventsOfInterest: mask, callback: { _, type, event, _ in
       if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { mediaKeys.check() }
       return mediaKeys.handle(type, event) ? nil : Unmanaged.passUnretained(event)
-    }, userInfo: nil) else {
-      log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+    }, userInfo: nil), let s = CFMachPortCreateRunLoopSource(nil, t, 0) else {
+      if let why {
+        if rearm.failed() { log("media keys: cannot create the event tap again (\(why)); keeping the old one") }
+      } else {
+        log("media keys: cannot create the event tap although Accessibility is granted; retrying")
+      }
       return
     }
-    CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, t, 0), .commonModes)
+    CFRunLoopAddSource(CFRunLoopGetMain(), s, .commonModes)
+    if let source { CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes); CFRunLoopSourceInvalidate(source) }
+    if let tap { CFMachPortInvalidate(tap) }
     tap = t
-    log("media keys: event tap installed")
+    source = s
+    rearm.worked()
+    log(why.map { "media keys: event tap created again (\($0))" } ?? "media keys: event tap installed")
   }
 
   /// Parallels (prl_client_app), UTM, VMware Fusion or OmacVM.app is frontmost and its VM window spans a whole
