@@ -48,6 +48,7 @@ class FakeMac:
         self.sign_answers = True          # False: an impostor that does not have the VM's key
         self.clock_skew = 0               # the fake Mac's clock minus the real one
         self.hello_delay = 0.0
+        self.unknown_for = 0              # this many status requests get 409 unknown-vm (a VM just started)
         self.nonces: set = set()
         fake = self
 
@@ -115,6 +116,10 @@ class FakeMac:
                     return self.send(200, {"proto": 1, "proto_min": 1, "omacvm": fake.version, "features": names,
                                            "requests": ["hello", "status", "updates", "jobs"], "macos": "15.7.4",
                                            "chip": "Apple M4 Max"})
+                if p == "/omacvm/status" and fake.unknown_for > 0:
+                    fake.unknown_for -= 1
+                    return self.send(409, {"error": "no running VM that OmacVM set up has this address (the Mac is "
+                                                    "looking at its VMs again: try in a moment)", "code": "unknown-vm"})
                 if p == "/omacvm/status":
                     return self.send(200, {"omacvm": fake.version, "features": [
                         {"name": "omanotch", "on": False, "available": False, "reason": "needs a MacBook with a notch"}],

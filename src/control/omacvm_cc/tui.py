@@ -30,6 +30,10 @@ from .local import log_tail
 # Job polls (one a second) that may fail in a row before the job counts as
 # lost: an update restarts the Bridge, which takes a while.
 LOST_AFTER = 120
+# A VM the Mac does not list yet (it just started, or the Bridge did): the
+# Mac looks at its VMs again in the background (for an unknown address at
+# most once a minute), so ask again a while.
+UNKNOWN_TRIES, UNKNOWN_WAIT = 15, 5.0
 
 THEME = Theme(
     name="omacvm-ansi", ansi=True, dark=True,
@@ -573,7 +577,14 @@ class ControlCentre(App):
     # ---- data ----
     @work(thread=True, exclusive=True, group="mac")
     def ask_mac(self) -> None:
-        self.c.refresh_mac()
+        from textual.worker import get_current_worker
+        worker = get_current_worker()
+        for _ in range(UNKNOWN_TRIES):
+            self.c.refresh_mac()
+            if not self.c.vm_unknown() or worker.is_cancelled:
+                break
+            self.call_from_thread(self.refresh_all)
+            time.sleep(UNKNOWN_WAIT)
         if self.c.linked:
             self.c.refresh_updates()
         self.call_from_thread(self.refresh_all)

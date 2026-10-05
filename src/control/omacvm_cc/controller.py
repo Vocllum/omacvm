@@ -55,6 +55,10 @@ class Controller:
         """The Mac answers and takes requests from this VM."""
         return self.hello is not None and self.mac_error is None
 
+    def vm_unknown(self) -> bool:
+        """The Mac does not list this VM (yet): it is looking again."""
+        return self.mac_error is not None and self.mac_error.code == "unknown-vm"
+
     def mac_problem(self) -> str:
         """Why switching from here does not work right now ("" if it does)."""
         if self.mac_error is not None:

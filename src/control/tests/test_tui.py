@@ -622,3 +622,19 @@ def test_control_centre_part_failed_never_says_turn_it_off(world):
             r = a.last_result
             assert "off (space)" not in r and "Later, u tries again" in r, r
     asyncio.run(go())
+
+
+def test_vm_the_mac_does_not_list_yet_asks_again(world, monkeypatch):
+    """The Mac does not list this VM yet (it just started, or the Bridge
+    restarted): it answers unknown-vm at once and looks in the background;
+    the control centre asks again until it is linked."""
+    from omacvm_cc import tui
+    monkeypatch.setattr(tui, "UNKNOWN_WAIT", 0.2)
+    world.unknown_for = 2
+
+    async def go():
+        a = app()
+        async with a.run_test(size=(110, 30)) as pilot:
+            assert await settle(pilot, lambda: a.c.linked and a.c.mac_status is not None, 10)
+            assert sum(1 for m, p, _ in world.requests if p == "/omacvm/status") == 3
+    asyncio.run(go())
