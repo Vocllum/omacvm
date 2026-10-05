@@ -7,12 +7,17 @@ OmacVM on the Mac and in the VM.
 
 | | Parallels | UTM | VMware Fusion | OmacVM.app |
 |---|---|---|---|---|
-| Download | 3.7 GB | 3.5 GB | 6.0 GB | 3.6 GB |
-| `omacvm build --prebuilt` (measured, M4 Max, fast connection) | 6 min | about 4 min | about 5 min | 3 min plus the download (from a local copy) |
+| Download | 3.7 GB | 3.5 GB | 6.0 GB | 3.6 GB (test image) |
+| `omacvm build --prebuilt` (measured, M4 Max, fast connection) | 6 min | about 4 min | about 5 min | 3 min plus the download (test image, see below) |
 | `omacvm build` (building it here) | 30-70 min | 30-70 min | 45-85 min | 10-30 min |
 
 The Fusion image is larger: it carries Hyprland with OmacVM's vmwgfx fix and
 VMware Tools, both built in the VM, and their build tools.
+
+The OmacVM.app numbers are test numbers: an OmacVM 2.7.0 test image, copied
+from a local folder (no download), and without the step that builds the Mac
+helpers (Bridge, Gestures), which every app user gets. They will be replaced
+with measured numbers when the first image for the app is released.
 
 ## Using one
 
@@ -64,7 +69,14 @@ downloads and checks the parts, unpacks the disk into the VM's folder, grows
 it, makes fresh firmware variables and the seed, and runs the first boot
 without a window, with the seed as a second disk. Then `omacvm apply` as
 after a build, the VM shuts down and the seed is deleted (also when anything
-fails). The password is hashed on the Mac (`src/prebuilt/sha512crypt.py`,
+fails). A run that fails before the VM is ready also deletes the disk and
+firmware variables it made, so building again starts over.
+
+Before the download it checks for free space (the parts plus the unpacked
+disk plus 2 GB). Only `Omarchy/disk.img` is taken from the archive, and only
+as a plain file (not a link). The manifest's values are checked before use,
+and the first boot's log is cut to printable text before the app or the
+terminal shows it. The password is hashed on the Mac (`src/prebuilt/sha512crypt.py`,
 the same `$6$` hash as `openssl passwd -6`; macOS's own openssl has no
 `-6` and the app needs no Homebrew). The app only ever starts the finished
 VM.
