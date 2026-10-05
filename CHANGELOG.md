@@ -76,6 +76,32 @@ in more words.
   chromium-video` takes it out). YouTube 4K60 uses 0.41-0.62 of a core in
   the VM instead of 1.00-1.11. HEVC, AV1 and 10-bit stay on the CPU.
   `omacvm check` has a "video decoding in Chromium" line.
+- Video: reading a decoded picture out in the other YUV layout works. FFmpeg's
+  `-hwaccel_output_format vaapi -vf hwdownload,format=yuv420p` gave the same
+  empty picture for every frame since 2.7.0; NV12 to I420/YV12 and back are
+  now bit for bit the decoded picture (in the desktop session; done by the
+  VM's VA-API driver shim).
+- The OmacVM control centre: `omacvm` in Omarchy (the Omarchy menu's
+  OmacVM row, the bar's OmacVM item or a terminal) shows every feature with
+  its live status and what to do on the Mac when it needs you. Switch a
+  feature, repair it, see its checks and log. "Report a problem" (also
+  `omacvm report` on the Mac) collects the check, versions and logs without
+  names, addresses, keys or Wi-Fi names, shows you the text, and opens a
+  GitHub issue with it. Requests go to the Mac through OmacVM Bridge, signed
+  with a key each VM gets from `omacvm apply`. Updates through it are not
+  live yet (no release key); `omacvm update` on the Mac stays the way to
+  update. Feature `control-centre`, on by default; an older VM is asked once
+  at its next apply.
+- OmacVM.app can update itself (weekly check, waits until the VM is shut
+  down, goes back to the old version if the new one does not start; "Go
+  Back" in the app menu). Not live yet: the update feed needs a release
+  key, and until a release has one the app checks nothing and says so under
+  Check for Updates.
+- Prebuilt VMs for Parallels, UTM and VMware Fusion: only the VM bundle comes
+  out of the image, and its settings and disks are checked before use (no
+  paths outside the bundle, no shared folders, no extra QEMU arguments,
+  disks without a parent). Free space is checked before the download, and
+  the seed with the password hash is deleted however the build ends.
 
 ## 2.9.0 (unreleased)
 
@@ -132,11 +158,6 @@ in more words.
   Firefox's 16). Past that, a video decodes on the CPU instead of playing
   black (the VM's VA-API driver knows the Mac's limit). The copy of each
   decoded picture can no longer be dropped by the app's own graphics state.
-- Video: reading a decoded picture out in the other YUV layout works. FFmpeg's
-  `-hwaccel_output_format vaapi -vf hwdownload,format=yuv420p` gave the same
-  empty picture for every frame since 2.7.0; NV12 to I420/YV12 and back are
-  now bit for bit the decoded picture (in the desktop session; done by the
-  VM's VA-API driver shim).
 - Video encoding on the Mac's media engine: apps in the VM that encode H.264
   or HEVC through VA-API use it instead of the VM's CPU (FFmpeg's
   `h264_vaapi`/`hevc_vaapi`, OBS Studio's VAAPI encoders). Google Chrome's
