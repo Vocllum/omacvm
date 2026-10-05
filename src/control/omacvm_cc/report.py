@@ -86,6 +86,10 @@ class Known:
             m = HOST_FORM.match(v) if kind == "host" else None
             if m and self._owner(m.group(1)):
                 self.user.append(m.group(1))
+                # "Thomas-MacBook-Pro": the s may be the name's own (Thomas), not 's.
+                whole = v[:m.end(1) + 1]
+                if whole[-1:].casefold() == "s" and v[m.end(1) + 1:m.end(1) + 2] == "-" and not self.has(whole):
+                    self.user.append(whole)
             # Wi-Fi and Bluetooth names of device and plain words alone (a
             # phone's hotspot "iPhone", "AirPods Pro") are nobody's name, and
             # taking them out would take out every "iPhone" in the logs. So is
@@ -270,11 +274,16 @@ def plain_user(kind: str, v: str) -> bool:
 
 
 # Where a plain word is a user name: after a word that says so ("user max",
-# "User: max", "login=max", "-u max", "su max", "chown max:..."), before @
-# (max@host), in id's "1000(max)", at the start of a passwd line, with 's.
+# "User: max", "login=max", "-u max", "su max", "chown max:...", OmacVM's own
+# "installed for max", "home of max", "user       max" in build's summary,
+# JSON's "user": "max", "user 'max'"), before @ (max@host), in id's
+# "1000(max)" and pam's "by max(uid=1000)", at the start of a passwd line,
+# with 's, in sudo's "max : TTY=...". "for max" is taken even where it is a
+# plain word: the user name never stays in OmacVM's own lines.
 USER_KEYS = ("user", "users", "username", "login", "logname", "owner", "account", "-u", "--user", "su", "chown",
-             "for user", "as user", "as", "hi", "hello", "dear")
-USER_SEPS = ("=", ": ", ":", " ", '="', "='", ': "', "=\\\"")
+             "for user", "as user", "as", "hi", "hello", "dear", "for", "home of", "name")
+USER_SEPS = ("=", ": ", ":", " ", '="', "='", ': "', "=\\\"", '": "', '":"', "': '", "':'", " '", ' "', ": '",
+             '=\\\'') + tuple(" " * n for n in range(2, 13))
 
 
 def name_like_re(v: str) -> re.Pattern:
@@ -287,8 +296,11 @@ def name_like_re(v: str) -> re.Pattern:
     return re.compile(
         edge_l + cap + edge_r +                                  # "Max", "Max's", "Hi Max"
         "|" + edge_l + "(?i:" + w + r")(?=@[\w.-]|'s\b)" +      # max@host, max's
-        "|(?:" + after + ")(?i:" + w + ")" + edge_r +            # user max, -u max, login=max
+        "|(?=(?i:" + w + "))(?:" + after + ")(?i:" + w + ")" + edge_r +   # user max, -u max, login=max
         r"|(?<=\d\()(?i:" + w + r")(?=\))" +                    # uid=1000(max)
+        "|" + edge_l + "(?i:" + w + r")(?=\(uid=\d)" +           # by max(uid=1000)
+        "|" + edge_l + "(?i:" + w + r")(?= : (?:[^\n;]*; )?TTY=)" +  # sudo: max : TTY=pts/0 ; ...
+        "|" + edge_l + "(?i:" + w + r")(?= is not user\b)" +    # max is not user 1000
         "|(?<=(?i:" + w + "):)(?i:" + w + ")" + edge_r +         # chown max:max
         "|" + edge_l + "(?i:" + w + ")(?=:(?i:" + w + ")" + edge_r + ")" +
         "|(?m:^)(?i:" + w + r")(?=:[^:\n]*:\d)")                 # max:x:1000:... (passwd)

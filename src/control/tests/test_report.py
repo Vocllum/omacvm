@@ -1,5 +1,6 @@
 """Redaction: planted personal data must never survive into a report."""
 import os
+import re
 import sys
 import urllib.parse
 
@@ -706,3 +707,94 @@ def test_gate_still_refuses_a_plain_word_user_left_as_a_name():
     with pytest.raises(R.RedactionFailed):
         R.gate("ssh max@host", k)
     R.gate("max size", k)
+
+
+# ---- review of a0b814b: OmacVM's own lines never keep a plain-word user ----
+
+SRC = os.path.join(os.path.dirname(__file__), "..", "..")
+MSG_CALL = re.compile(r'\b(?:log|echo|bad|ok|warn|die|usage)\s+((?:"(?:[^"\\]|\\.)*"\s*)+)')
+# Lines that print the user outside such a call, and the journal forms.
+MORE_LINES = ['user       $U ($FULL), hostname $HOST',               # build.sh's summary
+              '  "user": {"name": "$U", "full_name": "$FULL"},',      # build.sh's manifest
+              '{"user": "$U"}', "user '$U'", "OWNER=\"$U\"",
+              "session opened for user $U(uid=1000) by $U(uid=1000)",
+              "Accepted publickey for $U from 10.0.0.9 port 52144 ssh2",
+              "sudo:     $U : TTY=pts/0 ; PWD=/root ; USER=root ; COMMAND=/usr/bin/true",
+              "sudo:     $U : 3 incorrect password attempts ; TTY=pts/0 ; PWD=/ ; USER=root"]
+
+
+def omacvm_messages_with_user() -> list:
+    """Every OmacVM message (log/echo/bad/ok/warn/die/usage) whose text
+    prints the desktop user, from the scripts themselves."""
+    out = []
+    for d, _, files in os.walk(SRC):
+        for f in files:
+            if not f.endswith(".sh"):
+                continue
+            path = os.path.join(d, f)
+            for n, line in enumerate(open(path, errors="replace"), 1):
+                if line.lstrip().startswith("#"):
+                    continue
+                for m in MSG_CALL.finditer(line):
+                    for s in re.findall(r'"((?:[^"\\]|\\.)*)"', m.group(1)):
+                        if re.search(r"\$\{?U\b", s) and s.strip() not in ("$U", "${U}"):
+                            out.append((f"{os.path.relpath(path, SRC)}:{n}", s))
+    return out
+
+
+def fill(msg: str, user: str) -> str:
+    msg = re.sub(r"\$\{U\}|\$U\b", user, msg)
+    msg = re.sub(r"\$\{\w+:\+([^}]*)\}", r"\1", msg)   # ${had:+, OmacVM $had} as when set
+    return re.sub(r"\$\{[^}]*\}|\$\([^)]*\)|\$\w+", "x", msg)
+
+
+def test_every_omacvm_message_with_the_user_finds_the_known_ones():
+    found = {where.split(":")[0] for where, _ in omacvm_messages_with_user()}
+    for f in ("guest/check.sh", "guest/install.sh", "bridge/guest/install.sh", "cmd/apply.sh",
+              "prebuilt/guest/generalize.sh", "cmd/build.sh"):
+        assert f in found, found
+
+
+@pytest.mark.parametrize("user", ["max", "marshall", "pro", "mesa", "work", "home"])
+def test_every_omacvm_message_loses_a_plain_word_user(user):
+    """A login that is a plain word ("max") still goes from every line
+    OmacVM prints with it: check's "not running for max", the installers'
+    "installed for max", apply's "user max", generalize's "home of max"."""
+    k = R.Known()
+    k.add("user", user)
+    assert R.plain_user("user", k.user[0])
+    msgs = [w for _, w in omacvm_messages_with_user()] + MORE_LINES
+    for msg in msgs:
+        line = fill(msg, user)
+        rep = R.build([("omacvm check", line)], k, "Report")   # the gate passes
+        body = "\n".join(rep.text.splitlines()[2:-1])   # "### heading", fence, body, fence
+        want, _ = R.redact(fill(msg, "<user>"), k)
+        assert body == want, (msg, body)
+    with pytest.raises(R.RedactionFailed):
+        R.gate("Hyprland: not running for max: log in first", Known_max())
+    with pytest.raises(R.RedactionFailed):
+        R.gate('{"user": "max"}', Known_max())
+
+
+def Known_max() -> "R.Known":
+    k = R.Known()
+    k.add("user", "max")
+    return k
+
+
+def test_plain_word_user_places_keep_plain_text():
+    k = Known_max()
+    stay = "max size; set to max; max_connections=100; Apple M4 Max; AirPods Max; maxed out; max(1, 2)"
+    out, _ = R.redact(stay, k)
+    R.gate(out, k)
+    assert out == stay, out
+
+
+def test_host_owner_keeps_a_name_that_ends_in_s():
+    """"Thomas-MacBook-Pro": Thomas, not only "Thoma"."""
+    k = R.Known()
+    k.add("host", "Thomas-MacBook-Pro")
+    assert "Thomas" in k.user, k.user
+    out, _ = R.redact("Thomas wrote; ssh thomas@omarchy; Thomas's iPhone", k)
+    R.gate(out, k)
+    assert out == "<user> wrote; ssh <user>@omarchy; <user>'s iPhone", out
