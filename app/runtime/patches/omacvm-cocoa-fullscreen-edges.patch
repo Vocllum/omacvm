@@ -28,7 +28,11 @@ guest's pointer is absolute, so it only stops 3 points short of a corner.
 Upstream: not applicable (OmacVM's display windows; QEMU has one window).
 Test: full screen on the MacBook and an external display: the pointer pushed
 into each corner and along each edge shows no Dock, no menu bar, no hot
-corner (notes: display-bugs track).
+corner (notes: display-bugs track). Status: the Dock part passes. The hot
+corner part is NOT shown: with posted motion-only events the cursor stays
+3 points off, yet the bottom-left hot corner fired on every push in the
+last test (also on a build that had passed 16 pushes before). A check with
+a real mouse is open.
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
 index 646ffb6..0aca169 100644

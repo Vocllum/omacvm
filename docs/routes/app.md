@@ -232,8 +232,10 @@ window per guest screen:
   wallpaper remap themselves when their output moves.
 - In full screen the Dock and the menu bar stay hidden on every display, and
   the Mac's cursor stays 3 points off the screen corners while the VM has
-  the pointer, so hot corners do not fire
-  (`omacvm-cocoa-fullscreen-edges.patch`; `immersive=off` turns both off).
+  the pointer (`omacvm-cocoa-fullscreen-edges.patch`; `immersive=off` turns
+  both off). That is meant to keep hot corners from firing, but it is not
+  confirmed: with simulated mouse motion the bottom-left corner still fired,
+  and a check with a real mouse is open.
 
 Testing without a monitor: `app/scripts/dev/virtual-display.m` makes a
 virtual Mac display (killing it is unplugging it). With
