@@ -12,7 +12,16 @@ edges and corners; the Mac's cursor is kept at least 3 points off them.
 Edges shared with another display stay open. The maths is in
 ui/omacvm-pointer-guard.h (omacvm-cocoa-pointer-guard.patch). The cursor
 is given back where the guest's pointer is when it leaves the zone or our
-windows, on leaving full screen, on a Space change, on ungrab and on quit.
+windows, on leaving full screen, on a Space change, on ungrab and on quit;
+events queued before that still move the pointer by their delta. When the
+Mac's cursor is the only pointer shown (show-cursor=on: VMs whose guest
+hides its own pointer) the detached cursor follows the guest's pointer,
+the gap off the edges, each warp taken out of the next delta (the way GLFW
+does): not detaching there would give back the hot corners and the Dock,
+and a frozen cursor is the only pointer the user sees. The guest gets the
+guard's place in whichever of our windows has it, tested the guard's way
+(the top row counts); in none, no position is sent (never the held
+cursor's place).
 The Dock's side is read again on each full screen. All of it follows the
 immersive option (on by default; immersive=off keeps macOS's behaviour; the
 app's setting "Keep the Dock and hot corners away in full screen").
@@ -29,23 +38,29 @@ comes back in the next event's delta (SDL and GLFW correct for this on
 macOS), so each delta carried all the earlier ones and the pointer raced
 near corners and the Dock's edge (user, 2026-10-05: "at the corners it 20x
 the acceleration"; the test's model of that code: the 20th step is 19 times
-the motion). Now the detached cursor is not moved; the one warp left (off
-an outer edge, when the cursor got onto it in one go) is taken out of the
-next delta. AppKit can hand one event to a view twice; it counts once.
+the motion). Now the detached cursor is not moved (or, when it is the
+pointer shown, moved with one warp in flight) and every warp is taken out
+of the next delta. AppKit can hand one event to a view twice; it counts once.
+RC5 review: at the top edge the window test (NSPointInRect, top edge out)
+missed the guard's place and the guest got the held cursor's place, up to
+200 points off; the shown cursor (show-cursor=on) stood still in the zone;
+events queued before a let-go jumped back to the held place.
 Known limit: a flick that lands on the corner in one event has reached it
 before the guard sees the event.
 
 Upstream: not applicable (OmacVM's display windows; QEMU has one window).
 Test: app/runtime/Tests/display/test-pointer-guard.c (motion in the centre,
 near a corner, along the Dock's edge, across the zone's border and a shared
-display edge, the same event twice, a flick; run at build time and in CI).
+display edge, the same event twice, a flick, events queued before a let-go,
+the shown cursor following, the place in our windows incl. the top row, the
+notch strip and an external; run at build time and in CI).
 By hand: full screen on the MacBook and an external display, mouse and
 trackpad: the pointer moves the same everywhere; pushed into each corner and
 along each edge: no Dock, no menu bar, no hot corner (notes:
 pointer-corners track).
 
 diff --git a/ui/cocoa.m b/ui/cocoa.m
-index 646ffb6..fd8d51c 100644
+index 6b3270a..010a4e6 100644
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -40,6 +40,7 @@
@@ -56,21 +71,26 @@ index 646ffb6..fd8d51c 100644
  #include "system/system.h"
  #include "system/runstate.h"
  #include "system/runstate-action.h"
-@@ -466,6 +467,13 @@ static bool omacvm_map_pointer(int output, double u, double v,
+@@ -466,6 +467,18 @@ static bool omacvm_map_pointer(int output, double u, double v,
  static int omacvm_active_outputs(void);
  static bool omacvm_is_our_window(NSWindow *w);
  static bool omacvm_pointer_over_ours(void);
 +static void omacvm_guard_corners(NSEvent *event);
-+static bool omacvm_guarded_target(NSView **view, int *output, NSPoint *p);
++static int omacvm_guarded_target(NSView **view, int *output, NSPoint *p);
 +static OmacVMGuard omacvm_guard;         /* the full-screen pointer guard */
 +static bool omacvm_guard_place;          /* this event's place is the guard's */
++/* The displays and our windows the guard last saw (main thread). */
++static OmacVMGuardScreens omacvm_guard_scr;
++static OmacVMRect omacvm_guard_displays[16];
++static OmacVMRect omacvm_guard_ours_rects[OMACVM_MAX_OUTPUTS];
++static int omacvm_guard_ours_output[OMACVM_MAX_OUTPUTS];
 +static int omacvm_dock_edge_cache = -1;
 +static int omacvm_dock_edge(void);
 +static void omacvm_corner_release(void);
  static bool omacvm_is_head_console(unsigned int index);
  static bool omacvm_test_mode(void);
  static void omacvm_displays_update(void);
-@@ -1535,6 +1543,9 @@ - (void) handleMouseEvent:(NSEvent *)event
+@@ -1535,6 +1548,9 @@ static bool omacvm_notch_mode(void)
      if (!isMouseGrabbed) {
          return;
      }
@@ -80,22 +100,34 @@ index 646ffb6..fd8d51c 100644
  
      with_bql(^{
          if (isAbsoluteEnabled &&
-@@ -1543,6 +1554,14 @@ - (void) handleMouseEvent:(NSEvent *)event
+@@ -1543,10 +1559,24 @@ static bool omacvm_notch_mode(void)
          } else if (isAbsoluteEnabled) {
              CGFloat d = (CGFloat)screen.height / [self frame].size.height;
              NSPoint p = [event locationInWindow];
 +            NSView *gv = self;
-+            int go = 0;
++            int go = 0, guarded;
 +            NSPoint gp;
 +
-+            /* The detached cursor's new place (see omacvm_guard_corners). */
-+            if (omacvm_guarded_target(&gv, &go, &gp) && gv == self) {
++            /*
++             * The detached cursor's new place (see omacvm_guard_corners);
++             * never the event's own location then (the held cursor's).
++             */
++            guarded = omacvm_guarded_target(&gv, &go, &gp);
++            if (guarded > 0 && gv == self) {
 +                p = [self convertPoint:gp toView:nil];
 +            }
  
              /* Note that the origin for Cocoa mouse coords is bottom left, not top left. */
-             qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, p.x * d, 0, screen.width);
-@@ -1652,6 +1671,7 @@ - (void) grabMouse
+-            qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, p.x * d, 0, screen.width);
+-            qemu_input_queue_abs(dcl.con, INPUT_AXIS_Y, screen.height - p.y * d, 0, screen.height);
++            if (!guarded || (guarded > 0 && gv == self)) {
++                qemu_input_queue_abs(dcl.con, INPUT_AXIS_X, p.x * d, 0, screen.width);
++                qemu_input_queue_abs(dcl.con, INPUT_AXIS_Y, screen.height - p.y * d, 0, screen.height);
++            }
+         } else {
+             qemu_input_queue_rel(dcl.con, INPUT_AXIS_X, [event deltaX]);
+             qemu_input_queue_rel(dcl.con, INPUT_AXIS_Y, [event deltaY]);
+@@ -1652,6 +1682,7 @@ static bool omacvm_notch_mode(void)
      else
          [[self window] setTitle:@"QEMU - (Press  " UC_CTRL_KEY " " UC_ALT_KEY " G  to release Mouse)"];
      [self hideCursor];
@@ -103,7 +135,7 @@ index 646ffb6..fd8d51c 100644
      CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
      isMouseGrabbed = TRUE; // while isMouseGrabbed = TRUE, QemuCocoaApp sends all events to [cocoaView handleEvent:]
  }
-@@ -1665,6 +1685,7 @@ - (void) ungrabMouse
+@@ -1665,6 +1696,7 @@ static bool omacvm_notch_mode(void)
      else
          [[self window] setTitle:@"QEMU"];
      [self unhideCursor];
@@ -111,7 +143,7 @@ index 646ffb6..fd8d51c 100644
      CGAssociateMouseAndMouseCursorPosition(TRUE);
      isMouseGrabbed = FALSE;
      [self raiseAllButtons];
-@@ -1685,6 +1706,7 @@ - (void) notifyMouseModeChange {
+@@ -1685,6 +1717,7 @@ static bool omacvm_notch_mode(void)
          if (isAbsoluteEnabled) {
              [self ungrabMouse];
          } else {
@@ -119,7 +151,7 @@ index 646ffb6..fd8d51c 100644
              CGAssociateMouseAndMouseCursorPosition(isAbsoluteEnabled);
          }
      }
-@@ -1753,9 +1775,16 @@ - (void) raiseAllButtons
+@@ -1753,9 +1786,19 @@ static bool omacvm_notch_mode(void)
  - (bool) omacvmQueuePointer:(NSEvent *)event view:(NSView *)view output:(int)output
  {
      NSPoint p = [view convertPoint:[event locationInWindow] fromView:nil];
@@ -129,15 +161,18 @@ index 646ffb6..fd8d51c 100644
  
 +    /*
 +     * The cursor detached: this event's location is where it was, not where
-+     * the motion took it. Use the new place, in whichever window it is.
++     * the motion took it. Use the new place, in whichever window it is; in
++     * none, the guest's pointer stays (buttons still go).
 +     */
-+    omacvm_guarded_target(&view, &output, &p);
++    if (omacvm_guarded_target(&view, &output, &p) < 0) {
++        return true;
++    }
 +    size = [view bounds].size;
 +
      if (size.width <= 0 || size.height <= 0 ||
          !omacvm_map_pointer(output, p.x / size.width, 1.0 - p.y / size.height,
                              &nx, &ny)) {
-@@ -1783,6 +1812,9 @@ - (void) omacvmHeadEvent:(NSEvent *)event view:(NSView *)view output:(int)output
+@@ -1783,6 +1826,9 @@ static bool omacvm_notch_mode(void)
          }
          [self grabMouse];
      }
@@ -147,7 +182,7 @@ index 646ffb6..fd8d51c 100644
      with_bql(^{
          if (button >= 0) {
              qemu_input_queue_btn(dcl.con, button, down);
-@@ -1985,6 +2017,7 @@ - (void)applicationDidFinishLaunching: (NSNotification *) note
+@@ -1987,6 +2033,7 @@ static NSRect cocoa_initial_window_frame(void)
  - (void)applicationWillTerminate:(NSNotification *)aNotification
  {
      COCOA_DEBUG("QemuCocoaAppController: applicationWillTerminate\n");
@@ -155,7 +190,7 @@ index 646ffb6..fd8d51c 100644
  
      with_bql(^{
          shutdown_action = SHUTDOWN_ACTION_POWEROFF;
-@@ -2064,11 +2097,13 @@ - (void)windowDidFailToEnterFullScreen:(NSWindow *)window
+@@ -2066,11 +2113,13 @@ static bool powerdownPending;
  - (void)windowWillExitFullScreen:(NSNotification *)notification
  {
      omacvm_main_full_settled = false;
@@ -169,7 +204,7 @@ index 646ffb6..fd8d51c 100644
      [fullScreenMenuItem setTitle:@"Exit Full Screen"];
      [cocoaView updateScale];
      [cocoaView updateUIInfo];
-@@ -3277,6 +3312,185 @@ static bool omacvm_main_full_screen(void)
+@@ -3279,6 +3328,206 @@ static bool omacvm_main_full_screen(void)
             ([[cocoaView window] styleMask] & NSWindowStyleMaskFullScreen);
  }
  
@@ -186,27 +221,36 @@ index 646ffb6..fd8d51c 100644
 + * Off with immersive=off; leaving the zone, our windows, full screen, the
 + * Space or the VM gives the cursor back where the pointer is.
 + */
-+/* The guard's place as a point in one of our views; false when this event has its own. */
-+static bool omacvm_guarded_target(NSView **view, int *output, NSPoint *p)
++/*
++ * The guard's place as a point in one of our views: 1. 0: this event has its
++ * own place. -1: the guard has the place but it is in none of our windows;
++ * the caller sends no position (the event's location is the held cursor's,
++ * up to 200 points off). Membership is tested in CoreGraphics' space the way
++ * the guard tests it, so the window's top row (where the guard stops the
++ * pointer) counts.
++ */
++static int omacvm_guarded_target(NSView **view, int *output, NSPoint *p)
 +{
-+    NSPoint q;
++    double wx, wy;
++    int i, o;
 +
 +    if (!omacvm_guard_place) {
-+        return false;
++        return 0;
 +    }
-+    q = NSMakePoint(omacvm_guard.x,
-+                    NSMaxY([[[NSScreen screens] firstObject] frame]) - omacvm_guard.y);
-+    for (int i = 0; i < omacvm_outputs; i++) {
-+        NSWindow *w = i ? omacvm_heads[i].window : [cocoaView window];
-+        NSView *v = i ? omacvm_heads[i].view : cocoaView;
-+        if (w && v && [w isVisible] && NSPointInRect(q, [w frame])) {
++    i = omacvm_guard_window_point(&omacvm_guard_scr, omacvm_guard.x,
++                                  omacvm_guard.y, &wx, &wy);
++    o = i < 0 ? -1 : omacvm_guard_ours_output[i];
++    if (o >= 0 && o < omacvm_outputs) {
++        NSView *v = o ? omacvm_heads[o].view : cocoaView;
++
++        if (v) {
 +            *view = v;
-+            *output = i;
-+            *p = [v convertPoint:[w convertPointFromScreen:q] fromView:nil];
-+            return true;
++            *output = o;
++            *p = [v convertPoint:NSMakePoint(wx, wy) fromView:nil];
++            return 1;
 +        }
 +    }
-+    return false;
++    return -1;
 +}
 +
 +static void omacvm_guard_apply(const OmacVMGuardStep *st)
@@ -228,10 +272,13 @@ index 646ffb6..fd8d51c 100644
 +    }
 +}
 +
-+/* The Mac's displays and our visible windows, for the guard (CoreGraphics' space). */
-+static void omacvm_guard_screens(OmacVMGuardScreens *s, OmacVMRect *displays,
-+                                 int max_displays, OmacVMRect *ours, int max_ours)
++/*
++ * The Mac's displays and our visible windows (CoreGraphics' space) into
++ * omacvm_guard_scr, with the output each window shows.
++ */
++static void omacvm_guard_screens(void)
 +{
++    OmacVMGuardScreens *s = &omacvm_guard_scr;
 +    CGDirectDisplayID ids[16];
 +    uint32_t n = 0;
 +    CGFloat top = NSMaxY([[[NSScreen screens] firstObject] frame]);
@@ -240,12 +287,12 @@ index 646ffb6..fd8d51c 100644
 +    if (CGGetActiveDisplayList(16, ids, &n) != kCGErrorSuccess) {
 +        n = 0;
 +    }
-+    for (uint32_t i = 0; i < n && s->ndisplays < max_displays; i++) {
++    for (uint32_t i = 0; i < n && s->ndisplays < 16; i++) {
 +        CGRect r = CGDisplayBounds(ids[i]);
-+        displays[s->ndisplays++] = (OmacVMRect){ r.origin.x, r.origin.y,
-+                                                 r.size.width, r.size.height };
++        omacvm_guard_displays[s->ndisplays++] =
++            (OmacVMRect){ r.origin.x, r.origin.y, r.size.width, r.size.height };
 +    }
-+    for (int i = 0; i < omacvm_outputs && s->nours < max_ours; i++) {
++    for (int i = 0; i < omacvm_outputs && s->nours < OMACVM_MAX_OUTPUTS; i++) {
 +        NSWindow *w = i ? omacvm_heads[i].window : [cocoaView window];
 +        NSRect f;
 +
@@ -254,27 +301,27 @@ index 646ffb6..fd8d51c 100644
 +            continue;
 +        }
 +        f = [w frame];
-+        ours[s->nours++] = (OmacVMRect){ f.origin.x, top - NSMaxY(f),
-+                                         f.size.width, f.size.height };
++        omacvm_guard_ours_output[s->nours] = i;
++        omacvm_guard_ours_rects[s->nours++] =
++            omacvm_guard_rect_from_cocoa(top, f.origin.x, f.origin.y,
++                                         f.size.width, f.size.height);
 +    }
-+    s->displays = displays;
-+    s->ours = ours;
++    s->displays = omacvm_guard_displays;
++    s->ours = omacvm_guard_ours_rects;
 +    s->dock_edge = omacvm_dock_edge();
 +}
 +
 +static void omacvm_corner_release(void)
 +{
 +    OmacVMGuardStep st;
-+    OmacVMGuardScreens s;
-+    OmacVMRect displays[16], ours[OMACVM_MAX_OUTPUTS];
 +
 +    omacvm_guard_place = false;
 +    if (!omacvm_guard.held) {
 +        return;
 +    }
-+    omacvm_guard_screens(&s, displays, 16, ours, OMACVM_MAX_OUTPUTS);
++    omacvm_guard_screens();
 +    memset(&st, 0, sizeof(st));
-+    omacvm_guard_release(&omacvm_guard, &s, &st);
++    omacvm_guard_release(&omacvm_guard, &omacvm_guard_scr, &st);
 +    omacvm_guard_apply(&st);
 +}
 +
@@ -303,15 +350,18 @@ index 646ffb6..fd8d51c 100644
 +{
 +    OmacVMGuardStep st;
 +    OmacVMGuardScreens s;
-+    OmacVMRect displays[16], ours[OMACVM_MAX_OUTPUTS];
 +    CGEventRef cg = [event CGEvent], now;
 +    CGPoint loc, cur;
 +    double dx = 0, dy = 0;
++    bool on = immersive_mode_enabled && omacvm_main_full_screen();
 +
 +    omacvm_guard_place = false;
-+    if (!immersive_mode_enabled || !omacvm_main_full_screen()) {
++    if (!on) {
 +        omacvm_corner_release();
-+        return;
++        /* Events queued before the let-go still get the pointer's place. */
++        if (!omacvm_guard.let_go) {
++            return;
++        }
 +    }
 +    switch ([event type]) {
 +    case NSEventTypeMouseMoved:
@@ -345,7 +395,13 @@ index 646ffb6..fd8d51c 100644
 +    cur = CGEventGetLocation(now);
 +    CFRelease(now);
 +    loc = CGEventGetLocation(cg);
-+    omacvm_guard_screens(&s, displays, 16, ours, OMACVM_MAX_OUTPUTS);
++    omacvm_guard_screens();
++    s = omacvm_guard_scr;
++    if (!on) {
++        s.nours = 0;    /* never takes hold */
++    }
++    /* The Mac's cursor is the only pointer shown (show-cursor=on): it follows. */
++    omacvm_guard.follow = !cursor_hide;
 +    omacvm_guard_event(&omacvm_guard, &s, [event timestamp], loc.x, loc.y,
 +                       dx, dy, cur.x, cur.y, &st);
 +    omacvm_guard_apply(&st);
@@ -355,7 +411,7 @@ index 646ffb6..fd8d51c 100644
  /* A display's rectangle in points, top-left origin (CoreGraphics' global space). */
  static OmacVMBox omacvm_display_box(NSScreen *s, bool below_notch)
  {
-@@ -3692,6 +3906,22 @@ - (BOOL)windowShouldClose:(id)sender
+@@ -3694,6 +3943,22 @@ static void omacvm_heads_moved(void)
      return NO;
  }
  
@@ -378,7 +434,7 @@ index 646ffb6..fd8d51c 100644
  /*
   * A click on another display's window makes it key. The keyboard and the
   * main window's pointer tracking belong to the main window: hand it back.
-@@ -4226,6 +4456,14 @@ static void omacvm_displays_init(void)
+@@ -4228,6 +4493,14 @@ static void omacvm_displays_init(void)
      }
  #endif
      omacvm_head_delegate = [[OmacVMHeadDelegate alloc] init];
