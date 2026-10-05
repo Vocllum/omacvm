@@ -72,6 +72,12 @@ func live() {
     check(dim > 0, "the dimmest step is lit (level \(dim))")
     check(dim < old, "the dimmest step is dimmer than 0.01 (\(dim) < \(old))")
   }
+  // The key path: off, one press up, one press down.
+  check(KeyboardLight.set(0), "set off")
+  usleep(300_000)
+  check(KeyboardLight.step(up: true, low: true) == KeyboardSteps.low[0], "off, one press up: the dimmest step")
+  usleep(300_000)
+  check(KeyboardLight.step(up: false, low: true) == 0, "one press down: off")
 }
 
 if CommandLine.arguments.dropFirst().first == "live" { live() } else { offline() }

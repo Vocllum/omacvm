@@ -60,6 +60,7 @@ enum KeyboardLight {
     return (ids.first { builtIn?(c, sel, $0.uint64Value) ?? true } ?? ids.first)?.uint64Value
   }()
   private static var lastOn: Float = 0.5   // for the toggle key
+  private static var levelSeen = false     // the level call answered above 0 once: it means something here
 
   static func get() -> Float? {
     guard let c = client, let k = keyboard else { return nil }
@@ -77,13 +78,22 @@ enum KeyboardLight {
   /// nil when this macOS has no such call.
   static func level() -> Float? {
     guard let c = client, let k = keyboard, c.responds(to: levelSel) else { return nil }
-    return unsafeBitCast(c.method(for: levelSel), to: Get.self)(c, levelSel, k)
+    let l = unsafeBitCast(c.method(for: levelSel), to: Get.self)(c, levelSel, k)
+    if l > 0 { levelSeen = true }
+    return l
+  }
+
+  /// Lit or not by the level call; nil (trust the step) until it ever said
+  /// more than 0, so a macOS where it always answers 0 keeps every step.
+  private static func lit() -> Bool? {
+    guard let l = level() else { return nil }
+    return l > 0 ? true : levelSeen ? false : nil
   }
 
   /// One key press: the next lit level (see KeyboardSteps.settle).
   static func step(up: Bool, low: Bool) -> Float? {
     guard let v = get() else { return nil }
-    return KeyboardSteps.settle(from: v, up: up, low: low, set: set, lit: { level().map { $0 > 0 } })
+    return KeyboardSteps.settle(from: v, up: up, low: low, set: set, lit: lit)
   }
 
   static func toggle() -> Bool { guard let now = get() else { return false }; return set(now > 0 ? 0 : lastOn) }
