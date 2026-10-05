@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- External display brightness (feature `external-brightness`, on): with the
+  VM in front on an external display, the Mac's brightness keys set that
+  display over DDC/CI, in macOS's 16 steps (Option: 64), with Omarchy's
+  popup. A Studio Display or Pro Display XDR goes through macOS's own
+  control. Omarchy's brightness keys, `omarchy brightness display` and its
+  monitor panel in the VM do the same through OmacVM Bridge. OmacVM.app also
+  in a window; Parallels, UTM and VMware Fusion in full screen. The built-in
+  display works as before, and so does a display without DDC/CI (`omacvm
+  check` names it and why).
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one

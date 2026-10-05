@@ -10,7 +10,7 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 | Mac app | `mac/*.swift` → `~/Applications/OmacVMBridge.app` (agent app, keyboard icon in the menu bar), LaunchAgent `org.omacvm.bridge`, log `~/Library/Logs/omacvm-bridge.log` |
 | Listens on | port 47831 of the Mac's address on each VM network: `10.211.55.2` (Parallels' shared network), `192.168.64.1` (UTM's) and the `.1` of VMware Fusion's NAT network (`VNET_8_HOSTONLY_SUBNET` in `/Library/Preferences/VMware Fusion/networking`), and for OmacVM.app `127.0.0.1` and `192.168.77.1` (its fast network), never `0.0.0.0`. Waits for an address while its VM app is not running and re-binds after wake |
 | Token | Mac `~/Library/Application Support/omacvm-bridge/token` (0600, made on first start); VM `~/.config/omacvm-bridge/token` (copied by `omacvm apply`) |
-| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon`, `keyboard_low_steps` |
+| Config | `~/Library/Application Support/omacvm-bridge/config.json`: `capture_keys`, `menu_bar_icon`, `keyboard_low_steps`, `external_brightness` (read again within 2 s of a change; `omacvm apply` sets it from the feature) |
 | VM client | `guest/omacvm-bridge` (bash + curl; the token never shows in `ps`, and goes only to a Bridge that proved it knows it, see API) |
 | VM popups | `guest/omacvm-bridge-osd`, user service: the Mac's volume/brightness changes as Omarchy's own OSD |
 | Shared event stream | `guest/omacvm-bridge-events`, user socket `omacvm-bridge-events.socket` (`$XDG_RUNTIME_DIR/omacvm-bridge-events.sock`): one `/events` connection to the Mac per VM; `omacvm-bridge events` reads from it, so the widgets and the OSD keep their interface (see Events) |
@@ -20,7 +20,8 @@ VM network (Parallels, UTM or VMware Fusion) and pushes every change as Server-S
 Only Apple frameworks: CoreWLAN, CoreLocation, CoreAudio, IOBluetooth,
 CoreBluetooth (the permission), IOKit (the battery), AVFoundation (the camera), AppKit, Security, and the private
 DisplayServices and CoreBrightness (brightness, Night Shift, True Tone,
-keyboard light). Bluetooth power and forgetting a device use IOBluetooth's
+keyboard light), and IOKit's private IOAVService (DDC/CI to external
+displays, `external-brightness.swift`). Bluetooth power and forgetting a device use IOBluetooth's
 private `IOBluetoothPreferenceSetControllerPowerState` and
 `-[IOBluetoothDevice remove]` (as `blueutil` does), looked up at run time.
 
@@ -56,6 +57,7 @@ never gets the token, not even by passing on a proof from the Bridge on
 omacvm-bridge state | scan [--cached] | audio | display | bluetooth | battery | events
 omacvm-bridge volume +5 | mute | mic-volume 60 | output <uid>
 omacvm-bridge brightness -5 | night-shift toggle | night-shift strength 70 | true-tone off
+omacvm-bridge external | external-brightness [--output Virtual-N] [+5 | -5 | 40]
 omacvm-bridge password [ssid]
 omacvm-bridge bluetooth power toggle | connect AA:BB:CC:DD:EE:FF | disconnect … | forget … | settings
 ```
@@ -131,6 +133,44 @@ curl "${H[@]}" -d '{"enabled": false}'         $B/display/true-tone
 
 `enabled` is Night Shift's manual switch (tinting now); the schedule stays as
 set in macOS.
+
+### External displays
+
+The brightness of the external display a VM is on (feature
+`external-brightness`, `external-brightness.swift`): DDC/CI (VCP 0x10) over
+IOAVService on Apple Silicon, or DisplayServices for the displays macOS dims
+itself (Studio Display, Pro Display XDR). Which one works is found per display
+when the Bridge starts and after every display change; the built-in display
+is never set here.
+
+`GET /display/external`: every external display and how its brightness is
+set (`ddc`, `apple`, or `none` with the reason), for `omacvm check`:
+
+```json
+{"enabled": true, "displays": [{"id": 4, "name": "Pi-X9", "method": "ddc", "brightness": 35},
+  {"id": 7, "name": "LG HDR 4K", "method": "none", "brightness": null,
+   "reason": "no DDC/CI on this connection (some Macs' HDMI ports have none: try USB-C/DisplayPort)"}]}
+```
+
+`GET /display/external-brightness` → `{"brightness": 35, "display": "Pi-X9", "method": "ddc"}`
+(0-100, read fresh), and `POST` with `{"brightness": 0-100}` or
+`{"delta": -100..100}` sets it. Which display: with `?x=&y=&width=&height=`
+(an OmacVM.app output's box from its layout, in points with the layout's
+corner at 0,0) the one among the displays showing an OmacVM.app window whose
+place matches; without, the display of the VM window in front (under the
+pointer when it covers several). Only an external display with a VM window
+on it: `404` when there is none, `409` for the built-in display, a display
+without DDC/CI or `external_brightness: false`, `503` when it does not answer.
+The VM only names its output and a level; it never reaches the I2C bus. A
+request shows no popup from here (Omarchy's command shows its own).
+
+In the VM, `/usr/local/bin/ddcutil` (`guest/omacvm-ddcutil`) answers the three
+calls Omarchy's `omarchy-brightness-display-ddc` makes (`detect`, `getvcp 10`,
+`setvcp 10 N`; output Virtual-N is "bus" N, maximum 100) through this API, so
+Omarchy's brightness keys, `omarchy brightness display` and its monitor panel
+work on the output's Mac display. Outside OmacVM.app only the focused output
+asks (the Mac goes by the window in front). Everything else goes to the real
+`/usr/bin/ddcutil`.
 
 ### Bluetooth
 
@@ -280,6 +320,14 @@ macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
 and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
 VM is not full screen, passes through untouched. Switch it off in the
 menu-bar icon or with `"capture_keys": false`.
+
+With the VM in front on an external display, the display brightness keys
+set that display instead (see External displays): OmacVM.app's VMs also in a
+window, Parallels, UTM and Fusion in full screen; 16 steps (Option: 64),
+read from the display first, writes at most every 50 ms (the latest level),
+never waiting in the key path; the popup names the display. A display
+without DDC/CI keeps the keys as before (the Mac's built-in display, in full
+screen). `"external_brightness": false` in `config.json` switches it off.
 
 The keyboard light has three more steps below macOS's lowest (1/16): 0.01,
 0.02 and 0.04. Measured on a MacBook Pro M4 Max (macOS 15.7.4): each value is

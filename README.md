@@ -61,6 +61,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Battery in the bar | ✅ | ✅ | ✅ | ✅ |
 | Volume and brightness | ✅ | ✅ | ✅ | ✅ |
 | Keyboard backlight (Shift+F1/F2) | ✅ | ✅ | ✅ | ✅ |
+| External display brightness (DDC/CI) | 🔜 3.0.0 | 🔜 3.0.0 | 🔜 3.0.0 | 🔜 3.0.0 |
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
