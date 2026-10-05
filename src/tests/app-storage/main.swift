@@ -20,7 +20,13 @@ func expect(_ what: String, _ ok: Bool, _ detail: @autoclosure () -> String = ""
 func sha(_ url: URL) -> String {
     guard let h = FileHandle(forReadingAtPath: url.path) else { return "unreadable" }
     var hash = SHA256()
-    while let d = try? h.read(upToCount: 1 << 20), !d.isEmpty { hash.update(data: d) }
+    // Each chunk released at once: CI runners have little memory.
+    while autoreleasepool(invoking: { () -> Bool in
+        guard let d = try? h.read(upToCount: 1 << 20), !d.isEmpty else { return false }
+        hash.update(data: d)
+        return true
+    }) {}
+    try? h.close()
     return hash.finalize().map { String(format: "%02x", $0) }.joined()
 }
 
@@ -28,8 +34,8 @@ func allocated(_ url: URL) -> Int64 {
     Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]))?.totalFileAllocatedSize ?? -1)
 }
 
-/// A VM folder: vm.env, a sparse 2 GB disk.img with MB of data at a few places,
-/// efi-vars.fd, logs/, a symbolic link and a private file.
+/// A VM folder: vm.env, a sparse 512 MB disk.img with 1 MB of data every
+/// 4 MB (dataMB of them), efi-vars.fd, logs/, a symbolic link and a private file.
 func makeVM(_ root: URL, _ name: String, dataMB: Int = 3) throws -> URL {
     let d = root.appendingPathComponent(name)
     try fm.createDirectory(at: d.appendingPathComponent("logs"), withIntermediateDirectories: true)
@@ -37,16 +43,16 @@ func makeVM(_ root: URL, _ name: String, dataMB: Int = 3) throws -> URL {
     let disk = d.appendingPathComponent("disk.img")
     fm.createFile(atPath: disk.path, contents: nil)
     let h = try FileHandle(forWritingTo: disk)
-    try h.truncate(atOffset: 2 << 30)
+    try h.truncate(atOffset: 512 << 20)
     let mb = [UInt8](repeating: 0, count: 1 << 20)
     for i in 0..<dataMB {
         var block = mb
         for j in stride(from: 0, to: block.count, by: 4096) { block[j] = UInt8(truncatingIfNeeded: i * 31 + j / 4096 + 1) }
-        try h.seek(toOffset: UInt64(i) * (300 << 20))
+        try h.seek(toOffset: UInt64(i) * (4 << 20))
         h.write(Data(block))
     }
     // A data block of zeros: read as data, written as a hole.
-    try h.seek(toOffset: 1 << 30)
+    try h.seek(toOffset: 500 << 20)
     h.write(Data(mb))
     try h.close()
     try Data(repeating: 7, count: 65536).write(to: d.appendingPathComponent("efi-vars.fd"))
@@ -133,14 +139,14 @@ do {
     catch { expect("too big refused", error.localizedDescription.contains("free there"), error.localizedDescription) }
     expect("too big: source unchanged", fingerprint(big) == bigBefore)
 
-    // Mac OS Extended: the 2 GB disk would take 2 GB there
+    // Mac OS Extended: the 512 MB disk would take 512 MB there
     let small = try makeVM(work.appendingPathComponent("root4"), "Small", dataMB: 1)
     do { _ = try FolderMover().move(small, into: hfs.appendingPathComponent("VMs")); expect("no sparse files: full size counted", false) }
-    catch { expect("no sparse files: full size counted", error.localizedDescription.contains("2.15 GB to copy"), error.localizedDescription) }
+    catch { expect("no sparse files: full size counted", error.localizedDescription.contains("536.9 MB to copy"), error.localizedDescription) }
     expect("no sparse files: source kept", fm.fileExists(atPath: small.appendingPathComponent("disk.img").path))
 
     // Cancel during the copy: the source stays, no half copy
-    let mid = try makeVM(work.appendingPathComponent("root3"), "Mid", dataMB: 24)
+    let mid = try makeVM(work.appendingPathComponent("root3"), "Mid", dataMB: 4)
     let midBefore = fingerprint(mid)
     let c = FolderMover()
     c.progress = { _, done, _ in if done > 0 { c.cancel() } }
