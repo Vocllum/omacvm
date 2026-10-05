@@ -66,6 +66,9 @@ Include = /etc/pacman.d/mirrorlist
 [aur]
 Include = /etc/pacman.d/mirrorlist
 EOF
+pacman-key --init >/dev/null 2>&1
+pacman-key --populate archlinuxarm >/dev/null 2>&1
+pacman -Sy --noconfirm archlinuxarm-keyring >/dev/null 2>&1
 pacstrap -C /root/pacman.alarm.conf /mnt base base-devel linux-aarch64 linux-aarch64-headers archlinuxarm-keyring \
   btrfs-progs dosfstools grub efibootmgr openssh sudo git networkmanager nano vim man-db 2>&1 | tail -3
 cp /root/pacman.alarm.conf /mnt/etc/pacman.conf
