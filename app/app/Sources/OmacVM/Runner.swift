@@ -82,7 +82,10 @@ final class Runner {
               "-device", "virtserialport,bus=vser0.0,nr=3,chardev=batt0,name=org.omacvm.battery",
               // The Mac's camera, while a Linux app reads it (omacvm-camera in the VM).
               "-chardev", "socket,id=cam0,path=\(q(c.cameraSocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera"]
+              "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera",
+              // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
+              "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=5,chardev=ctl0,name=org.omacvm.control"]
         return a
     }
 
@@ -123,6 +126,7 @@ final class Runner {
                 self?.stopObserving()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
+                self?.control?.stop()
                 self?.onExit?(status)
             }
         }
@@ -138,6 +142,7 @@ final class Runner {
         startClipboard()
         startBattery()
         startCamera()
+        startControl()
     }
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
@@ -199,6 +204,27 @@ final class Runner {
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeBatteryBridge(socketPath: path) {
                     DispatchQueue.main.sync { self?.battery = bridge }
+                    try? bridge.run()
+                    bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: The control centre's port (NativeControlBridge.swift), reconnected while QEMU runs.
+
+    private var control: NativeControlBridge?
+
+    private func startControl() {
+        let path = config.controlSocket.path, name = config.name
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name) {
+                    DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
                 }
