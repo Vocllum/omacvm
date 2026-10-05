@@ -54,6 +54,7 @@ Return to confirm):
    | The Mac's battery: its charge and charging state in Omarchy's bar (Parallels shows it itself) | on with a battery, not on Parallels |
    | The Mac's clock: at the far right of the bar, in your Mac's menu bar format | on |
    | The Mac's camera as *Mac Camera*, on only while a Linux app uses it (UTM and Fusion: through OmacVM Bridge, also with the Bridge off) | on |
+   | External display brightness: the brightness keys (and Omarchy's own) set the external display the VM is on, over DDC/CI (needs the Bridge) | on |
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
