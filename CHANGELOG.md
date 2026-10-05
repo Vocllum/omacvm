@@ -5,22 +5,41 @@ in more words.
 
 ## 2.9.0 (unreleased)
 
+A faster GPU path for OmacVM.app, frames on the display's refresh (120 Hz on
+a MacBook Pro), fewer black WebGL canvases, hardware video encoding, and an
+opt-in fast network. Numbers against 2.8.0 are from the release candidate,
+with the benchmark lock held.
+
 - OmacVM.app: a faster GPU path. GPU fences come back in about 0.2 ms instead
-  of 1.5 ms, so light 3D work runs two to three and a half times as fast
-  (glmark2's short set 2,800-3,700 instead of 1,000-1,500 in the same build;
-  2,856 against 2.8.0's 1,124; benchmark lock held). A new frame goes to the window as soon as Omarchy
-  finishes it, drawn off the main thread as an IOSurface, not on QEMU's
-  30 ms timer.
-- WebGL-heavy pages are where they were on a quiet Mac (Aquarium 21-23 fps,
-  as before): there Apple's OpenGL is the limit. While other VMs use the Mac
-  they ran about 10% slower than with the old path (20-21 fps against
-  23-24); with the Mac's CPU busy otherwise, about 15% faster (12.0 against
-  10.4 fps). Against 2.8.0 with one other VM running: Aquarium 19.0 against
-  19.9 fps, Basemark Web 3.0 2,669 against 2,482.
+  of 1.5 ms, so light 3D work runs two to three and a half times as fast:
+  glmark2's short set 2,856 against 2.8.0's 1,124. A new frame goes to the
+  window as soon as Omarchy finishes it, drawn off the main thread as an
+  IOSurface, not on QEMU's 30 ms timer.
+- WebGL-heavy pages stay about where they were; there Apple's OpenGL is the
+  limit. Against 2.8.0 with one other VM running: Aquarium 19.0 against 19.9
+  fps, Basemark Web 3.0 2,669 against 2,482. In earlier runs Aquarium was the
+  same as before on a quiet Mac (21-23 fps), about 10% slower while other VMs
+  used the Mac (20-21 fps against 23-24) and about 15% faster with only the
+  CPU busy (12.0 against 10.4 fps).
 - The thread that waits for the GPU no longer keeps a core busy, also during
   a long GPU job (about 2,100 wakeups a second instead of 19,900). If it
   cannot start, the VM falls back to the old 1 ms polling and says so in
   `qemu.log` and `omacvm check`, instead of hanging the guest's GPU.
+- OmacVM.app shows the guest's frames on the display's refresh: one new
+  frame per refresh (testufo 117-120 new frames a second on a 120 Hz
+  display; 2.8.0 about 90). On a ProMotion MacBook the refresh rate follows
+  what the guest draws (a 24 fps video asks for 24 Hz), as native apps do;
+  displays with one rate keep it. `OMACVM_GL_REFRESH=fixed` keeps the full
+  rate. The windows on other displays still draw the old way.
+- Colours: frames are tagged sRGB, so the guest's colours are no longer
+  stretched to the MacBook's P3 range (red was too saturated).
+- WebGL and OpenGL apps: shaders and limits that Apple's OpenGL refuses no
+  longer stop the app's whole GL context (the canvas or window went black for
+  good). dEQP GLES3 (every 50th case) 812 to 855 of 869; the whole GLES3
+  list in one process 22,445 to 43,125 cases; the WebGL conformance pages in
+  one Chrome 430 to 776 (WebGL 1) and 97 to 959 (WebGL 2), because one
+  refused shader no longer breaks every page after it. 107 transform
+  feedback cases that failed in 2.7.1 pass.
 - The guest can no longer make QEMU allocate up to 3 GiB of window surfaces,
   or new ones on every frame: they are at most the size of the largest Mac
   display and made again at most twice a second.
@@ -31,33 +50,25 @@ in more words.
 - Vulkan in the VM, hidden and experimental (Venus on MoltenVK):
   `defaults write org.omacvm.app venus -bool true`. Needs Mesa 26.2.4 or newer
   in the VM (`app/scripts/dev/guest-mesa-venus.sh` builds it while Arch Linux
-  ARM has 26.2.3). vkmark about 5,200; the same build with the old polled
-  fences gives about 730 (no release had Venus). Venus memory is mapped into
-  the VM only in whole 16 KiB pages that belong to it.
-- The app carries the licence texts of MoltenVK and the Vulkan loader
-  (Apache-2.0, with cereal and cJSON).
-- OmacVM.app shows the guest's frames on the display's refresh: one new
-  frame per refresh (testufo 117-120 new frames a second on a 120 Hz
-  display; 2.8.0 about 90, the first 2.9.0 candidate about 108). On a ProMotion MacBook the
-  refresh rate follows what the guest draws (a 24 fps video asks for 24 Hz),
-  as native apps do; displays with one rate keep it.
-  `OMACVM_GL_REFRESH=fixed` keeps the full rate.
-- Colours: frames are tagged sRGB, so the guest's colours are no longer
-  stretched to the MacBook's P3 range.
+  ARM has 26.2.3). vkmark about 4,500 to 5,200; the same build with the old
+  polled fences gives about 730 (no release had Venus). Venus memory is mapped
+  into the VM only in whole 16 KiB pages that belong to it. `omacvm check`
+  names the Vulkan driver a VM uses.
+- KosmicKrisp, opt-in at build time: a runtime built with
+  `OMACVM_RUNTIME_KOSMICKRISP=1` (needs LLVM) also carries Mesa's Vulkan
+  driver on Metal. On macOS 26 and newer Venus then runs on it (Vulkan 1.4,
+  more features than MoltenVK); when it cannot start, Venus falls back to
+  MoltenVK, says why in `qemu.log`, and `omacvm check` shows a warning. The
+  released app is built without it.
 - HDR, hidden and experimental: `defaults write org.omacvm.app hdr -bool
   true`, then in the VM `sudo omacvm-virtio-gpu-build` (a 10-bit virtio-gpu
   module, rebuilt for new kernels) and a restart. Only on displays that can
-  show HDR; the main window's output only.
-- WebGL and OpenGL apps: shaders and limits that Apple's OpenGL refuses no
-  longer stop the app's whole GL context (the canvas or window went black for
-  good). dEQP GLES3 (every 50th case) 812 to 855 of 869; the whole GLES3
-  list in one process 22,445 to 43,125 cases; the WebGL conformance pages in
-  one Chrome 430 to 776 (WebGL 1) and 97 to 959 (WebGL 2), because one
-  refused shader no longer breaks every page after it.
+  show HDR; the main window's output only. mpv and Chrome do not send HDR yet.
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
   Firefox's 16). Past that, a video decodes on the CPU instead of playing
   black (the VM's VA-API driver knows the Mac's limit). The copy of each
   decoded picture can no longer be dropped by the app's own graphics state.
+  Existing VMs get the new driver with `omacvm update`.
 - Video encoding on the Mac's media engine: apps in the VM that encode H.264
   or HEVC through VA-API use it instead of the VM's CPU (FFmpeg's
   `h264_vaapi`/`hevc_vaapi`, OBS Studio's VAAPI encoders). Google Chrome's
@@ -82,6 +93,9 @@ in more words.
   manifest (for example a disk size with a command in it) could run that
   command on the Mac; now such a manifest is refused and the VM is built here
   instead.
+- The app carries the licence texts of MoltenVK and the Vulkan loader
+  (Apache-2.0, with cereal and cJSON), and of KosmicKrisp in builds that
+  have it.
 
 ## 2.8.0
 
