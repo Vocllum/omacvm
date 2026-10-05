@@ -24,8 +24,15 @@ trackpad. Then:
   keyboard). With the gestures feature off, the VM's daemon is off too (no link to the Mac's
   Gestures at all), and so is this.
 
-**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification); it
-re-arms when you come back to the full-screen VM, or press the combo again.
+**⌃⌥⌘ Esc** releases the trackpad to macOS (Omarchy shows a notification) and
+swipes the display under the pointer to the Space beside the VM's (a Dock
+swipe, as three or four fingers make it; `EscapeSwipe` = `all` in the
+`org.omacvm.gestures` settings: every display that shows the VM). The
+keyboard follows the pointer's display. Pressed there again in macOS, it
+swipes back. A swipe that cannot be made or does not land falls back to the
+app switch (the app from before, its Space), then to hiding the VM's app, so
+the keyboard never stays in the VM. It re-arms when you come back to the
+full-screen VM, or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
 ## macOS-native scroll momentum
