@@ -70,6 +70,11 @@ in more words.
   Firefox's 16). Past that, a video decodes on the CPU instead of playing
   black (the VM's VA-API driver knows the Mac's limit). The copy of each
   decoded picture can no longer be dropped by the app's own graphics state.
+- Video: reading a decoded picture out in the other YUV layout works. FFmpeg's
+  `-hwaccel_output_format vaapi -vf hwdownload,format=yuv420p` gave the same
+  empty picture for every frame since 2.7.0; NV12 to I420/YV12 and back are
+  now bit for bit the decoded picture (in the desktop session; done by the
+  VM's VA-API driver shim).
 - Video encoding on the Mac's media engine: apps in the VM that encode H.264
   or HEVC through VA-API use it instead of the VM's CPU (FFmpeg's
   `h264_vaapi`/`hevc_vaapi`, OBS Studio's VAAPI encoders). Google Chrome's
