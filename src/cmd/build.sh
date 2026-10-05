@@ -54,7 +54,7 @@ linux_name() {
 }
 TYPE=""; VM="Omarchy"; RES=""; CPUS=""; MEM_GB=""; DISK_GB=""; U=$(linux_name "$(id -un)"); FULL=""; HOST="omarchy"
 [[ -n $U ]] || U=omarchy
-BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0
+BRIDGE=1; WALLPAPER=1; GESTURES=1; GLIDE=0; OMANOTCH=""; MAC_CLOCK=1; CAMERA=1; BATTERY=""; IDLE_LOCK=1; AUTOLOGIN=0; THP=0; CONTROL=1
 CHANNEL=""; YES=0; DRY=0; PLAN=0; JSON=0; IMAGE=0; SOURCE=""
 usage() { echo "omacvm build: $*" >&2; exit 2; }
 needs_person() { printf '\033[1;31mneeds you:\033[0m %s\n' "$*" >&2; exit 3; }
@@ -72,6 +72,7 @@ feature_flag() {   # NAME on|off
     idle-lock) IDLE_LOCK=$v ;;
     autologin) AUTOLOGIN=$v ;;
     thp-kernel) THP=$v ;;
+    control-centre) CONTROL=$v ;;
     *) usage "unknown feature '$1' (omacvm features lists them)" ;;
   esac
   [[ $2 == on || $2 == off ]] || usage "--feature $1=$2: on or off"
@@ -361,7 +362,7 @@ fvar() {
     bridge) echo BRIDGE ;; wallpaper) echo WALLPAPER ;; gestures) echo GESTURES ;;
     scroll-momentum) echo GLIDE ;; omanotch) echo OMANOTCH ;; mac-clock) echo MAC_CLOCK ;; camera) echo CAMERA ;; idle-lock) echo IDLE_LOCK ;;
     battery) echo BATTERY ;;
-    autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;;
+    autologin) echo AUTOLOGIN ;; thp-kernel) echo THP ;; control-centre) echo CONTROL ;;
   esac
 }
 fget() { local v; v=$(fvar "$1"); echo "${!v:-0}"; }
@@ -421,7 +422,8 @@ esac
 (( IMAGE )) && { KB=us; KB_NOTE=""; KB_SHOWN=us; TZ_MAC=UTC; LANG_VM=en_US.UTF-8; }
 
 FEATS=(bridge "$BRIDGE" wallpaper "$WALLPAPER" gestures "$GESTURES" scroll-momentum "$GLIDE" omanotch "$OMANOTCH"
-       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP")
+       mac-clock "$MAC_CLOCK" camera "$CAMERA" battery "$BATTERY" idle-lock "$IDLE_LOCK" autologin "$AUTOLOGIN" thp-kernel "$THP"
+       control-centre "$CONTROL")
 # The one-time steps only a person can do on the Mac, one per line.
 human_steps() {
   (( ${EXTERNAL:-0} )) && echo "The VM is on an external drive: connect it before you start the VM, and never unplug it while the VM runs."

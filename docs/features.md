@@ -21,6 +21,7 @@ The short version is the grid at the top of the [README](../README.md).
 | **The Mac's clock** | Omarchy's clock at the far right of the bar, in your Mac's menu bar format (day, date, 12 or 24 hours, seconds, language) |
 | **The Mac's battery** | On a MacBook, Omarchy's battery icon and panel show the Mac's charge and charging, as on a laptop, plus time left and Omarchy's low-battery warning (not tested yet with the Mac on battery; the VM never suspends for it). Parallels does this itself; OmacVM adds it on UTM, VMware Fusion and OmacVM.app |
 | **Your keyboard layout** | Taken from the Mac |
+| **The control centre** | `omacvm` in Omarchy (the Omarchy menu, the bar's OmacVM item or a terminal) lists every feature with its live status: works, needs you (with the exact step on the Mac), failing, off, or not available on this Mac and why. Space switches a feature, `r` repairs it, `enter` shows its checks, version and log, `U` the updates (only the features a release changes, install now, weekly checks on or off), `!` reports a problem. The Mac does the work through a fixed list of requests to OmacVM Bridge; a failed switch puts the earlier features back. Theme colours come from the terminal, so it follows Omarchy's theme |
 | **Fast** | Near-native speed on Parallels; memory tuning so the VM does not hoard the Mac's RAM; btrfs snapshots you can boot from GRUB; optionally a memory-optimized kernel (transparent huge pages, MGLRU) |
 
 <p align="center">

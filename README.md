@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | 🔊 **Native volume and brightness**<br>The Mac's keys with Omarchy's own popups. | 🩺 **One check for everything**<br>`omacvm check` tells you what works and what to fix. |
 | 💡 **Keyboard backlight**<br>Shift+F1/F2 dims and brightens the Mac's keyboard, like Omarchy on a laptop. | 🔄 **One command to update**<br>`omacvm update` brings the Mac side and the VM up to date. |
 | 📷 **Camera and microphone**<br>Video calls in the VM. | 🔐 **Token-secured bridge to the Mac**<br>Only your own VM can talk to the Mac side, proven with a secret token. |
-| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | |
+| 📋 **Copy and paste, both ways**<br>Plus Night Shift, True Tone and the Mac's clock format. | 🎛️ **Control centre in Omarchy**<br>`omacvm` in the VM: features on or off, updates, report a problem. |
 
 **[See the full compatibility list per app below](#which-app), or [every feature in detail](docs/features.md).**
 
@@ -64,10 +64,11 @@ curl -fsSL https://raw.githubusercontent.com/gillesgoetsch/omacvm/main/install.s
 | Camera and microphone | ✅ | ✅ | ✅ | ✅ |
 | Copy and paste | ✅ | ✅ | ✅ ² | ✅ |
 | Theme and wallpaper sync | ✅ | ✅ | ✅ | ✅ |
+| Control centre in Omarchy | 🔜 ⁴ | ✅ | ✅ | ✅ |
 | Prebuilt VM (5 min) | 🔜 ³ | ✅ | ✅ | ✅ |
 | CPU and memory limit | none | none | none | 4 CPUs, 8 GB on Standard |
 
-¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes
+¹ after one setting in Parallels · ² when the pointer crosses the VM's edge · ³ coming soon; until then the app builds its VM in 10 to 30 minutes · ⁴ in OmacVM.app's VMs it shows the VM's side; switching from it comes with the app's control port (until then `omacvm features` on the Mac)
 
 <p align="center">
   <img src="docs/images/benchmarks.svg" alt="Bar chart: each route as a share of the Mac, OmacVM.app first, then UTM, VMware Fusion, Parallels. CPU all cores (Geekbench 7): 99, 89, 99, 96 percent. Web apps (Speedometer 3.1): 70, 52, 71, 67. Browser graphics (WebGL Aquarium): 22, 26, 38, 25. Browser overall (Basemark Web 3.0): OmacVM.app no full-screen run yet, 67, 78, 75. GPU compute (Geekbench 7 GPU, OpenCL): OmacVM.app 45 percent (not released yet), not available in the others." width="100%">
@@ -125,7 +126,12 @@ omacvm features                 # switch features on or off
 omacvm update                   # the newest OmacVM, on the Mac and in every running VM
 omacvm check                    # what works and what to fix; it changes nothing
 omacvm vms                      # your VMs and their OmacVM version
+omacvm report                   # report a problem: shows what goes into the GitHub issue first
 ```
+
+In Omarchy, `omacvm` (also in the Omarchy menu and the bar) opens the control
+centre: every feature with its status, on or off with space, repair, updates,
+and "report a problem" without personal data.
 
 Add `--vm NAME` for a VM other than the default. Have an Omarchy VM from
 omarchy-mac already? `omacvm apply --vm NAME` adds OmacVM to it.
@@ -148,7 +154,10 @@ More: [docs/how-it-works.md](docs/how-it-works.md), the whole build in
 
 ## Troubleshooting
 
-Start with `omacvm check`: it names what is wrong and what to do.
+Start with `omacvm check`: it names what is wrong and what to do. Still stuck?
+`omacvm report` (or `!` in the control centre) collects the checks, versions and
+logs without your names, addresses, Wi-Fi names or tokens, shows you the text,
+then opens a pre-filled GitHub issue.
 
 - **The Mac's menu bar stays over the full-screen VM**: System Settings › Menu
   Bar › Automatically hide and show the menu bar: **In Full Screen Only**.

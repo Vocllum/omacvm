@@ -6,6 +6,14 @@ in more words.
 
 ## Unreleased
 
+- **The OmacVM control centre in Omarchy**: `omacvm` in the VM (and OmacVM
+  in the Omarchy menu and the bar) shows every feature with its live status,
+  switches and repairs them through the Mac, lists what an update changes
+  and installs it, and turns update checks off. A VM from before gets it with
+  its next `omacvm apply` or `omacvm update` (one question, default yes).
+- **Report a problem**: `omacvm report` on the Mac, or `!` in the control
+  centre, collects checks, versions and logs without personal data, shows
+  the exact text, then opens a pre-filled GitHub issue.
 - **VMs last set up or updated with OmacVM 2.3 or older need one
   `omacvm update`** (with the VM running). Until then OmacVM Gestures no
   longer lets them in: their trackpad daemon has no Bridge token.

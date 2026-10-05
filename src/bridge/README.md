@@ -264,6 +264,28 @@ wallpaper store (`~/Library/Application Support/com.apple.wallpaper/Store/Index.
 macOS 14 and later) and restarts `WallpaperAgent` to apply it, so the desktop
 may redraw once.
 
+### The control centre (`/omacvm/`)
+
+For `omacvm` in Omarchy (docs/adr/0031). A fixed list; anything else is 404,
+and nothing the VM sends reaches a command line except feature names that are
+in the Mac's own `features.tsv`. The VM is never named by the request: the
+Bridge finds the one running VM that OmacVM set up at the request's address
+(none or two: 409). Requests carry `X-OmacVM-Proto: 1`; bodies are strict JSON
+up to 4 KB, unknown keys refused.
+
+| Request | What it does |
+|---|---|
+| `GET /omacvm/hello` | `{"proto", "proto_min", "omacvm", "requests", "features", "macos", "chip"}` |
+| `GET /omacvm/status` | the Mac's view of this VM: per feature on/available/reason, the Mac-side checks (`omacvm features --json` and `omacvm check --json --mac-only`, cached 30 s) |
+| `GET /omacvm/updates` | the last update check: `checks_enabled`, `checked_at`, `ok`, `offline`, `error`, the verified manifest |
+| `POST /omacvm/updates/check` | fetch and verify the manifest now (once a minute) |
+| `POST /omacvm/settings/update-checks` `{"enabled": bool}` | the one switch for update checks and notices |
+| `POST /omacvm/jobs` `{"action": "enable"\|"disable"\|"reinstall", "features": [...]}` or `{"action": "update"}` | runs `omacvm enable/disable F... --vm VM --yes --transaction`, `omacvm apply --vm VM --transaction` or `omacvm update --vm VM --transaction --commit C` (C from the verified manifest); 202 with the job. One per VM at a time, 20 an hour; toggles only when the Mac and the VM run the same OmacVM (else 409 `update-first`) |
+| `GET /omacvm/jobs/<id>` | `{"state": "running"\|"done"\|"failed"\|"rolled-back", "step", "text", "lines"}`, this VM's jobs only |
+
+From 127.0.0.1 (OmacVM.app's VMs, or any Mac program) everything but `hello`
+is refused. Every request goes to the log with the VM and the answer.
+
 ### Not built: Wi-Fi control
 
 `POST /power`, `/join`, `/disconnect` answer `501`. Design: CoreWLAN
