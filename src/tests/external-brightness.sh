@@ -11,7 +11,7 @@
 # 4. Anything odd is refused before it reaches the Bridge.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-T=$(mktemp -d); trap 'kill ${PID:-} 2>/dev/null && wait ${PID:-} 2>/dev/null; rm -rf "$T"' EXIT
+T=$(mktemp -d); trap '{ kill ${PID:-} && wait ${PID:-}; } 2>/dev/null || true; rm -rf "$T"' EXIT
 fail=0
 is() { if [[ $1 == "$2" ]]; then echo "ok    $3"; else echo "FAIL  $3: got '$1', want '$2'"; fail=1; fi; }
 
