@@ -3,11 +3,15 @@ Subject: [PATCH] ui/cocoa: start animation, then Omarchy's logo instead of "Disp
 
 What: when the window opens, OMACVM turns into Omarchy's logo (O, M and A
 stay, the cells of C, V and M fly and land as R, C, H and Y; 2.4 s), Omarchy
-green on Omarchy's background, then the logo holds until the guest shows its
-first picture and fades into it (the firmware's: the same logo, same size,
-same place). Reduce motion or OMACVM_SPLASH_ANIMATION=0: the logo without the
-morph. If the guest's picture comes before the animation ends, the rest plays
-within 0.35 s, then the fade. Only the main window animates.
+green on Omarchy's background. The firmware's first picture (about 0.1 s in)
+is the same logo, same size, same place: the animation plays on over it and
+then fades into it; if the guest is slower, the logo holds until its first
+picture. If the guest shows anything else before the animation ends (another
+firmware logo, GRUB, Linux), the rest plays within 0.35 s, then the fade: no
+half-made letters, and the guest is never held up. Which it is, is told by
+sampling the middle of each logo cell in the guest's picture. Reduce motion or
+OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the main window
+animates.
 After that, until the guest shows a picture on an output, and when it switches
 the output off again (a reboot), the window shows Omarchy's logo, green on
 black, where the firmware draws it, instead of QEMU's placeholder text
@@ -46,7 +50,8 @@ firmware's Logo.bmp of edk2-logo-omarchy.patch, at SPLASH_CELL);
 make-splash-morph.py --check (the table is the generator's);
 Tests/display/test-boot-splash-morph.c (the core starts as OMACVM and ends as
 the logo, still, on the pixels GL's nearest sampling gives at several window
-sizes; no jumps; the glow comes and goes). The build runs all three;
+sizes; no jumps; the glow comes and goes; a firmware-like frame is seen as
+the logo, text over it, a moved or recoloured logo as something else). The build runs all three;
 Tests/display/check-boot-splash.sh runs them from this patch alone (CI).
 Frames of the core against the preview's: start and end identical, mid-flight
 under 0.1 % of pixels differ by more than 8 of 255. The start, hand-over,
@@ -72,7 +77,7 @@ work notes).
      }
      return self;
  }
-@@ -2977,6 +2980,500 @@
+@@ -2977,6 +2980,543 @@
      CGLDestroyContext(ctx);
  }
  
@@ -101,7 +106,7 @@ work notes).
 +#include "ui/omacvm-splash.h"   /* the logo's cells, the animation's core */
 +
 +static int omacvm_splash_on = -1;       /* OMACVM_BOOT_SPLASH */
-+static bool omacvm_intro_told;          /* the start animation knows the guest drew */
++static int omacvm_intro_seen = -1;      /* the guest's main picture: SPLASH_SEEN_*, -1 none */
 +static GLuint omacvm_splash_tex[2];     /* on black, on navy; gl_view_ctx's group */
 +static bool omacvm_guest_drew;          /* a GL scanout since the last reset */
 +static int omacvm_frame_w = 1920;       /* the last picture of the guest's */
@@ -255,7 +260,50 @@ work notes).
 +    });
 +}
 +
-+static void omacvm_intro_guest_drew(void);
++static void omacvm_intro_guest_drew(bool real);
++
++/*
++ * QEMU's thread, BQL: tell the start animation what the guest shows. The
++ * firmware's first picture is the same logo in the same place: the animation
++ * plays on over it and then fades into it. Anything else (another logo,
++ * GRUB, Linux; the logo's place going black once the logo was there) is a
++ * real picture: the animation hurries and hands over.
++ */
++static void omacvm_intro_watch(void)
++{
++    int seen = SPLASH_SEEN_OTHER;
++
++    if (omacvm_intro_seen == SPLASH_SEEN_OTHER) {
++        return;
++    }
++    if (!gl_scanout_borrow) {
++        pixman_format_code_t f;
++
++        if (!surface || surface_is_placeholder(surface)) {
++            return;
++        }
++        f = surface_format(surface);
++        if (f == PIXMAN_x8r8g8b8 || f == PIXMAN_a8r8g8b8 ||
++            f == PIXMAN_x8b8g8r8 || f == PIXMAN_a8b8g8r8) {
++            seen = omacvm_splash_seen(surface_data(surface), surface_stride(surface),
++                                      surface_width(surface), surface_height(surface),
++                                      f == PIXMAN_x8b8g8r8 || f == PIXMAN_a8b8g8r8);
++        }
++        if (seen == SPLASH_SEEN_EMPTY) {
++            if (omacvm_intro_seen != SPLASH_SEEN_LOGO) {
++                return;     /* the firmware cleared the screen, the logo comes */
++            }
++            seen = SPLASH_SEEN_OTHER;
++        }
++    }
++    if (seen == omacvm_intro_seen) {
++        return;
++    }
++    omacvm_intro_seen = seen;
++    dispatch_async(dispatch_get_main_queue(), ^{
++        omacvm_intro_guest_drew(seen == SPLASH_SEEN_OTHER);
++    });
++}
 +
 +/* QEMU's thread, BQL: the main output changed. */
 +static void omacvm_splash_update(void)
@@ -263,14 +311,7 @@ work notes).
 +    if (gl_scanout_borrow) {
 +        omacvm_guest_drew = true;
 +    }
-+    if (!omacvm_intro_told &&
-+        (gl_scanout_borrow || (surface && !surface_is_placeholder(surface)))) {
-+        /* The guest's first picture: the start animation hands over. */
-+        omacvm_intro_told = true;
-+        dispatch_async(dispatch_get_main_queue(), ^{
-+            omacvm_intro_guest_drew();
-+        });
-+    }
++    omacvm_intro_watch();
 +    if (surface && !surface_is_placeholder(surface)) {
 +        omacvm_frame_w = surface_width(surface);
 +        omacvm_frame_h = surface_height(surface);
@@ -307,17 +348,18 @@ work notes).
 +/*
 + * OmacVM start animation: when the window opens, OMACVM turns into Omarchy's
 + * logo (O, M and A stay, the cells of C, V and M fly and land as R, C, H and
-+ * Y; 2.4 s), Omarchy green on Omarchy's background. Then the logo holds until
-+ * the guest shows its first picture (the firmware's, the same logo in the
-+ * same place) and fades into it. This is the preview the user picked
++ * Y; 2.4 s), Omarchy green on Omarchy's background. It plays on over the
++ * firmware's first picture (the same logo in the same place, so nothing is
++ * hidden) and then fades into it; if the guest is slower, the logo holds
++ * until the guest's first picture. This is the preview the user picked
 + * (a-pixel-morph.mp4, made by render.py of tracks/boot-splash/anim), drawn
 + * natively: the cells are a Core Animation shape layer, sharp at any size,
 + * and the soft glow is a small image under them, computed as the preview did.
 + *
 + * The guest is never held up: this is only drawing over the window. If the
-+ * guest shows a picture before the animation ends, the rest plays within
-+ * INTRO_RUSH s and then fades: cutting away mid-flight would leave half-made
-+ * letters, and the guest's first picture is that same logo anyway.
++ * guest shows something other than the logo before the animation ends
++ * (omacvm_intro_watch), the rest plays within INTRO_RUSH s and then fades:
++ * cutting away mid-flight would leave half-made letters.
 + * Reduce motion (or OMACVM_SPLASH_ANIMATION=0): the logo without the morph.
 + * Only the main window animates; the other displays show the still logo.
 + *
@@ -339,13 +381,12 @@ work notes).
 +@interface OmacVMIntroLayer : CALayer
 +- (id)initWithFrameWidth:(int)fw height:(int)fh still:(BOOL)still;
 +- (void)play;
-+- (void)guestDrew;
++- (void)guestShows:(bool)real;
 +@end
 +
 +static OmacVMIntroLayer *omacvm_intro;   /* main thread; nil once handed over */
 +
-+#define INTRO_RUSH 0.35   /* s: the rest of the animation once the guest drew */
-+#define INTRO_WAIT 0.2    /* s the guest's first picture shows under the logo first */
++#define INTRO_RUSH 0.35   /* s: the rest of the animation once the guest shows more */
 +#define INTRO_FADE 0.35   /* s */
 +
 +@implementation OmacVMIntroLayer {
@@ -355,9 +396,10 @@ work notes).
 +    int fw, fh;                 /* the firmware's frame */
 +    double t;                   /* where the animation is (s) */
 +    CFTimeInterval start;       /* of the first frame; 0 before */
-+    CFTimeInterval drew_at;     /* when the guest drew; 0 before */
++    CFTimeInterval rush_at;     /* when the guest showed a real picture; 0 before */
 +    double rush_from, rush_rate;
-+    double drew_t;              /* t when the guest drew */
++    double shown_t;             /* t when the guest's first picture came; -1 before */
++    bool real;                  /* that picture was not the firmware's logo */
 +    bool fading;
 +    IntroCell buf[INTRO_MAX];
 +    uint8_t bg[INTRO_BG_W * INTRO_BG_H * 4];
@@ -376,6 +418,7 @@ work notes).
 +        fw = w;
 +        fh = h;
 +        t = still ? INTRO_END : 0;
++        shown_t = -1;
 +        /* Like the cursor's image: sRGB, the colours of the preview. */
 +        space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 +        [self setActions:none];
@@ -476,7 +519,7 @@ work notes).
 +    [link addToRunLoop:[NSRunLoop mainRunLoop] forMode:NSRunLoopCommonModes];
 +}
 +
-+- (void)fadeAfter:(double)wait
++- (void)fade
 +{
 +    CABasicAnimation *a = [CABasicAnimation animationWithKeyPath:@"opacity"];
 +    CFTimeInterval now = [self convertTime:CACurrentMediaTime() fromLayer:nil];
@@ -485,11 +528,12 @@ work notes).
 +        return;
 +    }
 +    fading = true;
-+    info_report("cocoa: start animation fades into the guest's first picture "
-+                "(it came %.2f s into the %.1f s animation)", drew_t, INTRO_END);
++    info_report("cocoa: start animation fades into the guest's picture (%s; the first "
++                "came %.2f s into the %.1f s animation)",
++                real ? "not the logo, sped up" : "the firmware's logo", shown_t, INTRO_END);
 +    [a setFromValue:@1.0];
 +    [a setToValue:@0.0];
-+    [a setBeginTime:now + MAX(0, wait)];
++    [a setBeginTime:now];
 +    [a setDuration:INTRO_FADE];
 +    [a setFillMode:kCAFillModeBackwards];
 +    [a setTimingFunction:[CAMediaTimingFunction
@@ -514,8 +558,8 @@ work notes).
 +    if (!start) {
 +        start = now;
 +    }
-+    if (drew_at) {
-+        t = rush_from + (now - MAX(drew_at, start)) * rush_rate;
++    if (rush_at) {
++        t = rush_from + (now - MAX(rush_at, start)) * rush_rate;
 +    } else {
 +        t = now - start;
 +    }
@@ -523,30 +567,34 @@ work notes).
 +        t = INTRO_END;
 +        [link invalidate];
 +        link = nil;
-+        if (drew_at) {
-+            [self fadeAfter:INTRO_WAIT - (CACurrentMediaTime() - drew_at)];
++        if (shown_t >= 0) {
++            [self fade];
 +        }
 +    }
 +    [self render];
 +}
 +
-+- (void)guestDrew
++/* The guest's picture: the firmware's logo (real: false) or anything else. */
++- (void)guestShows:(bool)r
 +{
-+    drew_at = CACurrentMediaTime();
-+    drew_t = t;
-+    if (!link) {
-+        [self fadeAfter:INTRO_WAIT];
-+        return;
++    if (shown_t < 0) {
++        shown_t = t;
 +    }
-+    rush_from = t;
-+    rush_rate = MAX(1.0, (INTRO_END - t) / INTRO_RUSH);
++    real |= r;
++    if (!link) {
++        [self fade];
++    } else if (r && !rush_at) {
++        rush_at = CACurrentMediaTime();
++        rush_from = t;
++        rush_rate = MAX(1.0, (INTRO_END - t) / INTRO_RUSH);
++    }
 +}
 +@end
 +
-+/* Main thread: the guest showed its first picture on the main output. */
-+static void omacvm_intro_guest_drew(void)
++/* Main thread: what the guest shows on the main output now. */
++static void omacvm_intro_guest_drew(bool real)
 +{
-+    [omacvm_intro guestDrew];
++    [omacvm_intro guestShows:real];
 +}
 +
 +/* Main thread, with the BQL (cocoa_display_init): start the animation. */
@@ -573,7 +621,15 @@ work notes).
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -2996,6 +3493,7 @@
+@@ -2984,6 +3524,7 @@
+         surface_gl_update_texture(dgc.gls, surface, x, y, w, h);
+         gl_dirty = true;
+     });
++    omacvm_intro_watch();
+ }
+ 
+ static void cocoa_gl_switch(DisplayChangeListener *dcl,
+@@ -2996,6 +3537,7 @@
  
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
@@ -581,7 +637,7 @@ work notes).
  }
  
  static void cocoa_gl_render(void)
-@@ -3073,6 +3571,8 @@
+@@ -3073,6 +3615,8 @@
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -590,7 +646,7 @@ work notes).
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3123,6 +3623,7 @@
+@@ -3123,6 +3667,7 @@
  {
      gl_scanout_borrow = NULL;
      gl_dirty = true;
@@ -598,7 +654,7 @@ work notes).
  
      cocoa_gl_log("scanout disable");
  }
-@@ -3136,6 +3637,7 @@
+@@ -3136,6 +3681,7 @@
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
      gl_dirty = true;
@@ -606,7 +662,7 @@ work notes).
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -3711,6 +4213,8 @@
+@@ -3711,6 +4257,8 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -615,7 +671,7 @@ work notes).
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -4641,6 +5145,10 @@
+@@ -4641,6 +5189,10 @@
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;
@@ -628,7 +684,7 @@ work notes).
              QemuConsole *con = qemu_console_lookup_by_index(index);
 --- /dev/null
 +++ b/ui/omacvm-splash.h
-@@ -0,0 +1,476 @@
+@@ -0,0 +1,514 @@
 +/*
 + * OmacVM boot splash: Omarchy's logo as cells, and the core of the start
 + * animation (OMACVM turns into the logo). Only C, no Cocoa or QEMU, so that
@@ -841,6 +897,44 @@ work notes).
 +    {73.5f, 1, 74, 2, 1.2121f, -3.3560f}, {69.5f, 2, 72, 3, 1.1314f, -4.6529f}, {69.5f, 1, 73, 2, 1.2203f, 1.5243f},
 +    {68.5f, 1, 68, 2, 1.0549f, -1.6577f}, {70.5f, 0, 74, 1, 1.2409f, -6.6378f},
 +};
++
++/* What a guest picture shows where the firmware puts its logo. */
++enum { SPLASH_SEEN_EMPTY, SPLASH_SEEN_LOGO, SPLASH_SEEN_OTHER };
++
++/*
++ * A w x h picture of 32-bit pixels, 0xXXRRGGBB (0xXXBBGGRR with bgr), rows
++ * stride bytes apart: does it show the firmware's logo (centred as edk2 draws
++ * it, SPLASH_CELL pixels a cell), black where the logo goes, or something
++ * else? One pixel in the middle of each cell; 1 % of them may be off.
++ */
++static int omacvm_splash_seen(const uint8_t *data, int stride, int w, int h, bool bgr)
++{
++    const int lw = SPLASH_COLS * SPLASH_CELL, lh = SPLASH_ROWS * SPLASH_CELL;
++    const int n = SPLASH_COLS * SPLASH_ROWS;
++    int x0 = (w - lw) / 2, y0 = (h - lh) / 2, logo = 0, dark = 0;
++
++    if (!data || w < lw || h < lh || stride < w * 4) {
++        return SPLASH_SEEN_OTHER;
++    }
++    for (int r = 0; r < SPLASH_ROWS; r++) {
++        for (int c = 0; c < SPLASH_COLS; c++) {
++            const uint8_t *q = data + (size_t)(y0 + r * SPLASH_CELL + SPLASH_CELL / 2) * stride +
++                               (size_t)(x0 + c * SPLASH_CELL + SPLASH_CELL / 2) * 4;
++            uint32_t p = q[0] | q[1] << 8 | q[2] << 16 | (uint32_t)q[3] << 24;
++            int red = bgr ? p & 0xff : (p >> 16) & 0xff, green = (p >> 8) & 0xff;
++            int blue = bgr ? (p >> 16) & 0xff : p & 0xff;
++            bool black = red < 0x40 && green < 0x40 && blue < 0x40;
++            bool lit = red >= 0x90 && green >= 0xb0 && blue < 0x90;   /* #a8cd76 */
++
++            logo += omacvm_splash_cells[r][c] == '#' ? lit : black;
++            dark += black;
++        }
++    }
++    if (dark == n) {
++        return SPLASH_SEEN_EMPTY;
++    }
++    return logo >= n - n / 100 ? SPLASH_SEEN_LOGO : SPLASH_SEEN_OTHER;
++}
 +
 +#define INTRO_END     2.4   /* s: the last movement; the logo holds after it */
 +#define INTRO_FLIGHT  0.8   /* s a cell flies */

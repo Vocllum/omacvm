@@ -9,7 +9,8 @@
  *   animation's last frame is the GL splash's and the firmware's logo;
  * - no cell jumps from one frame to the next (120 Hz);
  * - the glow comes and goes: none at the start and the end, some mid-flight;
- *   the background is plain navy without it.
+ *   the background is plain navy without it;
+ * - a guest picture is told apart: the firmware's logo, black, anything else.
  *
  * build-qemu-gpu-runtime.sh builds it with -I the patched ui/;
  * check-boot-splash.sh with the header taken from the patch.
@@ -209,16 +210,72 @@ static void test_background(void)
     CHECK(top > 0x1b + 20, "no glow at its peak (green %d)", top);
 }
 
+/* A firmware-like frame: black, the logo centred at SPLASH_CELL, x8r8g8b8
+ * (or x8b8g8r8 with bgr), the logo moved by dx pixels. */
+static uint8_t *frame(int w, int h, bool logo, bool bgr, int dx)
+{
+    uint8_t *f = calloc((size_t)w * h, 4);
+    int x0 = (w - SPLASH_COLS * SPLASH_CELL) / 2 + dx, y0 = (h - SPLASH_ROWS * SPLASH_CELL) / 2;
+
+    for (int y = 0; logo && y < SPLASH_ROWS * SPLASH_CELL; y++) {
+        for (int x = 0; x < SPLASH_COLS * SPLASH_CELL; x++) {
+            if (omacvm_splash_cells[y / SPLASH_CELL][x / SPLASH_CELL] == '#' &&
+                x0 + x >= 0 && x0 + x < w) {
+                uint8_t *p = f + ((size_t)(y0 + y) * w + x0 + x) * 4;
+                p[0] = bgr ? 0xa8 : 0x76;
+                p[1] = 0xcd;
+                p[2] = bgr ? 0x76 : 0xa8;
+            }
+        }
+    }
+    return f;
+}
+
+static void test_seen(void)
+{
+    uint8_t *f = frame(1920, 1080, true, false, 0);
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_LOGO,
+          "the firmware's frame is not seen as the logo");
+    /* The progress bar and "Start boot option" under the logo do not matter. */
+    memset(f + (size_t)1000 * 1920 * 4, 0xff, (size_t)20 * 1920 * 4);
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_LOGO,
+          "the progress bar hides the logo");
+    /* GRUB's text across the logo's place. */
+    memset(f + (size_t)540 * 1920 * 4, 0xaa, (size_t)16 * 1920 * 4);
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_OTHER,
+          "text over the logo is seen as the logo");
+    free(f);
+    f = frame(2880, 1800, true, true, 0);
+    CHECK(omacvm_splash_seen(f, 2880 * 4, 2880, 1800, true) == SPLASH_SEEN_LOGO,
+          "a bigger bgr frame is not seen as the logo");
+    CHECK(omacvm_splash_seen(f, 2880 * 4, 2880, 1800, false) == SPLASH_SEEN_OTHER,
+          "the logo in the wrong colours is seen as the logo");
+    free(f);
+    f = frame(1920, 1080, true, false, SPLASH_CELL);
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_OTHER,
+          "a moved logo is seen as the logo");
+    free(f);
+    f = frame(1920, 1080, false, false, 0);
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_EMPTY,
+          "a black frame is not empty");
+    CHECK(omacvm_splash_seen(f, 1920 * 4, 1024, 768, false) == SPLASH_SEEN_OTHER &&
+          omacvm_splash_seen(NULL, 0, 1920, 1080, false) == SPLASH_SEEN_OTHER,
+          "a frame too small for the logo, or none, is not other");
+    free(f);
+}
+
 int main(void)
 {
     test_ends();
     test_geometry();
     test_motion();
     test_background();
+    test_seen();
     if (failures) {
         fprintf(stderr, "test-boot-splash-morph: %d failures\n", failures);
         return 1;
     }
-    printf("test-boot-splash-morph: OMACVM to the logo, still ends on GL's pixels, no jumps\n");
+    printf("test-boot-splash-morph: OMACVM to the logo, still ends on GL's pixels, no jumps, "
+           "the firmware's logo told apart\n");
     return 0;
 }
