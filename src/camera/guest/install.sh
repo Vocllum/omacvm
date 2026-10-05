@@ -14,7 +14,7 @@ FILES=(/etc/systemd/user/omacvm-camera.service /usr/local/bin/omacvm-camera /etc
        /etc/modules-load.d/90-omacvm-camera.conf /etc/udev/rules.d/70-omacvm-camera.rules)
 
 if [[ $ON != on || $TYPE == parallels ]]; then
-  [[ -e /usr/local/bin/omacvm-camera ]] || exit 0
+  [[ -e /usr/local/bin/omacvm-camera || -e /etc/systemd/user/omacvm-camera.service ]] || exit 0
   systemctl --global disable omacvm-camera.service >/dev/null 2>&1 || true
   user_ctl stop omacvm-camera.service 2>/dev/null || true
   systemctl --user -M root@ stop omacvm-camera.service >/dev/null 2>&1 || true

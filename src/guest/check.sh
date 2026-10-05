@@ -144,7 +144,11 @@ if [[ $BRIDGE == on ]]; then
   if [[ $WALLPAPER == on ]]; then
     if user_active omacvm-wallpaper.path; then ok "wallpaper" "follows the Omarchy theme"
     else bad "wallpaper" "the watcher (omacvm-wallpaper.path) stopped: omacvm apply starts it again"; fi
+  elif user_active omacvm-wallpaper.path || user_active omacvm-wallpaper.service; then
+    bad "wallpaper" "off, but its watcher runs: omacvm apply"
   else skip "wallpaper" "off (chosen at setup)"; fi
+elif user_active omacvm-bridge-events.socket || user_active omacvm-bridge-osd.service || pgrep -u "$U" -f /usr/local/bin/omacvm-bridge >/dev/null; then
+  bad "Bridge" "off, but its services run and talk to the Mac: omacvm apply"
 else skip "Bridge" "off (chosen at setup): Omarchy's own Wi-Fi and audio widgets"; fi
 
 section "Camera and microphone"
@@ -170,6 +174,7 @@ elif [[ $CAMERA == on ]]; then
       *) bad "camera from the Mac" "the Bridge does not answer /camera/status: $(jq -r '.error // "no answer"' <<<"$cs" 2>/dev/null) (omacvm update)" ;;
     esac
   fi
+elif user_active omacvm-camera.service; then bad "camera" "off, but omacvm-camera runs and asks the Mac: omacvm apply"
 else skip "camera" "off (chosen at setup)"; fi
 mic=$(as_user pactl list short sources 2>/dev/null | awk '$2 !~ /\.monitor$/ { print $2; exit }')
 if [[ -n $mic ]]; then ok "microphone" "$mic"
@@ -204,6 +209,7 @@ elif [[ $BATTERY == on ]]; then
   else skip "battery in the bar" "Omarchy's power widget is not in the bar (Omarchy's bar settings add it)"; fi
   if grep -qs '^CriticalPowerAction=Ignore' /etc/UPower/UPower.conf.d/90-omacvm-battery.conf; then ok "low battery" "the VM never suspends for it"
   else bad "low battery" "UPower may suspend or power off the VM: omacvm apply"; fi
+elif systemctl is-active -q omacvm-battery; then bad "battery" "off, but omacvm-battery runs and asks the Mac: omacvm apply"
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
@@ -397,10 +403,16 @@ if [[ $MAC_CLOCK == on ]]; then
   if [[ -n $f ]]; then ok "the Mac's clock" "far right, $f"
   elif [[ -s $H/.local/state/omacvm/pending-clock ]]; then bad "the Mac's clock" "set at the next login"
   else bad "the Mac's clock" "not at the far right of the bar (omacvm apply)"; fi
-fi
+else skip "the Mac's clock" "off (chosen at setup): Omarchy's own clock"; fi
 
 section "Omanotch"
-if [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
+if [[ $OMANOTCH == off ]]; then
+  if user_active notchcast.service || pgrep -u "$U" -x notchcast >/dev/null || connected_to "$HOST" 47811; then
+    bad "Omanotch" "off, but notchcast runs and talks to the Mac: omacvm apply"
+  elif [[ $(systemctl --global is-enabled omacvm-omanotch.service 2>/dev/null) == enabled ]]; then
+    bad "Omanotch" "off, but queued to install at the next login: omacvm apply"
+  else skip "Omanotch" "off (chosen at setup)"; fi
+elif [[ $OMANOTCH == on && ! -x $H/.local/bin/notchcast ]]; then
   if [[ -f /etc/systemd/user/omacvm-omanotch.service ]]; then bad "Omanotch" "chosen, not installed yet: it installs at the next login"
   else bad "Omanotch" "chosen, not set up (omacvm enable omanotch)"; fi
 elif systemctl --user -M "$U@" list-unit-files notchcast.service 2>/dev/null | grep -q notchcast; then
