@@ -38,9 +38,6 @@ while (( $# )); do
 done
 STAMPS=~/Library/Application\ Support/omacvm/installed
 mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
-# The omacvm the Bridge runs for the control centre's requests (control.swift
-# checks it belongs to this user and nobody else can write it).
-(umask 077; printf '%s\n' "$(cd "$R/.." && pwd)/omacvm" > ~/Library/Application\ Support/omacvm/cli)
 # Up to 2.7, Gestures kept its list of VMs without a token here; nothing reads it now.
 rm -f ~/Library/Application\ Support/omacvm/gestures-legacy{,.new}
 
@@ -64,6 +61,13 @@ install_app() {
 }
 INSTALLED=()
 source "$R/lib/mac.sh"
+# The omacvm the Bridge runs for the control centre's requests (control.swift
+# checks it belongs to this user and nobody else can write it): only the
+# installed checkout (cli_for_bridge).
+me="$(cd "$R/.." && pwd -P)/omacvm"
+if cli_for_bridge "$me"; then
+  (umask 077; printf '%s\n' "$me" > ~/Library/Application\ Support/omacvm/cli)
+fi
 # The token first: a Bridge starting without one makes its own, and two at
 # once could end up with the file holding another token than the Bridge.
 (( BRIDGE || GESTURES != -1 )) && bridge_token_ensure

@@ -5,7 +5,7 @@
       {"version", "parts": {part: {"digest", "release"}}} for this copy of
       src/ (omacvm apply writes it to the VM's /etc/omacvm/installed.json)
   manifest.py build --version V --commit C [--previous FILE] [--date D] [--notes FILE] [--src DIR]
-      the release manifest; a part keeps the release of the previous manifest
+      the release manifest ("kind": "control-manifest"); a part keeps the release of the previous manifest
       while its digest is the same, so nobody bumps versions by hand. --notes:
       "part<TAB>note" lines (one line per changed part)
   manifest.py parts [--src DIR]
@@ -129,7 +129,9 @@ def main() -> int:
         if not same and k in notes:
             p["note"] = notes[k]
         parts[k] = p
-    m = {"schema": 1, "version": a.version, "commit": a.commit, "date": a.date, "channel": "stable",
+    # "kind": one release key signs this and OmacVM.app's feed ("app-feed");
+    # the Bridge takes only a "control-manifest".
+    m = {"schema": 1, "kind": "control-manifest", "version": a.version, "commit": a.commit, "date": a.date, "channel": "stable",
          "notes_url": f"https://github.com/gillesgoetsch/omacvm/releases/tag/v{a.version}",
          "proto": 1, "proto_min": 1, "parts": parts}
     json.dump(m, sys.stdout, indent=1, sort_keys=True)
