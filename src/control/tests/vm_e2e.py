@@ -62,6 +62,7 @@ async def main(argv):
             await pilot.pause(0.3)
             if isinstance(app.screen, ConfirmScreen):
                 out["asked"] = True
+                out["asked_text"] = app.screen.text
                 await pilot.press("y")
             notes_seen = []
             orig = app.notify
@@ -91,8 +92,9 @@ async def main(argv):
             out["busy_notes"] = notes
             out["banners_while_running"] = banners
             out["job"] = {"state": j.state, "text": j.text, "steps": j.step, "of": j.of, "failed_part": j.failed_part,
-                          "mac_omacvm": j.mac_omacvm, "lines": app.c.job_lines.get(j.id, [])[-12:]} if j else None
+                          "failed_side": j.failed_side, "mac_omacvm": j.mac_omacvm, "lines": app.c.job_lines.get(j.id, [])[-12:]} if j else None
             out["banner"] = app.banner()
+            out["result"] = app.last_result
             out["after"] = [row(app, name).on, row(app, name).status.value, row(app, name).note]
         elif cmd == "updates":
             if len(argv) > 1 and argv[1] == "check":
