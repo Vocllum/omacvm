@@ -969,7 +969,8 @@ static CGPoint pointerNow(void) {
 }
 
 // One swipe on that display (dir +1: to the Space on the right). The Dock
-// swipes the display the pointer is on; the events also carry it.
+// swipes the display the pointer is on (swipe() puts it there first); the
+// events also carry it.
 static int postSwipe(CGDirectDisplayID d, CGRect b, int dir) {
   (void)d;
   CGPoint p = pointerNow();
@@ -1052,6 +1053,9 @@ static int (*spacesFn)(DisplaySpaces *, int) = readSpaces;
 static uint64_t (*windowSpaceFn)(CGWindowID) = readWindowSpace;
 static int (*swipeFn)(CGDirectDisplayID, CGRect, int) = postSwipe;
 static CGPoint (*pointerFn)(void) = pointerNow;
+static void warpPointer(CGPoint p) { CGWarpMouseCursorPosition(p); CGAssociateMouseAndMouseCursorPosition(true); }
+static void (*warpFn)(CGPoint) = warpPointer;
+static double warpSettle = 0.08;   // s: the Dock takes the swipe before the pointer goes back
 static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
 static int (*hideFn)(pid_t) = ns_hide;
@@ -1066,9 +1070,9 @@ static void after(void (^f)(void)) {
 // The Space each display showed the VM on when the combo left it (pressing
 // it again there swipes back to it), and the swipes of the last press.
 static struct { CGDirectDisplayID id; uint64_t space; } left[MAX_DISPLAYS];
-typedef struct { CGDirectDisplayID id; uint64_t from, to; int dir; } Swipe;
+typedef struct { CGDirectDisplayID id; CGRect b; uint64_t from, to; int dir; } Swipe;
 static Swipe swiped[MAX_DISPLAYS];
-static int nSwiped;
+static int nSwiped, signRetried;
 
 static void rememberLeft(CGDirectDisplayID id, uint64_t space) {
   for (int i = 0; i < MAX_DISPLAYS; i++)
@@ -1139,25 +1143,54 @@ static void focusPointerDisplay(void) {
 }
 
 // Did each swipe of the last press land? A Space that moved the other way
-// teaches the sign (kept); none moved: the swipe does not work here.
-static int swipesLanded(void) {
+// teaches the sign (kept). *moved: some display's Space changed at all.
+static int learnedNow;   // swipesLanded just learned the sign from a swipe that went the other way
+static int swipesLanded(int *moved) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), landed = 0;
+  *moved = 0; learnedNow = 0;
   for (int i = 0; i < nSwiped; i++) {
     const DisplaySpaces *d = displayIn(ds, nd, swiped[i].id);
     if (!d) continue;
     if (d->current == swiped[i].to) { landed++; continue; }
     int from = spaceIndex(d, swiped[i].from), now = spaceIndex(d, d->current);
+    if (now != from) *moved = 1;
     if (from >= 0 && now == from - swiped[i].dir) {
       swipeSign = -swipeSign;
       saveSignFn();
+      learnedNow = 1;
       logf_("escape combo: the swipe went the other way: direction learned");
     }
   }
   return landed;
 }
 
+static void postOn(CGDirectDisplayID id, CGRect b, int dir);
+
+// Nothing moved: with only two Spaces (a Mac mini: Desktop 1 and the VM's) a
+// swipe the wrong way just bounces at the edge, so nothing is learned. Try
+// the other direction once; if that lands, it is kept. 1: a retry is on.
+static int retryOtherWay(void (^then)(void)) {
+  if (signRetried || !nSwiped) return 0;
+  signRetried = 1;
+  swipeSign = -swipeSign;
+  logf_("escape combo: the swipe bounced: trying the other direction");
+  for (int i = 0; i < nSwiped; i++) postOn(swiped[i].id, swiped[i].b, swiped[i].dir);
+  after(then);
+  return 1;
+}
+
+// After the retry: it landed (kept) or not (the sign as before).
+static int retryLanded(int landed) {
+  if (!signRetried) return landed;
+  if (landed) { saveSignFn(); logf_("escape combo: the other direction worked: direction learned"); }
+  else if (!learnedNow) swipeSign = -swipeSign;
+  return landed;
+}
+
 static void checkLeave(void) {
-  if (!swipesLanded()) {
+  int moved, landed = swipesLanded(&moved);
+  if (!landed && !moved && retryOtherWay(^{ checkLeave(); })) return;
+  if (!retryLanded(landed)) {
     logf_("escape combo: the Space did not change: switching apps instead");
     leaveBySwitch();
     return;
@@ -1166,7 +1199,9 @@ static void checkLeave(void) {
 }
 
 static void checkEnter(void) {
-  if (!swipesLanded()) {
+  int moved, landed = swipesLanded(&moved);
+  if (!landed && !moved && retryOtherWay(^{ checkEnter(); })) return;
+  if (!retryLanded(landed)) {
     logf_("escape combo: the Space did not change: switching to the VM instead");
     goTo(vmPid, vmWin, "back into the VM:", NULL);
     return;
@@ -1176,11 +1211,26 @@ static void checkEnter(void) {
   if (frontFn() != vmPid) goTo(vmPid, vmWin, "keyboard to the VM:", NULL);
 }
 
+// The Dock swipes the display the pointer is on: for another display (the
+// "all" setting) the pointer goes to its centre for the swipe, then back.
+static int postWhere(CGDirectDisplayID id, CGRect b, int dir) {
+  CGPoint p = pointerFn();
+  int away = !CGRectContainsPoint(b, p);
+  if (away) warpFn(CGPointMake(CGRectGetMidX(b), CGRectGetMidY(b)));
+  int ok = swipeFn(id, b, dir);
+  if (away) {
+    if (warpSettle > 0) usleep((useconds_t)(warpSettle * 1e6));
+    warpFn(p);
+  }
+  return ok;
+}
+static void postOn(CGDirectDisplayID id, CGRect b, int dir) { postWhere(id, b, dir); }
+
 static int swipe(const DisplaySpaces *d, int dir, uint64_t to, const char *what) {
   // "Displays have separate Spaces" off: one list for every display, swiped once.
   for (int i = 0; i < nSwiped; i++) if (swiped[i].from == d->current) return 0;
-  if (!dir || nSwiped >= MAX_DISPLAYS || !swipeFn(d->id, d->bounds, dir)) return 0;
-  swiped[nSwiped++] = (Swipe){ d->id, d->current, to, dir };
+  if (!dir || nSwiped >= MAX_DISPLAYS || !postWhere(d->id, d->bounds, dir)) return 0;
+  swiped[nSwiped++] = (Swipe){ d->id, d->bounds, d->current, to, dir };
   logf_("escape combo: display %u swiped %s (%s)", d->id, dir > 0 ? "right" : "left", what);
   return 1;
 }
@@ -1197,7 +1247,7 @@ static void leaveVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
   CGPoint p = pointerFn();
-  nSwiped = 0;
+  nSwiped = 0; signRetried = 0;
   int pointerOnVM = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
@@ -1221,7 +1271,7 @@ static void enterVM(void) {
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
-  nSwiped = 0;
+  nSwiped = 0; signRetried = 0;
   for (int i = 0; i < nd; i++) {
     const DisplaySpaces *d = &ds[i];
     if (!all && !CGRectContainsPoint(d->bounds, p)) continue;

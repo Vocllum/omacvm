@@ -56,11 +56,18 @@ static uint64_t fakeWindowSpace(CGWindowID win) {
   return 0;
 }
 // The Dock: one Space over on that display; a full-screen Space brings its app.
+// The Dock swipes the display the pointer is on, whatever the events say.
+static World *underPointer(void) {
+  for (int i = 0; i < nWorld; i++) if (CGRectContainsPoint(world[i].b, pointer)) return &world[i];
+  return NULL;
+}
+static int warps;
+static void fakeWarp(CGPoint p) { pointer = p; warps++; }
 static int fakeSwipe(CGDirectDisplayID d, CGRect b, int dir) {
-  (void)b;
-  if (swipes < 4) swipedOn[swipes] = d;
+  (void)b; (void)d;
+  World *w = underPointer();
+  if (swipes < 4) swipedOn[swipes] = w ? w->id : 0;
   swipes++;
-  World *w = worldOf(d);
   if (!w || swipesIgnored) return 1;
   int i = idx(w, w->cur), j = i + dir * swipeSign * worldSign;
   if (i < 0 || j < 0 || j >= w->n) return 1;   // the edge: macOS bounces
@@ -153,6 +160,7 @@ int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
   spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; swipeFn = fakeSwipe; pointerFn = fakePointer;
   vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll; saveSignFn = fakeSave;
+  warpFn = fakeWarp; warpSettle = 0;
   verifyAfter = 0.01;
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   int sv[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, sv); peer = sv[1]; fcntl(peer, F_SETFL, O_NONBLOCK);
@@ -188,10 +196,26 @@ int main(void) {
   settle(vm, NET_APP);
   check(capturing && !strcmp(sent(), "S on|"), "... and it is captured again");
 
-  // The swipe does nothing (macOS ignores it): the app switch of RC8.
+  // Only two Spaces and the swipe's sign the wrong way round (the mini's usual
+  // layout): the swipe bounces at the edge, nothing to learn from. The other
+  // direction is tried once, lands and is kept: no app switch.
+  worldSign = -1; saved = 0;
+  check(press(C|O|M, HID, 0) == 1 && swipes == 2 && world[0].cur == 101 && !went && saved == 1 && swipeSign == -1,
+        "mini, sign the wrong way: the bounce is retried the other way, lands, is kept");
+  sent(); settle(vm, NET_APP);
+  check(press(C|O|M, HID, 0) == 1 && swipes == 1 && world[0].cur == 102 && front == vm && !went,
+        "... back into the VM with one swipe");
+  settle(vm, NET_APP); sent();
+  check(press(C|O|M, HID, 0) == 1 && swipes == 1 && world[0].cur == 101 && !went, "... and out with one swipe from now on");
+  sent(); settle(vm, NET_APP);
+  front = vm; world[0].cur = 102; settle(vm, NET_APP); sent();
+  worldSign = 1; swipeSign = 1; saved = 0;
+
+  // The swipe does nothing (macOS ignores it): one try the other way, then the app switch of RC8.
   swipesIgnored = 1;
-  check(press(C|O|M, HID, 0) == 1 && swipes == 1 && went == 1 && wentTo == terminal && wentWin == 11,
-        "swipe ignored: the app from before comes to the front instead");
+  check(press(C|O|M, HID, 0) == 1 && swipes == 2 && went == 1 && wentTo == terminal && wentWin == 11,
+        "swipe ignored (both ways): the app from before comes to the front instead");
+  check(swipeSign == 1 && saved == 0, "... and the direction stays as it was");
   check(front == terminal && world[0].cur == 101 && !hidden, "... with its Space");
   sent(); settle(vm, NET_APP);
   check(press(C|O|M, HID, 0) == 1 && went >= 1 && wentTo == vm && front == vm && world[0].cur == 102,
@@ -251,9 +275,13 @@ int main(void) {
   sent(); settle(vm, NET_APP);
   world[1].cur = 302; front = vm; settle(vm, NET_APP); sent();
 
-  // "Swipe all monitors".
-  all = 1;
+  // "Swipe all monitors": the Dock swipes the pointer's display only, so the
+  // pointer visits the other display for its swipe and comes back.
+  all = 1; warps = 0;
+  CGPoint before = pointer;
   check(press(C|O|M, HID, 0) == 1 && swipes == 2 && world[0].cur == 201 && world[1].cur == 301, "all: both displays swipe out of the VM");
+  check(swipedOn[0] != swipedOn[1] && warps == 2 && pointer.x == before.x && pointer.y == before.y,
+        "all: ... one swipe on each display (the pointer went there and back)");
   sent(); settle(vm, NET_APP);
   check(press(C|O|M, HID, 0) == 1 && swipes == 2 && world[0].cur == 202 && world[1].cur == 302 && front == vm,
         "all: ... and both back into it");
