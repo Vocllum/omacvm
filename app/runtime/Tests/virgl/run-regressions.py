@@ -46,7 +46,7 @@ def oracle_link_args(compiler):
     return ["-L" + str(output), "-lgl-oracle", "-Wl,-rpath," + str(output)]
 
 
-def run_api_test(name, oracle=False):
+def run_api_test(name, frameworks=(), oracle=False):
     """Link against the built libvirglrenderer and drive it through its public API.
     The tests run on Apple's software renderer (soft-gl.h), never on the GPU."""
     entry = next(item for item in entries if item["file"].endswith("/virglrenderer.c"))
@@ -59,7 +59,8 @@ def run_api_test(name, oracle=False):
                     str(Path(__file__).with_name(name + ".c")),
                     "-L" + str(build / "src"), "-lvirglrenderer",
                     "-Wl,-rpath," + str(build / "src"), *extra,
-                    "-framework", "OpenGL", "-Wno-deprecated-declarations", "-o", str(binary)],
+                    "-framework", "OpenGL", *[a for f in frameworks for a in ("-framework", f)],
+                    "-Wno-deprecated-declarations", "-o", str(binary)],
                    cwd=directory, check=True)
     subprocess.run([str(binary)], check=True)
 
@@ -86,6 +87,7 @@ def run_fuzz_replay():
 run_test("test-multisample-formats", "vrend_formats.c")
 run_test("test-native-shader-inputs", "vrend_renderer.c")
 run_test("test-integer-sampler-shader", "vrend_shader.c")
+run_api_test("test-video-decode", ("VideoToolbox", "CoreMedia", "CoreVideo", "CoreFoundation"))
 run_test("test-transfer-row-size", "vrend_formats.c")
 run_api_test("test-context-loss")
 run_api_test("test-transform-feedback")

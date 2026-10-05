@@ -90,11 +90,17 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   whole. Tested bit-exact against software decoding (FFmpeg) with x264, x265
   and libvpx streams and real 1080p clips.
 - The decoded frame is an IOSurface; the GPU copies it into the textures the
-  VM sees (no CPU copy on the Mac's OpenGL).
+  VM sees (no CPU copy on the Mac's OpenGL). The copy pauses the guest's
+  conditional rendering and turns its rasterizer discard off while it runs:
+  either could drop it without an error and leave the old picture. (Apple's
+  software OpenGL, which the build-time test runs on, copies either way, so
+  the test guards the path but cannot show the GPU's behaviour.)
 - In the VM, `src/app/guest/install.sh` adds `vainfo` and a small VA-API driver
   shim (`omacvm_drv_video.c`, used through `LIBVA_DRIVER_NAME=omacvm`): Mesa's
   driver unchanged, but it offers only NV12 surfaces (Firefox cannot show the
-  I420 ones FFmpeg would pick) and lists AV1 only to Chromium-based browsers.
+  I420 ones FFmpeg would pick), lists AV1 only to Chromium-based browsers and
+  keeps to the Mac's limit of open decoders (Limits, below;
+  `OMACVM_VA_DEBUG=1` prints it).
   Its folder `/usr/local/lib/dri` goes into `/etc/ld.so.conf.d`: Firefox
   decodes in a sandboxed process that may load libraries only from the paths
   ld.so knows, so without it YouTube in Firefox falls back to the CPU.
@@ -111,6 +117,35 @@ put the shim in: the VM folder's `video-decode` file).
   whole frame. So AV1 is offered to Chromium-based browsers only.
 - **HEVC**: Main and Main 10; long-term reference pictures from the SPS are
   not supported (rare).
+- **32 decoders at once per VM, 48 at most.** Each holds a session on the
+  Mac's media engine, which the Mac's own apps and other VMs share, plus its
+  pictures (about 30 MB in VideoToolbox's service per 1080p video, 90 MB at
+  4K); without a limit one VM could tie it all up. A playing video uses one:
+  Chrome keeps at most 16 itself, Firefox has no limit of its own (a page of
+  24 muted videos opened 24, two such tabs 48 for a moment). The Mac tells the
+  VM 32 in its video caps: Chrome's 16 plus one Firefox's 16. The shim
+  refuses `vaCreateContext` past that (`VA_STATUS_ERROR_MAX_NUM_EXCEEDED`),
+  so that video decodes on the CPU instead of staying black. Checked in a VM:
+  FFmpeg (`-hwaccel vaapi`, frames identical to software), mpv
+  (`--hwdec=vaapi`, `--vo=gpu`), Chrome and Firefox (every video plays with
+  pictures; the ones past the limit on the CPU). The shim counts across
+  processes with a lock per slot on `/dev/shm/omacvm-va-slots` (freed when a
+  process quits or crashes). Firefox decodes in a sandbox that can neither
+  open nor lock it, so a process like that counts only its own, up to 16,
+  and the shared slots are the other 16. So all apps that can share the
+  count (Chrome, mpv, FFmpeg) have 16 together: with Chrome's 16 in use, mpv
+  decodes on the CPU even when no Firefox runs.
+  The Mac itself refuses only past 48. The room above 32 is for two cases
+  the shim cannot see: Mesa sends a closed decoder to the Mac only with the
+  app's next commands (a browser that closed a tab of videos may send it
+  much later, while the shim has given the slots to other apps already), and
+  apps outside the desktop session (SSH shells, sudo, system services) do
+  not get `LIBVA_DRIVER_NAME=omacvm` and use Mesa's driver directly. Past 48
+  a video gets no decoder and stays black, and QEMU's log says `decoders
+  already open` (at most every 10 s, with a count). The shim prints its own
+  refusals the same way; `omacvm check` shows the limit.
+  `Tests/virgl/test-video-decode.c` checks at build time that the caps say
+  32 and that the Mac keeps 48 open and refuses one more.
 - **YUYV surfaces**: not offered. virglrenderer stored their plane format
   (R8G8_R8B8) at twice its size, and reading one back overflowed QEMU's heap
   (mpv's VA-API check did it, before 2.7.0's release);
