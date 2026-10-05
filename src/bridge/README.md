@@ -299,12 +299,16 @@ port (`org.omacvm.control`): `X-OmacVM-Relay` with the key in
 name, base64). The app sends these on the relay socket,
 `omacvm-bridge/relay.sock` (mode 0600 in the 0700 folder; the Bridge checks
 the peer's user on every connection and serves only `/omacvm/...` there), so
-its guests, which share 127.0.0.1, cannot use up the relay's places. An app
-older than the socket still relays on 127.0.0.1. A path too long for a Unix
-socket (over 103 bytes: a very long home folder) leaves the socket out and
-says so in the log; the app then uses 127.0.0.1. Every request goes to the log with the VM and the answer;
-refusals (and 401s) once a minute per address, VM and reason, with the
-count left out.
+its guests, which share 127.0.0.1, cannot use up the relay's places. When the
+app cannot connect to the socket (an older Bridge, the Bridge not running, the
+folder not 0700) it relays on 127.0.0.1 instead; once connected, a request is
+never sent a second time. A path too long for a Unix socket (over 103 bytes: a
+very long home folder) leaves the socket out and says so in the log; the app
+then uses 127.0.0.1. A second Bridge on the same Mac (a test Bridge) must set
+`OMACVM_BRIDGE_RELAY_SOCKET` to a socket of its own: two Bridges on one path
+remove each other's socket every few seconds. Every request goes to the log
+with the VM and the answer; refusals (and 401s) once a minute per address, VM
+and reason, with the count left out.
 
 Which VM asked comes from `omacvm vms --json`, cached: a request never waits
 for it. It is read again in the background, one run at a time, when the list

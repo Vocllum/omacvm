@@ -140,7 +140,8 @@ let hub = Hub([
 ])
 let scanner = Scanner(wifi: wifi, hub: hub, location: location)
 let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(fd, peer: peer) } }
-// OmacVM.app's relay (server.swift); OMACVM_BRIDGE_RELAY_SOCKET for tests.
+// OmacVM.app's relay (server.swift). A second Bridge on this Mac (tests) sets
+// OMACVM_BRIDGE_RELAY_SOCKET: two Bridges on one path remove each other's socket.
 let relaySocket = RelaySocket(path: env["OMACVM_BRIDGE_RELAY_SOCKET"] ?? supportDir + "/relay.sock")
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }

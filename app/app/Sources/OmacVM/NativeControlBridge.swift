@@ -12,7 +12,8 @@ import Foundation
 /// proves to the Bridge that the app sent it; no VM ever gets that key.
 /// The requests go on the Bridge's relay socket (omacvm-bridge/relay.sock,
 /// only this Mac user can open it), so guests that crowd 127.0.0.1 cannot
-/// take the relay's places; a Bridge older than that gets them on 127.0.0.1.
+/// take the relay's places. When the socket cannot be used (an older Bridge,
+/// the Bridge not running, the folder not 0700) they go on 127.0.0.1.
 ///
 /// The guest is untrusted: lines over 8 KB are dropped, only GET and POST to
 /// /omacvm/... with a JSON object body go on, at most 4 requests at a time.
@@ -147,7 +148,7 @@ final class NativeControlBridge: @unchecked Sendable {
         fallbackLock.lock()
         if !saidFallback {
             saidFallback = true
-            fputs("[control] no relay socket from OmacVM Bridge (older, or not running): 127.0.0.1\n", stderr)
+            fputs("[control] OmacVM Bridge's relay socket cannot be used (older Bridge, not running, or folder not 0700): 127.0.0.1\n", stderr)
         }
         fallbackLock.unlock()
         guard let url = URL(string: "http://127.0.0.1:\(Self.bridgePort)\(r.path)") else {
