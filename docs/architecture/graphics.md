@@ -772,3 +772,19 @@ The tracks share one runtime. Order and overlaps known today:
    the same present (one queue and one display link per head, each on its
    own screen); until then HDR goes to `Virtual-1` only, since the heads'
    8-bit `CAOpenGLLayer` has no PQ.
+7. The 2.9.0 RC2 (`gpu-2.9.0`) is built on 2.8.0 as released, which brings
+   2.7.1's GPU security patches (`gpu-robust`). Order in the virgl chain:
+   2.7.1's patches, then `gpu-native`'s and `kosmickrisp`'s, then
+   `gl-compat`'s; in QEMU: 2.8.0's display patches, the view-flush and 2D
+   scanout patches, then the GPU path and `pacing-hdr`'s. Both chains apply
+   with no fuzz or offsets. `virgl-core-instance-id.patch` stays next to
+   `virgl-shader-core-glsl-version.patch` (one `#extension` rule in the
+   patched source). On the RC2 runtime: the conformance stride lists equal
+   `gl-compat`'s final runtime case by case; dEQP GLES3 transform feedback
+   (every 3rd case) 404 pass, 0 fail, 0 crash, where 2.7.1 failed 107 of the
+   same cases (integer outputs); 30-minute soak passed; against 2.8.0 (bench
+   lock, one VM of another track running): glmark2 short set 2,856 vs 1,124,
+   Aquarium 19.0 vs 19.9 fps, Basemark Web 3.0 2,669 vs 2,482; testufo on a
+   virtual 120 Hz display 116.6-119.6 new frames a second (2.8.0: 88.8-90.6;
+   `pacing-hdr`'s final runtime in the same session: 114.5-118.7); Venus
+   vkmark 4,470 vs the first candidate's 4,354 (medians of 3).
