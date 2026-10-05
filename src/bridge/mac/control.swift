@@ -178,8 +178,11 @@ final class Control {
     var vmName = "-"
     // Set once the VM's signature checked out: the answer is signed with its key.
     var signer: (key: String, nonce: String)?
+    var quiet = false   // a VM over its request rate: logged once a minute, not per request
     func answer(_ code: Int, _ obj: [String: Any], _ note: String = "") {
-      log("control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))")
+      if !quiet {
+        log("control: \(logSafe(method)) \(logSafe(path)) from \(peer) (\(logSafe(vmName))): \(code)\(note.isEmpty ? "" : " " + logSafe(note))")
+      }
       guard let s = signer else { return respond(fd, code, obj) }
       let data = jsonData(obj) + Data("\n".utf8)
       let sig = answerMAC(key: s.key, nonce: s.nonce, status: code, body: data)
@@ -221,12 +224,12 @@ final class Control {
         return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
       }
       switch vmForApp(name, vmList(cli, refreshFor: "app/" + name)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
-      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { quiet = rateLogged(vm); return refuse(e) }
     } else {
       switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
       vmName = vm.name
       // Each VM's requests are limited on their own: one VM cannot crowd out another.
-      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { return refuse(e) }
+      if let e = q.sync(execute: { requests.admit(vmKey(vm)) }) { quiet = rateLogged(vm); return refuse(e) }
       // Signed with the VM's own key, which never crosses the network.
       let key = storedVMKey(vm)
       let checked = q.sync { () -> Result<String, AuthFailure> in
@@ -286,6 +289,18 @@ final class Control {
       answer(202, jobAnswer(j), "\(r.action.rawValue) \(r.features.joined(separator: " ")) job \(j.id)")
     default:
       refuse(PolicyError(404, "not-found", "not found"))
+    }
+  }
+
+  /// True when this VM's rate refusals were logged in the last minute (then
+  /// this one is not: a flooding VM must not fill the log the report reads).
+  private var rateLog: [String: Date] = [:]
+  private func rateLogged(_ vm: VMEntry) -> Bool {
+    q.sync {
+      let k = vmKey(vm), now = Date()
+      if let at = rateLog[k], now.timeIntervalSince(at) < 60 { return true }
+      rateLog[k] = now
+      return false
     }
   }
 
