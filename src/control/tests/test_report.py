@@ -459,3 +459,14 @@ def test_mac_report_bridge_down_planted_names(monkeypatch):
     rep = R.build([("Logs", log + "Gilles opened it on Mac-mini-von-Gilles.local\n")], k, "Gilles' problem")
     for gone in ("Gilles", "Dana", "Jean", "Marco", "Jan", "Zuhause", "Sunrise", "Thuis", "Chez", "Casa", "Galaxy"):
         assert gone not in rep.text + rep.title, (gone, rep.text)
+
+
+def test_device_word_as_a_known_value():
+    """A phone's hotspot named "iPhone" or "MacBook" among the Wi-Fi names:
+    it does not break up the owner forms, and is not taken out by itself."""
+    k = R.Known()
+    k.add("wifi", "iPhone", "MacBook", "AirPods Pro", "iPhone 15", "Zuhause Dana")
+    assert k.wifi == ["Zuhause Dana"]
+    out, _ = R.redact("MacBook-Pro-von-Dana.local; iPhone-de-Jean-Luc; my iPhone; Zuhause Dana", k)
+    R.gate(out, k)
+    assert "Dana" not in out and "Jean" not in out and "my iPhone" in out, out

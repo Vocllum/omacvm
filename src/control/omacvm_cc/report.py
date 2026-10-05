@@ -64,7 +64,7 @@ class Known:
             v = norm(str(v or "")).strip()
             # Product words are no one's personal data: a VM named "Omarchy"
             # with host name "omarchy" must not turn "Omarchy 4.0.3" into "<vm> 4.0.3".
-            if kind != "secret" and kind != "home" and product_only(v):
+            if kind != "secret" and kind != "home" and (product_only(v) or common_only(v)):
                 continue
             if len(v) >= 2 and not self.has(v):
                 lst.append(v)
@@ -123,6 +123,15 @@ def product_only(v: str) -> bool:
     """True when every word of V is a product word ("Omarchy", "omarchy-arm")."""
     words = [w for w in re.split(r"[^0-9a-z]+", v.casefold()) if w]
     return bool(words) and all(w in PRODUCT for w in words)
+
+
+def common_only(v: str) -> bool:
+    """True when V is device and plain words alone ("iPhone", "AirPods Pro",
+    a phone's hotspot): nobody's name, and taking it out everywhere would
+    take out every "iPhone" in the logs."""
+    words = [w for w in re.split(r"[^\w-]+", v) if w]
+    return bool(words) and all(w.casefold() in COMMON or product_only(w) or re.fullmatch(DEVICE_WORDS, w, re.I)
+                               or re.fullmatch(r"\d{1,2}", w) for w in words)
 
 
 # A name with "'s" ("Zorro's", after norm() made every apostrophe plain).
@@ -400,7 +409,9 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
         for w in variants(v):
             text, n = _value_re(w).subn(LABELS[kind], text)
             bump(kind, n)
-    # 2. Patterns: device owners first, then the rest.
+    # 2. Patterns: device owners first, then the rest. (A known value that is
+    # a device word alone, a phone's hotspot "iPhone", is not taken: it would
+    # break up "iPhone-de-Jean-Luc" before this.)
     text, n = device_owners(text)
     bump("user", n)
     for kind, rx, repl in PATTERNS[3:]:
