@@ -38,6 +38,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let other = NSRunningApplication.runningApplications(withBundleIdentifier: id).first(where: {
                $0 != me && !$0.isTerminated && $0.processIdentifier != installer
            }) {
+            if args.contains("--update-now") {
+                DistributedNotificationCenter.default().postNotificationName(
+                    Self.updateRequest, object: nil, userInfo: nil, deliverImmediately: true)
+                NSApp.terminate(nil)
+                return
+            }
             if CommandLine.arguments.contains("--start") {
                 let vm = args.firstIndex(of: "--vm").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? ""
                 DistributedNotificationCenter.default().postNotificationName(
@@ -52,15 +58,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let name = note.object as? String ?? ""
             MainActor.assumeIsolated { self?.startRequested(name) }
         }
+        DistributedNotificationCenter.default().addObserver(
+            forName: Self.updateRequest, object: nil, queue: .main) { _ in
+            // From `--update-now` of a second launcher: this one stays open.
+            Task { @MainActor in await Updater.shared.runScripted(quitWhenDone: false) }
+        }
         state.startVM = { [weak self] in self?.startVM() }
         Updater.shared.busyReason = { [weak self] in
             guard let self else { return nil }
-            if self.runner?.isRunning == true { return "The VM runs: the update waits until it is shut down." }
-            if self.state.screen == .building { return "A VM is being built: the update waits until it is done." }
+            if self.runner?.isRunning == true { return "The VM runs" }
+            if self.state.screen == .building { return "A VM is being built" }
             return nil
         }
         Updater.shared.start()
         buildMenu()
+        // Scripted update: --update-now (no window; update.log says what happened).
+        if args.contains("--update-now") {
+            Task { await Updater.shared.runScripted(quitWhenDone: true) }
+            return
+        }
         if state.config.isReady && CommandLine.arguments.contains("--start") {
             startVM()
         } else {
@@ -71,6 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Per bundle id: a test build (build-app.sh --id) does not take the
     /// installed app's start requests.
     static let startRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").start")
+    static let updateRequest = Notification.Name("\(Bundle.main.bundleIdentifier ?? "org.omacvm.app").update-now")
     /// The VM's window belongs to QEMU's process: the one from this app
     /// (another copy of OmacVM may run a VM of its own).
     static var qemuApp: NSRunningApplication? {
@@ -122,6 +139,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showWindow() {
         reloadConfig()
+        // Tests: the app and its VM stay out of sight (QEMU reads the same).
+        if ProcessInfo.processInfo.environment["OMACVM_COCOA_HIDDEN"] != nil { return }
         NSApp.setActivationPolicy(.regular)
         if window == nil {
             let w = NSWindow(contentRect: .zero, styleMask: [.titled, .closable, .miniaturizable],
@@ -144,8 +163,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.runner = nil
             if self.quitting {
                 self.quitting = false
+                // An update asked for while the VM ran goes in now.
+                if Updater.shared.installWhenIdle { Updater.shared.install(quit: false) }
                 NSApp.reply(toApplicationShouldTerminate: true)
             } else if status == 0 {
+                if Updater.shared.installWhenIdle { Updater.shared.install() }
                 NSApp.terminate(nil)
             } else {
                 self.state.message = "The VM stopped unexpectedly (QEMU exit \(status)). Log: \(self.state.config.folder.path)/logs/qemu.log"

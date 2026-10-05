@@ -59,11 +59,16 @@ fi
 [[ -d $NEW ]] || abort "the new app is missing"
 OLD_V=$(version "$APP") NEW_V=$(version "$NEW")
 
-# Old aside, new in: two renames on one volume, each checked.
-rm -rf "$HOME_DIR/previous"; mkdir -p "$HOME_DIR/previous"
-mv "$APP" "$PREV" || abort "could not move $BASE aside"
+# Old aside, new in: renames on one volume, each checked. The version kept
+# from before stays in previous.old until the new one has started.
+rm -rf "$HOME_DIR/previous.old"
+[[ ! -e $HOME_DIR/previous ]] || mv "$HOME_DIR/previous" "$HOME_DIR/previous.old" || abort "could not move the kept version aside"
+keep_old() { rm -rf "$HOME_DIR/previous"; [[ ! -e $HOME_DIR/previous.old ]] || mv "$HOME_DIR/previous.old" "$HOME_DIR/previous"; }
+mkdir -p "$HOME_DIR/previous"
+if ! mv "$APP" "$PREV"; then keep_old; abort "could not move $BASE aside"; fi
 if ! mv "$NEW" "$APP"; then
   mv "$PREV" "$APP" || log "the old app is at $PREV"
+  keep_old
   abort "could not put $NEW_V in place"
 fi
 "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
@@ -80,7 +85,7 @@ if launch --update-check "$TOKEN"; then
   rm -f "$MARKER"
   if [[ $answer == ok ]]; then
     if [[ $MODE == install ]]; then result "installed $OLD_V $NEW_V"; else result "went-back $OLD_V"; fi
-    rm -rf "$HOME_DIR/incoming" "$FAILED"
+    rm -rf "$HOME_DIR/incoming" "$FAILED" "$HOME_DIR/previous.old"
     exit 0
   fi
   [[ -n $answer ]] && why=${answer#fail: }
@@ -104,6 +109,7 @@ if ! mv "$APP" "$FAILED/$BASE" || ! mv "$PREV" "$APP"; then
   exit 1
 fi
 "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
+keep_old
 rm -rf "$FAILED" "$HOME_DIR/incoming"
 result "rolled-back $NEW_V $why"
 launch

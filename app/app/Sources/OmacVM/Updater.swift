@@ -306,16 +306,29 @@ final class Updater: ObservableObject {
 
     // MARK: - install and go back
 
-    /// Why not now, or nil.
-    var blockedReason: String? {
+    /// Asked to install while a VM runs: done once it has shut down
+    /// (AppDelegate calls install again then).
+    @Published private(set) var installWhenIdle = false
+
+    /// A VM that runs from this app (or is being built): not now.
+    var busyNow: String? {
         if let b = busyReason() { return b }
-        if !Running.pids(inside: bundle).isEmpty { return "A VM runs from \(Product.name): the update waits until it is shut down." }
-        return unavailableReason
+        if !Running.pids(inside: bundle).isEmpty { return "A VM runs from \(Product.name)" }
+        return nil
     }
 
-    func install() {
-        guard let s = staged else { return }
-        if let why = blockedReason { notice = why; return }
+    /// Installs the staged update, or once the VM has shut down when one
+    /// runs. quit false: the caller quits by itself.
+    func install(quit: Bool = true) {
+        guard let s = staged else { installWhenIdle = false; return }
+        if let why = busyNow {
+            installWhenIdle = true
+            notice = "\(why): \(Product.name) \(s.version) is installed once it has stopped."
+            log("install \(s.version) deferred: \(why)")
+            return
+        }
+        installWhenIdle = false
+        if let why = unavailableReason { notice = why; return }
         guard let v = Version(s.version), (try? Updater.verifyApp(s.app, id: bundleID, version: v)) != nil else {
             notice = "The downloaded update no longer checks out: it was removed. The next check downloads it again."
             try? FileManager.default.removeItem(at: stagedRoot)
@@ -339,7 +352,17 @@ final class Updater: ObservableObject {
             log("install: \(error.localizedDescription)")
             return
         }
-        swap(mode: "install", new: incoming)
+        swap(mode: "install", new: incoming, quit: quit)
+    }
+
+    /// --update-now (scripts, tests): check as if asked by hand and install
+    /// what is found: now, or once the VM has shut down. Shows nothing;
+    /// update.log says what happened.
+    func runScripted(quitWhenDone: Bool) async {
+        let outcome = await check(manual: true)
+        log("--update-now: \(outcome)")
+        if case .ready = outcome { install() }
+        if quitWhenDone && !installWhenIdle { NSApp.terminate(nil) }
     }
 
     private func rename(_ app: URL, to name: String) throws {
@@ -358,13 +381,13 @@ final class Updater: ObservableObject {
 
     func goBack() {
         guard previousVersion != nil else { return }
-        if let why = blockedReason { notice = why; return }
-        swap(mode: "rollback", new: nil)
+        if let why = busyNow ?? unavailableReason { notice = why; return }
+        swap(mode: "rollback", new: nil, quit: true)
     }
 
     /// Starts update-swap.sh from a copy outside the bundle (bash reads a
     /// script as it runs: the one in the bundle is about to move) and quits.
-    private func swap(mode: String, new: URL?) {
+    private func swap(mode: String, new: URL?, quit: Bool) {
         let script = home.appendingPathComponent("update-swap.sh")
         let token = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
         do {
@@ -386,7 +409,7 @@ final class Updater: ObservableObject {
             return
         }
         log("\(mode): handing over to update-swap.sh, quitting")
-        NSApp.terminate(nil)
+        if quit { NSApp.terminate(nil) }
     }
 
     // MARK: - after a swap
