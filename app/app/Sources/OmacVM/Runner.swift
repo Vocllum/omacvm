@@ -414,7 +414,10 @@ final class Runner {
                 guard running else { return }
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeClipboardBridge(socketPath: path) {
-                    DispatchQueue.main.sync { self?.clipboard = bridge }
+                    DispatchQueue.main.sync {
+                        self?.clipboard = bridge
+                        bridge.setVMActive(self?.qemuIsActive ?? true)
+                    }
                     try? bridge.run()
                     bridge.stop()
                 }
@@ -463,8 +466,22 @@ final class Runner {
         }
     }
 
+    /// QEMU's window is the active app (the clipboard polls only then).
+    private var qemuIsActive: Bool {
+        guard let pid = process?.processIdentifier else { return false }
+        return NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    }
+
     private func observeSleep() {
         let center = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.didDeactivateApplicationNotification] {
+            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.clipboard?.setVMActive(self.qemuIsActive)
+                }
+            })
+        }
         observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.willSleep() }
         })
