@@ -260,6 +260,16 @@ int main(void) {
   settle(vm, NET_APP); sent();
   all = 0;
 
+  // "Displays have separate Spaces" off: one list of Spaces for both displays.
+  const uint64_t shared[] = { 401, 402 };
+  layout(2, shared, 2, shared, 2);
+  owner[401] = terminal; winOn[401] = 11; owner[402] = vm; winOn[402] = 22;
+  world[0].cur = world[1].cur = 402; front = vm; all = 1;
+  settle(vm, NET_APP); sent();
+  check(press(C|O|M, HID, 0) == 1 && swipes == 1, "Spaces shared by the displays, all: one swipe, not two");
+  sent(); settle(vm, NET_APP);
+  all = 0;
+
   // ---- Not the real keyboard, a held key, other combos: as before ----
   front = finder; world[0].cur = 201; world[1].cur = 301;
   frontChanged(finder, -1, 0, "", 0, 1); sent();

@@ -1130,6 +1130,8 @@ static void checkEnter(void) {
 }
 
 static int swipe(const DisplaySpaces *d, int dir, uint64_t to, const char *what) {
+  // "Displays have separate Spaces" off: one list for every display, swiped once.
+  for (int i = 0; i < nSwiped; i++) if (swiped[i].from == d->current) return 0;
   if (!dir || nSwiped >= MAX_DISPLAYS || !swipeFn(d->id, d->bounds, dir)) return 0;
   swiped[nSwiped++] = (Swipe){ d->id, d->current, to, dir };
   logf_("escape combo: display %u swiped %s (%s)", d->id, dir > 0 ? "right" : "left", what);
