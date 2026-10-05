@@ -6,6 +6,7 @@
 import CryptoKit
 import Foundation
 
+setvbuf(stdout, nil, _IONBF, 0)   // each line at once, also when the test is killed
 let args = CommandLine.arguments
 let work = URL(fileURLWithPath: args[1]), drive = URL(fileURLWithPath: args[2]), volumes = URL(fileURLWithPath: args[3])
 let hfs = URL(fileURLWithPath: args[4])
