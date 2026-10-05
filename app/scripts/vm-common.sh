@@ -141,11 +141,19 @@ wait_ssh() {   # [seconds]
   return 1
 }
 
+# Text from the VM on its way to the app or a terminal: colour codes out, then
+# only printable ASCII and tabs (no other escape sequences: a guest could set
+# the window title or the Mac's clipboard), lines cut at 240 characters.
+# Line by line, so progress still shows as it comes.
+printable() {
+  LC_ALL=C sed -l -e $'s/\x1b\\[[0-9;]*m//g' -e 's/[^[:print:][:blank:]]//g' -e 's/^\(.\{240\}\).*/\1/'
+}
+
 # run_logged LOGFILE CMD...: CMD's output to LOGFILE, its "==>" lines to us.
 run_logged() {
   local f=$1 rc; shift
   set +e
-  "$@" 2>&1 | tee "$f" | sed -l 's/\x1b\[[0-9;]*m//g' | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
+  "$@" 2>&1 | tee "$f" | printable | grep --line-buffered -E '^==>|ERROR|[Ee]rror:|failed'
   rc=${PIPESTATUS[0]}
   set -e
   return "$rc"

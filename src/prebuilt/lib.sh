@@ -14,7 +14,7 @@ PREBUILT_CACHE=$HOME/Library/Caches/omacvm/prebuilt
 # prebuilt_lookup TYPE: the newest image for this app with OmacVM's major
 # version and a version up to this one (the first omacvm apply brings its
 # guest side to this version). Sets PB_TAG, PB_MANIFEST (local file), PB_SIZE
-# (bytes), PB_OMARCHY, PB_VERSION, PB_SOURCE (base URL or folder).
+# (bytes), PB_UNPACKED_KB, PB_OMARCHY, PB_VERSION, PB_SOURCE (base URL or folder).
 # $OMACVM_PREBUILT_SOURCE: a folder with the files (tests);
 # $OMACVM_PREBUILT_TAG: only that release.
 prebuilt_lookup() {
@@ -57,8 +57,9 @@ PY2
   PB_SIZE=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" size) || return 1
   PB_BUNDLE=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" bundle) || return 1
   PB_DISK_GB=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" disk_gb) || return 1
+  PB_UNPACKED_KB=$(python3 "$R/src/prebuilt/manifest.py" get "$PB_MANIFEST" unpacked_kb) || return 1
   # And again here, so no manifest text can reach bash arithmetic or a path.
-  [[ $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_DISK_GB =~ ^[0-9]{1,4}$ ]] || return 1
+  [[ $PB_SIZE =~ ^[0-9]{1,15}$ && $PB_DISK_GB =~ ^[0-9]{1,4}$ && $PB_UNPACKED_KB =~ ^[0-9]{1,12}$ ]] || return 1
   [[ $PB_BUNDLE =~ ^[A-Za-z0-9._-]{1,64}$ && $PB_BUNDLE != . && $PB_BUNDLE != .. ]] || return 1
   [[ $PB_VERSION =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$ ]] || return 1
   [[ $PB_VERSION == "${iv:-$PB_VERSION}" ]]
@@ -73,6 +74,28 @@ pb_disk_bigger() {
 }
 
 pb_gb() { awk -v b="$1" 'BEGIN { printf "%.1f", b / 1e9 }'; }
+
+# prebuilt_space_ok DEST: room for the parts (in the cache) and the unpacked
+# VM (in DEST), plus 2 GB. Says how much is missing and returns 1 if not.
+prebuilt_space_ok() {
+  local dest=$1 cache_kb dest_kb need_cache need_dest
+  mkdir -p "$PREBUILT_CACHE"
+  need_cache=$(( 10#$PB_SIZE / 1024 + 1 )); need_dest=$(( 10#$PB_UNPACKED_KB ))
+  cache_kb=$(df -Pk "$PREBUILT_CACHE" | awk 'NR == 2 { print $4 }')
+  dest_kb=$(df -Pk "$dest" | awk 'NR == 2 { print $4 }')
+  [[ $cache_kb =~ ^[0-9]+$ && $dest_kb =~ ^[0-9]+$ ]] || return 0   # df said nothing useful: let it try
+  if [[ $(stat -f %d "$PREBUILT_CACHE") == "$(stat -f %d "$dest")" ]]; then
+    need_dest=$(( need_dest + need_cache )); need_cache=0
+  fi
+  if (( dest_kb < need_dest + 2097152 )); then
+    echo "not enough free space on $(df -P "$dest" | awk 'NR == 2 { print $6 }'): $(pb_gb $(( (need_dest + 2097152) * 1024 ))) GB needed, $(pb_gb $(( dest_kb * 1024 ))) GB free" >&2
+    return 1
+  fi
+  if (( need_cache && cache_kb < need_cache + 2097152 )); then
+    echo "not enough free space for the download in $PREBUILT_CACHE: $(pb_gb $(( (need_cache + 2097152) * 1024 ))) GB needed, $(pb_gb $(( cache_kb * 1024 ))) GB free" >&2
+    return 1
+  fi
+}
 
 # prebuilt_download: every part into the cache, resumed, checked against the
 # manifest's SHA-256. A part that fails its check is fetched again once.
@@ -101,14 +124,34 @@ prebuilt_download() {
   done < <(python3 "$R/src/prebuilt/manifest.py" parts "$PB_MANIFEST")
 }
 
-# prebuilt_unpack DIR: the bundle into DIR (sparse files stay sparse). $ZSTD:
-# OmacVM.app's own zstd (its users need no Homebrew).
+# prebuilt_unpack DIR [MEMBER...]: the bundle into DIR (sparse files stay
+# sparse); with MEMBERs only those paths. $ZSTD: OmacVM.app's own zstd (its
+# users need no Homebrew).
 prebuilt_unpack() {
-  local dir; dir=$(dirname "$PB_MANIFEST")
-  mkdir -p "$1"
+  local dir to=$1; dir=$(dirname "$PB_MANIFEST"); shift
+  mkdir -p "$to"
   python3 "$R/src/prebuilt/manifest.py" parts "$PB_MANIFEST" | while read -r name _ _; do cat "$dir/$name"; done |
-    "${ZSTD:-zstd}" -dc --long=27 -q | tar -xSf - -C "$1"
-  [[ -d $1/$PB_BUNDLE ]] || die "the image did not unpack ($1/$PB_BUNDLE missing)"
+    "${ZSTD:-zstd}" -dc --long=27 -q | tar -xSf - -C "$to" "$@" ||
+    die "could not unpack the image (free disk space?)"
+  [[ -d $to/$PB_BUNDLE ]] || die "the image did not unpack ($to/$PB_BUNDLE missing)"
+}
+
+# prebuilt_unpack_disk WORK DEST: OmacVM.app's image is <bundle>/disk.img and
+# nothing else. Only that path comes out of the archive (into WORK, emptied
+# first), and only as a plain file with one link: a symbolic or hard link would
+# have the grow and QEMU write to some other file on the Mac. Then it moves to
+# DEST and WORK goes.
+prebuilt_unpack_disk() {
+  local u=$1 f
+  rm -rf "$u"
+  prebuilt_unpack "$u" "$PB_BUNDLE/disk.img"
+  f=$u/$PB_BUNDLE/disk.img
+  [[ $(cd "$u" && find . -mindepth 1 | LC_ALL=C sort | tr '\n' '|') == "./$PB_BUNDLE|./$PB_BUNDLE/disk.img|" ]] ||
+    { rm -rf "$u"; die "the image holds something other than $PB_BUNDLE/disk.img: not used"; }
+  [[ -d $u/$PB_BUNDLE && ! -L $u/$PB_BUNDLE && -f $f && ! -L $f && $(stat -f %l "$f") == 1 ]] ||
+    { rm -rf "$u"; die "the image's disk.img is not a plain file: not used"; }
+  mv "$f" "$2"
+  rm -rf "$u"
 }
 
 prebuilt_cleanup() {   # the downloaded parts (kept with OMACVM_PREBUILT_KEEP=1)
@@ -119,9 +162,13 @@ prebuilt_cleanup() {   # the downloaded parts (kept with OMACVM_PREBUILT_KEEP=1)
 
 # prebuilt_seed ISO: the answers for the VM's first boot, on a small ISO
 # labelled OMACVM-SEED. Needs U FULL HASH HOST KB TZ_MAC LANG_VM TYPE (and
-# SEED_DISPLAY, SEED_NET); the root key is ~/.ssh/omacvm.pub.
-prebuilt_seed() {
-  local d; d=$(mktemp -d)
+# SEED_DISPLAY, SEED_NET); the root key is $KEY.pub. The answers hold the
+# password hash: only the user can read them, from the first byte (umask), and
+# the work folder goes however this ends (a subshell with its own trap).
+prebuilt_seed() (
+  umask 077
+  d=$(mktemp -d) || die "could not make a folder for the seed"
+  trap 'rm -rf "$d"' EXIT
   b() { printf '%s' "$1" | base64 | tr -d '\n'; }
   {
     echo "VERSION=$(b 1)"
@@ -133,7 +180,7 @@ prebuilt_seed() {
     if [[ -n ${SEED_NET:-} ]]; then echo "NET=$(b "$SEED_NET")"; fi
   } > "$d/seed.env"
   rm -f "$1"
-  hdiutil makehybrid -quiet -iso -joliet -default-volume-name OMACVM-SEED -o "$1" "$d" || die "could not make the seed image"
+  hdiutil makehybrid -quiet -iso -joliet -default-volume-name OMACVM-SEED -o "$1" "$d" ||
+    { rm -f "$1"; die "could not make the seed image"; }
   chmod 600 "$1"
-  rm -rf "$d"
-}
+)
