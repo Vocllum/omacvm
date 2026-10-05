@@ -30,9 +30,13 @@ swipe, as three or four fingers make it; `EscapeSwipe` = `all` in the
 `org.omacvm.gestures` settings: every display that shows the VM). The
 keyboard follows the pointer's display. Pressed there again in macOS, it
 swipes back. A swipe that cannot be made or does not land falls back to the
-app switch (the app from before, its Space), then to hiding the VM's app, so
-the keyboard never stays in the VM. It re-arms when you come back to the
-full-screen VM, or press the combo again.
+app switch (the app from before, its Space). Every way out is checked: the
+VM still in front, or its full screen still showing, takes its window out of
+full screen and hides the VM's app, so the keyboard never stays in the VM;
+the combo in macOS then brings it back in full screen. In an OmacVM.app
+window the combo gives the keyboard to the app from before (else Finder) and
+brings the window back. It re-arms when you come back to the full-screen VM,
+or press the combo again.
 If the Mac helper stops, the tap goes with it and macOS has its gestures back.
 
 ## macOS-native scroll momentum

@@ -165,6 +165,14 @@ static pid_t frontPid;   // the full-screen VM app in front, else 0
 // app, and the last full-screen VM, each with its front window.
 static pid_t otherPid, vmPid, appPid;   // appPid: the app in front at the last check
 static CGWindowID otherWin, vmWin;
+// An OmacVM VM in front in a window, and the windowed VM the combo left (the
+// combo in macOS brings it back). restoreFull: the combo had to take the
+// full-screen VM out of full screen to get out; back in, it goes full screen
+// again. Main thread, and the event tap (also on it).
+static pid_t winVMPid, leftWinPid;
+static CGWindowID winVMWin, leftWinWin;
+static int restoreFull;
+static double restoreAt, restoreGrace = 1.5;   // s: the hide lands meanwhile
 // Every VM that runs the guest daemon stays connected (one per address);
 // frames go only to VMs on the network of the frontmost VM app (0 = Parallels,
 // 1 = UTM, 2 = Fusion, 3 = OmacVM.app, the index into listenAddrs). One connection per VM used to mean
@@ -183,6 +191,7 @@ int ns_event_type(CGEventRef e);  // scroll_ns.m
 void ns_on_app_activate(void (*f)(void));
 int ns_activate(pid_t pid);
 int ns_hide(pid_t pid);
+void ns_unhide(pid_t pid);
 int ns_is_regular(pid_t pid);
 static int isOther(pid_t pid, int net, const char *name, int regular);
 pid_t ns_finder_pid(void);
@@ -515,10 +524,18 @@ static void rearmTap(const char *why) {
 // its VM network (-1: not a VM app), whether its VM window covers a display,
 // that window's title, the window, and whether the app is one the escape
 // combo may go back to (other). Main thread.
+static int isQemu(pid_t pid);
+static int (*isQemuFn)(pid_t) = isQemu;
 static void frontChanged(pid_t pid, int net, int front, const char *title, CGWindowID win, int other) {
+  // OmacVM.app's launcher has the VMs' process name too: only QEMU counts.
+  int winVM = net == NET_APP && !front && pid > 0 && isQemuFn(pid);
   // Each OmacVM VM is its own QEMU process with its own tap: a different pid
-  // in front (frontPid is 0 while no VM is) may have put its tap ahead of ours.
-  if (front && net == NET_APP && pid != frontPid) rearmTap("an OmacVM VM came to the front");
+  // in front (tapVM is 0 while no VM is) may have put its tap ahead of ours.
+  // In a window too: the combo is ours there as well.
+  static pid_t tapVM;
+  int qemuFront = net == NET_APP && (front || winVM);
+  if (qemuFront && pid != tapVM) rearmTap(front ? "an OmacVM VM came to the front" : "an OmacVM VM window came to the front");
+  tapVM = qemuFront ? pid : 0;
   if (front) {
     pthread_mutex_lock(&sendLock);
     if (net != frontNet || strcmp(title, frontTitle)) {
@@ -531,6 +548,12 @@ static void frontChanged(pid_t pid, int net, int front, const char *title, CGWin
   } else if (other) {
     otherPid = pid; otherWin = win;
   }
+  winVMPid = winVM ? pid : 0;
+  winVMWin = winVM ? win : 0;
+  // In that VM again, or a full-screen VM in front (the newer one to go back to).
+  if (pid == leftWinPid || front) leftWinPid = 0;
+  // The VM taken out of full screen is back some other way (Dock, a click).
+  if (restoreFull && pid == vmPid && (winVM || front) && monoNow() - restoreAt > restoreGrace) restoreFull = 0;
   appPid = pid;
   frontPid = front ? pid : 0;
   cursorTimerOn(front);
@@ -577,7 +600,7 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   char title[sizeof frontTitle] = "";
   if (front) windowTitle(pid, title, sizeof title);
   int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
-  if (other) win = frontWindow(pid);
+  if (other || (net == NET_APP && !front)) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
   if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
 }
@@ -730,13 +753,34 @@ static void forwardKey(int kc, CGEventFlags f, int val) {
 // no neighbour), or the Space did not change -> the app from before comes to
 // the front instead (its Space, RC8's switch); refused too -> the VM's app is
 // hidden, so macOS has the keyboard whatever happens.
-enum { COMBO_PASS, COMBO_LEAVE, COMBO_CAPTURE, COMBO_ENTER };
+// Every way out ends with a check that the user is out (the app in front is
+// not the VM and its full screen no longer shows); if not, the VM's window
+// leaves full screen and its app is hidden (the Mac mini, 12:58: the swipe did
+// nothing and Finder came to the front without a window). The combo then
+// brings it back, in full screen again.
+// An OmacVM VM in a window with the keyboard has no Space of its own: the
+// combo gives the keyboard back to macOS (the app from before, else Finder,
+// COMBO_WINDOW_OUT); pressed again in macOS, that window comes back with the
+// keyboard (COMBO_WINDOW_BACK).
+enum { COMBO_PASS, COMBO_LEAVE, COMBO_CAPTURE, COMBO_ENTER, COMBO_WINDOW_OUT, COMBO_WINDOW_BACK };
 
 // haveVM: a full-screen VM to go back to, and its app is not the one in front
-// (a VM in a window keeps the combo, as before).
-static int comboAction(int vmFront, int esc, int haveVM) {
+// (Parallels, UTM or Fusion in a window keep the combo, as before). winVM: an
+// OmacVM VM in front in a window. winBack: the windowed VM the combo left,
+// still there and not in front (newer than any full-screen VM left).
+static int comboAction(int vmFront, int esc, int haveVM, int winVM, int winBack) {
   if (vmFront) return esc ? COMBO_CAPTURE : COMBO_LEAVE;
+  if (winVM) return COMBO_WINDOW_OUT;
+  if (winBack) return COMBO_WINDOW_BACK;
   return haveVM ? COMBO_ENTER : COMBO_PASS;
+}
+
+// OmacVM.app's QEMU (Contents/Resources/runtime/bin/OmacVM, or a plain
+// qemu-system-aarch64), not its launcher (Contents/MacOS/OmacVM).
+static int isQemu(pid_t pid) {
+  char path[PROC_PIDPATHINFO_MAXSIZE];
+  if (proc_pidpath(pid, path, sizeof path) <= 0) return 0;
+  return !strstr(path, "/Contents/MacOS/");
 }
 
 static int alive(pid_t p) { return p > 0 && (kill(p, 0) == 0 || errno == EPERM); }
@@ -782,6 +826,7 @@ static int bringToFront(pid_t pid, CGWindowID win) {
     setFront = (SetFrontFn)dlsym(RTLD_DEFAULT, "_SLPSSetFrontProcessWithOptions");
     if (!setFront) logf_("escape combo: no SkyLight front-window call, using NSRunningApplication");
   }
+  ns_unhide(pid);
   ProcessSerialNumber psn;
   if (win && setFront && GetProcessForPID(pid, &psn) == noErr && setFront(&psn, win, 0x200 /* user generated */) == kCGErrorSuccess)
     return 1;
@@ -1059,6 +1104,8 @@ static double warpSettle = 0.08;   // s: the Dock takes the swipe before the poi
 static int (*vmWindowsFn)(pid_t, CGRect *, int) = windowsOf;
 static pid_t (*topAppFn)(CGRect, pid_t, CGWindowID *) = topAppOn;
 static int (*hideFn)(pid_t) = ns_hide;
+static int setFullScreen(pid_t pid, int on);
+static int (*fullScreenFn)(pid_t, int) = setFullScreen;
 static int (*escapeAllFn)(void) = escapeAll;
 static void (*saveSignFn)(void) = saveSwipeSign;
 static double verifyAfter = 0.8;   // s: a swipe's animation is over by then
@@ -1118,19 +1165,89 @@ static void hideVM(void) {
   logf_("escape combo: %s kept the front: hidden%s, macOS has the keyboard (the combo brings it back)", name, ok ? "" : " (refused!)");
 }
 
-// Out by switching apps (RC8): the app from before, else Finder; refused: hide.
+// The VM's windows into or out of macOS's full screen (Accessibility:
+// AXFullScreen, as the green button). Out: each full-screen one; in: the
+// front one. 1: one changed.
+static int setFullScreen(pid_t pid, int on) {
+  AXUIElementRef app = AXUIElementCreateApplication(pid);
+  if (!app) return 0;
+  AXUIElementSetMessagingTimeout(app, 0.5f);
+  CFArrayRef wins = NULL;
+  int done = 0;
+  if (AXUIElementCopyAttributeValue(app, kAXWindowsAttribute, (CFTypeRef *)&wins) == kAXErrorSuccess && wins) {
+    for (CFIndex i = 0; i < CFArrayGetCount(wins) && !(on && done); i++) {
+      AXUIElementRef w = (AXUIElementRef)CFArrayGetValueAtIndex(wins, i);
+      CFTypeRef fs = NULL;
+      if (AXUIElementCopyAttributeValue(w, CFSTR("AXFullScreen"), &fs) == kAXErrorSuccess &&
+          (fs == kCFBooleanTrue) != on &&
+          AXUIElementSetAttributeValue(w, CFSTR("AXFullScreen"), on ? kCFBooleanTrue : kCFBooleanFalse) == kAXErrorSuccess)
+        done = 1;
+      if (fs) CFRelease(fs);
+    }
+    CFRelease(wins);
+  }
+  CFRelease(app);
+  return done;
+}
+
+// A VM window covering this display (its full screen, either kind).
+static int fullOn(const DisplaySpaces *d, const CGRect *wins, int nw) {
+  for (int i = 0; i < nw; i++)
+    if (fabs(wins[i].size.width - d->bounds.size.width) < 2 && wins[i].size.height >= d->bounds.size.height - 80 &&
+        CGRectContainsPoint(d->bounds, CGPointMake(CGRectGetMidX(wins[i]), CGRectGetMidY(wins[i])))) return 1;
+  return 0;
+}
+
+// Still in the VM: it has the keyboard, or the pointer's display still shows
+// its full-screen window (Finder took the front without a window: the Space
+// stays, on the Mac mini, 12:58).
+static const char *stillIn(void) {
+  if (frontFn() == vmPid) return "it is in front";
+  DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
+  CGRect wins[MAX_DISPLAYS]; int nw = vmWindowsFn(vmPid, wins, MAX_DISPLAYS);
+  CGPoint p = pointerFn();
+  for (int i = 0; i < nd; i++)
+    if (CGRectContainsPoint(ds[i].bounds, p) && fullOn(&ds[i], wins, nw)) return "its full screen still shows";
+  return NULL;
+}
+
+// The end of every way out: the user must be out. If not: the VM's window
+// out of full screen (its Space closes), then its app hidden, so macOS has
+// the keyboard and the screen (never a trap). The combo brings it back in
+// full screen.
+static void verifyOut(void) {
+  const char *why = stillIn();
+  if (!why) { logf_("escape combo: out of the VM (checked)"); return; }
+  pid_t vm = vmPid;
+  char name[64] = "";
+  proc_name(vm, name, sizeof name);
+  int un = fullScreenFn(vm, 0);
+  logf_("escape combo: still in the VM (%s): %s%s hidden", why, name, un ? " out of full screen and" : "");
+  after(^{
+    int ok = hideFn(vm);
+    if (un) { restoreFull = 1; restoreAt = monoNow(); }
+    after(^{
+      const char *still = stillIn();
+      if (still || !ok) logf_("escape combo: STILL in the VM after hiding it (%s)", still ? still : "macOS refused to hide it");
+      else logf_("escape combo: out of the VM (checked)");
+    });
+  });
+}
+
+// Out by switching apps (RC8): the app from before, else Finder; refused:
+// hide. Checked after (Finder has no window to switch Spaces with).
 static void leaveBySwitch(void) {
   pid_t to = alive(otherPid) ? otherPid : finderFn();
   CGWindowID w = to == otherPid ? otherWin : 0;
-  if (to <= 0) { logf_("escape combo: no app to go back to"); hideVM(); return; }
-  goTo(to, w, to == otherPid ? "back to" : "back to (the app from before has quit)", ^(int ok) { if (!ok) hideVM(); });
+  if (to <= 0) { logf_("escape combo: no app to go back to"); hideVM(); verifyOut(); return; }
+  goTo(to, w, to == otherPid ? "back to" : "back to (the app from before has quit)", ^(int ok) { if (!ok) hideVM(); verifyOut(); });
 }
 
 // After a swipe out: the keyboard follows the pointer's display. The VM may
 // still be in front (its window on another display, or macOS kept it there):
 // then the app on top of the pointer's display, else Finder.
 static void focusPointerDisplay(void) {
-  if (frontFn() != vmPid) return;
+  if (frontFn() != vmPid) { verifyOut(); return; }
   CGPoint p = pointerFn();
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS);
   CGRect b = CGRectNull;
@@ -1138,8 +1255,8 @@ static void focusPointerDisplay(void) {
   CGWindowID w = 0;
   pid_t to = CGRectIsNull(b) ? 0 : topAppFn(b, vmPid, &w);
   if (to <= 0) { to = finderFn(); w = 0; }
-  if (to <= 0) { hideVM(); return; }
-  goTo(to, w, "keyboard to", ^(int ok) { if (!ok) hideVM(); });
+  if (to <= 0) { hideVM(); verifyOut(); return; }
+  goTo(to, w, "keyboard to", ^(int ok) { if (!ok) hideVM(); verifyOut(); });
 }
 
 // Did each swipe of the last press land? A Space that moved the other way
@@ -1266,8 +1383,17 @@ static void leaveVM(void) {
 }
 
 // Into the VM again: the pointer's display (or, with "all", each display the
-// combo left) swipes back to the VM's Space when it is right beside it.
+// combo left) swipes back to the VM's Space when it is right beside it. Taken
+// out of full screen on the way out: to the front, full screen again.
 static void enterVM(void) {
+  if (restoreFull) {
+    restoreFull = 0;
+    pid_t vm = vmPid;
+    goTo(vm, vmWin, "back into the VM (full screen again):", ^(int ok) {
+      if (ok && !fullScreenFn(vm, 1)) logf_("escape combo: the VM window did not go full screen again (it stays a window)");
+    });
+    return;
+  }
   DisplaySpaces ds[MAX_DISPLAYS]; int nd = spacesFn(ds, MAX_DISPLAYS), all = escapeAllFn();
   CGPoint p = pointerFn();
   uint64_t vmSpace = windowSpaceFn(vmWin);
@@ -1281,6 +1407,28 @@ static void enterVM(void) {
   }
   if (nSwiped) { after(^{ checkEnter(); }); return; }
   goTo(vmPid, vmWin, "back into the VM:", NULL);
+}
+
+// A windowed VM with the keyboard: the app from before (else Finder) gets
+// it; the VM still in front -> its app is hidden.
+static void leaveWindow(void) {
+  pid_t vm = leftWinPid, to = alive(otherPid) ? otherPid : finderFn();
+  CGWindowID w = to == otherPid ? otherWin : 0;
+  void (^check)(int) = ^(int ok) {
+    (void)ok;
+    if (frontFn() != vm) return;
+    char name[64] = "";
+    proc_name(vm, name, sizeof name);
+    int hid = hideFn(vm);
+    logf_("escape combo: %s kept the keyboard: hidden%s (the combo brings it back)", name, hid ? "" : " (refused!)");
+  };
+  if (to <= 0) { check(0); return; }
+  goTo(to, w, to == otherPid ? "keyboard back to" : "keyboard back to (the app from before has quit)", check);
+}
+
+// Into the windowed VM the combo left: its window to the front, with the keyboard.
+static void enterWindow(void) {
+  goTo(leftWinPid, leftWinWin, "back into the VM window:", NULL);
 }
 
 // The switch runs after the tap's callback has returned (it talks to the
@@ -1301,7 +1449,10 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     int combo = (f & kCGEventFlagMaskControl) && (f & kCGEventFlagMaskAlternate) && (f & kCGEventFlagMaskCommand);
     if (kc == ESC_KEYCODE && type == kCGEventKeyUp && swallowEscUp) { swallowEscUp = 0; return NULL; }
     int act = kc == ESC_KEYCODE && combo
-              ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin)) : COMBO_PASS;
+              ? comboAction(frontIsVM, escaped, alive(vmPid) && vmPid != appPid && vmWindowFn(vmPid, vmWin),
+                            winVMPid > 0 && winVMPid == appPid,
+                            alive(leftWinPid) && leftWinPid != appPid && vmWindowFn(leftWinPid, leftWinWin))
+              : COMBO_PASS;
     if (act == COMBO_PASS) {
       if (kc >= 0 && kc < 128 && macToLinux[kc]) {
         // UTM, VMware Fusion and OmacVM.app (without Accessibility for it) keep
@@ -1331,6 +1482,11 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
     }
     if (act == COMBO_ENTER) {
       later(enterVM);
+    } else if (act == COMBO_WINDOW_BACK) {
+      later(enterWindow);
+    } else if (act == COMBO_WINDOW_OUT) {
+      leftWinPid = winVMPid; leftWinWin = winVMWin;
+      later(leaveWindow);
     } else {
       escaped = act == COMBO_LEAVE;
       capturing = !escaped;
