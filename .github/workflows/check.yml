@@ -76,3 +76,6 @@ jobs:
 
       - name: A Mac helper that does not build
         run: src/tests/mac-install.sh
+
+      - name: Prebuilt manifests are checked (untrusted input)
+        run: src/tests/prebuilt-manifest.sh
