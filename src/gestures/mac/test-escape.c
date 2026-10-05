@@ -105,6 +105,22 @@ static pid_t fakeFinder(void) { return finder; }
 static int fakeAll(void) { return all; }
 static void fakeSave(void) { saved++; }
 static int fakeVMWindow(pid_t pid, CGWindowID win) { (void)win; return vmAlive && alive(pid); }
+static pid_t launcher;   // OmacVM.app's launcher: the VMs' process name, but no QEMU
+static int fakeIsQemu(pid_t pid) { return pid != launcher; }
+// Out of full screen: each display showing the VM's Space goes to its first
+// one. Into it: the first display shows the VM's Space again.
+static int unfs, refs;
+static int fakeFullScreen(pid_t pid, int on) {
+  if (!on) {
+    unfs++;
+    for (int i = 0; i < nWorld; i++) if (owner[world[i].cur] == pid) world[i].cur = world[i].sp[0];
+    return 1;
+  }
+  refs++;
+  for (int i = 0; i < nWorld; i++)
+    for (int j = 0; j < world[i].n; j++) if (owner[world[i].sp[j]] == pid) { world[i].cur = world[i].sp[j]; return 1; }
+  return 0;
+}
 
 // What the guest got since the last call, lines joined by '|'.
 static const char *sent(void) {
@@ -160,8 +176,8 @@ int main(void) {
   activateFn = fakeActivate; finderFn = fakeFinder; frontFn = fakeFront; vmWindowFn = fakeVMWindow;
   spacesFn = fakeSpaces; windowSpaceFn = fakeWindowSpace; swipeFn = fakeSwipe; pointerFn = fakePointer;
   vmWindowsFn = fakeVMWindows; topAppFn = fakeTopApp; hideFn = fakeHide; escapeAllFn = fakeAll; saveSignFn = fakeSave;
-  warpFn = fakeWarp; warpSettle = 0;
-  verifyAfter = 0.01;
+  warpFn = fakeWarp; warpSettle = 0; isQemuFn = fakeIsQemu; fullScreenFn = fakeFullScreen;
+  verifyAfter = 0.01; restoreGrace = 0;
   for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
   int sv[2]; socketpair(AF_UNIX, SOCK_STREAM, 0, sv); peer = sv[1]; fcntl(peer, F_SETFL, O_NONBLOCK);
   clients[0].fd = sv[0]; clients[0].net = NET_APP; clients[0].gestures = 1;
@@ -224,11 +240,16 @@ int main(void) {
 
   // Neither the swipe nor the switch: the VM's app is hidden, macOS has the keyboard.
   refuse = 1;
-  check(press(C|O|M, HID, 0) == 1 && !capturing && hidden == 1 && front != vm,
+  unfs = 0;
+  check(press(C|O|M, HID, 0) == 1 && !capturing && hidden >= 1 && front != vm,
         "swipe ignored and the switch refused: the VM is hidden (never a trap)");
-  refuse = 0; swipesIgnored = 0;
+  check(unfs == 1 && world[0].cur == 101, "... its full screen still showed: out of full screen too");
+  refuse = 0; swipesIgnored = 0; refs = 0;
   sent(); settle(vm, NET_APP);
-  front = vm; world[0].cur = 102; settle(vm, NET_APP); sent();
+  check(restoreFull && press(C|O|M, HID, 0) == 1 && wentTo == vm && front == vm && refs == 1 && world[0].cur == 102 && !swipes,
+        "... the combo in macOS: the VM back, full screen again (no swipe)");
+  check(!restoreFull, "... once");
+  settle(vm, NET_APP); sent();
 
   // The swipe went the other way (the event's sign): learned and kept, the switch fixes this time.
   const uint64_t three[] = { 101, 102, 103 };
@@ -330,6 +351,83 @@ int main(void) {
   // The VM has quit: the combo in macOS is macOS's again.
   end(parallels);
   check(press(C|O|M, HID, 0) == 0 && !went && !swipes, "the last VM has quit: the combo passes in macOS");
+
+  // ---- Never stuck (Mac mini, 12:58): the swipe did nothing and Finder took
+  // the front without a window, so the VM's full-screen Space still showed ----
+  layout(1, mini, 2, NULL, 0);
+  owner[101] = terminal; winOn[101] = 11; owner[102] = vm; winOn[102] = 22;
+  pointer = CGPointMake(1000, 700); front = vm; world[0].cur = 102;
+  frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+  end(terminal); terminal = child(); owner[101] = terminal;   // the app from before has quit: Finder is next
+  swipesIgnored = 1; unfs = 0;
+  check(press(C|O|M, HID, 0) == 1 && swipes == 2 && wentTo == finder, "mini, nothing swipes: back to Finder (no window)");
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.15, false);
+  check(unfs == 1 && hidden == 1 && world[0].cur == 101 && front != vm,
+        "... the VM's Space still showed: out of full screen and hidden, the user is out");
+  swipesIgnored = 0;
+  frontChanged(finder, -1, 0, "", 0, 1);
+  // Brought back another way (the Dock: a window now): the next combo in macOS is no restore.
+  restoreGrace = 1.5;
+  front = vm; frontChanged(vm, NET_APP, 0, "", 22, 0);
+  check(restoreFull, "... the VM in front in a window while it is hidden (within 1.5 s): still to be restored");
+  restoreGrace = 0;
+  frontChanged(vm, NET_APP, 0, "", 22, 0);
+  check(!restoreFull, "... the VM in front again later (the Dock, a click): no full screen forced on it");
+  front = vm; world[0].cur = 102; frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+  unfs = 0;
+  check(press(C|O|M, HID, 0) == 1 && world[0].cur == 101, "a swipe that lands: out");
+  CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.1, false);
+  check(!unfs && !hidden, "... and nothing more (no un-full-screen, no hiding)");
+  sent(); settle(vm, NET_APP);
+  front = vm; world[0].cur = 102; settle(vm, NET_APP); sent();
+  frontChanged(terminal, -1, 0, "", 11, 1); front = terminal; world[0].cur = 101;
+
+  // ---- An OmacVM VM in a window with the keyboard: the combo gives it to
+  // the app from before; in macOS it brings that window back ----
+  pid_t winvm = child();
+  front = winvm;
+  frontChanged(winvm, NET_APP, 0, "", 77, 0); sent();
+  check(press(C|O|M, HID, 0) == 1 && went == 1 && wentTo == terminal && wentWin == 11 && front == terminal && !swipes,
+        "VM in a window: the combo gives the keyboard to the app from before (Terminal), no swipe");
+  check(!capturing && !strcmp(sent(), ""), "... nothing sent to the guest");
+  check(leftWinPid == winvm && leftWinWin == 77, "... and that window is remembered");
+  frontChanged(terminal, -1, 0, "", 11, 1);
+  check(press(C|O|M, HID, 0) == 1 && went == 1 && wentTo == winvm && wentWin == 77 && front == winvm,
+        "in macOS: the combo brings the VM window back, with the keyboard");
+  frontChanged(winvm, NET_APP, 0, "", 77, 0);
+  check(!leftWinPid, "... in it again: forgotten");
+  check(press(C|O|M, HID, 1) == -1 && !went && !leftWinPid && front == winvm, "VM in a window: a held combo (autorepeat): its repeats eaten, nothing happens");
+  check(press(C|O|M, POSTED, 0) == 0 && !leftWinPid && front == winvm, "VM in a window: a posted combo passes, not remembered");
+  // The switch refused: the VM's app is hidden, macOS has the keyboard.
+  refuse = 1;
+  check(press(C|O|M, HID, 0) == 1 && hidden == 1 && front != winvm, "VM in a window, the switch refused: hidden (never a trap)");
+  refuse = 0;
+  frontChanged(front, -1, 0, "", 0, 1);
+  check(press(C|O|M, HID, 0) == 1 && wentTo == winvm && front == winvm, "... the combo brings it back");
+  frontChanged(winvm, NET_APP, 0, "", 77, 0);
+  // Left with a click (no combo): the combo in macOS is not the window's.
+  front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+  wentTo = 0;
+  check(press(C|O|M, HID, 0) >= 0 && wentTo != winvm && !leftWinPid, "a VM window left with a click: the combo does not take it back");
+  sent(); front = terminal; world[0].cur = 101; frontChanged(terminal, -1, 0, "", 11, 1);
+  // The window left by the combo, then a full-screen VM entered: that one is the newer.
+  front = winvm; frontChanged(winvm, NET_APP, 0, "", 77, 0);
+  press(C|O|M, HID, 0);
+  check(leftWinPid == winvm, "window left by the combo");
+  front = vm; world[0].cur = 102; frontChanged(vm, NET_APP, 1, "Omarchy", 22, 0); sent();
+  check(!leftWinPid, "... then a full-screen VM in front: the window is no longer the way back");
+  frontChanged(terminal, -1, 0, "", 11, 1); front = terminal; world[0].cur = 101; sent(); escaped = 0;
+  // The launcher (OmacVM.app's start window) has the VMs' name, but is no VM.
+  launcher = child(); front = launcher;
+  frontChanged(launcher, NET_APP, 0, "", 88, 0);
+  check(!winVMPid, "OmacVM.app's launcher in front: no VM window");
+  front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+  // The window gone (VM quit): the combo in macOS is not the window's.
+  front = winvm; frontChanged(winvm, NET_APP, 0, "", 77, 0); press(C|O|M, HID, 0);
+  front = terminal; frontChanged(terminal, -1, 0, "", 11, 1);
+  end(winvm);
+  check(press(C|O|M, HID, 0) == 0 || wentTo != winvm, "the VM window's VM has quit: the combo does not go there");
+  end(launcher); launcher = 0;
 
   // Which apps the combo goes back to.
   check(isOther(terminal, -1, "Terminal", 1), "back to: a regular app");
