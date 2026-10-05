@@ -74,6 +74,9 @@ fi
 "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 log "swapped $OLD_V -> $NEW_V, starting it"
 
+# The result goes first: the new app reads it right after its check, while
+# this script may not have seen the marker yet. A failure overwrites it.
+if [[ $MODE == install ]]; then result "installed $OLD_V $NEW_V"; else result "went-back $OLD_V"; fi
 rm -f "$MARKER"
 why="no answer within ${WAIT} s"
 if launch --update-check "$TOKEN"; then
@@ -84,7 +87,7 @@ if launch --update-check "$TOKEN"; then
   answer=$(head -1 "$MARKER" 2>/dev/null)
   rm -f "$MARKER"
   if [[ $answer == ok ]]; then
-    if [[ $MODE == install ]]; then result "installed $OLD_V $NEW_V"; else result "went-back $OLD_V"; fi
+    log "$NEW_V started"
     rm -rf "$HOME_DIR/incoming" "$FAILED" "$HOME_DIR/previous.old"
     exit 0
   fi
