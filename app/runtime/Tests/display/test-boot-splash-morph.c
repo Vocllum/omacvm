@@ -4,13 +4,15 @@
  *
  * - it starts as the word OMACVM, every cell still, and ends as exactly the
  *   logo's cells (the firmware's), still, with no glow;
+ * - the timeline: OMACVM holds INTRO_HOLD s, the cells fly for 2.5 to 3 s
+ *   after that, nothing moves after INTRO_END;
  * - still cells end on the pixels where GL's nearest sampling of the logo
  *   texture ends them (omacvm_splash_draw), at several window sizes, so the
- *   animation's last frame is the GL splash's and the firmware's logo;
+ *   animation's last frame is the GL splash's logo; the cells are square;
  * - no cell jumps from one frame to the next (120 Hz);
  * - the glow comes and goes: none at the start and the end, some mid-flight;
  *   the background is plain navy without it;
- * - a guest picture is told apart: the firmware's logo, black, anything else.
+ * - the desktop is told apart from the firmware's logo and text on black.
  *
  * build-qemu-gpu-runtime.sh builds it with -I the patched ui/;
  * check-boot-splash.sh with the header taken from the patch.
@@ -101,11 +103,12 @@ static void test_ends(void)
 }
 
 /* GL_NEAREST over the 81 x 19 texture in the viewport omacvm_splash_draw()
- * sets: the first pixel (from the top left) of each cell. */
-static void gl_edges(int w, int h, int fw, int fh, int *xs, int *ys)
+ * sets: the first pixel (from the top left) of each cell. The logo: as in a
+ * 1920 x 1080 frame with 15-pixel cells stretched to w x h, square cells. */
+static void gl_edges(int w, int h, int *xs, int *ys)
 {
-    double cw = (double)w * SPLASH_CELL / fw, ch = (double)h * SPLASH_CELL / fh;
-    int lw = MAX(1, (int)lround(SPLASH_COLS * cw)), lh = MAX(1, (int)lround(SPLASH_ROWS * ch));
+    double cell = MIN(w * 15.0 / 1920, h * 15.0 / 1080);
+    int lw = MAX(1, (int)lround(81 * cell)), lh = MAX(1, (int)lround(19 * cell));
     int vx = (w - lw) / 2, vy = (h - lh) / 2;   /* GL: from the bottom */
 
     for (int c = 0; c <= SPLASH_COLS; c++) {
@@ -133,20 +136,23 @@ static void gl_edges(int w, int h, int fw, int fh, int *xs, int *ys)
 
 static void test_geometry(void)
 {
-    static const int sizes[][4] = {
-        { 1280, 720, 1920, 1080 }, { 1920, 1080, 1920, 1080 }, { 2880, 1800, 1920, 1080 },
-        { 3456, 2234, 1920, 1080 }, { 1366, 768, 1920, 1080 }, { 2000, 1333, 1920, 1080 },
-        { 1600, 1000, 2880, 1800 }, { 1217, 777, 1920, 1080 },
+    static const int sizes[][2] = {
+        { 1280, 720 }, { 1920, 1080 }, { 2880, 1800 }, { 3456, 2234 }, { 1366, 768 },
+        { 2000, 1333 }, { 1600, 1000 }, { 1217, 777 }, { 800, 1200 }, { 5120, 1440 },
+        { 640, 480 },
     };
     double glow;
     int n = omacvm_intro_cells(INTRO_END, cells, &glow);
 
     for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
         int w = sizes[s][0], h = sizes[s][1], xs[SPLASH_COLS + 1], ys[SPLASH_ROWS + 1];
-        IntroGeom g = omacvm_intro_geom(w, h, sizes[s][2], sizes[s][3]);
+        IntroGeom g = omacvm_intro_geom(w, h);
         int bad = 0;
 
-        gl_edges(w, h, sizes[s][2], sizes[s][3], xs, ys);
+        gl_edges(w, h, xs, ys);
+        /* Square cells, up to the rounding of the logo's size. */
+        CHECK(fabs(g.sx - g.sy) < 1.0 / SPLASH_ROWS + 1e-9, "%dx%d: cells %.3f x %.3f", w, h,
+              g.sx, g.sy);
         for (int i = 0; i < n; i++) {
             int c = (int)cells[i].x, r = (int)cells[i].y;
             double e[4];
@@ -198,7 +204,8 @@ static void test_background(void)
     }
     CHECK(!lit, "the end's background is not plain navy (%d pixels)", lit);
 
-    n = omacvm_intro_cells(2.05, cells, &glow);
+    /* The glow's peak: 2.05 s into the preview. */
+    n = omacvm_intro_cells(INTRO_HOLD + (2.05 - PREVIEW_START) * INTRO_SLOW, cells, &glow);
     omacvm_intro_background(cells, n, glow, px);
     int out = 0;
     for (int i = 0; i < INTRO_BG_W * INTRO_BG_H; i++) {
@@ -210,62 +217,116 @@ static void test_background(void)
     CHECK(top > 0x1b + 20, "no glow at its peak (green %d)", top);
 }
 
-/* A firmware-like frame: black, the logo centred at SPLASH_CELL, x8r8g8b8
- * (or x8b8g8r8 with bgr), the logo moved by dx pixels. */
-static uint8_t *frame(int w, int h, bool logo, bool bgr, int dx)
+/* The timeline: OMACVM holds, then the cells fly for 2.5 to 3 s. */
+static void test_timeline(void)
 {
-    uint8_t *f = calloc((size_t)w * h, 4);
-    int x0 = (w - SPLASH_COLS * SPLASH_CELL) / 2 + dx, y0 = (h - SPLASH_ROWS * SPLASH_CELL) / 2;
+    static IntroCell first[INTRO_MAX];
+    double glow, first_move = -1, last = -1;
+    int n = omacvm_intro_cells(0, first, &glow);
 
-    for (int y = 0; logo && y < SPLASH_ROWS * SPLASH_CELL; y++) {
-        for (int x = 0; x < SPLASH_COLS * SPLASH_CELL; x++) {
-            if (omacvm_splash_cells[y / SPLASH_CELL][x / SPLASH_CELL] == '#' &&
-                x0 + x >= 0 && x0 + x < w) {
-                uint8_t *p = f + ((size_t)(y0 + y) * w + x0 + x) * 4;
-                p[0] = bgr ? 0xa8 : 0x76;
-                p[1] = 0xcd;
-                p[2] = bgr ? 0x76 : 0xa8;
-            }
+    for (double t = 0; t <= INTRO_HOLD; t += 1 / 120.0) {
+        omacvm_intro_cells(t, cells, &glow);
+        CHECK(!memcmp(first, cells, n * sizeof(cells[0])), "t=%.3f: OMACVM moves before %.1f s",
+              t, INTRO_HOLD);
+    }
+    for (int f = 0; f <= (int)((INTRO_END + 1) * 120); f++) {
+        double t = f / 120.0;
+        bool moving = false;
+
+        omacvm_intro_cells(t, cells, &glow);
+        for (int i = 0; i < n; i++) {
+            moving |= !cells[i].rest;
         }
+        if (moving) {
+            first_move = first_move < 0 ? t : first_move;
+            last = t;
+        }
+        if (fabs(t - (INTRO_HOLD + 0.1)) < 1 / 240.0) {
+            CHECK(moving, "nothing moves 0.1 s after OMACVM's hold");
+        }
+    }
+    /* The user's ask: OMACVM about 0.6 s, the morph 2.5 to 3 s. */
+    CHECK(first_move >= 0.55 && first_move <= 0.7, "OMACVM holds %.2f s, not about 0.6",
+          first_move);
+    CHECK(last - INTRO_HOLD >= 2.5 && last - INTRO_HOLD <= 3.0,
+          "the cells fly for %.2f s, not 2.5 to 3", last - INTRO_HOLD);
+    CHECK(INTRO_END >= last && INTRO_END <= 4.0, "the animation ends at %.2f s", INTRO_END);
+}
+
+/* A w x h picture of 32-bit pixels, all of colour c. */
+static uint32_t *picture(int w, int h, uint32_t c)
+{
+    uint32_t *f = malloc((size_t)w * h * 4);
+
+    for (size_t i = 0; i < (size_t)w * h; i++) {
+        f[i] = c;
     }
     return f;
 }
 
-static void test_seen(void)
+/* The probe's pixels of it, as cocoa.m takes them from a 2D surface. */
+static bool desktop(const uint32_t *f, int w, int h)
 {
-    uint8_t *f = frame(1920, 1080, true, false, 0);
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_LOGO,
-          "the firmware's frame is not seen as the logo");
-    /* The progress bar and "Start boot option" under the logo do not matter. */
-    memset(f + (size_t)1000 * 1920 * 4, 0xff, (size_t)20 * 1920 * 4);
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_LOGO,
-          "the progress bar hides the logo");
-    /* GRUB's text across the logo's place. */
-    memset(f + (size_t)540 * 1920 * 4, 0xaa, (size_t)16 * 1920 * 4);
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_OTHER,
-          "text over the logo is seen as the logo");
+    uint32_t px[SPLASH_PROBE_ROWS * SPLASH_PROBE_COLS];
+
+    for (int r = 0; r < SPLASH_PROBE_ROWS; r++) {
+        int y = omacvm_splash_probe_at(r, SPLASH_PROBE_ROWS, h);
+        for (int c = 0; c < SPLASH_PROBE_COLS; c++) {
+            int x = omacvm_splash_probe_at(c, SPLASH_PROBE_COLS, w);
+            CHECK(x >= 0 && x < w && y >= 0 && y < h, "probe %d,%d outside %dx%d", x, y, w, h);
+            px[r * SPLASH_PROBE_COLS + c] = f[(size_t)y * w + x];
+        }
+    }
+    return omacvm_splash_desktop(px);
+}
+
+static void test_desktop(void)
+{
+    const int w = 1920, h = 1080;
+    uint32_t *f = picture(w, h, 0xff000000);
+    unsigned seed = 1;
+
+    CHECK(!desktop(f, w, h), "black is the desktop");
+    /* The firmware's logo, 15-pixel cells in the middle, a progress bar under it. */
+    for (int y = 0; y < SPLASH_ROWS * SPLASH_CELL; y++) {
+        for (int x = 0; x < SPLASH_COLS * SPLASH_CELL; x++) {
+            if (omacvm_splash_cells[y / SPLASH_CELL][x / SPLASH_CELL] == '#') {
+                f[(size_t)(397 + y) * w + 352 + x] = 0xff000000 | SPLASH_GREEN;
+            }
+        }
+    }
+    for (int y = 900; y < 920; y++) {
+        for (int x = 200; x < 1720; x++) {
+            f[(size_t)y * w + x] = 0xffffffff;
+        }
+    }
+    CHECK(!desktop(f, w, h), "the firmware's logo is the desktop");
     free(f);
-    f = frame(2880, 1800, true, true, 0);
-    CHECK(omacvm_splash_seen(f, 2880 * 4, 2880, 1800, true) == SPLASH_SEEN_LOGO,
-          "a bigger bgr frame is not seen as the logo");
-    CHECK(omacvm_splash_seen(f, 2880 * 4, 2880, 1800, false) == SPLASH_SEEN_OTHER,
-          "the logo in the wrong colours is seen as the logo");
+    /* Linux's console, full of text: a third of each 8 x 16 cell lit. */
+    f = picture(w, h, 0xff000000);
+    for (size_t i = 0; i < (size_t)w * h; i++) {
+        seed = seed * 1103515245 + 12345;
+        if ((seed >> 16) % 3 == 0) {
+            f[i] = 0xffaaaaaa;
+        }
+    }
+    CHECK(!desktop(f, w, h), "a console full of text is the desktop");
     free(f);
-    f = frame(1920, 1080, true, false, SPLASH_CELL);
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_OTHER,
-          "a moved logo is seen as the logo");
+    /* Omarchy's background (Tokyo Night), a wallpaper half black. */
+    f = picture(w, h, 0xff000000 | SPLASH_NAVY);
+    CHECK(desktop(f, w, h), "Omarchy's background is not the desktop");
+    for (int y = 0; y < h; y++) {
+        memset(f + (size_t)y * w, 0, w / 2 * 4);
+    }
+    CHECK(desktop(f, w, h), "a wallpaper half black is not the desktop");
     free(f);
-    f = frame(1920, 1080, false, false, 0);
-    CHECK(omacvm_splash_seen(f, 1920 * 4, 1920, 1080, false) == SPLASH_SEEN_EMPTY,
-          "a black frame is not empty");
-    /* The firmware's first mode, 640 x 480, black: empty, not other. */
-    CHECK(omacvm_splash_seen(f, 640 * 4, 640, 480, false) == SPLASH_SEEN_EMPTY,
-          "a black frame too small for the logo is not empty");
-    memset(f + (size_t)200 * 640 * 4, 0xaa, (size_t)40 * 640 * 4);
-    CHECK(omacvm_splash_seen(f, 640 * 4, 640, 480, false) == SPLASH_SEEN_OTHER,
-          "a small frame with something on it is not other");
-    CHECK(omacvm_splash_seen(NULL, 0, 1920, 1080, false) == SPLASH_SEEN_OTHER,
-          "no picture is not other");
+    /* Hyprland's grey before the wallpaper: not yet. */
+    f = picture(w, h, 0xff111111);
+    CHECK(!desktop(f, w, h), "Hyprland's grey alone is the desktop");
+    free(f);
+    /* Tiny and odd pictures: the probe stays inside. */
+    f = picture(1, 1, 0xff808080);
+    CHECK(desktop(f, 1, 1), "a 1 x 1 grey picture is not the desktop");
     free(f);
 }
 
@@ -275,12 +336,13 @@ int main(void)
     test_geometry();
     test_motion();
     test_background();
-    test_seen();
+    test_timeline();
+    test_desktop();
     if (failures) {
         fprintf(stderr, "test-boot-splash-morph: %d failures\n", failures);
         return 1;
     }
-    printf("test-boot-splash-morph: OMACVM to the logo, still ends on GL's pixels, no jumps, "
-           "the firmware's logo told apart\n");
+    printf("test-boot-splash-morph: OMACVM to the logo on the slowed timeline, still ends on "
+           "GL's pixels, no jumps, the desktop told apart\n");
     return 0;
 }

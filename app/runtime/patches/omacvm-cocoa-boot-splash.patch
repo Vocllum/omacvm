@@ -1,66 +1,80 @@
 From: OmacVM
-Subject: [PATCH] ui/cocoa: start animation, then Omarchy's logo instead of "Display output is not active."
+Subject: [PATCH] ui/cocoa: start animation, then Omarchy's logo until the desktop
 
 What: when the window opens, OMACVM turns into Omarchy's logo (O, M and A
-stay, the cells of C, V and M fly and land as R, C, H and Y; 2.4 s), Omarchy
-green on Omarchy's background. The firmware's first picture (about 0.1 s in)
-is the same logo, same size, same place: the animation plays on over it and
-then fades into it; if the guest is slower, the logo holds until its first
-picture. If the guest shows anything else before the animation ends (another
-firmware logo, GRUB, Linux), the rest plays within 0.35 s, then the fade: no
-half-made letters, and the guest is never held up. Which it is, is told by
-sampling the middle of each logo cell in the guest's picture (read back from
-the scanout texture, as virgl shows the firmware's picture as one; only until
-something other than the logo shows). A black picture (the firmware's first
-mode, before the logo) counts as the guest's after 1 s, so the logo never
-hides a guest that draws little for long. Reduce motion or
-OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the main window
-animates.
-After that, until the guest shows a picture on an output, and when it switches
-the output off again (a reboot), the window shows Omarchy's logo, green on
-black, where the firmware draws it, instead of QEMU's placeholder text
+stay, the cells of C, V and M fly and land as R, C, H and Y), Omarchy green
+on Omarchy's background: OMACVM holds 0.6 s, the cells fly for about 2.6 s,
+the glow goes by 3.56 s. Then the logo holds until Omarchy's desktop (or its
+login or lock screen) is there, over the firmware's progress bar, GRUB's
+text and Linux's console, and fades into it. The desktop is there when
+Omarchy's display agent (omacvm-displays, a user service that starts with
+the desktop) opens its port org.omacvm.display, or when the guest's picture
+is lit almost everywhere (a wallpaper, not text on black; 32 x 18 pixels
+looked at 4 times a second, read back from the scanout's texture). If the
+desktop comes before the animation ends, the animation still plays to its
+end. The logo gives way at once when the VM stops on an error, and after
+40 s of running time without a desktop (OMACVM_SPLASH_HOLD_SECONDS), so a
+prompt or an error in the guest is not hidden for long; qemu.log says which
+it was. After a reboot the logo comes back, still, the same way. Reduce
+motion or OMACVM_SPLASH_ANIMATION=0: the logo without the morph. Only the
+main window has the animation.
+Under it, in the GL layers of the main window and the other displays' windows:
+until the guest shows a picture on an output, and when it switches it off,
+Omarchy's logo on Omarchy's background instead of QEMU's placeholder text
 ("Display output is not active.", "Guest has not initialized the display
-(yet)."). The windows of the other displays show it on Omarchy's background.
-If the guest has shown nothing of its own 90 s of running time after it
-started (OMACVM_SPLASH_HINT_SECONDS), a line under the logo says Omarchy is
-taking long and where its logs are (OMACVM_LOGS, set by the launcher), and
-qemu.log gets a warning. OMACVM_BOOT_SPLASH=0 brings QEMU's text back and
-turns the animation off. The main window's layer now draws again when the
-window changes size.
+(yet)."); once the desktop was there (until the next reset), plain black, as
+a screen that is off (an idle Omarchy turns its display off). If the guest
+has shown nothing of its own 90 s of running time after it started
+(OMACVM_SPLASH_HINT_SECONDS), a line under the logo says Omarchy is taking
+long and where its logs are (OMACVM_LOGS, set by the launcher), and qemu.log
+gets a warning. OMACVM_BOOT_SPLASH=0 brings QEMU's text back and turns the
+logo and the animation off. The main window's layer now draws again when the
+window changes size (cheap; the still logo has no frames of its own).
 
 Why: every start showed QEMU's text for a few seconds (before the firmware,
-and from GRUB until Linux draws), and every reboot for longer. It looked like
-an error but is just the guest getting ready. The animation is the one the
-user picked from three previews (a-pixel-morph).
+and from GRUB until Linux draws), then the firmware, GRUB and Linux's text,
+and every reboot the text for longer. It looked like errors but is just the
+guest getting ready. The user asked for the logo from the window's first
+frame to the desktop, and for the animation (the preview they picked,
+a-pixel-morph) to run slower to fill the 3 to 5 s of loading.
 
-How: the animation is a Core Animation layer over the window's GL layer (a
-shape layer for the cells, sharp at any size and scale; a 640 x 360 image
-under it for the glow), driven by a CADisplayLink on the main thread; the
-guest is never held up. Its core (no Cocoa, no QEMU) is a port of the
-preview's generator: the flying cells' table is made by
-boot-logo/make-splash-morph.py, the glow is the preview's blur (Pillow's
-resampling weights). The still logo is drawn in the window's GL layers: an
-81 x 19 texture with sharp cells, placed where the firmware's stretched frame
-has its logo (1920 x 1080 on a cold start, after a reboot the size of the
-guest's last picture, as virtio-gpu then reports), so neither the hand-over to
-the firmware nor the animation's last frame moves it. The logo is the
+How: the animation and the held logo are a Core Animation layer over the
+window's GL layer (a shape layer for the cells, sharp at any size and scale;
+a small glow image under them laid over the preview's frame), driven by a
+CADisplayLink on the main thread; the guest is never held up. Their green and
+navy are made in the window's colour space: GL's pixels reach the screen
+unconverted, so the layer's are the very values of the GL logo, the
+firmware's and the guest's. The core (no Cocoa, no QEMU, ui/omacvm-splash.h)
+is a port of the preview's generator on a slowed timeline: the flying cells'
+table is made by boot-logo/make-splash-morph.py, the glow is the preview's
+blur (Pillow's resampling weights). The still logo in the GL layers is an
+81 x 19 texture with sharp cells. The logo is as big as the firmware's
+1920 x 1080 frame stretched to the view would have it (1215 x 285 there:
+15 pixels a cell), with square cells, in the middle. The logo is the
 firmware's (boot-logo/make-logo-bmp.py logo.svg --rows, from Omarchy's
-logo.svg, MIT), 15 pixels a cell in the firmware's frame.
+logo.svg, MIT).
 
 Upstream: OmacVM only (branding), not for QEMU.
 
 Test: Tests/display/test-boot-splash-cells.py (the cells make exactly the
 firmware's Logo.bmp of edk2-logo-omarchy.patch, at SPLASH_CELL);
 make-splash-morph.py --check (the table is the generator's);
-Tests/display/test-boot-splash-morph.c (the core starts as OMACVM and ends as
-the logo, still, on the pixels GL's nearest sampling gives at several window
-sizes; no jumps; the glow comes and goes; a firmware-like frame is seen as
-the logo, text over it, a moved or recoloured logo as something else). The build runs all three;
+Tests/display/test-boot-splash-morph.c (the core starts as OMACVM, holds it
+about 0.6 s, flies 2.5 to 3 s and ends as the logo, still, on the pixels GL's
+nearest sampling gives at several window sizes, square cells; no jumps; the
+glow comes and goes; the desktop is told apart from the firmware's logo,
+a console full of text and Hyprland's grey). The build runs all three;
 Tests/display/check-boot-splash.sh runs them from this patch alone (CI).
-Frames of the core against the preview's: start and end identical, mid-flight
-under 0.1 % of pixels differ by more than 8 of 255. The start, hand-over,
-Reduce motion and a reboot were checked in the app (tracks/boot-splash in the
-work notes).
+The core's cells and glow at any time are the earlier core's (which matched
+the preview's frames) at the preview's time, frame for frame at 120 Hz.
+Checked in the app on a test VM: a cold start (OMACVM 0.6 s, the morph to
+about 3.2 s at ~60 fps, the logo held over the firmware, GRUB's menu and
+Linux, given way when the wallpaper showed, 12.6 s), a reboot (the still
+logo again to the desktop), the display agent's port opened by hand (gives
+way at once), the time limit at 2 s (the animation still ends first), the
+still logo; the layer's green and navy are the GL logo's and the firmware's
+values on the screen (168,205,118 and 26,27,38), the logo's box the GL
+logo's to the pixel.
 
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
@@ -81,45 +95,66 @@ work notes).
      }
      return self;
  }
-@@ -2977,6 +2980,715 @@
-     CGLDestroyContext(ctx);
- }
+@@ -2975,8 +2978,709 @@
+ #endif
  
+     CGLDestroyContext(ctx);
++}
++
 +/*
-+ * OmacVM boot splash. Until the guest shows a picture on an output, and when
-+ * it switches the output off again (a reboot), the window shows Omarchy's
-+ * logo where the firmware draws it, not QEMU's "Display output is not
-+ * active." The firmware's frame (the logo 1215 x 285 in the middle) is
-+ * stretched to the window, so the logo takes the same place here and does
-+ * not move at the hand-over. The firmware draws at the size virtio-gpu
-+ * reports: 1920 x 1080 (the launcher's xres/yres) on a cold start, after a
-+ * reboot the window's own, as the guest did before; so the frame is taken to
-+ * be as big as the last picture the guest showed. Outputs the firmware never
-+ * draws on (the other displays) get square cells at their own size, on
-+ * Omarchy's background like the start animation (below), as nothing of the
-+ * firmware's black comes before or after it there.
++ * OmacVM boot splash. When the window opens, OMACVM turns into Omarchy's
++ * logo (the start animation, below), and the logo stays over the window
++ * until Omarchy's desktop (or its login or lock screen) is there: the
++ * firmware's progress bar, GRUB's text and Linux's console stay under it.
++ * After a reboot the logo comes back, still, the same way. The desktop is
++ * there when
++ * - Omarchy's display agent (omacvm-displays, a user service that starts
++ *   with the desktop) opens its port, org.omacvm.display, or
++ * - the guest's picture is lit almost everywhere (omacvm_splash_desktop:
++ *   a wallpaper, not text on black), looked at 4 times a second.
++ * The logo gives way earlier, and says why in qemu.log, when the VM stops on
++ * an error (at once, even mid-animation), or when there is no desktop after
++ * OMACVM_SPLASH_HOLD_SECONDS (40) of running time: whatever the guest shows
++ * then (a prompt, an error) is not hidden for longer. If QEMU itself fails
++ * (no disk, a crash), it quits and the app says so, as before.
 + *
-+ * When the guest has shown nothing of its own OMACVM_SPLASH_HINT_SECONDS
-+ * (90) of running time after it started, a line under the logo says so and
-+ * where the logs are, and qemu.log gets a warning. OMACVM_BOOT_SPLASH=0:
-+ * QEMU's text, as before.
++ * Under the logo, in the window's GL layer, and on the other displays: until
++ * the guest shows a picture on an output, and when it switches the output
++ * off again, the output shows Omarchy's logo on Omarchy's background instead
++ * of QEMU's "Display output is not active."; once the desktop was there
++ * (until the next reset) plain black, as a screen that is off (an idle
++ * Omarchy turns its display off). When the guest has shown nothing of its own
++ * OMACVM_SPLASH_HINT_SECONDS (90) of running time after it started, a line
++ * under the logo says so and where the logs are, and qemu.log gets a warning.
++ * OMACVM_BOOT_SPLASH=0: QEMU's text, as before, and no animation.
++ *
++ * The logo is as big as the firmware's 1920 x 1080 frame stretched to the
++ * view would have it (1215 x 285 there), with square cells, in the middle.
 + *
 + * Threads: the state below is used with the BQL (QEMU's thread, and the
-+ * layers' draws on the main thread take it); the hint label is main thread.
++ * layers' draws on the main thread take it); the hint label and the
++ * animation's layer are main thread only.
 + */
++#include "hw/virtio/virtio-serial.h"
 +#include "ui/omacvm-splash.h"   /* the logo's cells, the animation's core */
 +
 +static int omacvm_splash_on = -1;       /* OMACVM_BOOT_SPLASH */
-+static uint32_t gl_scanout_w, gl_scanout_h;  /* the scanout's size, if the texture has none */
-+static int omacvm_intro_seen = -1;
-+static bool omacvm_intro_watching = true;   /* until the animation hands over */      /* the guest's main picture: SPLASH_SEEN_*, -1 none */
-+static GLuint omacvm_splash_tex[2];     /* on black, on navy; gl_view_ctx's group */
-+static bool omacvm_guest_drew;          /* a GL scanout since the last reset */
-+static int omacvm_frame_w = 1920;       /* the last picture of the guest's */
-+static int omacvm_frame_h = 1080;
++static GLuint omacvm_splash_tex;        /* the logo; gl_view_ctx's group */
++static bool omacvm_guest_drew;          /* a picture of the guest's since the last reset */
++static bool omacvm_desktop_up;          /* its desktop since the last reset */
 +static bool omacvm_splash_hint_up;
 +static QEMUTimer *omacvm_splash_timer;
 +static NSTextField *omacvm_splash_hint; /* main thread */
++/* The main scanout's place in its texture (the texture may not know its size). */
++static uint32_t gl_scanout_x, gl_scanout_y, gl_scanout_w, gl_scanout_h;
++/* The window's logo waits for the desktop: */
++static bool omacvm_overlay_ok;          /* the window has the logo's layer */
++static bool omacvm_holding;
++static bool omacvm_hold_dirty;          /* the guest's picture changed since the last look */
++static int64_t omacvm_hold_since;       /* QEMU_CLOCK_VIRTUAL ms */
++static QEMUTimer *omacvm_hold_timer;    /* QEMU_CLOCK_REALTIME, while holding */
++
++#define SPLASH_HOLD_TICK_MS 250
 +
 +static bool omacvm_splash_enabled(void)
 +{
@@ -145,41 +180,30 @@ work notes).
 +           omacvm_splash_enabled();
 +}
 +
-+/* With the BQL: the size of the frame the firmware would show on con. */
-+static void omacvm_splash_frame(QemuConsole *con, int *fw, int *fh)
-+{
-+    const QemuUIInfo *info = con ? qemu_console_get_ui_info(con) : NULL;
-+
-+    *fw = omacvm_frame_w;
-+    *fh = omacvm_frame_h;
-+    if (con != dcl.con && info && info->width && info->height) {
-+        *fw = info->width;
-+        *fh = info->height;
-+    }
-+}
-+
 +/*
 + * With the BQL, in a CGL context that shares gl_view_ctx's objects: a w x h
-+ * pixel output showing con.
++ * pixel output without a picture. logo: the logo on Omarchy's background;
++ * else black (the desktop was there: the guest turned the output off).
 + */
-+static void omacvm_splash_draw(QemuConsole *con, int w, int h, bool square)
++static void omacvm_splash_draw(int w, int h, bool logo)
 +{
-+    int fw, fh;
-+    /* Black as the firmware's frame; the other displays Omarchy's background. */
-+    uint32_t bg = square ? SPLASH_NAVY : 0;
++    uint32_t bg = logo ? SPLASH_NAVY : 0;
 +
 +    glClearColor((bg >> 16) / 255.0, ((bg >> 8) & 0xff) / 255.0, (bg & 0xff) / 255.0, 1);
 +    glClear(GL_COLOR_BUFFER_BIT);
-+    if (!omacvm_splash_tex[square]) {
++    if (!logo) {
++        return;
++    }
++    if (!omacvm_splash_tex) {
 +        static uint32_t px[SPLASH_ROWS * SPLASH_COLS];
 +        for (int r = 0; r < SPLASH_ROWS; r++) {
 +            for (int c = 0; c < SPLASH_COLS; c++) {
 +                px[r * SPLASH_COLS + c] = 0xff000000 |
-+                    (omacvm_splash_cells[r][c] == '#' ? SPLASH_GREEN : bg);
++                    (omacvm_splash_cells[r][c] == '#' ? SPLASH_GREEN : SPLASH_NAVY);
 +            }
 +        }
-+        glGenTextures(1, &omacvm_splash_tex[square]);
-+        glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex[square]);
++        glGenTextures(1, &omacvm_splash_tex);
++        glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex);
 +        glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 +        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 +        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, SPLASH_COLS, SPLASH_ROWS, 0,
@@ -187,17 +211,10 @@ work notes).
 +        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 +        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 +    }
-+    /* One cell: SPLASH_CELL x SPLASH_CELL pixels of the firmware's frame. */
-+    omacvm_splash_frame(con, &fw, &fh);
-+    double cw = (double)w * SPLASH_CELL / fw, ch = (double)h * SPLASH_CELL / fh;
-+    if (square) {
-+        cw = ch = MIN(cw, ch);
-+    }
-+    int lw = MAX(1, (int)lround(SPLASH_COLS * cw));
-+    int lh = MAX(1, (int)lround(SPLASH_ROWS * ch));
++    IntroGeom g = omacvm_intro_geom(w, h);
 +
-+    glViewport((w - lw) / 2, (h - lh) / 2, lw, lh);
-+    glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex[square]);
++    glViewport((int)g.left, h - (int)g.top - g.lh, g.lw, g.lh);
++    glBindTexture(GL_TEXTURE_2D, omacvm_splash_tex);
 +    /* Sharp cells, whatever the zoom filter. */
 +    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 +    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -205,8 +222,8 @@ work notes).
 +    glViewport(0, 0, w, h);
 +}
 +
-+/* Main thread: the hint under the logo of the main window (fh: frame height). */
-+static void omacvm_splash_hint_show(bool show, int fh)
++/* Main thread: the hint under the logo of the main window. */
++static void omacvm_splash_hint_show(bool show)
 +{
 +    if (!show) {
 +        [omacvm_splash_hint removeFromSuperview];
@@ -229,9 +246,9 @@ work notes).
 +    }
 +    NSRect b = [cocoaView bounds];
 +    NSSize size = [omacvm_splash_hint frame].size;
-+    /* Under the logo (19 cells of the frame's rows, in the middle). */
-+    const int lh = SPLASH_ROWS * SPLASH_CELL;
-+    CGFloat y = b.size.height / 2 - b.size.height * lh / MAX(fh, lh) / 2 - 32 - size.height;
++    /* 32 points under the logo (in points, from the bottom). */
++    IntroGeom g = omacvm_intro_geom((int)b.size.width, (int)b.size.height);
++    CGFloat y = b.size.height - g.top - g.lh - 32 - size.height;
 +    [omacvm_splash_hint setFrame:NSMakeRect(floor((b.size.width - size.width) / 2),
 +                                            floor(MAX(8, y)), size.width, size.height)];
 +    if (![omacvm_splash_hint superview]) {
@@ -239,12 +256,17 @@ work notes).
 +    }
 +}
 +
++static int omacvm_splash_seconds(const char *name, int fallback)
++{
++    const char *v = getenv(name);
++    return v && atoi(v) > 0 ? MIN(atoi(v), 3600) : fallback;
++}
++
 +static int omacvm_splash_hint_seconds(void)
 +{
 +    static int seconds;
 +    if (!seconds) {
-+        const char *v = getenv("OMACVM_SPLASH_HINT_SECONDS");
-+        seconds = v && atoi(v) > 0 ? MIN(atoi(v), 3600) : 90;
++        seconds = omacvm_splash_seconds("OMACVM_SPLASH_HINT_SECONDS", 90);
 +    }
 +    return seconds;
 +}
@@ -255,30 +277,50 @@ work notes).
 +    if (omacvm_guest_drew || !omacvm_splash_wanted(gl_scanout_borrow, surface)) {
 +        return;
 +    }
-+    int fw, fh;
-+
-+    omacvm_splash_frame(dcl.con, &fw, &fh);
 +    omacvm_splash_hint_up = true;
 +    warn_report("cocoa: no picture from the guest %d s after it started",
 +                omacvm_splash_hint_seconds());
 +    dispatch_async(dispatch_get_main_queue(), ^{
-+        omacvm_splash_hint_show(true, fh);
++        omacvm_splash_hint_show(true);
 +    });
+ }
+ 
++/* QEMU's thread, BQL: the main output changed. */
++static void omacvm_splash_update(void)
++{
++    omacvm_hold_dirty = true;
++    if (gl_scanout_borrow || (surface && !surface_is_placeholder(surface))) {
++        omacvm_guest_drew = true;
++    }
++    if (!omacvm_guest_drew && omacvm_splash_wanted(gl_scanout_borrow, surface)) {
++        /* Guest time: a paused VM is not slow to start. */
++        if (!omacvm_splash_timer) {
++            omacvm_splash_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
++                                               omacvm_splash_hint_timer, NULL);
++        }
++        if (!omacvm_splash_hint_up && !timer_pending(omacvm_splash_timer)) {
++            timer_mod(omacvm_splash_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) +
++                                           omacvm_splash_hint_seconds() * 1000LL);
++        }
++        return;
++    }
++    if (omacvm_splash_timer) {
++        timer_del(omacvm_splash_timer);
++    }
++    if (omacvm_splash_hint_up) {
++        omacvm_splash_hint_up = false;
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_splash_hint_show(false);
++        });
++    }
 +}
 +
-+static void omacvm_intro_guest_drew(int seen);
-+
-+/*
-+ * QEMU's thread, BQL: the same for a GL scanout (virgl shows the firmware's
-+ * picture as one): the logo's place is read back from the texture. Only until
-+ * the guest shows something other than the logo; 1215 x 285 pixels a time.
-+ */
 +/*
 + * With the view context: w x h pixels of the texture from (x, y) (GL's rows,
-+ * from the bottom) into px as 0xAARRGGBB. False if it cannot be read; that is
-+ * said once, and then the animation just plays to its end.
++ * from the bottom) into px as 0xAARRGGBB. False if it cannot be read (said
++ * once; the logo then waits for the display agent or the time limit).
 + */
-+static bool omacvm_intro_read(GLuint tex, int x, int y, int w, int h, uint32_t *px)
++static bool omacvm_splash_read(GLuint tex, int x, int y, int w, int h, uint32_t *px)
 +{
 +    static GLuint fb;
 +    static bool said;
@@ -304,8 +346,8 @@ work notes).
 +    if (status != GL_FRAMEBUFFER_COMPLETE || err != GL_NO_ERROR) {
 +        if (!said) {
 +            said = true;
-+            info_report("cocoa: start animation cannot read the guest's picture "
-+                        "(framebuffer 0x%x, error 0x%x): it plays to its end", status, err);
++            info_report("cocoa: boot splash cannot read the guest's picture "
++                        "(framebuffer 0x%x, error 0x%x)", status, err);
 +        }
 +        return false;
 +    }
@@ -313,187 +355,162 @@ work notes).
 +}
 +
 +/*
-+ * QEMU's thread, BQL: what a GL scanout shows (virgl shows the firmware's
-+ * picture as one): the logo's place is read back from the texture, only
-+ * until the guest shows something other than the logo; 1215 x 285 pixels a
-+ * time. A picture too small for the logo is empty if its middle row and
-+ * column are black. Unreadable: taken as the logo (the animation plays on).
++ * QEMU's thread, BQL: does the main output show the guest's desktop? The
++ * probe's pixels, from the GL scanout's texture (one row of it at a time) or
++ * from the 2D surface.
 + */
-+static int omacvm_intro_seen_texture(DisplayGLTexture tex, uint32_t sw, uint32_t sh)
++static bool omacvm_splash_sees_desktop(void)
 +{
-+    static uint32_t px[SPLASH_ROWS * SPLASH_CELL][SPLASH_COLS * SPLASH_CELL];
-+    static uint32_t line[2][16384];
-+    __block int seen = SPLASH_SEEN_LOGO;
-+    int x0, y0;
++    static uint32_t px[SPLASH_PROBE_ROWS * SPLASH_PROBE_COLS];
++    static uint32_t line[16384];
 +
-+    if (!tex.width || !tex.height) {
-+        tex.width = sw;     /* the scanout's size */
-+        tex.height = sh;
-+    }
-+    if (!tex.id || !tex.width || !tex.height || tex.width > 16384 || tex.height > 16384) {
-+        return SPLASH_SEEN_LOGO;
-+    }
-+    if (!omacvm_splash_logo_at(tex.width, tex.height, &x0, &y0)) {
++    if (gl_scanout_borrow) {
++        DisplayGLTexture tex = gl_scanout_borrow(gl_scanout_id);
++        __block bool ok = true;
++
++        if (!tex.width || !tex.height) {
++            tex.width = gl_scanout_x + gl_scanout_w;
++            tex.height = gl_scanout_y + gl_scanout_h;
++        }
++        if (!tex.id || !gl_scanout_w || !gl_scanout_h || tex.width > 16384 ||
++            gl_scanout_x + gl_scanout_w > tex.width || gl_scanout_y + gl_scanout_h > tex.height) {
++            return false;
++        }
 +        with_gl_view_ctx(^{
-+            if (omacvm_intro_read(tex.id, 0, tex.height / 2, tex.width, 1, line[0]) &&
-+                omacvm_intro_read(tex.id, tex.width / 2, 0, 1, tex.height, line[1])) {
-+                seen = SPLASH_SEEN_EMPTY;
-+                for (uint32_t i = 0; i < tex.width + tex.height; i++) {
-+                    uint32_t p = i < tex.width ? line[0][i] : line[1][i - tex.width];
-+                    if (!omacvm_splash_black(p)) {
-+                        seen = SPLASH_SEEN_OTHER;
-+                        cocoa_gl_log("intro: texture %u %ux%u: pixel %u is %08x", tex.id,
-+                                     tex.width, tex.height, i, p);
-+                        break;
-+                    }
++            for (int r = 0; r < SPLASH_PROBE_ROWS && ok; r++) {
++                int y = gl_scanout_y + omacvm_splash_probe_at(r, SPLASH_PROBE_ROWS, gl_scanout_h);
++                ok = omacvm_splash_read(tex.id, gl_scanout_x, tex.y_0_top ? y : tex.height - 1 - y,
++                                        gl_scanout_w, 1, line);
++                for (int c = 0; ok && c < SPLASH_PROBE_COLS; c++) {
++                    px[r * SPLASH_PROBE_COLS + c] =
++                        line[omacvm_splash_probe_at(c, SPLASH_PROBE_COLS, gl_scanout_w)];
 +                }
 +            }
 +        });
-+        cocoa_gl_log("intro: texture %u %ux%u (no room for the logo): seen %d",
-+                     tex.id, tex.width, tex.height, seen);
-+        return seen;
++        return ok && omacvm_splash_desktop(px);
 +    }
-+    with_gl_view_ctx(^{
-+        const int lw = SPLASH_COLS * SPLASH_CELL, lh = SPLASH_ROWS * SPLASH_CELL;
-+        /* Texture rows count from the bottom unless y_0_top. */
-+        int y = tex.y_0_top ? y0 : (int)tex.height - y0 - lh;
-+
-+        if (!omacvm_intro_read(tex.id, x0, y, lw, lh, &px[0][0])) {
-+            return;
++    if (!surface || surface_is_placeholder(surface) || surface_bits_per_pixel(surface) != 32) {
++        return false;
++    }
++    for (int r = 0; r < SPLASH_PROBE_ROWS; r++) {
++        const uint8_t *row = (const uint8_t *)surface_data(surface) + (size_t)surface_stride(surface) *
++            omacvm_splash_probe_at(r, SPLASH_PROBE_ROWS, surface_height(surface));
++        for (int c = 0; c < SPLASH_PROBE_COLS; c++) {
++            memcpy(&px[r * SPLASH_PROBE_COLS + c],
++                   row + 4 * omacvm_splash_probe_at(c, SPLASH_PROBE_COLS, surface_width(surface)), 4);
 +        }
-+        /*
-+         * virgl may keep a BGRX resource as RGBA with swizzled sampling, and
-+         * the rows' order depends on y_0_top: either channel order and either
-+         * row order count as the logo.
-+         */
-+        seen = SPLASH_SEEN_OTHER;
-+        for (int flip = 0; flip < 2 && seen != SPLASH_SEEN_LOGO; flip++) {
-+            if (flip) {
-+                for (int r = 0; r < lh / 2; r++) {
-+                    for (int c = 0; c < lw; c++) {
-+                        uint32_t t = px[r][c];
-+                        px[r][c] = px[lh - 1 - r][c];
-+                        px[lh - 1 - r][c] = t;
-+                    }
-+                }
-+            }
-+            for (int bgr = 0; bgr < 2 && seen != SPLASH_SEEN_LOGO; bgr++) {
-+                seen = omacvm_splash_seen_logo((const uint8_t *)px, sizeof(px[0]), bgr);
-+            }
-+        }
-+        cocoa_gl_log("intro: texture %u %ux%u top=%d: seen %d (pixels %08x %08x)",
-+                     tex.id, tex.width, tex.height, tex.y_0_top, seen,
-+                     px[lh / 2][lw / 2], px[SPLASH_CELL / 2][SPLASH_CELL * 2 + SPLASH_CELL / 2]);
-+    });
-+    return seen;
++    }
++    return omacvm_splash_desktop(px);
 +}
 +
-+/*
-+ * QEMU's thread, BQL: tell the start animation what the guest shows. The
-+ * firmware's first picture is the same logo in the same place: the animation
-+ * plays on over it and then fades into it. Anything else (another logo,
-+ * GRUB, Linux; the logo's place going black once the logo was there) is a
-+ * real picture: the animation hurries and hands over.
-+ */
-+static void omacvm_intro_watch(void)
++/* BQL: has Omarchy's display agent opened its port (it starts with the desktop)? */
++static int omacvm_splash_agent_port(Object *obj, void *opaque)
 +{
-+    int seen = SPLASH_SEEN_OTHER;
++    VirtIOSerialPort *port = (VirtIOSerialPort *)object_dynamic_cast(obj, TYPE_VIRTIO_SERIAL_PORT);
 +
-+    if (omacvm_intro_seen == SPLASH_SEEN_OTHER || !qatomic_read(&omacvm_intro_watching)) {
++    if (port && port->name && !strcmp(port->name, "org.omacvm.display") &&
++        port->guest_connected) {
++        *(bool *)opaque = true;
++        return 1;
++    }
++    return 0;
++}
++
++static bool omacvm_splash_agent_up(void)
++{
++    bool up = false;
++
++    object_child_foreach_recursive(object_get_root(), omacvm_splash_agent_port, &up);
++    return up;
++}
++
++static void omacvm_intro_reveal(bool now);
++
++/* QEMU's thread, BQL, 4 times a second while the logo waits: is the desktop there? */
++static void omacvm_hold_tick(void *opaque)
++{
++    int64_t ran = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) - omacvm_hold_since;
++    int limit = omacvm_splash_seconds("OMACVM_SPLASH_HOLD_SECONDS", 40);
++    const char *why = NULL;
++    bool now = false;
++
++    if (!omacvm_holding) {
 +        return;
 +    }
-+    if (gl_scanout_borrow) {
-+        seen = omacvm_intro_seen_texture(gl_scanout_borrow(gl_scanout_id),
-+                                         gl_scanout_w, gl_scanout_h);
-+    } else {
-+        pixman_format_code_t f;
-+
-+        if (!surface || surface_is_placeholder(surface)) {
-+            return;
-+        }
-+        f = surface_format(surface);
-+        if (f == PIXMAN_x8r8g8b8 || f == PIXMAN_a8r8g8b8 ||
-+            f == PIXMAN_x8b8g8r8 || f == PIXMAN_a8b8g8r8) {
-+            seen = omacvm_splash_seen(surface_data(surface), surface_stride(surface),
-+                                      surface_width(surface), surface_height(surface),
-+                                      f == PIXMAN_x8b8g8r8 || f == PIXMAN_a8b8g8r8);
-+        }
-+        cocoa_gl_log("intro: surface %dx%d format %x: seen %d", surface_width(surface),
-+                     surface_height(surface), f, seen);
++    if (runstate_check(RUN_STATE_INTERNAL_ERROR) || runstate_check(RUN_STATE_IO_ERROR) ||
++        runstate_check(RUN_STATE_GUEST_PANICKED)) {
++        why = "the VM stopped on an error";
++        now = true;
++    } else if (omacvm_splash_agent_up()) {
++        why = "Omarchy's display agent started";
++        omacvm_desktop_up = true;
++    } else if (omacvm_hold_dirty && omacvm_splash_sees_desktop()) {
++        why = "the guest shows its desktop";
++        omacvm_desktop_up = true;
++    } else if (ran >= limit * 1000LL) {
++        why = "no desktop yet: the guest's screen as it is";
 +    }
-+    if (seen == SPLASH_SEEN_EMPTY && omacvm_intro_seen == SPLASH_SEEN_LOGO) {
-+        seen = SPLASH_SEEN_OTHER;   /* the logo went away */
-+    }
-+    if (seen == omacvm_intro_seen ||
-+        (seen == SPLASH_SEEN_EMPTY && omacvm_intro_seen == SPLASH_SEEN_OTHER)) {
++    omacvm_hold_dirty = false;
++    if (!why) {
++        timer_mod(omacvm_hold_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + SPLASH_HOLD_TICK_MS);
 +        return;
 +    }
-+    omacvm_intro_seen = seen;
++    omacvm_holding = false;
++    gl_dirty = true;
++    info_report("cocoa: boot logo gives way, %s (%.1f s of running time after the start)",
++                why, ran / 1000.0);
 +    dispatch_async(dispatch_get_main_queue(), ^{
-+        omacvm_intro_guest_drew(seen);
++        omacvm_intro_reveal(now);
 +    });
 +}
 +
-+/* QEMU's thread, BQL: the main output changed. */
-+static void omacvm_splash_update(void)
++/* BQL: the window's logo waits for the desktop from now on. */
++static void omacvm_hold_start(void)
 +{
-+    if (gl_scanout_borrow) {
-+        omacvm_guest_drew = true;
++    omacvm_holding = true;
++    omacvm_hold_dirty = true;
++    omacvm_hold_since = qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL);
++    if (!omacvm_hold_timer) {
++        omacvm_hold_timer = timer_new_ms(QEMU_CLOCK_REALTIME, omacvm_hold_tick, NULL);
 +    }
-+    omacvm_intro_watch();
-+    if (surface && !surface_is_placeholder(surface)) {
-+        omacvm_frame_w = surface_width(surface);
-+        omacvm_frame_h = surface_height(surface);
-+    }
-+    if (!omacvm_guest_drew && omacvm_splash_wanted(gl_scanout_borrow, surface)) {
-+        /* Guest time: a paused VM is not slow to start. */
-+        if (!omacvm_splash_timer) {
-+            omacvm_splash_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL,
-+                                               omacvm_splash_hint_timer, NULL);
-+        }
-+        if (!omacvm_splash_hint_up && !timer_pending(omacvm_splash_timer)) {
-+            timer_mod(omacvm_splash_timer, qemu_clock_get_ms(QEMU_CLOCK_VIRTUAL) +
-+                                           omacvm_splash_hint_seconds() * 1000LL);
-+        }
-+        return;
-+    }
-+    if (omacvm_splash_timer) {
-+        timer_del(omacvm_splash_timer);
-+    }
-+    if (omacvm_splash_hint_up) {
-+        omacvm_splash_hint_up = false;
-+        dispatch_async(dispatch_get_main_queue(), ^{
-+            omacvm_splash_hint_show(false, 0);
-+        });
-+    }
++    timer_mod(omacvm_hold_timer, qemu_clock_get_ms(QEMU_CLOCK_REALTIME) + SPLASH_HOLD_TICK_MS);
 +}
 +
-+/* A guest reset starts over: the hint counts again from the next splash. */
++static void omacvm_intro_again(void);
++
++/* A guest reset starts over: the logo again until the desktop, the hint's clock. */
 +static void omacvm_splash_reset(void *opaque)
 +{
 +    omacvm_guest_drew = false;
++    omacvm_desktop_up = false;
++    if (omacvm_overlay_ok) {
++        omacvm_hold_start();
++        dispatch_async(dispatch_get_main_queue(), ^{
++            omacvm_intro_again();
++        });
++    }
 +}
 +
 +/*
 + * OmacVM start animation: when the window opens, OMACVM turns into Omarchy's
 + * logo (O, M and A stay, the cells of C, V and M fly and land as R, C, H and
-+ * Y; 2.4 s), Omarchy green on Omarchy's background. It plays on over the
-+ * firmware's first picture (the same logo in the same place, so nothing is
-+ * hidden) and then fades into it; if the guest is slower, the logo holds
-+ * until the guest's first picture. This is the preview the user picked
-+ * (a-pixel-morph.mp4, made by render.py of tracks/boot-splash/anim), drawn
-+ * natively: the cells are a Core Animation shape layer, sharp at any size,
-+ * and the soft glow is a small image under them, computed as the preview did.
-+ *
-+ * The guest is never held up: this is only drawing over the window. If the
-+ * guest shows something other than the logo before the animation ends
-+ * (omacvm_intro_watch), the rest plays within INTRO_RUSH s and then fades:
-+ * cutting away mid-flight would leave half-made letters.
++ * Y), Omarchy green on Omarchy's background: OMACVM holds 0.6 s, the cells
++ * fly for about 2.6 s, the glow goes by 3.56 s (omacvm-splash.h has the
++ * timeline). This is the preview the user picked (a-pixel-morph), slowed
++ * down, drawn natively: the cells are a Core Animation shape layer, sharp at
++ * any size, the soft glow a small image under them, worked out as the
++ * preview did. Then the logo holds until the desktop is there (above); if
++ * that comes earlier, the animation still plays to its end, then fades. The
++ * guest is never held up: this is only drawing over the window.
 + * Reduce motion (or OMACVM_SPLASH_ANIMATION=0): the logo without the morph.
-+ * Only the main window animates; the other displays show the still logo.
++ * After a reboot: the logo, still. Only the main window has it.
++ *
++ * Colours: GL's pixels reach the screen unconverted (the layer has no colour
++ * space), so the layer's green and navy are made in the window's colour space,
++ * and stay the very values of the GL logo, the firmware's and the guest's.
 + *
 + * Threads: all of it runs on the main thread (a CADisplayLink drives the
-+ * frames); QEMU's thread only says when the guest drew (dispatch_async).
++ * frames); QEMU's thread only says when to give way (dispatch_async).
 + * The core (the cells at a time, where they go in the window, the glow) is
 + * in ui/omacvm-splash.h: Tests/display/test-boot-splash-morph.c builds and
 + * checks it on its own.
@@ -508,76 +525,64 @@ work notes).
 +}
 +
 +@interface OmacVMIntroLayer : CALayer
-+- (id)initWithFrameWidth:(int)fw height:(int)fh still:(BOOL)still;
++- (id)initStill:(BOOL)still;
 +- (void)play;
-+- (void)guestShows:(int)seen;
++- (void)hold;
++- (void)reveal:(BOOL)now;
 +@end
 +
-+static OmacVMIntroLayer *omacvm_intro;   /* main thread; nil once handed over */
++static OmacVMIntroLayer *omacvm_intro;   /* main thread; nil once it fades */
 +
-+#define INTRO_RUSH 0.35   /* s: the rest of the animation once the guest shows more */
-+#define INTRO_FADE 0.35   /* s */
-+#define INTRO_BLACK 1.0   /* s a black picture (the firmware's start) may last under it */
++#define INTRO_FADE 0.4   /* s */
 +
 +@implementation OmacVMIntroLayer {
 +    CAShapeLayer *cells;
++    CALayer *glow;              /* the glow image over the preview's frame */
 +    CADisplayLink *link;
-+    CGColorSpaceRef space;
-+    int fw, fh;                 /* the firmware's frame */
++    CGColorSpaceRef space;      /* the window's */
 +    double t;                   /* where the animation is (s) */
 +    CFTimeInterval start;       /* of the first frame; 0 before */
-+    CFTimeInterval rush_at;     /* when the guest showed a real picture; 0 before */
-+    double rush_from, rush_rate;
-+    CFTimeInterval opened;      /* when the window opened */
-+    double shown_after;         /* s after that the guest's first picture came; -1 before */
-+    CFTimeInterval black_at;    /* when the guest showed a black picture; 0 before */
-+    bool real;                  /* the guest showed something other than the logo */
-+    bool logo;                  /* the guest showed the firmware's logo */
++    CFTimeInterval opened;
++    bool ready;                 /* the desktop is there: fade once the animation ends */
 +    bool fading;
 +    IntroCell buf[INTRO_MAX];
 +    uint8_t bg[INTRO_BG_W * INTRO_BG_H * 4];
 +}
 +
-+- (id)initWithFrameWidth:(int)w height:(int)h still:(BOOL)still
++- (id)initStill:(BOOL)still
 +{
 +    self = [super init];
 +    if (self) {
-+        CGFloat c[4];
 +        NSDictionary *none = @{ @"path": [NSNull null], @"bounds": [NSNull null],
 +                                @"position": [NSNull null], @"contents": [NSNull null],
-+                                @"contentsScale": [NSNull null],
-+                                @"backgroundColor": [NSNull null] };
++                                @"contentsScale": [NSNull null], @"hidden": [NSNull null],
++                                @"backgroundColor": [NSNull null], @"fillColor": [NSNull null] };
 +
-+        fw = w;
-+        fh = h;
 +        t = still ? INTRO_END : 0;
 +        opened = CACurrentMediaTime();
-+        shown_after = -1;
-+        /* Like the cursor's image: sRGB, the colours of the preview. */
-+        space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
 +        [self setActions:none];
 +        /* Under QEMU's labels (pause, the slow-start hint) and the cursor. */
 +        [self setZPosition:-1];
 +        [self setAutoresizingMask:kCALayerWidthSizable | kCALayerHeightSizable];
-+        [self setContentsGravity:kCAGravityResize];
-+        [self setMagnificationFilter:kCAFilterLinear];
-+        omacvm_splash_colour(SPLASH_NAVY, c);
-+        CGColorRef navy = CGColorCreate(space, c);
-+        [self setBackgroundColor:navy];
-+        CGColorRelease(navy);
-+
++        glow = [[CALayer alloc] init];
++        [glow setActions:none];
++        [glow setContentsGravity:kCAGravityResize];
++        [glow setMagnificationFilter:kCAFilterLinear];
++        [glow setHidden:YES];
++        [self addSublayer:glow];
 +        cells = [[CAShapeLayer alloc] init];
 +        [cells setActions:none];
-+        omacvm_splash_colour(SPLASH_GREEN, c);
-+        CGColorRef green = CGColorCreate(space, c);
-+        [cells setFillColor:green];
-+        CGColorRelease(green);
 +        [cells setAutoresizingMask:kCALayerWidthSizable | kCALayerHeightSizable];
 +        [self addSublayer:cells];
-+        /* Moved to a display with another scale: draw sharp there. */
++        [self colours];
++        /* Moved to a display with another scale or colour space: draw for it. */
 +        [[NSNotificationCenter defaultCenter]
-+            addObserver:self selector:@selector(render)
++            addObserver:self selector:@selector(backingChanged:)
 +                   name:NSWindowDidChangeBackingPropertiesNotification
++                 object:[cocoaView window]];
++        [[NSNotificationCenter defaultCenter]
++            addObserver:self selector:@selector(backingChanged:)
++                   name:NSWindowDidChangeScreenNotification
 +                 object:[cocoaView window]];
 +    }
 +    return self;
@@ -587,8 +592,33 @@ work notes).
 +{
 +    [[NSNotificationCenter defaultCenter] removeObserver:self];
 +    [cells release];
++    [glow release];
 +    CGColorSpaceRelease(space);
 +    [super dealloc];
++}
++
++/* Green and navy in the window's colour space, where GL's pixels show unconverted. */
++- (void)colours
++{
++    CGColorSpaceRef s = [[[cocoaView window] colorSpace] CGColorSpace];
++    CGFloat c[4];
++
++    CGColorSpaceRelease(space);
++    space = s ? CGColorSpaceRetain(s) : CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
++    omacvm_splash_colour(SPLASH_NAVY, c);
++    CGColorRef navy = CGColorCreate(space, c);
++    [self setBackgroundColor:navy];
++    CGColorRelease(navy);
++    omacvm_splash_colour(SPLASH_GREEN, c);
++    CGColorRef green = CGColorCreate(space, c);
++    [cells setFillColor:green];
++    CGColorRelease(green);
++}
++
++- (void)backingChanged:(NSNotification *)n
++{
++    [self colours];
++    [self render];
 +}
 +
 +/* The frame at t, at the layer's size now. */
@@ -596,14 +626,14 @@ work notes).
 +{
 +    CGRect b = [self bounds];
 +    CGFloat scale = [[cocoaView window] backingScaleFactor];
-+    double glow;
-+    int n = omacvm_intro_cells(t, buf, &glow);
++    double strength;
++    int n = omacvm_intro_cells(t, buf, &strength);
 +    int w = (int)(b.size.width * scale), h = (int)(b.size.height * scale);
 +
 +    if (w < 1 || h < 1 || scale <= 0) {
 +        return;
 +    }
-+    IntroGeom g = omacvm_intro_geom(w, h, fw, fh);
++    IntroGeom g = omacvm_intro_geom(w, h);
 +    CGMutablePathRef path = CGPathCreateMutable();
 +    for (int i = 0; i < n; i++) {
 +        double e[4];
@@ -618,20 +648,28 @@ work notes).
 +    [cells setFrame:b];
 +    [cells setContentsScale:scale];
 +    [cells setPath:path];
-+    if (glow > 0) {
-+        omacvm_intro_background(buf, n, glow, bg);
++    if (strength > 0) {
++        /* The preview's frame, scaled so that its logo lies on the window's. */
++        double sx = g.sx / INTRO_PX, sy = g.sy / INTRO_PX;
++        double top = g.top - INTRO_LOGO_Y * sy;
++
++        omacvm_intro_background(buf, n, strength, bg);
 +        CFDataRef bytes = CFDataCreate(NULL, bg, sizeof(bg));
 +        CGDataProviderRef data = CGDataProviderCreateWithCFData(bytes);
 +        CGImageRef image = CGImageCreate(INTRO_BG_W, INTRO_BG_H, 8, 32, INTRO_BG_W * 4,
 +                                         space, (CGBitmapInfo)kCGImageAlphaNoneSkipLast,
-+                                         data, NULL,
-+                                         true, kCGRenderingIntentDefault);
-+        [self setContents:(id)image];
++                                         data, NULL, true, kCGRenderingIntentDefault);
++        [glow setFrame:CGRectMake((g.left - INTRO_LOGO_X * sx) / scale,
++                                  (h - top - INTRO_H * sy) / scale,
++                                  INTRO_W * sx / scale, INTRO_H * sy / scale)];
++        [glow setContents:(id)image];
++        [glow setHidden:NO];
 +        CGImageRelease(image);
 +        CGDataProviderRelease(data);
 +        CFRelease(bytes);
 +    } else {
-+        [self setContents:nil];
++        [glow setContents:nil];
++        [glow setHidden:YES];
 +    }
 +    [CATransaction commit];
 +    CGPathRelease(path);
@@ -662,11 +700,13 @@ work notes).
 +        return;
 +    }
 +    fading = true;
-+    qatomic_set(&omacvm_intro_watching, false);
-+    info_report("cocoa: start animation fades into the guest's picture (%s; it came "
-+                "%.2f s after the window opened, the animation is %.1f s)",
-+                real ? "not the logo, sped up" : logo ? "the firmware's logo" : "black",
-+                shown_after, INTRO_END);
++    [link invalidate];   /* it holds us */
++    link = nil;
++    if (omacvm_intro == self) {
++        omacvm_intro = nil;   /* a reset from now on gets a new logo */
++    }
++    info_report("cocoa: boot logo fades into the guest's screen, %.2f s after it came up",
++                CACurrentMediaTime() - opened);
 +    [a setFromValue:@1.0];
 +    [a setToValue:@0.0];
 +    [a setBeginTime:now];
@@ -677,10 +717,7 @@ work notes).
 +    [CATransaction begin];
 +    [CATransaction setCompletionBlock:^{
 +        [self removeFromSuperlayer];
-+        if (omacvm_intro == self) {
-+            omacvm_intro = nil;
-+            [self release];
-+        }
++        [self release];   /* the alloc in omacvm_intro_show */
 +    }];
 +    [self addAnimation:a forKey:@"fade"];
 +    [self setOpacity:0];
@@ -694,82 +731,57 @@ work notes).
 +    if (!start) {
 +        start = now;
 +    }
-+    if (rush_at) {
-+        t = rush_from + (now - MAX(rush_at, start)) * rush_rate;
-+    } else {
-+        t = now - start;
-+    }
++    t = now - start;
 +    if (t >= INTRO_END) {
 +        t = INTRO_END;
 +        [link invalidate];
 +        link = nil;
-+        if (shown_after >= 0) {
++        if (ready) {
 +            [self fade];
-+        } else if (black_at) {
-+            [self fadeIfBlack];
 +        }
 +    }
 +    [self render];
 +}
 +
-+/*
-+ * A black picture is the firmware clearing the screen before its logo, or a
-+ * guest drawing little (text in a small mode): after INTRO_BLACK s it counts
-+ * as the guest's picture, so the logo never hides it for long.
-+ */
-+- (void)fadeIfBlack
++/* The guest was reset before the logo faded: wait for the desktop again. */
++- (void)hold
 +{
-+    double left = INTRO_BLACK - (CACurrentMediaTime() - black_at);
-+
-+    if (fading || link) {
-+        return;
-+    }
-+    if (left > 0) {
-+        [self retain];
-+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(left * NSEC_PER_SEC)),
-+                       dispatch_get_main_queue(), ^{
-+            [self fadeIfBlack];
-+            [self release];
-+        });
-+        return;
-+    }
-+    if (shown_after < 0) {
-+        shown_after = CACurrentMediaTime() - opened;
-+    }
-+    [self fade];
++    ready = false;
 +}
 +
-+/* What the guest shows: SPLASH_SEEN_EMPTY, _LOGO (the firmware's) or _OTHER. */
-+- (void)guestShows:(int)seen
++/* The desktop is there (or the logo gives way): fade after the animation; now: at once. */
++- (void)reveal:(BOOL)now
 +{
-+    bool r = seen == SPLASH_SEEN_OTHER;
-+
-+    if (seen == SPLASH_SEEN_EMPTY) {
-+        if (!black_at) {
-+            black_at = CACurrentMediaTime();
-+            [self fadeIfBlack];
-+        }
-+        return;
-+    }
-+    if (shown_after < 0) {
-+        shown_after = CACurrentMediaTime() - opened;
-+    }
-+    real |= r;
-+    logo |= seen == SPLASH_SEEN_LOGO;
-+    if (!link) {
++    ready = true;
++    if (now || !link) {
 +        [self fade];
-+    } else if (r && !rush_at) {
-+        rush_at = CACurrentMediaTime();
-+        rush_from = t;
-+        rush_rate = MAX(1.0, (INTRO_END - t) / INTRO_RUSH);
 +    }
 +}
 +@end
 +
-+/* Main thread: what the guest shows on the main output now. */
-+static void omacvm_intro_guest_drew(int seen)
++/* Main thread: put the logo's layer over the window (still: without the morph). */
++static void omacvm_intro_show(bool still)
 +{
-+    [omacvm_intro guestShows:seen];
++    omacvm_intro = [[OmacVMIntroLayer alloc] initStill:still];
++    [omacvm_intro setFrame:[[cocoaView layer] bounds]];
++    [[cocoaView layer] addSublayer:omacvm_intro];
++    [omacvm_intro play];
++}
++
++/* Main thread: the guest was reset: the logo, still, until its desktop. */
++static void omacvm_intro_again(void)
++{
++    if (omacvm_intro) {
++        [omacvm_intro hold];
++    } else {
++        omacvm_intro_show(true);
++    }
++}
++
++/* Main thread: the logo gives way (now: at once, even mid-animation). */
++static void omacvm_intro_reveal(bool now)
++{
++    [omacvm_intro reveal:now];
 +}
 +
 +/* Main thread, with the BQL (cocoa_display_init): start the animation. */
@@ -781,31 +793,27 @@ work notes).
 +
 +    if (!omacvm_splash_enabled() || getenv("OMACVM_COCOA_HIDDEN") ||
 +        ![[cocoaView layer] isKindOfClass:[CAOpenGLLayer class]]) {
-+        omacvm_intro_watching = false;
 +        return;
 +    }
 +    info_report("cocoa: start animation %s", reduce ? "still (Reduce motion)" :
 +                off ? "still (OMACVM_SPLASH_ANIMATION=0)" : "on");
-+    omacvm_intro = [[OmacVMIntroLayer alloc] initWithFrameWidth:omacvm_frame_w
-+                                                         height:omacvm_frame_h
-+                                                          still:reduce || off];
-+    [omacvm_intro setFrame:[[cocoaView layer] bounds]];
-+    [[cocoaView layer] addSublayer:omacvm_intro];
-+    [omacvm_intro play];
++    omacvm_overlay_ok = true;
++    omacvm_intro_show(reduce || off);
++    omacvm_hold_start();
 +}
 +
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -2984,6 +3696,7 @@
+@@ -2984,6 +3688,7 @@
          surface_gl_update_texture(dgc.gls, surface, x, y, w, h);
          gl_dirty = true;
      });
-+    omacvm_intro_watch();
++    omacvm_hold_dirty = true;
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -2996,6 +3709,7 @@
+@@ -2996,6 +3701,7 @@
  
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
@@ -813,16 +821,16 @@ work notes).
  }
  
  static void cocoa_gl_render(void)
-@@ -3073,6 +3787,8 @@
+@@ -3073,6 +3779,8 @@
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
 +    } else if (omacvm_splash_wanted(NULL, surface)) {
-+        omacvm_splash_draw(dcl.con, size.width, size.height, false);
++        omacvm_splash_draw(size.width, size.height, !omacvm_desktop_up);
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3123,6 +3839,7 @@
+@@ -3123,6 +3831,7 @@
  {
      gl_scanout_borrow = NULL;
      gl_dirty = true;
@@ -830,60 +838,50 @@ work notes).
  
      cocoa_gl_log("scanout disable");
  }
-@@ -3135,7 +3852,10 @@
+@@ -3135,7 +3844,12 @@
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
-+    gl_scanout_w = x + w;
-+    gl_scanout_h = y + h;
++    gl_scanout_x = x;
++    gl_scanout_y = y;
++    gl_scanout_w = w;
++    gl_scanout_h = h;
      gl_dirty = true;
 +    omacvm_splash_update();
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -3145,7 +3865,17 @@
-                                    uint32_t x, uint32_t y,
+@@ -3146,6 +3860,7 @@
                                     uint32_t w, uint32_t h)
  {
-+    int lx, ly;
-+
      gl_dirty = true;
-+    /* Once the logo is there, only changes where it is matter (not the
-+     * firmware's progress bar under it). */
-+    if (omacvm_intro_seen != SPLASH_SEEN_LOGO ||
-+        !omacvm_splash_logo_at(gl_scanout_w, gl_scanout_h, &lx, &ly) ||
-+        (x < (uint32_t)lx + SPLASH_COLS * SPLASH_CELL && x + w > (uint32_t)lx &&
-+         y < (uint32_t)ly + SPLASH_ROWS * SPLASH_CELL && y + h > (uint32_t)ly)) {
-+        omacvm_intro_watch();
-+    }
++    omacvm_hold_dirty = true;
  
      cocoa_gl_log("scanout flush region=%ux%u+%u+%u", w, h, x, y);
  }
-@@ -3711,6 +4441,8 @@
+@@ -3711,6 +4426,8 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
 +    } else if (omacvm_splash_wanted(NULL, hd->surface)) {
-+        omacvm_splash_draw(hd->dcl.con, size.width, size.height, true);
++        omacvm_splash_draw(size.width, size.height, !omacvm_desktop_up);
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -4641,6 +5373,12 @@
+@@ -4641,6 +5358,10 @@
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;
 +        qemu_register_reset(omacvm_splash_reset, NULL);
 +        if (opts->gl != DISPLAY_GL_MODE_ES) {
 +            omacvm_intro_start();
-+        } else {
-+            omacvm_intro_watching = false;
 +        }
  
          for (unsigned int index = 0; ; index++) {
              QemuConsole *con = qemu_console_lookup_by_index(index);
 --- /dev/null
 +++ b/ui/omacvm-splash.h
-@@ -0,0 +1,550 @@
+@@ -0,0 +1,535 @@
 +/*
 + * OmacVM boot splash: Omarchy's logo as cells, and the core of the start
 + * animation (OMACVM turns into the logo). Only C, no Cocoa or QEMU, so that
@@ -932,7 +930,8 @@ work notes).
 +/* Made by boot-logo/make-splash-morph.py; the build checks it. */
 +#define MORPH_KEEP_COLS 38  /* O, M and A: the logo's cells left of this column */
 +#define MORPH_PARTS 482
-+/* The flying cells: from (x, y) in OMACVM to (x, y) in the logo, start (s), arc. */
++/* The flying cells: from (x, y) in OMACVM to (x, y) in the logo, start (s of the
++   preview), arc. */
 +static const float omacvm_morph_parts[MORPH_PARTS][6] = {
 +    {44.5f, 1, 41, 1, 0.6389f, -5.5669f}, {44.5f, 1, 42, 2, 0.6948f, -6.3119f}, {44.5f, 2, 41, 3, 0.6643f, -3.5260f},
 +    {43.5f, 3, 41, 4, 0.6070f, -2.1794f}, {43.5f, 4, 41, 5, 0.6045f, -2.8804f}, {43.5f, 5, 41, 6, 0.6084f, -6.1382f},
@@ -1097,86 +1096,55 @@ work notes).
 +    {68.5f, 1, 68, 2, 1.0549f, -1.6577f}, {70.5f, 0, 74, 1, 1.2409f, -6.6378f},
 +};
 +
-+/* What a guest picture shows where the firmware puts its logo. */
-+enum { SPLASH_SEEN_EMPTY, SPLASH_SEEN_LOGO, SPLASH_SEEN_OTHER };
-+
 +/*
-+ * The logo's place in a picture of 32-bit pixels, 0xXXRRGGBB (0xXXBBGGRR with
-+ * bgr), rows stride bytes apart, data at the logo's top left: does it show
-+ * the firmware's logo (SPLASH_CELL pixels a cell), black, or something else?
-+ * One pixel in the middle of each cell; 1 % of them may be off.
++ * Is a picture of the guest's its desktop (or its login or lock screen), not
++ * the firmware's logo, GRUB's or Linux's text on black? px: SPLASH_PROBE_COLS
++ * x SPLASH_PROBE_ROWS pixels taken evenly across the picture (the middle of
++ * each part), 32 bits each with the colour in the low 24 bits, in any order.
++ * Text and the logo light up well under a fifth of them; a desktop (a
++ * wallpaper, Hyprland's background) almost all: 40 % or more brighter than
++ * 0x18 in some channel count as the desktop.
 + */
-+static int omacvm_splash_seen_logo(const uint8_t *data, size_t stride, bool bgr)
++#define SPLASH_PROBE_COLS 32
++#define SPLASH_PROBE_ROWS 18
++
++static bool omacvm_splash_desktop(const uint32_t *px)
 +{
-+    const int n = SPLASH_COLS * SPLASH_ROWS;
-+    int logo = 0, dark = 0;
++    const int n = SPLASH_PROBE_COLS * SPLASH_PROBE_ROWS;
++    int lit = 0;
 +
-+    for (int r = 0; r < SPLASH_ROWS; r++) {
-+        for (int c = 0; c < SPLASH_COLS; c++) {
-+            const uint8_t *q = data + (size_t)(r * SPLASH_CELL + SPLASH_CELL / 2) * stride +
-+                               (size_t)(c * SPLASH_CELL + SPLASH_CELL / 2) * 4;
-+            uint32_t p = q[0] | q[1] << 8 | q[2] << 16 | (uint32_t)q[3] << 24;
-+            int red = bgr ? p & 0xff : (p >> 16) & 0xff, green = (p >> 8) & 0xff;
-+            int blue = bgr ? (p >> 16) & 0xff : p & 0xff;
-+            bool black = red < 0x40 && green < 0x40 && blue < 0x40;
-+            bool lit = red >= 0x90 && green >= 0xb0 && blue < 0x90;   /* #a8cd76 */
-+
-+            logo += omacvm_splash_cells[r][c] == '#' ? lit : black;
-+            dark += black;
-+        }
++    for (int i = 0; i < n; i++) {
++        lit += (px[i] & 0xff) > 0x18 || ((px[i] >> 8) & 0xff) > 0x18 ||
++               ((px[i] >> 16) & 0xff) > 0x18;
 +    }
-+    if (dark == n) {
-+        return SPLASH_SEEN_EMPTY;
-+    }
-+    return logo >= n - n / 100 ? SPLASH_SEEN_LOGO : SPLASH_SEEN_OTHER;
++    return lit * 10 >= n * 4;
 +}
 +
-+/* Where edk2 puts the logo in a w x h picture (centred); false: it does not fit. */
-+static bool omacvm_splash_logo_at(int w, int h, int *x0, int *y0)
++/* Where the probe's i-th of n pixels lies across w: the middle of its part. */
++static int omacvm_splash_probe_at(int i, int n, int w)
 +{
-+    *x0 = (w - SPLASH_COLS * SPLASH_CELL) / 2;
-+    *y0 = (h - SPLASH_ROWS * SPLASH_CELL) / 2;
-+    return *x0 >= 0 && *y0 >= 0;
-+}
-+
-+static bool omacvm_splash_black(uint32_t p)
-+{
-+    return (p & 0xff) < 0x40 && ((p >> 8) & 0xff) < 0x40 && ((p >> 16) & 0xff) < 0x40;
++    return (int)((2LL * i + 1) * w / (2 * n));
 +}
 +
 +/*
-+ * The same for a whole w x h picture. One too small for the logo (the
-+ * firmware starts at 640 x 480 before it sets its mode) is empty if it is
-+ * black (16 x 16 pixels across it), else something other than the logo.
++ * The animation is the preview's (a-pixel-morph, the one the user picked),
++ * slowed down to fill the start: OMACVM holds INTRO_HOLD s, then the morph
++ * plays INTRO_SLOW times slower than in the preview, where it ran from 0.55 s
++ * (nothing moves before) to 2.4 s (the logo holds after): about 2.6 s of
++ * flying cells, then 0.4 s of the glow going. The table's starts are the
++ * preview's seconds.
 + */
-+static int omacvm_splash_seen(const uint8_t *data, int stride, int w, int h, bool bgr)
-+{
-+    int x0, y0;
-+
-+    if (!data || w < 1 || h < 1 || stride < w * 4) {
-+        return SPLASH_SEEN_OTHER;
-+    }
-+    if (!omacvm_splash_logo_at(w, h, &x0, &y0)) {
-+        for (int j = 0; j < 16; j++) {
-+            for (int i = 0; i < 16; i++) {
-+                const uint8_t *q = data + (size_t)((2 * j + 1) * h / 32) * stride +
-+                                   (size_t)((2 * i + 1) * w / 32) * 4;
-+                if (!omacvm_splash_black(q[0] | q[1] << 8 | q[2] << 16)) {
-+                    return SPLASH_SEEN_OTHER;
-+                }
-+            }
-+        }
-+        return SPLASH_SEEN_EMPTY;
-+    }
-+    return omacvm_splash_seen_logo(data + (size_t)y0 * stride + (size_t)x0 * 4, stride, bgr);
-+}
-+
-+#define INTRO_END     2.4   /* s: the last movement; the logo holds after it */
-+#define INTRO_FLIGHT  0.8   /* s a cell flies */
++#define INTRO_HOLD    0.6   /* s OMACVM holds */
++#define INTRO_SLOW    1.6
++#define PREVIEW_START 0.55  /* s of the preview: the first movement */
++#define PREVIEW_END   2.4   /* s of the preview: the last */
++#define INTRO_END     (INTRO_HOLD + (PREVIEW_END - PREVIEW_START) * INTRO_SLOW)   /* 3.56 s */
++#define INTRO_FLIGHT  0.8   /* s of the preview a cell flies */
 +#define INTRO_SHIFT   2.5   /* cells OMACVM sits right of the logo (76 vs 81 wide) */
 +#define INTRO_MAX     (SPLASH_ROWS * MORPH_KEEP_COLS + MORPH_PARTS)
 +/* The preview's frame, 1280 x 720 at 10 pixels a cell with the logo in the
-+ * middle, is the window: its glow is worked out in those pixels. */
++ * middle: the glow is worked out in its pixels, then laid over the window so
++ * that its logo lies on the window's. */
 +#define INTRO_W       1280
 +#define INTRO_H       720
 +#define INTRO_PX      10.0
@@ -1184,6 +1152,12 @@ work notes).
 +#define INTRO_LOGO_Y  265.0
 +#define INTRO_BG_W    640   /* the glow image: half the preview, scaled up */
 +#define INTRO_BG_H    360
++
++/* The preview's second at t s into the animation. */
++static double omacvm_intro_preview_time(double t)
++{
++    return PREVIEW_START + (t - INTRO_HOLD) / INTRO_SLOW;
++}
 +
 +/* A cell in logo cells (x right, y down from the logo's top left). rest: not
 + * moving, so its edges go on whole pixels exactly as the GL splash's. */
@@ -1210,10 +1184,13 @@ work notes).
 +}
 +
 +/* The cells at t seconds into the animation (out: INTRO_MAX), and how strong
-+ * the glow is then. */
++ * the glow is then. The preview's movements, on its timeline. */
 +static int omacvm_intro_cells(double t, IntroCell *out, double *glow)
 +{
-+    double drift = intro_ease((t - 0.6) / 1.5), flying = 0;
++    double flying = 0, drift;
++
++    t = omacvm_intro_preview_time(t);
++    drift = intro_ease((t - 0.6) / 1.5);
 +    int n = 0;
 +
 +    for (int r = 0; r < SPLASH_ROWS; r++) {
@@ -1240,28 +1217,34 @@ work notes).
 +                                p[1] + (p[3] - p[1]) * e + p[5] * bump + off,
 +                                size, rest };
 +    }
-+    *glow = 0.35 * flying + 0.5 * intro_pulse(t, 2.05, 0.35);
++    *glow = 0.35 * flying + 0.5 * intro_pulse(t, 2.05, 0.35);   /* t: the preview's */
 +    return n;
 +}
 +
 +/*
-+ * Where the logo goes in a w x h pixel view, as omacvm_splash_draw() puts it
-+ * for a fw x fh firmware frame: cells of SPLASH_CELL frame pixels, the logo
-+ * lw x lh in the middle.
++ * Where the logo goes in a w x h pixel view: as big as in the firmware's
++ * 1920 x 1080 frame stretched to the view (cells of SPLASH_CELL frame pixels),
++ * but with square cells (the smaller side decides), in the middle. GL's
++ * still logo (omacvm_splash_draw) and the animation both place it so.
 + */
++#define SPLASH_FRAME_W 1920
++#define SPLASH_FRAME_H 1080
++
 +typedef struct {
 +    double left, top, sx, sy;   /* pixels, from the top left; per cell */
++    int lw, lh;                 /* the logo's size in pixels */
 +} IntroGeom;
 +
-+static IntroGeom omacvm_intro_geom(int w, int h, int fw, int fh)
++static IntroGeom omacvm_intro_geom(int w, int h)
 +{
-+    double cw = (double)w * SPLASH_CELL / fw, ch = (double)h * SPLASH_CELL / fh;
-+    int lw = MAX(1, (int)lround(SPLASH_COLS * cw));
-+    int lh = MAX(1, (int)lround(SPLASH_ROWS * ch));
++    double cell = fmin((double)w * SPLASH_CELL / SPLASH_FRAME_W,
++                       (double)h * SPLASH_CELL / SPLASH_FRAME_H);
++    int lw = MAX(1, (int)lround(SPLASH_COLS * cell));
++    int lh = MAX(1, (int)lround(SPLASH_ROWS * cell));
 +    int bottom = (h - lh) / 2;   /* GL's viewport, from the bottom */
 +
 +    return (IntroGeom){ (w - lw) / 2, h - bottom - lh,
-+                        (double)lw / SPLASH_COLS, (double)lh / SPLASH_ROWS };
++                        (double)lw / SPLASH_COLS, (double)lh / SPLASH_ROWS, lw, lh };
 +}
 +
 +/* A cell's edges in pixels (x0, y0, x1, y1 from the top left). Resting cells

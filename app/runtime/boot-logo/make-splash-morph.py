@@ -2,10 +2,11 @@
 """The start animation of OmacVM.app's window (omacvm-cocoa-boot-splash.patch):
 OMACVM turns into Omarchy's logo. O, M and A stay and drift 2.5 cells left;
 every cell of C, V and M flies (shrinking to a dot on the way) and lands as a
-cell of R, C, H or Y, left to right. This is variant A ("pixel morph") of the
-previews the user picked (tracks/boot-splash/anim, render.py), ported to plain
-Python so the build needs nothing else: same letters, same pairing, same
-random numbers.
+cell of R, C, H or Y, left to right. This is the preview the user picked from
+three ("pixel morph"); its generator (numpy) ported to plain Python, so the
+build needs nothing else: same letters, same pairing, same random numbers.
+The starts are the preview's seconds; the app plays them slower
+(omacvm-splash.h: INTRO_HOLD, INTRO_SLOW).
 
 Input is the logo's cells as ui/omacvm-splash.h has them (omacvm_splash_cells,
 the firmware's logo). Output is the table that header carries:
@@ -47,7 +48,6 @@ V_GLYPH = """
 # sits 2.5 cells right of the logo when both are centred.
 OMACVM = [("O", 0), ("M", 11), ("A", 27), ("C", 39), ("V", 50), ("M", 61)]
 SHIFT = (81 - 76) / 2
-FLIGHT = 0.8   # seconds each cell flies
 SEED = 7
 
 
@@ -151,7 +151,8 @@ def table(keep_cols, parts):
            "#define MORPH_KEEP_COLS %d  /* O, M and A: the logo's cells left of this column */"
            % keep_cols,
            "#define MORPH_PARTS %d" % len(parts),
-           "/* The flying cells: from (x, y) in OMACVM to (x, y) in the logo, start (s), arc. */",
+           "/* The flying cells: from (x, y) in OMACVM to (x, y) in the logo, start (s of the",
+           "   preview), arc. */",
            "static const float omacvm_morph_parts[MORPH_PARTS][6] = {"]
     for k in range(0, len(parts), 3):
         out.append("    " + " ".join("{%.1ff, %d, %d, %d, %.4ff, %.4ff}," % p

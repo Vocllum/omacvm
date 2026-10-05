@@ -6,12 +6,19 @@ in more words.
 ## 3.0.0 (unreleased)
 
 - OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
-  (2.4 s; just the logo with Reduce motion), which then fades into the
-  firmware's, now the same size and place. After that, a starting VM shows
-  Omarchy's logo instead of QEMU's "Display output is not active." until
-  Omarchy draws, also after a restart and on the other displays. If Omarchy
-  has shown nothing after 90 seconds, a line under the logo says so and where
-  the logs are.
+  (about 3.5 s; just the logo with Reduce motion). The logo then stays until
+  Omarchy's desktop (or its login or lock screen) is there, over the
+  firmware, GRUB and Linux's text, and fades into it; also after a restart.
+  It gives way at once if the VM stops on an error, and after 40 seconds
+  without a desktop, so a prompt or an error in the VM shows. If Omarchy has
+  shown nothing at all after 90 seconds, a line under the logo says so and
+  where the logs are.
+- OmacVM.app: an output with nothing on it shows Omarchy's logo instead of
+  QEMU's "Display output is not active.", and plain black once the desktop
+  was there: an idle Omarchy that turns its display off now shows black.
+- Boot logo: the firmware's logo is as big as the app's start animation
+  (1215 x 285 at 1920 x 1080) and smaller on a small screen (a small window
+  after a restart) instead of none.
 
 ## 2.9.0 (unreleased)
 
