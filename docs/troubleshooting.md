@@ -33,6 +33,22 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   switching to an application, switch to a Space with open windows" (on by
   default). The Gestures log (`~/Library/Logs/omacvm-gestures.log`, lines
   "escape combo: ...") says which way it took.
+- **A macOS shortcut still does its macOS thing in the VM** (a screenshot,
+  Mission Control): the VM's window must have the keyboard (click into it).
+  `omacvm check` shows "macOS shortcuts"; `logs/qemu.log` in the VM's folder
+  says "macOS shortcuts off" while the VM has them. Keys macOS handles below
+  every app stay macOS's: the power / Touch ID key, and the globe key on its
+  own. If you set `macShortcuts` to keep them for macOS:
+  `defaults delete org.omacvm.app macShortcuts` and a VM restart.
+- **macOS's shortcuts do not work after leaving the VM**: they come back the
+  moment the VM's window loses the keyboard, and macOS restores them by
+  itself if the VM's app quits or crashes. If the VM's window hangs, OmacVM
+  turns them on after 2 seconds (`qemu.log`: "the VM window stopped
+  answering").
+- **A mouse scrolls on after the wheel stops, or jumps**: scroll momentum is
+  for trackpads only and passes every mouse's scrolling one to one; this was
+  a smooth-scrolling mouse (Logitech MX and co.) taken as a trackpad before
+  2.9.0. Update the Mac's helpers (`omacvm update`).
 - **Permissions asked again after updating to 2.9.0**: OmacVM Bridge and
   OmacVM Gestures now come signed with OmacVM's Developer ID, which macOS
   treats as a new app once. Turn them on again in System Settings › Privacy &
