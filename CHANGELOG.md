@@ -113,7 +113,8 @@ the benchmark lock held.
   volume with Omarchy's popup instead of macOS's greyed-out panel.
   Play/pause, next and previous go to the VM's players, not macOS's Now
   Playing. The keys reach the VM through QEMU's control socket; if that is
-  busy, the key goes to macOS.
+  busy, the key goes to macOS. The Bridge takes them at the HID level: on
+  macOS 27 the volume keys never reach a session tap.
 - OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
   OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
   these copies (nothing is compiled on the Mac), and macOS keeps their
