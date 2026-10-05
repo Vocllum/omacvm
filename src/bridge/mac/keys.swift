@@ -12,6 +12,7 @@ final class Config {
   var menuBarIcon = true
   var keyboardLowSteps = true  // keyboard light: KeyboardLight.lowSteps below macOS's lowest step
   var externalBrightness = true  // brightness keys set the external display a VM is on (external-brightness.swift)
+  var onExternalBrightness: (() -> Void)?   // external_brightness switched in the file
   private var stamp: Date?
 
   init() {
@@ -42,7 +43,9 @@ final class Config {
     guard now != stamp else { return }
     let was = externalBrightness
     _ = load()
-    if was != externalBrightness { log("config: external_brightness=\(externalBrightness)") }
+    guard was != externalBrightness else { return }
+    log("config: external_brightness=\(externalBrightness)")
+    onExternalBrightness?()
   }
 
   func save() {
@@ -281,19 +284,9 @@ final class MediaKeys {
 
   /// Parallels (prl_client_app), UTM, VMware Fusion or OmacVM.app is frontmost and its VM window spans a whole
   /// display (it sits below the menu bar/notch strip, so allow a gap on top).
-  private func parallelsFullScreen() -> Bool {
-    guard let app = NSWorkspace.shared.frontmostApplication,
-          ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(app.executableURL?.lastPathComponent ?? ""),
-          let wins = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
-    else { return false }
-    var ids = [CGDirectDisplayID](repeating: 0, count: 16), n: UInt32 = 0
-    CGGetActiveDisplayList(16, &ids, &n)
-    let displays = ids.prefix(Int(n)).map { CGDisplayBounds($0) }
-    return wins.contains { w in
-      guard w[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier, w[kCGWindowLayer as String] as? Int == 0,
-            let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b) else { return false }
-      return displays.contains { abs(r.width - $0.width) < 2 && r.height >= $0.height - 80 && abs(r.minX - $0.minX) < 2 }
-    }
+  private func parallelsFullScreen(_ front: FrontWindows) -> Bool {
+    guard ["prl_client_app", "UTM", "VMware Fusion", "OmacVM"].contains(front.app?.executableURL?.lastPathComponent ?? "") else { return false }
+    return DisplayPick.spansOne(front.windows, VMScreens.displays().map(\.bounds))
   }
 
   /// Runs in the tap callback (main thread): true = swallow the event.
@@ -301,7 +294,8 @@ final class MediaKeys {
     guard config.captureKeys, type.rawValue == 14, let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 else { return false }
     let code = (ns.data1 & 0xFFFF0000) >> 16, down = (ns.data1 & 0xFF00) >> 8 == 0xA
     guard var key = MediaKey(rawValue: code) else { return false }
-    vmFullScreen = parallelsFullScreen()
+    let front = FrontWindows()   // one copy of the window list for both questions below
+    vmFullScreen = parallelsFullScreen(front)
     // As in Omarchy: Shift + brightness keys = keyboard backlight (a MacBook has
     // no keys of its own for it), Option + brightness keys = small steps.
     let shift = event.flags.contains(.maskShift), option = event.flags.contains(.maskAlternate)
@@ -309,7 +303,7 @@ final class MediaKeys {
       if key == .brightnessUp { key = .keyboardUp } else if key == .brightnessDown { key = .keyboardDown }
     }
     // A VM in front on an external display: that display, if it can (else as before).
-    if key == .brightnessUp || key == .brightnessDown, let id = externalTarget() {
+    if key == .brightnessUp || key == .brightnessDown, let id = externalTarget(front) {
       if down { externalBrightness.step(id, up: key == .brightnessUp, fine: option) }
       return true
     }
@@ -322,8 +316,8 @@ final class MediaKeys {
   /// The external display the VM in front is on (OmacVM.app also windowed,
   /// Parallels, UTM and Fusion full screen), when its brightness can be set
   /// (DDC/CI or an Apple display). Only cached answers: never waits here.
-  private func externalTarget() -> CGDirectDisplayID? {
-    guard config.externalBrightness, let t = VMScreens.front(windowed: false), !t.display.builtin else { return nil }
+  private func externalTarget(_ front: FrontWindows) -> CGDirectDisplayID? {
+    guard config.externalBrightness, let t = VMScreens.front(windowed: false, front), !t.display.builtin else { return nil }
     return externalBrightness.method(t.display.id)?.works == true ? t.display.id : nil
   }
 

@@ -140,7 +140,7 @@ let servers = listenAddrs.map { addr in Server(addr: addr) { fd, peer in handle(
 let osdEvents = OSDEvents()
 let camera = CameraHub { log("camera: \($0)") }
 let mediaKeys = MediaKeys()
-let externalBrightness = ExternalBrightness()
+let externalBrightness = ExternalBrightness { config.externalBrightness }
 let menuBar = MenuBar()
 
 log("starting (pid \(getpid()), token \(tokenPath))")
@@ -160,6 +160,7 @@ servers.forEach { $0.check() }
 mediaKeys.start()
 externalBrightness.onKey = { value, name in osdEvents.externalBrightnessSet(value, display: name, source: "keys") }
 externalBrightness.start()
+config.onExternalBrightness = { externalBrightness.displaysChanged() }   // off: forget the displays; on: look at them
 if config.menuBarIcon { menuBar.show() }
 log("config \(config.path): capture_keys=\(config.captureKeys) menu_bar_icon=\(config.menuBarIcon) keyboard_low_steps=\(config.keyboardLowSteps) external_brightness=\(config.externalBrightness)")
 // A Mac mini, iMac or Studio has no keyboard light: Shift + brightness stays macOS's.

@@ -49,6 +49,51 @@ enum DDCPacket {
   }
 }
 
+/// When the Bridge looks at a display (again). `works`: nil = never looked.
+/// A display that could not be set is asked again after `retry` seconds: it
+/// may have been asleep, or its AV service not there yet.
+enum ProbeRule {
+  static func due(works: Bool?, probedAt: Date, now: Date, retry: Double) -> Bool {
+    guard let works else { return true }
+    return !works && now.timeIntervalSince(probedAt) > retry
+  }
+}
+
+/// Time between DDC transfers: 50 ms for anything (a held key sends the
+/// latest level); writes the VM asked for at least 250 ms apart, since some
+/// monitors save the level to EEPROM on every write.
+enum WritePace {
+  static let gap = 0.05
+  static let vmGap = 0.25
+  static func delay(sinceTransfer: Double, sinceWrite: Double, fromVM: Bool) -> Double {
+    max(0, gap - sinceTransfer, fromVM ? vmGap - sinceWrite : 0)
+  }
+}
+
+/// Why a display's brightness can't be set (omacvm check shows these).
+enum NotSettable {
+  static let builtin = "the built-in display (the brightness keys stay macOS's)"
+  static let virtual = "a virtual or AirPlay display"
+  static let noIOAV = "this macOS has no IOAVService for DDC/CI"
+  // An M1/M2 Mac mini's HDMI port has an AV service but passes no DDC/CI: the same silence as a display with DDC off.
+  static let noAnswer = "it does not answer DDC/CI (switched off in its own menu, asleep, or this port passes none: " +
+    "some Macs' HDMI ports, try USB-C/DisplayPort)"
+  static let noService = "no DDC/CI on this connection (some Macs' HDMI ports have none: try USB-C/DisplayPort)"
+}
+
+/// The on-screen normal windows (layer 0, bigger than 100x100) of one process,
+/// front to back, from one copy of macOS's window list.
+enum WindowList {
+  static func rects(_ list: [[String: Any]], pid: Int32) -> [CGRect] {
+    list.compactMap { w in
+      guard w[kCGWindowOwnerPID as String] as? Int32 == pid, w[kCGWindowLayer as String] as? Int == 0,
+            let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b),
+            r.width > 100, r.height > 100 else { return nil }
+      return r
+    }
+  }
+}
+
 /// A Mac display, in CoreGraphics' global space (points, top-left origin).
 struct MacDisplay: Equatable {
   let id: CGDirectDisplayID
@@ -62,6 +107,13 @@ enum DisplayPick {
   static func covers(_ w: CGRect, _ d: CGRect) -> Bool {
     abs(w.width - d.width) < 2 && w.height >= d.height - 80 && abs(w.minX - d.minX) < 2 &&
       w.minY >= d.minY - 2 && w.maxY <= d.maxY + 2
+  }
+
+  /// The media keys' older, looser rule: a window as wide as a display, at
+  /// its left edge and at most 80 points short (Parallels, UTM, Fusion and
+  /// OmacVM.app full screen).
+  static func spansOne(_ windows: [CGRect], _ displays: [CGRect]) -> Bool {
+    windows.contains { r in displays.contains { abs(r.width - $0.width) < 2 && r.height >= $0.height - 80 && abs(r.minX - $0.minX) < 2 } }
   }
 
   /// The display with most of the window on it.

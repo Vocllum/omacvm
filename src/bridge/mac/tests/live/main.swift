@@ -9,7 +9,7 @@ struct APIError: Error {
   init(_ status: Int, _ message: String) { self.status = status; self.message = message }
 }
 func log(_ s: String) { FileHandle.standardError.write(Data("\(s)\n".utf8)) }
-let externalBrightness = ExternalBrightness()
+let externalBrightness = ExternalBrightness { true }
 
 func out(_ o: Any) {
   let d = try! JSONSerialization.data(withJSONObject: o, options: [.sortedKeys])
