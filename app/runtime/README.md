@@ -113,6 +113,20 @@ commit 82927e9. Changes here:
   (the guest's dumb buffers: console, plymouth, dumb screens and cursors)
   with the SCANOUT bind, so the budget's screen reserve covers them; the
   build checks the patched source
+- `patches/virgl-resource-budget-context-loss.patch`: a resource the budget
+  refused loses the GL context that made it as soon as that context attaches
+  it, and the QEMU log says why. A guest Mesa with
+  `src/app/guest/mesa/mesa-virgl-reset-status.patch` is told
+  (`GL_GUILTY_CONTEXT_RESET` for robust contexts; other apps end at their next
+  flush). Stock guest Mesa has no channel for it: the app draws nothing.
+  Checked by `Tests/virgl/test-resource-budget.c`
+- `patches/virgl-venus-memory-budget.patch`: Venus device memory and shm blobs
+  count against the same budget (one per VM); past it `vkAllocateMemory`
+  fails with `VK_ERROR_OUT_OF_DEVICE_MEMORY` (guest Mesa allocates
+  asynchronously by default: then the app ends at its next use of the memory).
+  The charge goes with the storage: it lasts until the last holder is gone
+  (the memory, memory imported from it, the guest's blob), so a kept dma-buf
+  fd or mapping still counts. Checked by `Tests/virgl/test-venus-budget-storage.c`
 - `patches/virgl-test-shader-fault.patch`: test runtimes only
   (`OMACVM_RUNTIME_TEST_HOOKS=1 ./build-qemu-gpu-runtime.sh`): refuse shaders
   whose GLSL contains `OMACVM_VIRGL_TEST_FAIL_GLSL`. Such a runtime is marked

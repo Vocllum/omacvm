@@ -17,6 +17,12 @@ in more words.
 - Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
   in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
   first pictures it came out garbled.
+- OmacVM.app: an app whose texture or buffer goes past the VM's GPU memory
+  budget loses its GPU context at once, and QEMU's log says why. With the
+  VM's reset-aware Mesa (`src/app/guest/mesa`, not installed by default) a
+  robust app reads `GL_GUILTY_CONTEXT_RESET` and can start over. Vulkan
+  (Venus) memory now counts against the same budget, for as long as anything
+  in the VM still holds it (a kept dma-buf or mapping too).
 
 ## 2.9.0 (unreleased)
 
