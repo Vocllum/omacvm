@@ -4,7 +4,7 @@
 # Omanotch (the bar beside the notch, src/omanotch).
 # Idempotent; `omacvm apply` runs it with what the VM's features need.
 #   src/mac/install.sh [--no-bridge] [--skip-gestures | --keys-only] [--skip-clip] [--omanotch] [--force]
-#                      [--force-app NAME]... [--quiet]
+#                      [--force-app NAME]... [--skip-failed [--retry-app NAME]...] [--quiet]
 # --no-bridge leaves OmacVM Bridge out (one already installed stays, other VMs
 # may use it). --skip-gestures leaves OmacVM Gestures out (likewise).
 # --skip-clip leaves the clipboard helper out (only Parallels VMs use it;
@@ -17,11 +17,17 @@
 # An app whose sources and options did not change since it was installed is
 # left as it is (--force rebuilds it; --force-app "OmacVM Gestures" only that
 # one, for a repair); --quiet only reports what changed.
+# An app that does not build or install is named, the one installed before
+# keeps running, and the others go on; the run then ends with exit code 5
+# (the names in the file $OMACVM_MAC_FAILED_FILE, one per line, when set).
+# --skip-failed: an app that failed with these same sources is not tried
+# again (the control centre's jobs: a broken build does not run on every
+# switch), except the --retry-app ones; omacvm update always tries again.
 # macOS asks for Location Services (Bridge) and Accessibility + Input Monitoring
 # (Bridge, Gestures) the first time.
 set -euo pipefail
 R=$(cd "$(dirname "$0")/.." && pwd)
-BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0; FORCE_APPS="|"
+BRIDGE=1; GESTURES=1; CLIP=1; NOTCH=0; FORCE=0; QUIET=0; FORCE_APPS="|"; SKIP_FAILED=0; RETRY_APPS="|"
 while (( $# )); do
   case $1 in
     --no-bridge) BRIDGE=0 ;;
@@ -31,6 +37,8 @@ while (( $# )); do
     --omanotch) NOTCH=1 ;;
     --force) FORCE=1 ;;
     --force-app) FORCE_APPS+="${2:?--force-app NAME}|"; shift ;;
+    --skip-failed) SKIP_FAILED=1 ;;
+    --retry-app) RETRY_APPS+="${2:?--retry-app NAME}|"; shift ;;
     --quiet) QUIET=1 ;;
     *) echo "src/mac/install.sh: unknown option $1" >&2; exit 2 ;;
   esac
@@ -49,18 +57,33 @@ install_app() {
   # Paths relative to src/, so another copy of the same OmacVM matches too.
   sum=$( { cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
            sort -z | xargs -0 shasum; echo "args: $*"; } | shasum | cut -c1-16)
-  if (( ! FORCE )) && [[ $FORCE_APPS != *"|$name|"* ]] && [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] &&
-     launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
-    (( QUIET )) || echo "$name: up to date"
-    return 0
+  if (( ! FORCE )) && [[ $FORCE_APPS != *"|$name|"* ]]; then
+    if [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] && launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
+      (( QUIET )) || echo "$name: up to date"
+      return 0
+    fi
+    if (( SKIP_FAILED )) && [[ $RETRY_APPS != *"|$name|"* ]] && [[ $(cat "$STAMPS/$name.failed" 2>/dev/null) == "$sum" ]]; then
+      echo "$name: did not build last time, not tried again (omacvm update on the Mac tries again)" >&2
+      FAILED+=("$name")
+      return 0
+    fi
   fi
   printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m\n' "$name"
-  "$R/$dir/install.sh" "$@"
+  # Each app's install.sh builds before it replaces anything: one that fails
+  # leaves the installed one running.
+  if ! "$R/$dir/install.sh" "$@"; then
+    echo "$sum" > "$STAMPS/$name.failed"
+    FAILED+=("$name")
+    printf '\033[1;31merror:\033[0m %s did not build or install (see above); one installed before keeps running\n' "$name" >&2
+    return 0
+  fi
+  rm -f "$STAMPS/$name.failed"
   # No stamp yet: a first install, which macOS asks permissions for.
   [[ -e $STAMPS/$name ]] || INSTALLED+=("$name")
   echo "$sum" > "$STAMPS/$name"
 }
 INSTALLED=()   # installed for the first time (an update keeps the permissions)
+FAILED=()      # did not build or install
 source "$R/lib/mac.sh"
 # The omacvm the Bridge runs for the control centre's requests (control.swift
 # checks it belongs to this user and nobody else can write it): only the
@@ -91,5 +114,10 @@ if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " ==
   [[ " ${INSTALLED[*]} " == *" OmacVM Bridge "* ]] &&
     printf '    * Accessibility: OmacVM Bridge (media keys); Location Services: OmacVM Bridge (Wi-Fi names);\n      Bluetooth: OmacVM Bridge (your Bluetooth devices)\n'
   printf '  Until then those features wait; the build goes on either way.\n\n'
+fi
+if (( ${#FAILED[@]} )); then
+  [[ -n ${OMACVM_MAC_FAILED_FILE:-} ]] && printf '%s\n' "${FAILED[@]}" > "$OMACVM_MAC_FAILED_FILE"
+  echo "src/mac/install.sh: not installed: $(printf '%s, ' "${FAILED[@]}" | sed 's/, $//')" >&2
+  exit 5
 fi
 (( QUIET )) || echo "OmacVM Mac side installed"

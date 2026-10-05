@@ -68,7 +68,25 @@ launchctl print "gui/$(id -u)/org.omacvm.clip-in" >/dev/null 2>&1 || args+=(--sk
 launchctl print "gui/$(id -u)/ch.gillesgoetsch.omanotch" >/dev/null 2>&1 && args+=(--omanotch)
 step mac "the Mac side"
 log "OmacVM on the Mac"
-"$R/src/mac/install.sh" ${args[@]+"${args[@]}"}
+# A helper that does not build keeps its last build running; the VMs still
+# get this OmacVM (a VM left older than the Mac could not switch features
+# until it is updated), and the run ends failed, naming the helper.
+MAC_FAILED=$(mktemp -t omacvm-mac); mac_failed=()
+mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" ${args[@]+"${args[@]}"} || mrc=$?
+if (( mrc == 5 )); then
+  while IFS= read -r h; do [[ -n $h ]] && mac_failed+=("$h"); done < "$MAC_FAILED"
+elif (( mrc )); then
+  mac_failed+=("the Mac side")
+fi
+rm -f "$MAC_FAILED"
+mac_failure() {   # the failed line for the control centre, last (it shows the last one)
+  (( ${#mac_failed[@]} )) || return 0
+  local what
+  what="$(printf '%s, ' "${mac_failed[@]}" | sed 's/, $//') did not build on the Mac"
+  [[ ${mac_failed[0]} == "the Mac side" ]] && what="the Mac side did not install"
+  failed_part "$(mac_helper_feature "${mac_failed[0]}")" "$what" mac
+  echo "omacvm update: $what (see above; what was installed before keeps running). omacvm update tries again" >&2
+}
 
 # ---------- OmacVM.app ----------
 step app "OmacVM.app"
@@ -95,8 +113,10 @@ fi
 
 # ---------- the VMs ----------
 if [[ -n $VM ]]; then
-  OMACVM_STEP_BASE=$OMA_STEP OMACVM_STEP_OF=$OMA_STEPS "$R/src/cmd/apply.sh" --vm "$VM" ${TYPE:+--vm-type "$TYPE"} --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"}
-  exit
+  rc=0; OMACVM_STEP_BASE=$OMA_STEP OMACVM_STEP_OF=$OMA_STEPS "$R/src/cmd/apply.sh" --vm "$VM" ${TYPE:+--vm-type "$TYPE"} --no-mac ${APPLY_ARGS[@]+"${APPLY_ARGS[@]}"} || rc=$?
+  # The VM's own failure says more; with none, the Mac's.
+  if (( rc == 0 && ${#mac_failed[@]} )); then mac_failure; exit 1; fi
+  exit $rc
 fi
 done_any=0; stopped=(); unanswered=(); failed=()
 while IFS=$'\t' read -r name type state; do
@@ -127,6 +147,7 @@ if (( ${#stopped[@]} )); then
 fi
 (( ${#unanswered[@]} )) && info "not updated: $(printf '%s, ' "${unanswered[@]}" | sed 's/, $//'): $UTM_NO_ANSWER"
 (( ${failed_app:-0} )) && failed+=("OmacVM.app")
+(( ${#mac_failed[@]} )) && { mac_failure; failed+=("the Mac side"); }
 if (( ${#failed[@]} )); then
   echo "omacvm update: failed in $(printf '%s, ' "${failed[@]}" | sed 's/, $//') (see above)" >&2
   exit 1

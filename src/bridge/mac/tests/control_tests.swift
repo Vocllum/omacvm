@@ -200,6 +200,9 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     expect(rest == ["==> OmacVM Bridge on the Mac", "pacman: rolled back nothing", "==> old install"], "progress lines are not shown as output")
     expect(fl == Failed(part: "camera", text: "camera was not set up"), "what failed")
     expect(progress([#"{"omacvm_failed": 1, "part": "../x", "text": "t"}"#]).2 == Failed(part: "", text: "t"), "a bad part name is dropped")
+    expect(progress([#"{"omacvm_failed": 1, "part": "gestures", "text": "OmacVM Gestures did not build on the Mac", "side": "mac"}"#]).2
+           == Failed(part: "gestures", text: "OmacVM Gestures did not build on the Mac", side: "mac"), "a Mac helper that failed: side mac")
+    expect(progress([#"{"omacvm_failed": 1, "part": "", "text": "t", "side": "shell"}"#]).2?.side == "vm", "unknown side: vm")
     expect(progress([#"{"omacvm_progress": 1, "n": 500, "of": 4, "text": "x"}"#]).0 == nil, "nonsense counts")
     expect(progress(["{\"omacvm_progress\": 1, broken"]).0 == nil, "broken line")
 

@@ -141,18 +141,36 @@ log "$TYPE VM '$VM' at $IP, user $U${had:+, OmacVM $had}"
 info "features: $(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)"
 
 # ---------- the Mac side ----------
+# helper_of FEATURE: the Mac helper it needs built (empty: none).
+helper_of() {
+  case $1 in
+    bridge) echo "OmacVM Bridge" ;;
+    camera|battery) [[ $TYPE == utm || $TYPE == fusion ]] && echo "OmacVM Bridge" ;;
+    gestures|scroll-momentum) echo "OmacVM Gestures" ;;
+    omanotch) echo Omanotch ;;
+  esac
+  return 0
+}
 if (( MAC )); then
   step mac "the Mac side"
   args=(--quiet)
   # A repair builds that feature's Mac helper again (the others stay as they are).
   for f in ${REINSTALL[@]+"${REINSTALL[@]}"}; do
-    case $f in
-      bridge) args+=(--force-app "OmacVM Bridge") ;;
-      camera|battery) [[ $TYPE == utm || $TYPE == fusion ]] && args+=(--force-app "OmacVM Bridge") ;;
-      gestures|scroll-momentum) args+=(--force-app "OmacVM Gestures") ;;
-      omanotch) args+=(--force-app "Omanotch") ;;
-    esac
+    h=$(helper_of "$f"); [[ -n $h ]] && args+=(--force-app "$h")
   done
+  # What this run needs from the Mac: the helpers of the features it turns on
+  # or repairs. A helper that failed to build with these sources before is
+  # not built again for anything else (the control centre's jobs), so a
+  # switch that does not need it never stops on it.
+  NEED=()
+  for ((i = 0; i < ${#FN[@]}; i++)); do
+    [[ ${FV[$i]} == on && ( ${PREV[$i]} != on || -z $had || " ${REINSTALL[*]:-} " == *" ${FN[$i]} "* ) ]] || continue
+    h=$(helper_of "${FN[$i]}"); [[ -n $h && " ${NEED[*]:-} " != *" $h "* ]] && NEED+=("$h")
+  done
+  if (( TRANSACTION )); then
+    args+=(--skip-failed)
+    for h in ${NEED[@]+"${NEED[@]}"}; do args+=(--retry-app "$h"); done
+  fi
   needs_bridge || args+=(--no-bridge)
   { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
@@ -160,7 +178,28 @@ if (( MAC )); then
   # app's own notch-strip mode is a separate switch in the app, which apply
   # leaves alone).
   on omanotch && args+=(--omanotch)
-  "$R/src/mac/install.sh" "${args[@]}" || die "the Mac side did not install (see above); the VM was not changed"
+  MAC_FAILED=$(mktemp -t omacvm-mac)
+  mrc=0; OMACVM_MAC_FAILED_FILE=$MAC_FAILED "$R/src/mac/install.sh" "${args[@]}" || mrc=$?
+  if (( mrc == 5 )); then
+    # Which helpers did not build: one this run needs stops it (the VM is not
+    # changed); the others keep their last build, and the VM side goes on.
+    stop=""; others=()
+    while IFS= read -r h; do
+      [[ -n $h ]] || continue
+      if [[ " ${NEED[*]:-} " == *" $h "* ]]; then stop=${stop:-$h}; else others+=("$h"); fi
+    done < "$MAC_FAILED"
+    rm -f "$MAC_FAILED"
+    if [[ -n $stop ]]; then
+      failed_part "$(mac_helper_feature "$stop")" "$stop did not build on the Mac" mac
+      die "$stop did not build on the Mac (see above); the VM was not changed. On the Mac, omacvm update tries it again"
+    fi
+    (( ${#others[@]} )) && info "not built on the Mac: $(printf '%s, ' "${others[@]}" | sed 's/, $//') (the one installed before keeps running; omacvm update tries again). The VM side goes on."
+  elif (( mrc )); then
+    rm -f "$MAC_FAILED"
+    failed_part "" "the Mac side did not install" mac
+    die "the Mac side did not install (see above); the VM was not changed"
+  fi
+  rm -f "$MAC_FAILED"
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
     case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in

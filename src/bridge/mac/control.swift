@@ -460,7 +460,7 @@ final class Control {
     let text = state == "running" ? (step?.text ?? last ?? "starting")
       : state == "done" ? "done" : (failed?.text ?? lines.last ?? "failed")
     return ["id": j.id, "action": j.action, "features": j.features, "state": state, "step": step?.n ?? 0, "of": step?.of ?? 0,
-            "text": text, "failed_part": failed?.part ?? "", "mac_omacvm": macVersionNow(),
+            "text": text, "failed_part": failed?.part ?? "", "failed_side": failed?.side ?? "", "mac_omacvm": macVersionNow(),
             "rc": rc.map { Int($0) } ?? NSNull(), "lines": Array(lines.suffix(20))]
   }
 

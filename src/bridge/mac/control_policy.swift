@@ -343,8 +343,12 @@ func jobState(rc: Int32?, alive: Bool) -> String {
 
 struct Progress: Equatable { let n: Int, of: Int, text: String }
 
-/// What failed in a job (apply's {"omacvm_failed": 1, "part", "text"} line).
-struct Failed: Equatable { let part: String, text: String }
+/// What failed in a job (apply's and update's {"omacvm_failed": 1, "part",
+/// "text", "side"} line; side "mac" for a Mac helper, else "vm").
+struct Failed: Equatable {
+  let part: String, text: String, side: String
+  init(part: String, text: String, side: String = "vm") { self.part = part; self.text = text; self.side = side }
+}
 
 /// The CLI's progress lines (OMACVM_PROGRESS=json: {"omacvm_progress": 1,
 /// "step", "n", "of", "text"}) and failure lines: the last of each, and the
@@ -359,7 +363,7 @@ func progress(_ lines: [String]) -> (Progress?, [String], Failed?) {
     } else if l.hasPrefix("{\"omacvm_failed\""), let o = (try? JSONSerialization.jsonObject(with: Data(l.utf8))) as? [String: Any],
               let t = o["text"] as? String {
       let p = o["part"] as? String ?? ""
-      failed = Failed(part: validFeatureName(p) ? p : "", text: String(t.prefix(160)))
+      failed = Failed(part: validFeatureName(p) ? p : "", text: String(t.prefix(160)), side: (o["side"] as? String) == "mac" ? "mac" : "vm")
     } else {
       rest.append(l)
     }

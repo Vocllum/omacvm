@@ -73,3 +73,6 @@ jobs:
 
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
+
+      - name: A Mac helper that does not build
+        run: src/tests/mac-install.sh

@@ -14,15 +14,25 @@ step() {   # NAME TEXT
   printf '{"omacvm_progress": 1, "step": "%s", "n": %d, "of": %d, "text": "%s"}\n' "$1" "$OMA_STEP" "$OMA_STEPS" "$t"
 }
 
-# failed_part PART TEXT: what failed in a job (PART a feature, or empty), for
-# the person and, as a JSON line, for the control centre.
+# failed_part PART TEXT [SIDE]: what failed in a job (PART a feature, or
+# empty; SIDE vm, the default, or mac), for the person and, as a JSON line,
+# for the control centre.
 failed_part() {
   local t
   t=$(printf '%s' "$2" | tr '\000-\037' ' ' | cut -c1-160)
   info "what failed: $t"
   [[ ${OMACVM_PROGRESS:-} == json ]] || return 0
   t=${t//\\/\\\\}; t=${t//\"/\\\"}
-  printf '{"omacvm_failed": 1, "part": "%s", "text": "%s"}\n' "$1" "$t"
+  printf '{"omacvm_failed": 1, "part": "%s", "text": "%s", "side": "%s"}\n' "$1" "$t" "${3:-vm}"
+}
+
+# mac_helper_feature HELPER: the feature a Mac helper is for (empty: none).
+mac_helper_feature() {
+  case $1 in
+    "OmacVM Bridge") echo bridge ;;
+    "OmacVM Gestures") echo gestures ;;
+    Omanotch) echo omanotch ;;
+  esac
 }
 
 # cli_for_bridge OMACVM: true when OMACVM (a checkout's omacvm, resolved) is
