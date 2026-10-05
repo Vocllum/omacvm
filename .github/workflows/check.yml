@@ -71,3 +71,6 @@ jobs:
 
       - name: The vulkan feature (VM folder file, guest Mesa step)
         run: src/tests/vulkan-feature.sh
+
+      - name: Where the app and its VMs are (omacvm and the app agree)
+        run: src/tests/app-paths.sh

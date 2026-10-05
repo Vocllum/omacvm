@@ -16,14 +16,17 @@ enum Paths {
     static let appSupport = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Application Support/OmacVM")
 
-    /// The folder that holds the VM folders. The user can pick another one
-    /// (an external drive, say) in the setup.
+    /// The folder that holds the VM folders: ~/OmacVM unless the user
+    /// picked another one (an external drive, say) in the setup; see VMsFolder.
     static var vmsRoot: URL {
         if let custom = UserDefaults.standard.string(forKey: "vmsRoot"), !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        return appSupport.appendingPathComponent("VMs")
+        return defaultVMsRoot
     }
+    /// Decided once per launch: a ~/OmacVM made while a VM from the old place
+    /// runs must not move that VM's folder under the app.
+    private static let defaultVMsRoot = VMsFolder.resolve(custom: nil, home: VMsFolder.home)
 
     /// The app's resources: Contents/Resources in the app, the source tree when
     /// run with `swift run` (OMACVM_RESOURCES).
@@ -129,6 +132,7 @@ struct VMConfig: Equatable {
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
 
     func write() throws {
+        try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         func q(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
         let text = """

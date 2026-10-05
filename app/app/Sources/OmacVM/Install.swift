@@ -13,11 +13,10 @@ enum Installer {
             || ProcessInfo.processInfo.environment["OMACVM_RESOURCES"] != nil
     }
 
-    /// /Applications when this user may write there, else ~/Applications.
+    /// The user's own Applications folder (~/Applications): no admin rights
+    /// needed, and the omacvm command looks there first.
     static var defaultFolder: URL {
-        FileManager.default.isWritableFile(atPath: "/Applications")
-            ? URL(fileURLWithPath: "/Applications")
-            : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
     }
 
     static func validName(_ name: String) -> Bool {

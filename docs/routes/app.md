@@ -27,6 +27,18 @@ OmacVM's version.
 
 - Setup in the app: VM name, user, password, resources, disk size, where the
   disk goes (any APFS or Mac OS Extended drive).
+- Where things are: the app in `~/Applications` (or `/Applications`, where
+  older versions put it), the VMs in `~/OmacVM/<VM name>/` (Spotlight skips
+  the folder). VMs from before 2.9.0 in
+  `~/Library/Application Support/OmacVM/VMs` stay there and are used while
+  `~/OmacVM` does not exist. A folder picked in the setup wins over both.
+- A VM folder from another Mac: copy it into `~/OmacVM/` (the app runs one VM
+  at a time, the first folder by name), open the app and start it. Then, with
+  the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
+  `bash ~/Applications/OmacVM.app/Contents/Resources/scripts/apply-vm.sh ~/OmacVM/<VM name>`
+  (or `omacvm apply --vm "<VM name>" --vm-type app`). If it says there is no
+  SSH access, the VM does not know this Mac's key yet: `omacvm apply` prints
+  the one command to run in the VM's terminal.
 - The build: the same steps as the other routes (try-omarchy as a temporary
   live system, Arch Linux ARM on btrfs with GRUB, Omarchy from omarchy-mac,
   OmacVM's VM side). 10 to 30 minutes (8 on an M4 Max), plus a 1.4 GB
@@ -118,13 +130,12 @@ builds the VM through the app instead of in it. The questions and the summary
 are the same as for the other routes; the VM goes into the app's VMs folder
 (set in the app; no `--vm-dir`). Then:
 
-1. It finds the app in /Applications or ~/Applications by its bundle id
+1. It finds the app in ~/Applications or /Applications by its bundle id
    (`org.omacvm.app`, under any name it was installed as). Not installed:
    after asking, it downloads `OmacVM-<version>.zip` (this OmacVM's version)
    from the GitHub release `v<version>` with curl, checks it against the
    `.sha256` next to it and that the app is signed with OmacVM's Developer
-   ID (team 722686Y34B), and puts it in /Applications (or ~/Applications when
-   /Applications is not writable). curl sets no quarantine attribute, so
+   ID (team 722686Y34B), and puts it in ~/Applications. curl sets no quarantine attribute, so
    Gatekeeper does not stop the app. Releases from before the app have no
    zip: it says so and stops (exit 3). With `--yes` it installs nothing and
    stops with the command to run (exit 3).
