@@ -46,6 +46,10 @@ jobs:
         working-directory: app/app
         run: swift build
 
+      - name: OmacVM.app update checks
+        working-directory: app/app
+        run: swift run update-tests
+
       - name: Mac helpers build (Gestures, Bridge)
         run: |
           src/gestures/mac/build.sh
