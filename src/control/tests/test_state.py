@@ -124,6 +124,14 @@ def test_rows_map_checks_and_local_avail(features):
     assert r["bridge"].status is S.Status.FAILING
     assert r["gestures"].status is S.Status.WORKS
     assert r["battery"].status is S.Status.UNAVAILABLE and "Parallels" in r["battery"].note
+    assert r["fast-network"].status is S.Status.UNAVAILABLE and "OmacVM.app" in r["fast-network"].note
+
+
+def test_app_only_feature_on_the_app(features):
+    on = S.desired(features, {"OMACVM_FEATURE_fast_network": "on"})
+    rows = S.build_rows(features, on, vm_type="app", checks=[])
+    r = {x.feature.name: x for x in rows}
+    assert r["fast-network"].status is S.Status.WORKS
 
 
 def test_rows_mac_avail_and_older_mac(features):

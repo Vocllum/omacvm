@@ -14,4 +14,5 @@ camera	camera/**
 battery	battery/**
 thp-kernel	kernel/build-thp-kernel.sh kernel/thp-pkgbuild.py
 control-centre	control/**
+fast-network	net/**
 core	**
