@@ -68,3 +68,6 @@ jobs:
 
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
+
+      - name: Keyboard light steps (offline)
+        run: src/tests/keyboard-light.sh

@@ -3,6 +3,13 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- The Mac's keyboard light goes dimmer: a new lowest step (0.001) below the
+  three added in 2.6.0, about half as bright as the old lowest and as dim as
+  the keys go while still lit. A step a Mac's keyboard can't light is
+  skipped, and Omarchy's popup shows a lit keyboard as 1 %, not 0 %.
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
