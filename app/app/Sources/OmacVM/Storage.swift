@@ -87,13 +87,37 @@ enum Storage {
     }
 
     /// Time Machine leaves the folder out (the sticky flag `tmutil addexclusion`
-    /// sets; it moves with the folder). A VM disk changes all the time and
-    /// would fill the backup.
+    /// sets). A rename keeps it; a copy to another drive does not, so
+    /// FolderMover sets it again on the copy. A VM disk changes all the time
+    /// and would fill the backup.
     static func excludeFromBackup(_ url: URL) {
         var u = url
         var v = URLResourceValues()
         v.isExcludedFromBackup = true
         try? u.setResourceValues(v)
+    }
+
+    static func isExcludedFromBackup(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup ?? false
+    }
+
+    /// Half copies (".NAME.moving") a move left in the VMs folders when the app
+    /// quit or crashed during it; only called at launch, before any move.
+    /// Returns what was deleted.
+    @discardableResult
+    static func removeStaleMoves(in roots: [URL]) -> [URL] {
+        let fm = FileManager.default
+        var removed: [URL] = []
+        for root in roots where missingDrive(for: root) == nil {
+            for name in (try? fm.contentsOfDirectory(atPath: root.path)) ?? []
+            where name.count > ".moving".count + 1 && name.hasPrefix(".") && name.hasSuffix(".moving") {
+                let u = root.appendingPathComponent(name)
+                var st = stat()
+                guard lstat(u.path, &st) == 0, st.st_mode & S_IFMT == S_IFDIR else { continue }
+                if (try? fm.removeItem(at: u)) != nil { removed.append(u) }
+            }
+        }
+        return removed
     }
 
     /// This user's processes, with their full command lines.
@@ -156,6 +180,10 @@ final class FolderMover: @unchecked Sendable {
         let source = folder.standardizedFileURL
         let target = root.standardizedFileURL.appendingPathComponent(source.lastPathComponent)
         guard source.deletingLastPathComponent().path != root.standardizedFileURL.path else { return source }
+        // A copy would go through the link and then delete only the link.
+        if let dest = try? fm.destinationOfSymbolicLink(atPath: source.path) {
+            throw StorageError.failed("\(source.lastPathComponent) is a link to \(dest), not a folder: move that folder in Finder instead.")
+        }
         guard !fm.fileExists(atPath: target.path) else {
             throw StorageError.failed("\(target.path) already exists.")
         }
@@ -171,6 +199,7 @@ final class FolderMover: @unchecked Sendable {
                 throw StorageError.failed("Could not move \(source.lastPathComponent): \(error.localizedDescription)")
             }
         }
+        let before = try stamps(source)
         let files = try plan(source)
         let total = files.reduce(Int64(0)) { $0 + $1.data }
         // Mac OS Extended has no sparse files: a disk takes its full size there.
@@ -213,11 +242,19 @@ final class FolderMover: @unchecked Sendable {
                 copyAttributes(from, to)
             }
             copyAttributes(source, temp)
+            if Storage.isExcludedFromBackup(source) { Storage.excludeFromBackup(temp) }
             try fm.moveItem(at: temp, to: target)
         } catch {
             try? fm.removeItem(at: temp)
             if let e = error as? StorageError { throw e }
             throw StorageError.failed("Could not copy \(source.lastPathComponent): \(error.localizedDescription)")
+        }
+        // Something wrote into the folder while it was copied (`omacvm apply`,
+        // say): the copy misses that, so the original stays.
+        let after = (try? stamps(source)) ?? [:]
+        if let changed = Set(before.keys).union(after.keys).sorted().first(where: { before[$0] != after[$0] }) {
+            try? fm.removeItem(at: target)
+            throw StorageError.failed("\(changed) in \(source.lastPathComponent) changed during the move: nothing moved. Try again.")
         }
         do {
             try fm.removeItem(at: source)
@@ -239,6 +276,28 @@ final class FolderMover: @unchecked Sendable {
         var ranges: [Range<Int64>] = []
         var size: Int64 = 0
         var data: Int64 { ranges.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) } }
+    }
+
+    /// Every item in the folder with what tells a change: type, and for a file
+    /// its size and modification time (to the nanosecond), for a link where it
+    /// points.
+    private func stamps(_ folder: URL) throws -> [String: String] {
+        guard let e = FileManager.default.enumerator(atPath: folder.path) else {
+            throw StorageError.failed("Cannot read \(folder.path).")
+        }
+        var out: [String: String] = [:]
+        for case let rel as String in e {
+            let path = folder.appendingPathComponent(rel).path
+            var st = stat()
+            guard lstat(path, &st) == 0 else { out[rel] = "gone"; continue }
+            switch st.st_mode & S_IFMT {
+            case S_IFDIR: out[rel] = "dir"
+            case S_IFREG: out[rel] = "file \(st.st_size) \(st.st_mtimespec.tv_sec).\(st.st_mtimespec.tv_nsec)"
+            case S_IFLNK: out[rel] = "link " + ((try? FileManager.default.destinationOfSymbolicLink(atPath: path)) ?? "")
+            default: out[rel] = "other \(st.st_mode & S_IFMT)"
+            }
+        }
+        return out
     }
 
     /// Everything in the folder, parents before children; each file with the

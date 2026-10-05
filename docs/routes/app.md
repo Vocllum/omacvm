@@ -30,9 +30,13 @@ OmacVM's version.
 - Where things are: the app in `~/Applications`, the VMs in
   `~/OmacVM/<VM name>/`; moves, other drives, sizes and downloads:
   [where things are](#where-things-are).
-- A VM folder from another Mac: copy it into `~/OmacVM/` (the app runs one VM
-  at a time, the first folder by name), open the app and start it. Then, with
-  the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
+- A VM folder from another Mac: copy it into `~/OmacVM/` once (the app runs
+  one VM at a time, the first folder by name). Check that the app looks there:
+  `~/Applications/OmacVM.app/Contents/MacOS/OmacVM --vms-folder` (or the
+  same under `/Applications`) must print the same as `echo ~/OmacVM` (a home
+  folder can be on another drive, under `/Volumes`). If it prints another
+  folder, move the VM folder there and use that path below. Open the app and
+  start the VM. Then, with the VM running, set up this Mac's side (Bridge, Gestures, clock, token) with
   `bash ~/Applications/OmacVM.app/Contents/Resources/scripts/apply-vm.sh ~/OmacVM/<VM name>`
   (or `omacvm apply --vm "<VM name>" --vm-type app`). If it says there is no
   SSH access, the VM does not know this Mac's key yet: `omacvm apply` prints
@@ -118,7 +122,12 @@ OmacVM's version.
   and compared, then deleted in the old place, with progress and a Cancel
   that leaves the VM where it was), **New VMs Only** (the VMs stay where
   they are and keep working from there) or Cancel. A VM that runs is never
-  moved: it stays, and the app says so.
+  moved: it stays, and the app says so. If a file in the VM's folder changes
+  or appears during a move (an `omacvm apply`, say), the copy is deleted and
+  the VM stays where it was; try again. A VM folder that is a link to
+  another folder is not moved: move the folder it points to in Finder. A
+  half copy (`.NAME.moving`) left by quitting during a move is deleted the
+  next time the app opens.
 - **A drive that is not connected**: the app says so ("SD4TB is not
   connected") instead of offering a new VM, and builds nothing there (a
   leftover empty /Volumes/NAME folder counts as not connected). A VM whose
@@ -126,7 +135,9 @@ OmacVM's version.
 - **2.9 and older** kept the VMs hidden in
   `~/Library/Application Support/OmacVM/VMs`. They keep working there; the
   app offers once to move them to ~/OmacVM (Storage › Move later too).
-  `omacvm` finds VMs in every folder the app does.
+  `omacvm` finds VMs in every folder the app does. Going back to 2.9.0
+  after that: it shows only the VMs in ~/OmacVM (or the picked folder); the
+  others are hidden from it, not deleted.
 - **Sizes**: the settings show each VM's size on disk (with Show in Finder)
   and the downloads in `~/Library/Caches/omacvm` (try-omarchy's live system,
   prebuilt VMs) with **Clear Downloads** (not while a build uses them).

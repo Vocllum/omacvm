@@ -52,8 +52,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return self.runner?.isRunning == true || self.state.screen == .building || Self.qemuApp != nil
         }
         state.storage.building = { [weak self] in self?.state.screen == .building }
+        // Half copies from a move cut short by a quit (no move runs yet), and
         // Time Machine leaves VM folders out (those from before 3.0 too).
         DispatchQueue.global(qos: .utility).async {
+            for u in Storage.removeStaleMoves(in: Paths.vmsRoots) {
+                FileHandle.standardError.write(Data("storage: removed the half copy \(u.path)\n".utf8))
+            }
             for vm in VMConfig.all() { Storage.excludeFromBackup(vm.folder) }
         }
         buildMenu()
@@ -83,7 +87,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if state.storage.moving != nil {
             // A copy to another drive stops at once; its half copy is deleted
-            // and the VM stays where it was.
+            // (at the next launch if that takes longer than the 10 s wait) and
+            // the VM stays where it was.
             state.storage.cancelMove()
             func wait(_ tries: Int) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in

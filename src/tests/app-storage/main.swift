@@ -132,6 +132,76 @@ do {
     let back = try FolderMover().move(onExt, into: r2)
     expect("back again: same files", fingerprint(back) == before)
 
+    // Time Machine's exclusion: a copy to another drive drops it, the mover sets it again
+    let tmVM = try makeVM(r1, "Tm", dataMB: 1)
+    Storage.excludeFromBackup(tmVM)
+    let tmExt = try FolderMover().move(tmVM, into: ext)
+    expect("other drive: still left out of Time Machine", Storage.isExcludedFromBackup(tmExt))
+    let tmBack = try FolderMover().move(tmExt, into: r1)
+    expect("back again: still left out of Time Machine", Storage.isExcludedFromBackup(tmBack))
+    try fm.removeItem(at: tmBack)
+
+    // Something writes into the folder during the move: the original stays
+    func changedDuringMove(_ name: String, _ change: @escaping (URL) throws -> Void) throws -> (String, URL) {
+        let v = try makeVM(r1, name, dataMB: 1)
+        let mv = FolderMover()
+        var once = false
+        mv.progress = { phase, _, _ in
+            if phase == "Checking" && !once { once = true; try? change(v) }
+        }
+        do { _ = try mv.move(v, into: ext); return ("moved", v) }
+        catch { return (error.localizedDescription, v) }
+    }
+    let (grew, grow) = try changedDuringMove("Grow") { v in
+        try "1 2\n".write(to: v.appendingPathComponent("guest-pointer"), atomically: false, encoding: .utf8)
+    }
+    expect("a file that appears during the move: refused", grew.contains("guest-pointer") && grew.contains("changed during the move"), grew)
+    expect("a file that appears: it and the original stay", fm.fileExists(atPath: grow.appendingPathComponent("guest-pointer").path)
+           && fm.fileExists(atPath: grow.appendingPathComponent("disk.img").path))
+    expect("a file that appears: no copy left", !fm.fileExists(atPath: ext.appendingPathComponent("Grow").path)
+           && !fm.fileExists(atPath: ext.appendingPathComponent(".Grow.moving").path))
+    // Same size, new contents: only the modification time tells.
+    let (edited, edit) = try changedDuringMove("Edit") { v in
+        try "NAME='Edit'\nCPUS=8\n".write(to: v.appendingPathComponent("vm.env"), atomically: false, encoding: .utf8)
+    }
+    expect("a file changed during the move: refused", edited.contains("vm.env") && edited.contains("changed during the move"), edited)
+    expect("a file changed: the new contents stay", (try? String(contentsOf: edit.appendingPathComponent("vm.env"), encoding: .utf8)) == "NAME='Edit'\nCPUS=8\n")
+    expect("a file changed: no copy left", !fm.fileExists(atPath: ext.appendingPathComponent("Edit").path))
+    try fm.removeItem(at: grow); try fm.removeItem(at: edit)
+
+    // A VM folder that is a link: refused, the link and its folder stay
+    let real = try makeVM(work.appendingPathComponent("elsewhere"), "Linked", dataMB: 1)
+    let realBefore = fingerprint(real)
+    let link = r1.appendingPathComponent("Linked")
+    try fm.createSymbolicLink(at: link, withDestinationURL: real)
+    for (what, into) in [("other drive", ext), ("same drive", r2)] {
+        do { _ = try FolderMover().move(link, into: into); expect("link refused (\(what))", false) }
+        catch { expect("link refused (\(what))", error.localizedDescription.contains("is a link to \(real.path)"), error.localizedDescription) }
+    }
+    expect("link refused: link and folder kept", (try? fm.destinationOfSymbolicLink(atPath: link.path)) == real.path
+           && fingerprint(real) == realBefore && !fm.fileExists(atPath: ext.appendingPathComponent("Linked").path))
+    try fm.removeItem(at: link)
+
+    // Half copies left by a quit during a move: removed at the next launch, nothing else
+    let ghost = ext.appendingPathComponent(".Ghost.moving")
+    try fm.createDirectory(at: ghost.appendingPathComponent("logs"), withIntermediateDirectories: true)
+    try Data(repeating: 1, count: 4096).write(to: ghost.appendingPathComponent("disk.img"))
+    try Data().write(to: ext.appendingPathComponent(".file.moving"))
+    try fm.createDirectory(at: ext.appendingPathComponent(".moving"), withIntermediateDirectories: true)
+    let kept = work.appendingPathComponent("kept")
+    try fm.createDirectory(at: kept, withIntermediateDirectories: true)
+    try "x".write(to: kept.appendingPathComponent("a"), atomically: true, encoding: .utf8)
+    try fm.createSymbolicLink(at: ext.appendingPathComponent(".Link.moving"), withDestinationURL: kept)
+    let extBefore = Set(try fm.contentsOfDirectory(atPath: ext.path))
+    let removed = Storage.removeStaleMoves(in: [ext, URL(fileURLWithPath: "/Volumes/OmacVM-no-such-drive/VMs"),
+                                                work.appendingPathComponent("no-such")])
+    expect("stale half copy removed", removed.map(\.lastPathComponent) == [".Ghost.moving"] && !fm.fileExists(atPath: ghost.path),
+           "\(removed)")
+    expect("stale half copies: nothing else touched",
+           Set(try fm.contentsOfDirectory(atPath: ext.path)) == extBefore.subtracting([".Ghost.moving"])
+           && fm.fileExists(atPath: kept.appendingPathComponent("a").path))
+    for n in [".file.moving", ".moving", ".Link.moving"] { try fm.removeItem(at: ext.appendingPathComponent(n)) }
+
     // Too big for the drive: refused before copying, nothing changes
     let big = try makeVM(r1, "Big", dataMB: 90)
     let bigBefore = fingerprint(big)

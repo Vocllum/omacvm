@@ -1,6 +1,7 @@
 #!/bin/bash
 # OmacVM.app's VMs folders without a VM: moves on one drive and to another (a
-# small disk image), sparse disks, cancel, refusals, busy folders, downloads,
+# small disk image), sparse disks, cancel, refusals (changes during a move,
+# linked folders), half copies left behind, busy folders, downloads,
 # Time Machine, the app into ~/Applications. Fixture folders only.
 #   src/tests/app-storage.sh
 set -euo pipefail

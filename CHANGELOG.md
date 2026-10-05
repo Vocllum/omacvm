@@ -9,8 +9,11 @@ in more words.
   the app's window changes it (an external drive too) and moves the VMs: a
   rename on the same drive, else copied, read back, compared and only then
   deleted, with progress and Cancel; or New VMs Only, and the VMs stay
-  where they are and keep working. A VM that runs is never moved. Each VM's
-  size with Show in Finder; Clear Downloads for `~/Library/Caches/omacvm`.
+  where they are and keep working. A VM that runs is never moved, nor one
+  whose files change during the move, nor a VM folder that is a link. A
+  half copy left by quitting during a move is deleted at the next launch.
+  Each VM's size with Show in Finder; Clear Downloads for
+  `~/Library/Caches/omacvm`.
 - A drive that is not connected is named as such ("SD4TB is not
   connected"), and nothing is built into a stale /Volumes folder. A VM whose
   files are missing says which and does not start.
@@ -18,6 +21,10 @@ in more words.
   app offers once to move them to `~/OmacVM`; new VMs go to `~/OmacVM`.
 - An app in /Applications offers once to move itself to ~/Applications.
 - VM folders are left out of Time Machine.
+- Going back to 2.9.0: once 3.0 has made `~/OmacVM`, 2.9.0 shows only the
+  VMs in `~/OmacVM` (or in the folder picked in the app). VMs still in the
+  old hidden folder or another folder are hidden from it, not deleted; 3.0
+  finds them again.
 
 ## 2.9.0 (unreleased)
 
@@ -46,12 +53,14 @@ in more words.
   there now comes with the gestures feature. `omacvm apply` stops the service
   in VMs that have gestures off.
 
-- OmacVM.app keeps its VMs in `~/OmacVM`, one folder per VM (Spotlight skips
-  it), and installs itself in `~/Applications`. VMs in the old place
+- OmacVM.app keeps its VMs in `~/OmacVM`, one folder per VM, and installs
+  itself in `~/Applications`. VMs in the old place
   (`~/Library/Application Support/OmacVM/VMs`) stay there and keep working
   while `~/OmacVM` does not exist; a folder picked in the app still wins.
   `omacvm` finds the app in `~/Applications` or `/Applications` and the VMs
-  the same way as the app.
+  the same way as the app. Spotlight still lists the file names in
+  `~/OmacVM` (it never reads inside a VM disk); to hide them, add the folder
+  under System Settings › Spotlight › Search Privacy.
 
 ## 2.8.0
 
