@@ -11,6 +11,7 @@ PB_SEED="" PB_WORK=""
 # unpacked image that did not get used go. A build that failed leaves a half
 # made VM (build.sh says to delete it): its settings may still name the seed.
 prebuilt_exit() {
+  ui_spin_stop   # an unpack still running (after Ctrl-C) would go on writing into PB_WORK
   if [[ -n $PB_SEED ]]; then rm -f "$PB_SEED"; fi
   # UTM copies the bundle on import: a copy may be there even if the import failed.
   if [[ $TYPE == utm ]]; then rm -f "$UTM_DOCS/$VM.utm/Data/omacvm-seed.iso"; fi

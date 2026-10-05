@@ -6,6 +6,7 @@
 #   src/tests/prebuilt-routes.sh
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
+source "$R/src/lib/ui.sh"
 source "$R/src/lib/mac.sh"
 source "$R/src/prebuilt/lib.sh"
 source "$R/src/prebuilt/vm.sh"
@@ -302,6 +303,44 @@ expect "printable: long lines cut at 240" 240 "$(head -c 400 /dev/zero | tr '\0'
   prebuilt_exit
   [[ ! -e $PB_SEED && ! -e $PB_WORK ]]
 ) && expect "prebuilt_exit removes the seed and the unpacked image" ok ok || { expect "prebuilt_exit" ok no; }
+
+# Ctrl-C while the image unpacks: ui_spin runs it as a background job, which
+# ignores Ctrl-C in a script. The exit cleanup must stop it before the work
+# folder goes, or it writes the folder again. (A pipeline that keeps making
+# folders and files, like zstd | tar; Ctrl-C = SIGINT to the process group.)
+cat > "$T/ctrlc.sh" <<'EOF'
+R=$1 PB_WORK=$2 FANCY=$3
+source "$R/src/lib/ui.sh"; source "$R/src/prebuilt/lib.sh"; source "$R/src/prebuilt/vm.sh"
+UI_FANCY=$FANCY TTY=/dev/null TYPE=fusion VM=x
+trap 'prebuilt_exit' EXIT
+writer() {
+  while :; do echo x; sleep 0.05; done |
+    while read -r _; do mkdir -p "$PB_WORK/Omarchy.vmwarevm"; : > "$PB_WORK/Omarchy.vmwarevm/f$RANDOM"; done
+}
+ui_spin "Unpacking and checking" writer
+EOF
+for fancy in 0 1; do
+  got=$(python3 - "$T/ctrlc.sh" "$R" "$T/ctrlc-work" "$fancy" <<'PY2'
+import os, shutil, signal, subprocess, sys, time
+script, r, w, fancy = sys.argv[1:5]
+p = subprocess.Popen(["/bin/bash", script, r, w, fancy], start_new_session=True,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+for _ in range(200):
+    if os.path.isdir(w + "/Omarchy.vmwarevm"): break
+    time.sleep(0.05)
+os.killpg(p.pid, signal.SIGINT)
+p.wait(timeout=30)
+time.sleep(1)
+left = os.path.exists(w)
+alive = subprocess.run(["pgrep", "-g", str(p.pid)], capture_output=True, text=True).stdout.split()
+try: os.killpg(p.pid, signal.SIGKILL)
+except ProcessLookupError: pass
+shutil.rmtree(w, ignore_errors=True)
+print("rc %d, folder %s, %s" % (p.returncode, "left" if left else "gone", "still running" if alive else "stopped"))
+PY2
+)
+  expect "Ctrl-C during the unpack (spinner $fancy): stopped, folder gone" "rc 130, folder gone, stopped" "$got"
+done
 
 # The first-boot wait: 255 (no SSH yet) asks again, 0 waits, 1 is done.
 (
