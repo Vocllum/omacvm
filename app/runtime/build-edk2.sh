@@ -46,11 +46,11 @@ log() { echo "[edk2-build] $*"; }
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
 logo_patch="$native_dir/patches/edk2-logo-omarchy.patch"
-logo_patch_sha256=d1763d4db5c616dd8b51d772127555d04d6e68070f8f72f379a69cf496038057
+logo_patch_sha256=60747a5a01ff2624f6ebe3e4dbcb0288940152ecec6a06c600728d42a5a72b88
 nvme_patch="$native_dir/patches/edk2-bootmanager-nvme-identify-align.patch"
 nvme_patch_sha256=f1a494492426f1a1476e96c3682d0d171ef0ca43b386db07ef491e1dd118fda1
 # The logo the patch puts in (checked after applying it).
-logo_bmp_sha256=75d40490e502d2850e571ab78d4be84b62232279cfc4ec30d23404017f630670
+logo_bmp_sha256=ff1db470dd6cae2db1e7fdcf3a5576e64d56677a45438cf347c6aac9675ca2a5
 
 # QEMU's build helper and config at QEMU 11.1.1 (c3d48b7d); roms/edk2-version
 # there names edk2-stable202408 of 08/13/2024, and QEMU's prebuilt

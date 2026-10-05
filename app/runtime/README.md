@@ -14,7 +14,8 @@ commit 82927e9. Changes here:
   flags (`roms/edk2-build.py`, `roms/edk2-build.config`, build
   `armvirt.aa64`, DEBUG as QEMU ships it), clang 18 instead of GCC, and
   `patches/edk2-logo-omarchy.patch`: Omarchy's logo instead of TianoCore's
-  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`), and
+  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`, 15 pixels
+  a cell: as big as the app's start animation draws it), and
   `patches/edk2-bootmanager-nvme-identify-align.patch`: with clang, edk2
   could not read the NVMe disk's name and renamed its boot entry to "UEFI
   Misc Device"; now it is "UEFI QEMU NVMe Ctrl omacvm 1" as with QEMU's
@@ -28,15 +29,19 @@ commit 82927e9. Changes here:
   firmware carries no user name (the build checks that). The flash layout and the
   boot variables are the same either way: a VM's `efi-vars.fd` works with
   both
-- `patches/omacvm-cocoa-boot-splash.patch`: until the guest draws on an
+- `patches/omacvm-cocoa-boot-splash.patch`: when the window opens, OMACVM
+  turns into Omarchy's logo (Core Animation, 2.4 s; the still logo with
+  Reduce motion or `OMACVM_SPLASH_ANIMATION=0`), which holds until the guest's
+  first picture and fades into it. After that, until the guest draws on an
   output (and when it switches it off again, a reboot), the window shows
   Omarchy's logo where the firmware draws it, not QEMU's "Display output is
   not active."; after 90 s of the guest running with nothing of its own on
   the screen (`OMACVM_SPLASH_HINT_SECONDS`), a line under the logo names the
   VM's logs (`OMACVM_LOGS`) and qemu.log gets a warning.
   `OMACVM_BOOT_SPLASH=0` shows QEMU's text again. The cells are the
-  firmware's (`boot-logo/make-logo-bmp.py logo.svg --rows`);
-  `Tests/display/test-boot-splash-cells.py` checks that at build time
+  firmware's (`boot-logo/make-logo-bmp.py logo.svg --rows`), the animation's
+  table is `boot-logo/make-splash-morph.py`'s; the build checks both and the
+  animation's core (`Tests/display/`, also `check-boot-splash.sh` in CI)
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's

@@ -5,11 +5,13 @@ in more words.
 
 ## 3.0.0 (unreleased)
 
-- OmacVM.app: a starting VM shows Omarchy's logo instead of QEMU's "Display
-  output is not active." until Omarchy draws, also after a restart and on
-  the other displays. The logo sits where the firmware's does, so the
-  hand-over does not move it. If Omarchy has shown nothing after 90 seconds,
-  a line under the logo says so and where the logs are.
+- OmacVM.app: when a VM's window opens, OMACVM turns into Omarchy's logo
+  (2.4 s; just the logo with Reduce motion), which then fades into the
+  firmware's, now the same size and place. After that, a starting VM shows
+  Omarchy's logo instead of QEMU's "Display output is not active." until
+  Omarchy draws, also after a restart and on the other displays. If Omarchy
+  has shown nothing after 90 seconds, a line under the logo says so and where
+  the logs are.
 
 ## 2.9.0 (unreleased)
 

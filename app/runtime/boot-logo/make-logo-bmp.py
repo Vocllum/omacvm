@@ -6,7 +6,7 @@ The wordmark is pixel art on a 15-unit grid (81 x 19 cells), so each cell
 becomes an exact CELL x CELL block: sharp edges at any whole-number size.
 Only the plain path commands logo.svg uses (m h v l z) are read.
 
-  make-logo-bmp.py logo.svg Logo.bmp [CELL]   (CELL defaults to 5: 405 x 95)
+  make-logo-bmp.py logo.svg Logo.bmp [CELL]   (CELL defaults to 15: 1215 x 285)
   make-logo-bmp.py logo.svg --rows            (the cells as C strings, # = on:
                                                the app window's boot splash)
 """
@@ -102,7 +102,7 @@ def main():
         for row in on:
             print('    "%s",' % "".join("#" if c else "." for c in row))
         return
-    cell = int(sys.argv[3]) if len(sys.argv) == 4 else 5
+    cell = int(sys.argv[3]) if len(sys.argv) == 4 else 15
     with open(sys.argv[2], "wb") as f:
         f.write(bmp(on, cell))
 

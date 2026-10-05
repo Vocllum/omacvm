@@ -42,6 +42,9 @@ jobs:
       - name: Python compiles
         run: git ls-files -z '*.py' | xargs -0 python3 -m py_compile
 
+      - name: Boot splash and start animation (offline, from the patch)
+        run: app/runtime/Tests/display/check-boot-splash.sh
+
       - name: OmacVM.app builds
         working-directory: app/app
         run: swift build

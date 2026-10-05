@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """The boot splash (omacvm-cocoa-boot-splash.patch) draws the firmware's logo,
-cell for cell: the cells in ui/cocoa.m, made into a BMP the way
-boot-logo/make-logo-bmp.py makes the firmware's, must give the very bytes
-edk2-logo-omarchy.patch puts into MdeModulePkg/Logo/Logo.bmp (its git blob id).
+cell for cell and as big: the cells in ui/omacvm-splash.h, made into a BMP
+with its SPLASH_CELL the way boot-logo/make-logo-bmp.py makes the firmware's,
+must give the very bytes edk2-logo-omarchy.patch puts into
+MdeModulePkg/Logo/Logo.bmp (its git blob id).
 
-  test-boot-splash-cells.py ui/cocoa.m
+  test-boot-splash-cells.py ui/omacvm-splash.h
 """
 import hashlib
 import importlib.util
@@ -35,7 +36,10 @@ rows = re.findall(r'"([#.]+)"', m.group(1))
 if len(rows) != 19 or any(len(r) != 81 for r in rows):
     fail("the cells are not 81 x 19")
 
-data = logo.bmp([[c == "#" for c in r] for r in rows], 5)
+m = re.search(r"^#define SPLASH_CELL (\d+)", src, re.M)
+if not m:
+    fail("no SPLASH_CELL in " + sys.argv[1])
+data = logo.bmp([[c == "#" for c in r] for r in rows], int(m.group(1)))
 blob = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 patch = open(os.path.join(runtime, "patches", "edk2-logo-omarchy.patch"), encoding="utf-8").read()

@@ -604,12 +604,19 @@ cc -fblocks -Wall -Werror -Wno-deprecated-declarations -I"$display_tests" \
   "$native_dir/Tests/display/test-gl-view-flush.c" -framework OpenGL \
   -o "$display_tests/test-gl-view-flush"
 "$display_tests/test-gl-view-flush"
-# OmacVM: Omarchy's logo instead of "Display output is not active." until the
-# guest draws (and after it switched an output off); the cells must be the
-# firmware's logo.
+# OmacVM: the start animation (OMACVM becomes Omarchy's logo), then Omarchy's
+# logo instead of "Display output is not active." until the guest draws (and
+# after it switched an output off); the cells must be the firmware's logo, the
+# animation's table the generator's, and its core must start and end right.
 patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-boot-splash.patch"
-python3 "$native_dir/Tests/display/test-boot-splash-cells.py" "$source_dir/ui/cocoa.m" || \
+python3 "$native_dir/Tests/display/test-boot-splash-cells.py" "$source_dir/ui/omacvm-splash.h" || \
   die "the boot splash's logo is not the firmware's (test-boot-splash-cells.py)"
+python3 "$native_dir/boot-logo/make-splash-morph.py" --check "$source_dir/ui/omacvm-splash.h" || \
+  die "the start animation's table is not make-splash-morph.py's"
+cc -Wall -Wextra -Werror -I"$source_dir/ui" "$native_dir/Tests/display/test-boot-splash-morph.c" \
+  -o "$display_tests/test-boot-splash-morph"
+"$display_tests/test-boot-splash-morph"
+"$display_tests/test-boot-splash-morph"
 # OmacVM: 2D resources (the guest's dumb buffers: console, plymouth, dumb
 # screens and cursors) are made with the SCANOUT bind, so the guest memory
 # budget's display reserve covers them (test-resource-budget checks the reserve
