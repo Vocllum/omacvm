@@ -10,9 +10,9 @@
 # launcher exits at once. Tests: weekly schedule, silence switch, update
 # held back while a VM runs and applied after, rollback of both broken
 # builds, the one step back, a renamed copy. Exit 0 when all pass.
-set -uo pipefail
 # check() evals its condition: variables used there look unused.
 # shellcheck disable=SC2034
+set -uo pipefail
 SRC=${1:?usage: self-update-test.sh BUILT_APP WORK}
 WORK=${2:?usage: self-update-test.sh BUILT_APP WORK}
 HERE=$(cd "$(dirname "$0")/../.." && pwd)
