@@ -14,6 +14,9 @@ in more words.
   in a window; Parallels, UTM and VMware Fusion in full screen. The built-in
   display works as before, and so does a display without DDC/CI (`omacvm
   check` names it and why).
+- Video decoding: HEVC made by the Mac's own encoder (FFmpeg's `hevc_vaapi`
+  in the VM, `hevc_videotoolbox` on the Mac) decodes in hardware. After its
+  first pictures it came out garbled.
 
 ## 2.9.0 (unreleased)
 

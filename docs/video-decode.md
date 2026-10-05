@@ -88,7 +88,12 @@ decoded frame (IOSurface) ─GPU copy─▶ the guest's video textures ─▶ br
   slice headers get explicit reference picture sets, as VA-API does not pass
   the SPS's), AV1 frames cut out of the temporal unit. VP9 frames arrive
   whole. Tested bit-exact against software decoding (FFmpeg) with x264, x265
-  and libvpx streams and real 1080p clips.
+  and libvpx streams, real 1080p clips and HEVC from the Mac's own encoder
+  (`hevc_vaapi` in the VM in bitrate and constant-QP mode,
+  `hevc_videotoolbox` on the Mac). That HEVC uses syntax that VA-API does not
+  describe to the host (Mesa leaves `NumPocTotalCurr` and
+  `deblocking_filter_control_present_flag` at 0): the backend works both out
+  from the values it does get.
 - The decoded frame is an IOSurface; the GPU copies it into the textures the
   VM sees (no CPU copy on the Mac's OpenGL). The copy pauses the guest's
   conditional rendering and turns its rasterizer discard off while it runs:
