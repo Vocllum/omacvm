@@ -20,6 +20,8 @@ It also builds the UEFI firmware with Omarchy's boot logo (build-edk2.sh);
 OMACVM_FIRMWARE=qemu keeps QEMU's prebuilt firmware instead.
 
 Set OMARCHY_RUNTIME_BUILD_JOBS to a positive integer to bound compilation.
+Set OMACVM_RUNTIME_KOSMICKRISP=1 to add KosmicKrisp (build-kosmickrisp.sh), which
+Venus uses on macOS 26 and newer; without it the runtime has MoltenVK only.
 With --archive-dir, reuse already-downloaded pinned archives from DIR. Every
 archive is copied into private scratch space and checksum-verified before use.
 EOF
@@ -57,6 +59,16 @@ while (($#)); do
 done
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
+
+# KosmicKrisp (Venus on macOS 26+, from a pinned Mesa commit) is opt-in:
+# OMACVM_RUNTIME_KOSMICKRISP=1. Its build needs Homebrew LLVM and SPIR-V tools,
+# so check the build machine before the long QEMU build. Without it the
+# runtime has MoltenVK only.
+case ${OMACVM_RUNTIME_KOSMICKRISP:-0} in
+  0) with_kosmickrisp=0 ;;
+  1) "$native_dir/build-kosmickrisp.sh" --check; with_kosmickrisp=1 ;;
+  *) echo 'qemu-source-build: OMACVM_RUNTIME_KOSMICKRISP must be 0 or 1' >&2; exit 64 ;;
+esac
 texture_patch="$native_dir/patches/qemu-texture-borrowing-11.1.patch"
 gpu_fix_patch="$native_dir/patches/qemu-gpu-spike-resolution-fix.patch"
 identity_patch="$native_dir/patches/qemu-cocoa-product-identity.patch"
@@ -849,8 +861,11 @@ patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-thread-sync-fallba
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-vulkan-beside.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-stream-sockets.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-heap-check.patch"
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-metal-entrypoints.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-ext-table.patch"
 patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-venus-host-pages.patch"
+# OmacVM Venus: a KosmicKrisp without a usable device falls back to MoltenVK.
+patch -d "$virgl_source" -p1 -f -i "$native_dir/patches/virgl-darwin-kosmickrisp-fallback.patch"
 virgl_build="$virgl_source/build"
 meson="$tool_root/$meson_root/meson.py"
 # Optimize the graphics command path while retaining assertions and diagnostics.
@@ -1011,11 +1026,18 @@ if [[ $firmware == omacvm ]] && ! "$native_dir/build-edk2.sh" --qemu-source "$so
   firmware=qemu
 fi
 
+kosmickrisp_args=()
+if ((with_kosmickrisp)); then
+  "$native_dir/build-kosmickrisp.sh" ${archive_cache:+--archive-dir "$archive_cache"}
+  kosmickrisp_args=(--source-kosmickrisp "$native_dir/.build/kosmickrisp/libvulkan_kosmickrisp.dylib")
+fi
+
 log "Relocating, capability-gating, signing, and publishing the runtime"
 "$prepare_runtime" \
   --source-qemu "$qemu_binary" \
   --source-slirp "$slirp_root/lib/libslirp.0.dylib" \
   --source-virgl "$virgl_root/lib/libvirglrenderer.1.dylib" \
+  ${kosmickrisp_args[@]+"${kosmickrisp_args[@]}"} \
   --archive-dir "$archive_dir"
 
 # The firmware must show the logo and name the disk's boot entry as QEMU's

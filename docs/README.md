@@ -20,6 +20,7 @@ we found along the way. To set OmacVM up, start with the
 | [benchmarks/README.md](benchmarks/README.md) | How we benchmark the routes against the Mac, step by step, and the results so far |
 | [troubleshooting.md](troubleshooting.md) | Common problems and what to do, then the non-obvious problems we hit, each as symptom, cause, fix and where in the code |
 | [notes/findings.md](notes/findings.md) | Notes for developers: security reviews, measuring pitfalls, how the VM apps work inside, the first Parallels vs UTM measurements |
+| [experiments/kosmickrisp.md](experiments/kosmickrisp.md) | Vulkan in the VM on KosmicKrisp (macOS 26+): what it took, numbers, and what still blocks Zink GL 3+, ANGLE on Vulkan and WebGPU |
 | [experiments/vmware-fusion.md](experiments/vmware-fusion.md) | The plan and test log from building the Fusion route |
 | [experiments/trackpad-scrolling.md](experiments/trackpad-scrolling.md) | How the macOS-native scroll momentum was tuned, over 29 rounds, with every measurement |
 | [experiments/scroll-analysis/](experiments/scroll-analysis/) | The analysis scripts for the scroll momentum |

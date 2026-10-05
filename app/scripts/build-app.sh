@@ -34,10 +34,16 @@ if (( RELEASE )) && [[ -n $(git -C "$REPO" status --porcelain) ]]; then
 fi
 RT=$ROOT/runtime/.build
 # What the runtime was built from: its build scripts, patches and the tests
-# the build runs, and which UEFI firmware (OMACVM_FIRMWARE=qemu: QEMU's
-# prebuilt one, TianoCore logo).
+# the build runs, which UEFI firmware (OMACVM_FIRMWARE=qemu: QEMU's prebuilt
+# one, TianoCore logo), and with KosmicKrisp its build tools (a new Homebrew
+# LLVM rebuilds it).
+KK_STAMP=
+if [[ ${OMACVM_RUNTIME_KOSMICKRISP:-0} == 1 ]]; then
+  KK_STAMP=$("$ROOT/runtime/build-kosmickrisp.sh" --stamp)
+fi
 INPUTS=$(cd "$ROOT/runtime" && { shasum -a 256 ./*.sh runtime-files.txt patches/* Tests/firmware/*.py Tests/virgl/*.py Tests/virgl/*.c Tests/virgl/*.h
-  echo "firmware=${OMACVM_FIRMWARE:-omacvm}"; } | shasum -a 256 | cut -d' ' -f1)
+  echo "firmware=${OMACVM_FIRMWARE:-omacvm}"
+  echo "kosmickrisp=${OMACVM_RUNTIME_KOSMICKRISP:-0}${KK_STAMP:+ $KK_STAMP}"; } | shasum -a 256 | cut -d' ' -f1)
 # A runtime built with OMACVM_RUNTIME_TEST_HOOKS=1 (test hooks) is never shipped.
 if [[ ! -x $RT/qemu-gpu-runtime/bin/qemu-system-aarch64 || ! -f $RT/firmware/edk2-aarch64-code.fd
       || -e $RT/qemu-gpu-runtime.test-hooks
@@ -97,6 +103,12 @@ install -m644 "$ROOT/runtime/boot-logo/LICENSE.omarchy" "$C/Resources/licenses/"
 # MoltenVK and the Vulkan loader (Apache-2.0) need their licence texts.
 if [[ -e $RT/qemu-gpu-runtime/lib/libMoltenVK.dylib || -e $RT/qemu-gpu-runtime/lib/libvulkan.1.dylib ]]; then
   install -m644 "$ROOT/runtime/LICENSE.vulkan.txt" "$C/Resources/licenses/"
+fi
+# A runtime with KosmicKrisp must carry its licence notice.
+if [[ -e $RT/qemu-gpu-runtime/lib/libvulkan_kosmickrisp.dylib ]]; then
+  KK_NOTICE=$RT/qemu-gpu-runtime/share/licenses/LICENSE.mesa-kosmickrisp.txt
+  [[ -s $KK_NOTICE ]] || { echo "the runtime has KosmicKrisp but no $KK_NOTICE" >&2; exit 1; }
+  install -m644 "$KK_NOTICE" "$C/Resources/licenses/"
 fi
 
 # The app carries the version of the OmacVM it is part of.
