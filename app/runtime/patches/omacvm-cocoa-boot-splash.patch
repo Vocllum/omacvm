@@ -49,10 +49,10 @@ is a port of the preview's generator on a slowed timeline: the flying cells'
 table is made by boot-logo/make-splash-morph.py, the glow is the preview's
 blur (Pillow's resampling weights). The still logo in the GL layers is an
 81 x 19 texture with sharp cells. The logo is as big as the firmware's
-1920 x 1080 frame stretched to the view would have it (1215 x 285 there:
-15 pixels a cell), with square cells, in the middle. The logo is the
-firmware's (boot-logo/make-logo-bmp.py logo.svg --rows, from Omarchy's
-logo.svg, MIT).
+1920 x 1080 frame stretched to the view would have it (810 x 190 there:
+10 pixels a cell; the user asked for a small logo, about 200 pixels tall),
+with square cells, in the middle. The logo is the firmware's
+(boot-logo/make-logo-bmp.py logo.svg --rows, from Omarchy's logo.svg, MIT).
 
 Upstream: OmacVM only (branding), not for QEMU.
 
@@ -132,7 +132,7 @@ logo's to the pixel.
 + * OMACVM_BOOT_SPLASH=0: QEMU's text, as before, and no animation.
 + *
 + * The logo is as big as the firmware's 1920 x 1080 frame stretched to the
-+ * view would have it (1215 x 285 there), with square cells, in the middle.
++ * view would have it (810 x 190 there), with square cells, in the middle.
 + *
 + * Threads: the state below is used with the BQL (QEMU's thread, and the
 + * layers' draws on the main thread take it); the hint label and the
@@ -900,7 +900,7 @@ logo's to the pixel.
 +
 +#define SPLASH_COLS 81
 +#define SPLASH_ROWS 19
-+#define SPLASH_CELL 15      /* pixels a cell in the firmware's frame */
++#define SPLASH_CELL 10      /* pixels a cell in the firmware's frame */
 +/* Omarchy's Plymouth theme: the logo's green and the background. */
 +#define SPLASH_GREEN 0xa8cd76
 +#define SPLASH_NAVY 0x1a1b26

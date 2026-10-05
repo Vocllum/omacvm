@@ -14,9 +14,9 @@ commit 82927e9. Changes here:
   flags (`roms/edk2-build.py`, `roms/edk2-build.config`, build
   `armvirt.aa64`, DEBUG as QEMU ships it), clang 18 instead of GCC, and
   `patches/edk2-logo-omarchy.patch`: Omarchy's logo instead of TianoCore's
-  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`, 15 pixels
-  a cell: as big as the app's start animation draws it; also 12, 9 and 6
-  pixels a cell, the biggest that fits the screen shows), and
+  (made by `boot-logo/make-logo-bmp.py` from Omarchy's `logo.svg`, 10 pixels
+  a cell, 810 x 190: as big as the app's start animation draws it; on a
+  screen too small for it, the biggest whole cell that fits), and
   `patches/edk2-bootmanager-nvme-identify-align.patch`: with clang, edk2
   could not read the NVMe disk's name and renamed its boot entry to "UEFI
   Misc Device"; now it is "UEFI QEMU NVMe Ctrl omacvm 1" as with QEMU's

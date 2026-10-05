@@ -17,7 +17,7 @@ in more words.
   QEMU's "Display output is not active.", and plain black once the desktop
   was there: an idle Omarchy that turns its display off now shows black.
 - Boot logo: the firmware's logo is as big as the app's start animation
-  (1215 x 285 at 1920 x 1080) and smaller on a small screen (a small window
+  (810 x 190 at 1920 x 1080) and smaller on a small screen (a small window
   after a restart) instead of none.
 
 ## 2.9.0 (unreleased)

@@ -104,10 +104,11 @@ static void test_ends(void)
 
 /* GL_NEAREST over the 81 x 19 texture in the viewport omacvm_splash_draw()
  * sets: the first pixel (from the top left) of each cell. The logo: as in a
- * 1920 x 1080 frame with 15-pixel cells stretched to w x h, square cells. */
+ * 1920 x 1080 frame with 10-pixel cells (810 x 190, the firmware's) stretched
+ * to w x h, square cells. */
 static void gl_edges(int w, int h, int *xs, int *ys)
 {
-    double cell = MIN(w * 15.0 / 1920, h * 15.0 / 1080);
+    double cell = MIN(w * 10.0 / 1920, h * 10.0 / 1080);
     int lw = MAX(1, (int)lround(81 * cell)), lh = MAX(1, (int)lround(19 * cell));
     int vx = (w - lw) / 2, vy = (h - lh) / 2;   /* GL: from the bottom */
 
@@ -287,11 +288,13 @@ static void test_desktop(void)
     unsigned seed = 1;
 
     CHECK(!desktop(f, w, h), "black is the desktop");
-    /* The firmware's logo, 15-pixel cells in the middle, a progress bar under it. */
+    /* The firmware's logo, SPLASH_CELL-pixel cells in the middle, a progress
+     * bar under it. */
+    const int lx = (w - SPLASH_COLS * SPLASH_CELL) / 2, ly = (h - SPLASH_ROWS * SPLASH_CELL) / 2;
     for (int y = 0; y < SPLASH_ROWS * SPLASH_CELL; y++) {
         for (int x = 0; x < SPLASH_COLS * SPLASH_CELL; x++) {
             if (omacvm_splash_cells[y / SPLASH_CELL][x / SPLASH_CELL] == '#') {
-                f[(size_t)(397 + y) * w + 352 + x] = 0xff000000 | SPLASH_GREEN;
+                f[(size_t)(ly + y) * w + lx + x] = 0xff000000 | SPLASH_GREEN;
             }
         }
     }

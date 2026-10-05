@@ -7,8 +7,8 @@ QEMU starts the firmware as OmacVM.app does (virt, HVF, virtio-gpu at
 1920 x 1080, an NVMe disk with serial omacvm) but with no window, an empty
 disk and fresh boot variables. Checks:
 - the boot logo: the screen (QMP screendump) shows exactly LOGO.bmp's pixels,
-  centred as edk2's BootLogoLib draws it; and on a 1100 x 700 screen (too
-  small for it) the same logo with 13-pixel cells (the biggest that fits)
+  centred as edk2's BootLogoLib draws it; and on a 640 x 480 screen (too
+  small for it) the same logo with 7-pixel cells (the biggest that fits)
   instead of none;
 - the disk's boot entry: named "UEFI QEMU NVMe Ctrl omacvm 1", as QEMU's
   prebuilt firmware names it (patches/edk2-bootmanager-nvme-identify-align.patch).
@@ -26,7 +26,7 @@ import tempfile
 import time
 
 WIDTH, HEIGHT = 1920, 1080
-SMALL = (1100, 700, 13)     # a screen, and the logo's cell size there (1100 // 81)
+SMALL = (640, 480, 7)       # a screen, and the logo's cell size there (640 // 81)
 NVME_ENTRY = "UEFI QEMU NVMe Ctrl omacvm 1"
 
 
