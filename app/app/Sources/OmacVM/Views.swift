@@ -207,7 +207,7 @@ struct SetupView: View {
         state.config.hostname = "omarchy"
         let on = { (b: Bool) in b ? "on" : "off" }
         // Omanotch off for now: see VMConfig.features.
-        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
+        state.config.features = "bridge=\(on(bridge)) wallpaper=\(on(bridge)) gestures=\(on(gestures)) scroll-momentum=off omanotch=off mac-clock=on camera=on battery=\(on(Mac.hasBattery)) external-brightness=\(on(bridge)) chromium-video=on idle-lock=on autologin=\(on(autologin)) thp-kernel=off"
         locationProblem = nil
         // A new VM goes into the VMs folder as it is now, under its name; the
         // folder is kept (a default that changes later must not hide the VM).

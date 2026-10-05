@@ -5,7 +5,7 @@
 #   omacvm enable FEATURE... [--vm NAME] [--yes]
 #   omacvm disable FEATURE... [--vm NAME] [--yes]
 # Features (src/features.tsv): bridge wallpaper gestures scroll-momentum omanotch
-# mac-clock camera battery external-brightness idle-lock autologin thp-kernel. A feature that needs another one brings it
+# mac-clock camera battery external-brightness chromium-video idle-lock autologin thp-kernel. A feature that needs another one brings it
 # along (enable scroll-momentum also enables gestures) or goes with it (disable bridge
 # also disables wallpaper). Changes go through omacvm apply: the Mac side
 # they need, then the VM. A stopped VM is started.

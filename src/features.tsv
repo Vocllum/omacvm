@@ -14,6 +14,7 @@ mac-clock	on	mac,vm	-	-	The Mac's clock	the clock at the far right of the bar, f
 camera	on	mac,vm	-	-	The Mac's camera	Linux apps and video calls in the browser see it as Mac Camera; it is on only while one of them uses it (UTM and VMware Fusion: through OmacVM Bridge, installed for it also with the Bridge off)
 battery	laptop	mac,vm	laptop,not-parallels	-	The Mac's battery	its charge and charging state in Omarchy's bar, as on a laptop (UTM, VMware Fusion, OmacVM.app; Parallels shows it itself)
 external-brightness	on	mac,vm	-	bridge	External display brightness	the brightness keys set the external display the VM is in front on, over DDC/CI (a Studio Display or Pro Display XDR as macOS does), and so do Omarchy's own brightness keys and monitor panel; the built-in display as before (OmacVM.app also in a window; Parallels, UTM and VMware Fusion in full screen)
+chromium-video	on	vm	app-only	-	Chromium video on the Mac	Arch Linux ARM's Chromium decodes H.264 and VP9 on the Mac's media engine, like Chrome and Brave do on their own (OmacVM.app)
 idle-lock	on	vm	-	-	Screensaver and lock	Omarchy's own, after idle in the VM (off: the Mac's lock protects the VM)
 autologin	off	vm	-	-	Autologin	straight into Omarchy, without its login screen
 thp-kernel	off	vm	slow	-	Memory-optimized kernel	Arch Linux ARM's kernel with transparent huge pages and MGLRU, for memory-heavy work (about 10 minutes per build and update)

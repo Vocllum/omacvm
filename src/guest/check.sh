@@ -78,6 +78,7 @@ THP_KERNEL=${OMACVM_FEATURE_thp_kernel:-}; AUTOLOGIN=${OMACVM_FEATURE_autologin:
 GLIDE=${OMACVM_FEATURE_scroll_momentum:-${OMACVM_FEATURE_glide:-off}}; OMANOTCH=${OMACVM_FEATURE_omanotch:-}
 MAC_CLOCK=${OMACVM_FEATURE_mac_clock:-off}; CAMERA=${OMACVM_FEATURE_camera:-off}; BATTERY=${OMACVM_FEATURE_battery:-off}
 EXT_BRIGHTNESS=${OMACVM_FEATURE_external_brightness:-off}
+CHROMIUM_VIDEO=${OMACVM_FEATURE_chromium_video:-on}
 
 section "Session ($TYPE VM, the Mac is $HOST)"
 if pgrep -u "$U" -x Hyprland >/dev/null; then ok "Hyprland" "running for $U"
@@ -346,6 +347,21 @@ app)
   if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
+  # Arch Linux ARM's Chromium decodes through V4L2 (omacvm-vdec + omacvm-vdecd).
+  if command -v chromium >/dev/null; then
+    s=$(cat /run/omacvm-vdec/status 2>/dev/null || true)
+    # A module built after it was loaded (an update while a video played): the old one serves until then.
+    pend=""; m=$(modinfo -F srcversion omacvm_vdec 2>/dev/null || true)
+    [[ -n $m && -e /sys/module/omacvm_vdec && $(cat /sys/module/omacvm_vdec/srcversion 2>/dev/null) != "$m" ]] &&
+      pend=" (an update waits: restart the VM)"
+    if [[ $CHROMIUM_VIDEO != on ]]; then skip "video decoding in Chromium" "off (omacvm enable chromium-video)"
+    elif [[ -z $v ]]; then skip "video decoding in Chromium" "no decoders on the Mac's side"
+    elif [[ ! -f /etc/systemd/system/omacvm-vdecd.service ]]; then bad "video decoding in Chromium" "not set up: omacvm apply"
+    elif [[ ! -e /dev/omacvm-vdec ]]; then bad "video decoding in Chromium" "no module for kernel $(uname -r) yet: omacvm apply, or reboot after an update"
+    elif ! systemctl is-active -q omacvm-vdecd || [[ -z $s ]]; then bad "video decoding in Chromium" "omacvm-vdecd not running (journalctl -u omacvm-vdecd)$pend"
+    elif ! as_user /usr/local/lib/omacvm/chromium-flags.py check; then bad "video decoding in Chromium" "AcceleratedVideoDecoder missing in Chromium's flags: omacvm apply"
+    else ok "video decoding in Chromium" "V4L2 -> the Mac's media engine: $s$pend"; fi
+  fi
   if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
     check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
       grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf

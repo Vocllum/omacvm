@@ -58,8 +58,8 @@ OmacVM's version.
   in Google Chrome (YouTube 4K at 60 fps, the VM's CPU nearly idle), VP9 in
   Brave, H.264 and VP9 in Firefox (AV1 not yet), H.264, VP9 and HEVC in mpv,
   FFmpeg and GStreamer apps. Omarchy's Chromium (Arch Linux ARM) is built
-  without VA-API and decodes on the CPU for now; a route for it (V4L2) is
-  planned. [How it works](../video-decode.md).
+  without VA-API: H.264 and VP9 (YouTube) go through a V4L2 decoder OmacVM
+  adds to the VM (feature `chromium-video`, on by default). [How it works](../video-decode.md).
 - A new frame goes to the window as soon as Omarchy finishes it, drawn off
   the main thread as an IOSurface (before, QEMU redrew the window on a 30 ms
   timer). GPU fences come back in about 0.2 ms instead of 1.5 ms, so light 3D
