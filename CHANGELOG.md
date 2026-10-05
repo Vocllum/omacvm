@@ -3,6 +3,18 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
+## 3.0.0 (unreleased)
+
+- A feature switched off is off on every route. Omanotch off left an
+  Omanotch that was still to be built at the next login, which then built
+  itself and kept connecting to the Mac; the Bridge, the wallpaper and
+  queued bar widgets or clock could come back the same way when nobody was
+  logged in. Now nothing of an off feature runs in the VM or connects to
+  the Mac, OmacVM.app gives a VM nothing of the Mac for its features that
+  are off (no Omanotch, Gestures or Bridge port, no battery or camera) from
+  its next start, and `omacvm check` says "off" for them, or fails when
+  something of them still runs.
+
 ## 2.9.0 (unreleased)
 
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one

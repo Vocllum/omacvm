@@ -112,6 +112,10 @@ takes about 10 minutes the first time). A feature that needs another brings it
 along: the scroll momentum needs the trackpad gestures, the wallpaper needs
 the Bridge.
 
+Off means off: nothing of the feature keeps running in the VM, the VM no
+longer talks to the Mac for it, OmacVM.app gives that VM nothing of the Mac
+for it from its next start, and `omacvm check` says "off".
+
 **Already have an Omarchy VM** you installed yourself from omarchy-mac?
 `omacvm apply --vm NAME` adds OmacVM to it. If OmacVM cannot get in yet, it
 prints the one command to run in the VM's terminal first (it lets OmacVM in
