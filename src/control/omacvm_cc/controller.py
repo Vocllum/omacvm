@@ -144,7 +144,7 @@ class Controller:
         mac_features = set(self.hello.features) if self.hello and self.hello.features else None
         return S.build_rows(self.local.features, self.local.on, vm_type=self.local.vm_type, avail=avail,
                             checks=checks, jobs=list(self.jobs.values()), installed=self.local.installed_parts(),
-                            offer=self.offer() if with_updates else {}, mac_features=mac_features)
+                            offer=self.offer(), mac_features=mac_features, show_updates=with_updates)
 
     # ---- jobs ----
     def _job(self, d: dict) -> S.Job:

@@ -275,7 +275,8 @@ def test_rolled_back_says_what_next(world):
             a.screen.query_one(DataTable).move_cursor(row=names.index("mac-clock"))
             await pilot.press("r")
             assert await settle(pilot, lambda: bool(a.last_result))
-            assert "Repair The Mac's clock" in a.last_result and "r tries again" in a.last_result
+            assert a.last_result == ("Repair The Mac's clock: failed, this VM went back to its features from before "
+                                     "(r tries again; ! reports the problem).")
             assert a.banner() == a.last_result
             body = [b for _, p, b in world.requests if p == "/omacvm/jobs"][-1]
             assert body == {"action": "reinstall", "features": ["mac-clock"]}

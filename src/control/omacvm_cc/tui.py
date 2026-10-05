@@ -648,17 +648,17 @@ class ControlCentre(App):
     def describe(self, action: str, features: list[str]) -> str:
         titles = {f.name: f.title for f in self.c.local.features}
         names = ", ".join(titles.get(n, n) for n in features)
-        return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names}: on",
-                "disable": f"{names}: off"}.get(action, action)
+        return {"update": "Update", "reinstall": f"Repair {names}", "enable": f"{names} on",
+                "disable": f"{names} off"}.get(action, action)
 
     def next_step(self, action: str, state: str) -> str:
         """What the person can do after a job that did not work."""
         again = {"enable": "space tries again", "disable": "space tries again", "reinstall": "r tries again",
                  "update": "u tries again"}.get(action, "")
         if state == "rolled-back":
-            what = ("this VM keeps its OmacVM" if action == "update" else "the features are as before")
-            return f"rolled back: {what}. {again}; ! reports the problem."
-        return f"On the Mac, omacvm apply puts this VM right; {again}; ! reports the problem."
+            what = "its OmacVM and features" if action == "update" else "its features"
+            return f"this VM went back to {what} from before ({again}; ! reports the problem)."
+        return f"on the Mac, omacvm apply puts this VM right ({again}; ! reports the problem)."
 
     def toggle(self, r: S.Row) -> None:
         if r.status is S.Status.UNAVAILABLE:
@@ -743,7 +743,7 @@ class ControlCentre(App):
                                 "omacvm status on the Mac shows it).")
             self.call_from_thread(self.ask_retry, action, features, self.last_result)
         else:
-            head = "failed and " if job.state == "rolled-back" else "failed: " + job.text + ". "
+            head = "failed, " if job.state == "rolled-back" else "failed: " + job.text.rstrip(".") + ". "
             self.last_result = f"{what}: {head}{self.next_step(action, job.state)}"
             self.call_from_thread(self.notify, self.last_result, severity="error", timeout=12)
         if action == "disable" and "control-centre" in features and job.state == "done":

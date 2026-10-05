@@ -172,3 +172,17 @@ def test_toggle_plain(features):
 def test_toggle_unknown_feature(features):
     with pytest.raises(KeyError):
         S.toggle_plan(features, {}, "rm -rf")
+
+
+def test_checks_off_hides_marks_but_not_a_running_update():
+    fs = S.parse_features_tsv(open(os.path.join(os.path.dirname(__file__), "..", "..", "features.tsv"), encoding="utf-8").read())
+    on = {f.name: True for f in fs}
+    offer = {"gestures": {"digest": "sha256:" + "c" * 64, "release": "2.9.1"}}
+    installed = {"gestures": {"digest": "sha256:" + "a" * 64}}
+    rows = {r.feature.name: r for r in S.build_rows(fs, on, checks=[], offer=offer, installed=installed, show_updates=False)}
+    assert not rows["gestures"].update
+    job = S.Job(id="1", action="update", features=(), state="running", step=5, of=6, text="the VM side")
+    rows = {r.feature.name: r for r in S.build_rows(fs, on, checks=[], offer=offer, installed=installed,
+                                                    jobs=[job], show_updates=False)}
+    assert rows["gestures"].status is S.Status.BUSY and rows["gestures"].note == "the VM side (5/6)"
+    assert not rows["gestures"].update and rows["bridge"].status is not S.Status.BUSY

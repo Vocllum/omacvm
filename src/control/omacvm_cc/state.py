@@ -196,9 +196,12 @@ def part_changed(name: str, installed: dict, offer: dict) -> bool:
 def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "",
                avail: dict[str, Avail] | None = None, checks: list[Check] | None = None,
                jobs: list[Job] | None = None, installed: dict | None = None,
-               offer: dict | None = None, mac_features: set[str] | None = None) -> list[Row]:
+               offer: dict | None = None, mac_features: set[str] | None = None,
+               show_updates: bool = True) -> list[Row]:
     """The features screen. mac_features: what the Mac's OmacVM knows (None:
-    not known); a feature it lacks is unavailable until the Mac is updated."""
+    not known); a feature it lacks is unavailable until the Mac is updated.
+    show_updates False (update checks off): no update marks, but an update
+    that runs still shows on the features it changes."""
     active = [j for j in (jobs or []) if j.active]
     rows = []
     for f in features:
@@ -211,7 +214,7 @@ def build_rows(features: list[Feature], on: dict[str, bool], *, vm_type: str = "
         mine = None if checks is None else [c for c in checks if c.feature == f.name]
         st, note = status_of(f, on.get(f.name, False), a, mine, job)
         rows.append(Row(feature=f, on=on.get(f.name, False), status=st, note=note,
-                        update=update, checks=tuple(mine or ())))
+                        update=update and show_updates, checks=tuple(mine or ())))
     return rows
 
 
