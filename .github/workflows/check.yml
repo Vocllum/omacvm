@@ -66,6 +66,10 @@ jobs:
       - name: Install dialog defaults (previous copy, Run Without Installing)
         run: src/tests/install-defaults.sh
 
+      - name: OmacVM.app update checks
+        working-directory: app/app
+        run: swift run update-tests
+
       - name: Mac helpers build (Gestures, Bridge)
         run: |
           src/gestures/mac/build.sh

@@ -346,6 +346,7 @@ struct ReadyView: View {
             if let p = state.config.filesProblem {
                 Text(p).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
+            UpdateSection(updater: Updater.shared)
             HStack {
                 Button("Delete…") { deleteVM() }
                     .disabled(state.storage.moving != nil)
@@ -410,6 +411,51 @@ struct ReadyView: View {
                 fastNetOn = now
                 fastNetStatus = text
             }
+        }
+    }
+}
+
+/// The self-update in the window: a ready update (never while update checks
+/// are off), what the last update did, and the weekly-check switch, shared
+/// with the control centre.
+struct UpdateSection: View {
+    @ObservedObject var updater: Updater
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Divider()
+            let banner = updater.enabled && updater.staged != nil
+            if banner, let s = updater.staged {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("\(Product.name) \(s.version) is ready", systemImage: "arrow.down.circle.fill")
+                        .font(.headline)
+                    Text(updater.installWhenIdle
+                         ? "You have \(updater.currentVersion). It goes in once the VM has shut down; your VMs are not changed."
+                         : "You have \(updater.currentVersion). \(Product.name) restarts with the new version; your VMs are not changed.")
+                        .font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        if let n = s.notes { Button("What's New") { NSWorkspace.shared.open(n) } }
+                        Button("Skip This Version") { updater.skip() }
+                        Spacer()
+                        if !updater.installWhenIdle { Button("Update and Relaunch") { updater.install() } }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            }
+            // While it waits for the VM the banner says so already.
+            if let n = updater.notice, !(banner && updater.installWhenIdle) {
+                Label(n, systemImage: "info.circle")
+                    .font(.callout).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Toggle("Check for updates once a week", isOn: Binding(get: { updater.enabled }, set: { updater.setEnabled($0) }))
+            Text("Off: no checks and no messages. The same switch as in OmacVM's control centre in Omarchy. \(Product.name) › Check for Updates… still works.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Divider()
         }
     }
 }

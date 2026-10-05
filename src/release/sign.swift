@@ -4,11 +4,14 @@
 //                                               prints the public key for src/lib/release-key.pub
 //   swift sign.swift sign PRIVATE_KEY_FILE FILE  prints FILE's signature (base64): FILE.sig
 //   swift sign.swift verify PUBLIC_KEY FILE SIG_FILE
+// PRIVATE_KEY_FILE "-" reads the key from stdin (from the Keychain, so it
+// never lands in a file: app/scripts/appcast.sh).
 import CryptoKit
 import Foundation
 
 func fail(_ s: String) -> Never { FileHandle.standardError.write(Data((s + "\n").utf8)); exit(2) }
 func read(_ p: String) -> Data {
+  if p == "-" { return FileHandle.standardInput.readDataToEndOfFile() }
   guard let d = try? Data(contentsOf: URL(fileURLWithPath: p)) else { fail("cannot read \(p)") }
   return d
 }

@@ -1,7 +1,9 @@
 #!/bin/bash
 # Zip dist/OmacVM.app for a GitHub release: dist/OmacVM-<version>.zip and its
-# .sha256, the version from src/VERSION. Upload both to the release v<version>;
-# omacvm build --vm-type app and omacvm update download them from there.
+# .sha256, the version from src/VERSION, then the app's update feed
+# (scripts/appcast.sh: OmacVM-appcast.json and .sig) once a release key
+# exists. Upload them all to the release v<version>; omacvm build --vm-type
+# app and omacvm update download the zip from there, installed apps the feed.
 #   scripts/package-release.sh   (after scripts/build-app.sh --release)
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -36,3 +38,11 @@ ditto -c -k --keepParent "$APP" "$ZIP"
 (cd "$ROOT/dist" && shasum -a 256 "$(basename "$ZIP")" > "$(basename "$ZIP").sha256")
 printf '==> %s (%s)\n' "$ZIP" "$(du -h "$ZIP" | cut -f1)"
 printf '==> %s\n' "$ZIP.sha256"
+
+# The update feed. Publish the release as a pre-release first and try its
+# zip; installed apps see it only once the release is marked latest.
+if [[ -f $REPO/src/lib/release-key.pub ]]; then
+  "$ROOT/scripts/appcast.sh"
+else
+  echo "==> no src/lib/release-key.pub yet: no update feed (apps do not check for updates until a release has one)"
+fi
