@@ -160,8 +160,8 @@ class FeaturesScreen(Screen):
     def redraw(self) -> None:
         app: ControlCentre = self.app  # type: ignore[assignment]
         rows = app.rows = app.c.rows()
-        t = self.table
-        if not t.columns:   # not mounted yet: on_mount draws
+        t = next(iter(self.query(DataTable)), None)
+        if t is None or not t.columns:   # not mounted yet (on_mount draws), or closing
             return
         keep = t.cursor_row
         # The note gets what is left: borders, padding, the other columns and their cell padding.
@@ -595,10 +595,11 @@ class ControlCentre(App):
         if any(r.status is S.Status.BUSY for r in self.rows):
             self.tick += 1
             s = self.screen
-            if isinstance(s, FeaturesScreen):
+            t = next(iter(s.query(DataTable)), None) if isinstance(s, FeaturesScreen) else None
+            if t is not None:   # none while the app closes
                 for r in self.rows:
                     if r.status is S.Status.BUSY:
-                        s.table.update_cell(r.feature.name, "st", status_cell(r, self.tick))
+                        t.update_cell(r.feature.name, "st", status_cell(r, self.tick))
 
     def subtitle(self) -> str:
         c = self.c

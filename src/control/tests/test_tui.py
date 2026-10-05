@@ -565,6 +565,7 @@ def test_same_version_switch_off_does_not_ask(world):
             _move_to(a, "camera")
             await pilot.press("space")
             assert await settle(pilot, lambda: any(p == "/omacvm/jobs" for _, p, _ in world.requests))
+            assert await settle(pilot, lambda: a.c.jobs and all(not j.active for j in a.c.jobs.values()))
     asyncio.run(go())
 
 
