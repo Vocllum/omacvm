@@ -7,7 +7,7 @@
 #                    [--vm-name-b64 NAME] [--only F,...] [--strict F,...|all]
 #                    (--vm-type app: OmacVM.app)
 # Features: the list in ../features.tsv (bridge, wallpaper, gestures, scroll-momentum,
-# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, control-centre) with its defaults; a feature
+# omanotch, mac-clock, camera, idle-lock, autologin, thp-kernel, battery, control-centre, fast-network) with its defaults; a feature
 # needing another one is off without it. Choices are kept in /etc/omacvm/env,
 # so a later run without --feature keeps them.
 # --vm-type defaults to what the hardware says (Parallels or QEMU = UTM);
@@ -116,6 +116,8 @@ case $TYPE in
 esac
 # Parallels gives the VM the Mac's battery itself.
 [[ $TYPE == parallels ]] && F[battery]=off
+# The fast network is OmacVM.app's (the other apps have vmnet themselves).
+[[ $TYPE == app ]] || F[fast-network]=off
 # Fusion: the public DNS from fusion/guest/install.sh goes again also when a
 # later step fails.
 [[ $TYPE == fusion ]] && FUSION_DNS=1
@@ -143,6 +145,13 @@ if system; then
   # Omarchy's firewall denies everything inbound; the Mac (Parallels' shared
   # network) may still reach SSH.
   ufw allow from "${HOST%.*}.0/24" to any port 22 proto tcp comment "omacvm: ssh from the Mac" >/dev/null 2>&1 || true
+  # OmacVM.app's fast network (vmnet): the Mac reaches SSH from 192.168.77.1
+  # (only the Mac: other VMs on that network do not).
+  if [[ ${F[fast-network]} == on ]]; then
+    ufw allow from 192.168.77.1 to any port 22 proto tcp comment "omacvm: ssh from the Mac (fast network)" >/dev/null 2>&1 || true
+  else
+    ufw delete allow from 192.168.77.1 to any port 22 proto tcp >/dev/null 2>&1 || true
+  fi
 else
   log "repair: $(tr , ' ' <<<"${ONLY:1:-1}")"
 fi
@@ -248,13 +257,14 @@ if system; then
   log "memory";     "$R/memory/guest/install.sh"
   log "keyboard";   "$R/keyboard/guest/install.sh" "$U" "$layout" "${variant:-}"
 fi
-# On UTM, VMware Fusion and OmacVM.app the gestures daemon also types Cmd
-# shortcuts as Super, so it stays.
+# Gestures off means the daemon is off on every route. It used to stay on UTM,
+# VMware Fusion and OmacVM.app for the Cmd shortcuts (keys-only), so a VM with
+# gestures off still connected to the Mac's Gestures.
 if ! want gestures && ! want scroll-momentum; then
   :
-elif [[ ${F[gestures]} == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
+elif [[ ${F[gestures]} == on ]]; then
   log "gestures";   "$R/gestures/guest/install.sh" "$U"
-elif systemctl is-enabled -q omacvm-gestures 2>/dev/null; then
+elif systemctl is-enabled -q omacvm-gestures 2>/dev/null || systemctl is-active -q omacvm-gestures 2>/dev/null; then
   log "gestures: off"; systemctl disable --now omacvm-gestures >/dev/null 2>&1 || true
 fi
 if ! want scroll-momentum; then

@@ -48,6 +48,11 @@ if [[ -z $IP ]]; then
   msg=$(sed 's/^omacvm: //' "$err"); rm -f "$err"
   (( rc == 0 )) || stop "$rc" "${msg:-no VM}"
   IFS=$'\t' read -r VM TYPE IP <<<"$r"
+  # An app VM whose fast network did not come up has no address: say why.
+  if [[ -z $IP && $TYPE == app ]] && d=$(app_dir "$VM") && app_running_dir "$d" &&
+     n=$(head -1 "$d/logs/network" 2>/dev/null) && [[ $n == vmnet-down* ]]; then
+    stop 1 "fast network: ${n#vmnet-down }"
+  fi
   [[ -n $IP ]] || stop 1 "'$VM' is not running (start it, or omacvm apply --vm \"$VM\" starts it)"
 fi
 if [[ -z $TYPE ]]; then
@@ -62,8 +67,10 @@ case $TYPE in
        [[ -n $IP ]] || IP=$(utm_ip "$VM" 10) || stop 1 "no IP for UTM VM '$VM' (is it running?)" ;;
   fusion) HOST=$(fusion_host)
           [[ -n $IP ]] || IP=$(fusion_ip "$VM" 10) || stop 1 "no IP for VMware Fusion VM '$VM' (is it running?)" ;;
-  app) HOST=127.0.0.1   # OmacVM.app: the VM reaches the Mac's 127.0.0.1 as 10.0.2.2
-       [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running" ;;
+  app) [[ -n $IP ]] || IP=$(app_ip "$VM") || stop 1 "OmacVM.app VM '$VM' is not running"
+       # OmacVM.app: QEMU's user network reaches the Mac's 127.0.0.1 as 10.0.2.2;
+       # on its fast network (vmnet) the Mac is 192.168.77.1.
+       if [[ $IP == 127.0.0.1:* ]]; then HOST=127.0.0.1; else HOST=192.168.77.1; fi ;;
   *) stop 2 "--vm-type parallels, utm, fusion or app" ;;
 esac
 export OMA_KEY=$KEY
@@ -106,6 +113,25 @@ if ! msg=$(vm_network_ok "$TYPE" "$IP" 2>&1); then
   (( JSON )) && json_out false
   exit 1
 fi
+# OmacVM.app on the fast network: 192.168.77.1 being up proves little (it
+# stays while any app VM uses it). The app must still say vmnet (it watches
+# the link the whole run), the VM's address must route to a Mac interface
+# with 192.168.77.1, and the VM must answer there.
+fast_net_down() {   # -> why, when the VM's fast network is not working
+  local d n ifc
+  d=$(app_dir "$VM" 2>/dev/null); n=$(head -1 "$d/logs/network" 2>/dev/null)
+  [[ $n == vmnet ]] || { echo "${n:-the app did not say which network it took}"; return 0; }
+  ifc=$(route -n get "$IP" 2>/dev/null | awk '/interface:/ { print $2 }')
+  [[ -n $ifc ]] && ifconfig "$ifc" 2>/dev/null | grep -q "inet 192.168.77.1 " ||
+    { echo "no Mac interface with 192.168.77.1 leads to the VM's $IP"; return 0; }
+  ping -c 1 -t 3 -q "$IP" >/dev/null 2>&1 || { echo "the VM does not answer at $IP"; return 0; }
+  return 1
+}
+if [[ $TYPE == app && $HOST == 192.168.77.1 ]] && why=$(fast_net_down); then
+  bad "VM network" "the fast network is not working: $why (omacvm-netd's log: /var/log/org.omacvm.netd.log)"
+  (( JSON )) && json_out false
+  exit 1
+fi
 if ! ifconfig | grep -q "inet $HOST "; then
   bad "VM network" "$HOST is not up on this Mac: start the VM, then run omacvm check again"
   (( JSON )) && json_out false
@@ -124,6 +150,36 @@ fi
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
 BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
+
+FEATURE=fast-network
+# OmacVM.app's fast network: the service on the Mac, and which network this
+# start of the VM took (the app writes it to logs/network).
+netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, as "; omacvm-netd: ..."
+  local l t
+  l=$(grep -E 'refused|failed|did not|kept failing|stopped' /var/log/org.omacvm.netd.log 2>/dev/null | tail -1)
+  t=$(date -j -f '%Y-%m-%d %H:%M:%S' "${l:0:19}" +%s 2>/dev/null) || return 0
+  (( $(date +%s) - t < 600 )) && printf '; %s' "$(cut -d' ' -f3- <<<"$l")"
+  return 0
+}
+if [[ $TYPE == app ]]; then
+  if [[ $(feat fast_network off) == on ]]; then
+    case $("$R/src/net/mac/install.sh" --status 2>/dev/null) in
+      ok) ok "fast network service" "omacvm-netd, for this OmacVM.app" ;;
+      old) bad "fast network service" "for another build of the app, or older: omacvm enable fast-network --vm \"$VM\"" ;;
+      down) bad "fast network service" "installed, but launchd does not run it: sudo launchctl bootstrap system /Library/LaunchDaemons/org.omacvm.netd.plist" ;;
+      stopped) bad "fast network service" "vmnet failed too often in a row, so omacvm-netd stopped trying (each failure costs macOS's vmnet service for good): restart the Mac, or omacvm enable fast-network --vm \"$VM\" again" ;;
+      *) bad "fast network service" "not installed: omacvm enable fast-network --vm \"$VM\"" ;;
+    esac
+    d=$(app_dir "$VM" 2>/dev/null); net=$(head -1 "$d/logs/network" 2>/dev/null)
+    case $net in
+      vmnet) ok "fast network" "on (vmnet), the VM is $IP" ;;
+      slirp\ fallback*) bad "fast network" "${net#slirp fallback: }$(netd_said)" ;;
+      slirp*) bad "fast network" "this start took QEMU's user network: ${net#slirp }" ;;
+      vmnet-down*) bad "fast network" "${net#vmnet-down }$(netd_said)" ;;
+      *) bad "fast network" "the app did not say which network it took (from before the fast network? omacvm update)" ;;
+    esac
+  else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
+fi
 
 FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
@@ -190,10 +246,10 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     skip "GPU contexts" "lost earlier in this run by: $lost (an app that draws nothing needs a restart; the shell: omarchy-restart-shell)"
   else ok "GPU contexts" "no VM app lost its GPU context in this run"; fi
 fi
-# Gestures runs keys-only when trackpad gestures were turned off; on UTM it
-# also types Cmd as Super, so it is needed there either way.
-[[ $GESTURES == on ]] && FEATURE=gestures || FEATURE=""   # UTM, Fusion, OmacVM.app: Cmd as Super without it
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
+FEATURE=gestures
+# With gestures off the VM's daemon is off too (also on UTM, Fusion and
+# OmacVM.app), so this VM needs no Gestures on the Mac.
+if [[ $GESTURES == on ]]; then
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"

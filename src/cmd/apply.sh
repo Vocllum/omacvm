@@ -172,7 +172,7 @@ if (( MAC )); then
     for h in ${NEED[@]+"${NEED[@]}"}; do args+=(--retry-app "$h"); done
   fi
   needs_bridge || args+=(--no-bridge)
-  { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; } || args+=(--skip-gestures)   # on UTM and Fusion it also types Cmd as Super
+  on gestures || args+=(--skip-gestures)
   [[ $TYPE == parallels ]] || args+=(--skip-clip)   # the VM -> Mac clipboard of Parallels' shared folder
   # Omanotch from src/omanotch. OmacVM.app too, as for the other routes (the
   # app's own notch-strip mode is a separate switch in the app, which apply
@@ -200,6 +200,11 @@ if (( MAC )); then
     die "the Mac side did not install (see above); the VM was not changed"
   fi
   rm -f "$MAC_FAILED"
+  # OmacVM.app's fast network: a system service (macOS asks for the password once).
+  if [[ $TYPE == app ]] && on fast-network; then
+    rc=0; "$R/src/net/mac/install.sh" || rc=$?
+    (( rc == 0 )) || { echo "omacvm apply: the fast network did not install (omacvm disable fast-network keeps QEMU's own network)" >&2; exit "$rc"; }
+  fi
   # Chrome in the guest gets no GPU with UTM's "Apple Core OpenGL" renderer.
   if [[ $TYPE == utm ]]; then
     case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
@@ -225,9 +230,9 @@ fi
 T=$BRIDGE_TOKEN
 # A Bridge installed a moment ago writes its token when it first starts.
 if (( MAC )) && needs_bridge; then for _ in $(seq 20); do [[ -f $T ]] && break; sleep 1; done; fi
-# The gestures daemon says it too (on UTM, Fusion and OmacVM.app it always
-# runs; OmacVM.app's VMs show it on 127.0.0.1 even without the Bridge).
-if (( TOKEN )) && { on gestures || [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; }; then bridge_token_ensure; fi
+# The gestures daemon says it too (OmacVM.app's VMs show it on 127.0.0.1 even
+# without the Bridge).
+if (( TOKEN )) && on gestures; then bridge_token_ensure; fi
 if (( ! TOKEN )); then
   :
 elif [[ -f $T ]]; then
@@ -357,6 +362,28 @@ step finish "finishing"
 # hid Omarchy's pointer and need the Mac's until they get this apply.
 if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   echo omarchy > "$d/guest-pointer"
+  # The fast network from the VM's next start: its own MAC address (the VMs
+  # share vmnet's network), kept in fast-network, which the app reads.
+  if on fast-network; then
+    [[ -s $d/fast-network ]] ||
+      printf 'mac=52:54:00:%02x:%02x:%02x\n' $((RANDOM % 256)) $((RANDOM % 256)) $((RANDOM % 256)) > "$d/fast-network"
+    [[ $(app_net "$d") == vmnet ]] || info "fast network: from the VM's next start (shut it down, then start it again)"
+  elif [[ -e $d/fast-network ]]; then
+    rm -f "$d/fast-network"
+    # The root service only while one of this user's app VMs has the fast
+    # network; without it a VM still running on it switches to the user
+    # network within seconds, else at its next start.
+    if (( MAC )) && ! app_any_fast_network; then
+      if "$R/src/net/mac/install.sh" --remove; then
+        [[ $(app_net "$d") == vmnet ]] && info "fast network: off (the running VM switches to QEMU's own network now)"
+      else
+        info "the fast network's service stays installed (omacvm uninstall, or src/net/mac/install.sh --remove, takes it off)"
+        [[ $(app_net "$d") == vmnet ]] && info "fast network: off from the VM's next start"
+      fi
+    elif [[ $(app_net "$d") == vmnet ]]; then
+      info "fast network: off from the VM's next start"
+    fi
+  fi
   # Its VA-API shim keeps AV1 to Chromium-based browsers (FFmpeg's AV1 cannot
   # go to the Mac's decoder): the app may offer AV1 to this VM.
   gssh "$IP" "test -x /usr/local/lib/dri/omacvm_drv_video.so" < /dev/null 2>/dev/null &&

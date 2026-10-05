@@ -44,6 +44,25 @@ ev_device() { grep -q "^N: Name=\"$1\"" /proc/bus/input/devices; }
 [[ -r /etc/omacvm/env ]] || { bad "OmacVM guest side" "not installed (run omacvm apply on the Mac)"; exit 1; }
 source /etc/omacvm/env
 HOST=$OMACVM_HOST; TYPE=$OMACVM_VM_TYPE
+# The VM's default gateway, as Gestures' default_gateway() picks it: the
+# lowest metric among default routes whose card has a link. After the app
+# switches networks the old card's route stays listed (first) for seconds.
+SYS_NET=/sys/class/net
+default_gateway() {
+  local m via dev c
+  ip -4 route show default 2>/dev/null |
+    awk '{ v = d = ""; m = 0
+           for (i = 1; i < NF; i++) { if ($i == "via") v = $(i + 1); if ($i == "dev") d = $(i + 1); if ($i == "metric") m = $(i + 1) }
+           if (v != "") print m, v, d }' |
+    while read -r m via dev; do
+      c=$(cat "$SYS_NET/$dev/carrier" 2>/dev/null) || c=1   # no carrier to read: count it
+      if [[ $c == 1 ]]; then echo "$m $via"; fi
+    done | sort -n | awk '{ print $2; exit }'
+}
+# OmacVM.app on its fast network (vmnet): the Mac is the gateway 192.168.77.1.
+GW=$(default_gateway)
+[[ $TYPE == app && $GW == 192.168.77.1 ]] && HOST=$GW
+FAST_NET=${OMACVM_FEATURE_fast_network:-off}
 # Features chosen at setup (VMs set up before the choices existed: the defaults
 # they were built with).
 BRIDGE=${OMACVM_FEATURE_bridge:-on}; WALLPAPER=${OMACVM_FEATURE_wallpaper:-on}
@@ -196,12 +215,14 @@ elif [[ $BATTERY == on ]]; then
 else skip "battery" "off (omacvm enable battery, on a MacBook)"; fi
 
 section "Trackpad and keyboard"
-[[ $GESTURES == on ]] && FEATURE=gestures || FEATURE=""   # on UTM, Fusion and OmacVM.app the daemon runs also without it
-if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then   # on UTM, Fusion and OmacVM.app the daemon also types Cmd as Super
+FEATURE=gestures
+if [[ $GESTURES == on ]]; then
   if systemctl is-active -q omacvm-gestures; then
     if connected_to "$HOST" 47830; then ok "gestures" "connected to the Mac"
     else bad "gestures" "service runs but is not connected to $HOST:47830"; fi
   else bad "gestures" "omacvm-gestures.service not running"; fi
+elif systemctl is-active -q omacvm-gestures; then
+  bad "gestures" "off, but omacvm-gestures.service runs and talks to the Mac: omacvm apply"
 fi
 FEATURE=gestures
 if [[ $GESTURES == on ]]; then
@@ -224,7 +245,9 @@ if [[ $GLIDE == on && $GESTURES == on ]]; then
 else skip "scroll momentum" "off (experimental, opt-in: omacvm enable scroll-momentum)"; fi
 FEATURE=""
 if [[ $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; then
-  check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
+  if [[ $GESTURES == on ]]; then
+    check "Cmd as Super" "OmacVM keyboard (Mac shortcuts)" ev_device "OmacVM keyboard (Mac shortcuts)"
+  else skip "Cmd as Super" "comes with trackpad gestures, which are off (omacvm enable gestures)"; fi
 fi
 check "Cmd+V paste" "Universal paste binding" grep -qs '"Universal paste"' "$H/.config/hypr/bindings.lua"
 kb=$(as_user hyprctl getoption input:kb_layout -j 2>/dev/null | jq -r '.str // empty' 2>/dev/null)
@@ -261,6 +284,14 @@ app)
   section "OmacVM.app"
   check "display follows the window" "omacvm-display-sync" pgrep -u "$U" -f omacvm-display-sync
   check "QEMU guest agent" "clean shutdown fallback" systemctl is-active -q qemu-guest-agent
+  # Fast network (vmnet through omacvm-netd on the Mac), else QEMU's user network.
+  if [[ $GW == 192.168.77.1 ]]; then
+    a=$(ip -4 -o addr show scope global 2>/dev/null | awk '{ print $4; exit }')
+    if [[ $FAST_NET == on ]]; then ok "fast network" "vmnet, ${a%/*}"
+    else bad "fast network" "the VM is on vmnet, but the feature is off here: omacvm enable fast-network"; fi
+  elif [[ $FAST_NET == on ]]; then
+    bad "fast network" "on, but the VM got QEMU's user network (the app says why: omacvm check on the Mac)"
+  else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
   check "power key" "Quit on the Mac shuts down" test -f /etc/systemd/logind.conf.d/90-omacvm-app-power.conf
   if user_active omacvm-clipboard.service; then ok "clipboard" "both ways (omacvm-clipboard)"
   else bad "clipboard" "omacvm-clipboard.service not running (the app passes the port: started from OmacVM.app?)"; fi
@@ -294,15 +325,25 @@ app)
   esac
   # Video decoding on the Mac's media engine (an app with it lists decoders).
   drv=virtio_gpu; [[ -f /usr/local/lib/dri/omacvm_drv_video.so ]] && drv=omacvm
-  v=$(as_user env LIBVA_DRIVER_NAME=$drv LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri \
-      vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' | tr '\n' ' ')
-  if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v"
+  # The shim prints the Mac's per-VM limit (past it, players decode on the CPU).
+  va=$(as_user env LIBVA_DRIVER_NAME=$drv LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri \
+      OMACVM_VA_DEBUG=1 vainfo --display drm 2>&1)
+  v=$(sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointVLD$/\1/p' <<<"$va" | tr '\n' ' ')
+  lim=$(sed -n 's/^omacvm_drv_video: the Mac keeps at most \([1-9][0-9]*\) decoders.*/\1/p' <<<"$va" | head -1)
+  if [[ -n $v ]]; then ok "video decoding" "the Mac's media engine: $v${lim:+(at most $lim at once, more decode on the CPU)}"
   elif ! command -v vainfo >/dev/null; then skip "video decoding" "no vainfo (omacvm apply installs it)"
   else skip "video decoding" "no decoders (OmacVM.app older than the video decoding?)"; fi
   if [[ $drv == omacvm ]] && command -v firefox >/dev/null; then
     check "video decoding in Firefox" "the driver shim is on ld.so's path (Firefox's sandbox)" \
       grep -qx /usr/local/lib/dri /etc/ld.so.conf.d/omacvm-video.conf
-  fi ;;
+  fi
+  e=$(as_user env LIBVA_DRIVER_NAME=$drv LIBVA_DRIVERS_PATH=/usr/local/lib/dri:/usr/lib/dri \
+      vainfo --display drm 2>/dev/null | sed -n 's/^[[:space:]]*VAProfile\([A-Za-z0-9]*\)[[:space:]]*:[[:space:]]*VAEntrypointEncSlice$/\1/p' | tr '\n' ' ')
+  if [[ -n $e ]]; then
+    ok "video encoding" "the Mac's media engine: $e"
+    check "WebRTC encoding" "Chrome, Brave: VA-API encoder features in their flags (omacvm apply)" \
+      python3 /usr/local/share/omacvm/app/guest/browser-video-encode.py "$U" check
+  elif command -v vainfo >/dev/null; then skip "video encoding" "none offered (OmacVM.app older than the video encoding?)"; fi ;;
 fusion)
   section "VMware Fusion"
   check "graphics driver" "vmwgfx" test -d /sys/module/vmwgfx
