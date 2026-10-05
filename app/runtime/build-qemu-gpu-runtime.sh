@@ -615,6 +615,10 @@ verify_file_sha "QEMU virgl 2D resources as screens" \
 patch -d "$source_dir" -p1 -f -i "$virgl_2d_scanout_patch"
 grep -q 'args.bind = (1 << 1) | (1 << 18);' "$source_dir/hw/display/virtio-gpu-virgl.c" || \
   die "virgl_cmd_create_resource_2d does not make 2D resources as screens"
+# macOS's own shortcuts go to the VM while it has the keyboard (and its logic's test).
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-shortcuts-logic.patch"
+patch -d "$source_dir" -p1 -f -i "$native_dir/patches/omacvm-cocoa-system-shortcuts.patch"
+"$native_dir/Tests/keys/test-shortcuts.sh"
 
 virgl_root="$dependency_root/virglrenderer/$virgl_version"
 angle_root="$dependency_root/angle/$angle_version"

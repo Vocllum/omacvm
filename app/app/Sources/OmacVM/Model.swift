@@ -330,6 +330,11 @@ enum Mac {
 
 /// The launcher's own preferences.
 enum Settings {
+    /// macOS's own shortcuts (screenshots, Mission Control, Spotlight,
+    /// Cmd+Tab ...) stay with macOS even while the VM has the keyboard.
+    /// Off: they all go to the VM then (only the escape combo is macOS's).
+    /// Hidden: defaults write org.omacvm.app macShortcuts -bool true
+    static var macShortcuts: Bool { UserDefaults.standard.bool(forKey: "macShortcuts") }
     static var startFullScreen: Bool {
         get { UserDefaults.standard.object(forKey: "startFullScreen") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "startFullScreen") }
