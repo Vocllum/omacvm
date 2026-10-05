@@ -22,6 +22,9 @@ OmacVM's version.
 
 `omacvm update` replaces an older OmacVM.app with the one for its version
 (not while the app is open), and keeps the name it was installed under.
+The app also updates itself, once a week unless switched off, never while a
+VM runs, and goes back by itself when a new version does not start
+([app README](../../app/README.md#updates)).
 
 ## What works
 
