@@ -111,7 +111,7 @@ fi
 # What was chosen at setup for this VM (defaults for VMs from before the choices).
 envf=$(gssh "$IP" cat /etc/omacvm/env 2>/dev/null)
 feat() { local v; v=$(sed -n "s/^OMACVM_FEATURE_$1=//p" <<<"$envf" | tail -1); echo "${v:-${2:-on}}"; }
-BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum off)
+BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "$(feat glide off)")
 
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
@@ -171,6 +171,14 @@ if [[ $GESTURES == on || $TYPE == utm || $TYPE == fusion || $TYPE == app ]]; the
   if running org.omacvm.gestures; then
     a=$(listeners 47830)
     [[ " $a " == *" $HOST "* ]] && ok "Gestures" "listening on $a" || bad "Gestures" "not listening on $HOST (only: ${a:-nothing})"
+    # A VM last updated with OmacVM 2.3 or older: its daemon has no token, so
+    # Gestures refuses it (and it tries again every 2 s) until it is updated.
+    if [[ $TYPE != app ]]; then
+      r=$(grep -nF "omacvm-gestures: refused ${IP%:*} on " "$L/omacvm-gestures.log" 2>/dev/null | grep -F ": no token" | tail -1 | cut -d: -f1)
+      c=$(grep -nF "omacvm-gestures: guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1 | cut -d: -f1)
+      (( ${r:-0} > ${c:-0} )) &&
+        bad "Gestures for this VM" "refused: its trackpad daemon is from OmacVM 2.3 or older (omacvm update --vm \"$VM\")"
+    fi
     keysonly=$(launchctl print "gui/$(id -u)/org.omacvm.gestures" 2>/dev/null | grep -c -- '--keys-only')
     if [[ $GESTURES == on && $keysonly != 0 ]]; then
       bad "trackpad gestures" "OmacVM Gestures runs keys-only on this Mac: src/mac/install.sh turns gestures back on"
@@ -242,7 +250,7 @@ parallels)
     || skip "Cmd+C/V/X as Super" "Parallels turns them into Ctrl: quit Parallels Desktop, run src/mac/parallels-shortcuts.sh" human ;;
 utm)
   [[ $(defaults read com.utmapp.UTM QEMUVulkanDriver 2>/dev/null) == 1 ]] && ok "UTM speed settings" "no Vulkan driver (fast page size)" \
-    || bad "UTM speed settings" "QEMUVulkanDriver is not 1 (build.sh sets it; restart UTM after)"
+    || bad "UTM speed settings" "QEMUVulkanDriver is not 1: omacvm build sets it, or run defaults write com.utmapp.UTM QEMUVulkanDriver -int 1; restart UTM after"
   case $(defaults read com.utmapp.UTM QEMURendererBackend 2>/dev/null || echo 0) in
     0|2) ok "UTM renderer" "ANGLE on Metal (GPU in Chrome)" ;;
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;

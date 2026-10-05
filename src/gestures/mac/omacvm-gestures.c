@@ -805,7 +805,10 @@ static void *greet(void *arg) {
     base64Name(name64, name, sizeof name);
     addClient(c, g.net, ip, gestures, glide, name);
   } else {
-    static char lastIp[32]; static time_t lastLog;   // a refused daemon retries every 2 s
+    // A refused daemon tries again every 2 s; only the log line is throttled.
+    // Keeping its socket open instead would not save anything: a daemon from
+    // 2.3 or older then polls it every 2 ms. omacvm check tells the user.
+    static char lastIp[32]; static time_t lastLog;
     pthread_mutex_lock(&sendLock);
     if (strcmp(lastIp, ip) || time(NULL) - lastLog >= 60) {
       logf_("refused %s on %s: %s", ip, addr, why);
@@ -895,12 +898,13 @@ int main(int argc, char **argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "-v")) verbose = 1;
     else if (!strcmp(argv[i], "--keys-only")) trackpad = 0;
-    else if (!strcmp(argv[i], "--scroll")) ;   // test flag of the Glide experiment: Glide is per VM now
     else if (!strcmp(argv[i], "--record")) {
       char path[1024]; snprintf(path, sizeof path, "%s/Library/Logs/omacvm-input.tsv", getenv("HOME"));
       rec = fopen(path, "a");
       if (rec) setvbuf(rec, NULL, _IOLBF, 0);
     }
+    // A wrong option is not worth a launchd restart loop: say it and go on.
+    else logf_("unknown option %s, ignored", argv[i]);
   }
   signal(SIGPIPE, SIG_IGN);
 
