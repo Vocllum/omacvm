@@ -242,8 +242,11 @@ static void input_drop(struct inst *in)
 	in->nin = 0;
 }
 
+static void finish(struct inst *in, bool deliver);
+
 static void decoder_close(struct inst *in)
 {
+	finish(in, true);	/* conversions still read the decoder's surfaces */
 	frames_drop(in);
 	src_flush(in);
 	avcodec_free_context(&in->cc);
@@ -308,8 +311,6 @@ static void receive_all(struct inst *in)
 }
 
 /* ---- CAPTURE buffers ------------------------------------------------------------ */
-
-static void finish(struct inst *in, bool deliver);
 
 static void cap_free(struct inst *in)
 {
