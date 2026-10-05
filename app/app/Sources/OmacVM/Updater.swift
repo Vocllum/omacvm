@@ -135,12 +135,20 @@ final class Updater: ObservableObject {
 
     // MARK: - start
 
+    /// An install asked for in an earlier run that had to wait (a VM ran):
+    /// at launch it goes in now, waits until nothing runs from the app (the
+    /// launch starts a VM), or is left to --update-now.
+    enum Pending { case installNow, waitUntilIdle, leave }
+
     /// At launch, after the one-launcher-at-a-time check.
-    func start() {
+    func start(pending: Pending) {
         trimLog()
         readSwapResult()
         if publicKey != nil, notice == nil { tellWriteProblemOnce() }
-        Task { await loadStaged() }
+        Task {
+            await loadStaged()
+            resumePending(pending)
+        }
         // Not right away: a VM start or the first window comes first.
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in self?.checkIfDue() }
         timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -318,6 +326,7 @@ final class Updater: ObservableObject {
 
     func skip() {
         guard let s = staged else { return }
+        stopWaiting()
         skipped = s.version
         try? FileManager.default.removeItem(at: stagedRoot)
         staged = nil
@@ -326,9 +335,50 @@ final class Updater: ObservableObject {
 
     // MARK: - install and go back
 
-    /// Asked to install while a VM runs: done once it has shut down
-    /// (AppDelegate calls install again then).
+    /// Asked to install while a VM runs: done once nothing runs from the app.
+    /// Checked when this launcher's VM ends (any exit status), every 30 s
+    /// while the app is open (a VM started by the CLI, or by a launcher that
+    /// crashed, has no runner here) and at the next launch (the request is
+    /// kept in the defaults: updateInstallPending).
     @Published private(set) var installWhenIdle = false
+    private var idleTimer: Timer?
+    private var swapping = false
+
+    private var pendingInstall: String? {
+        get { UserDefaults.standard.string(forKey: "updateInstallPending") }
+        set { UserDefaults.standard.set(newValue, forKey: "updateInstallPending") }
+    }
+
+    private func waitUntilIdle(_ version: String) {
+        installWhenIdle = true
+        pendingInstall = version
+        guard idleTimer == nil else { return }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.installWhenIdle, self.busyNow == nil else { return }
+                self.log("nothing runs from the app any more")
+                self.install()
+            }
+        }
+    }
+
+    private func stopWaiting() {
+        installWhenIdle = false
+        pendingInstall = nil
+        idleTimer?.invalidate()
+        idleTimer = nil
+    }
+
+    private func resumePending(_ mode: Pending) {
+        guard mode != .leave, let v = pendingInstall else { return }
+        guard let s = staged, s.version == v else {
+            log("the install of \(v) asked for earlier: no longer ready, dropped")
+            pendingInstall = nil
+            return
+        }
+        log("the install of \(v) asked for earlier: \(mode == .installNow ? "now" : "once nothing runs from the app")")
+        if mode == .installNow { install() } else { waitUntilIdle(v) }
+    }
 
     /// A VM that runs from this app (or is being built): not now.
     var busyNow: String? {
@@ -340,14 +390,15 @@ final class Updater: ObservableObject {
     /// Installs the staged update, or once the VM has shut down when one
     /// runs. quit false: the caller quits by itself.
     func install(quit: Bool = true) {
-        guard let s = staged else { installWhenIdle = false; return }
+        guard !swapping else { return }
+        guard let s = staged else { stopWaiting(); return }
         if let why = busyNow {
-            installWhenIdle = true
+            waitUntilIdle(s.version)
             notice = "\(why): \(Product.name) \(s.version) is installed once it has stopped."
             log("install \(s.version) deferred: \(why)")
             return
         }
-        installWhenIdle = false
+        stopWaiting()
         if let why = unavailableReason { notice = why; return }
         guard let v = Version(s.version), (try? Updater.verifyApp(s.app, id: bundleID, version: v)) != nil else {
             notice = "The downloaded update no longer checks out: it was removed. The next check downloads it again."
@@ -377,12 +428,17 @@ final class Updater: ObservableObject {
 
     /// --update-now (scripts, tests): check as if asked by hand and install
     /// what is found: now, or once the VM has shut down. Shows nothing;
-    /// update.log says what happened.
+    /// update.log says what happened. A hidden launcher started just for
+    /// this does not stay to wait: the request is kept for the next launch.
     func runScripted(quitWhenDone: Bool) async {
         let outcome = await check(manual: true)
         log("--update-now: \(outcome)")
         if case .ready = outcome { install() }
-        if quitWhenDone && !installWhenIdle { NSApp.terminate(nil) }
+        guard quitWhenDone else { return }
+        if installWhenIdle {
+            log("--update-now: not waiting hidden; the install goes in at the next launch once nothing runs from the app")
+        }
+        NSApp.terminate(nil)
     }
 
     private func rename(_ app: URL, to name: String) throws {
@@ -428,6 +484,7 @@ final class Updater: ObservableObject {
             self.log("swap: \(error.localizedDescription)")
             return
         }
+        swapping = true
         log("\(mode): handing over to update-swap.sh, quitting")
         if quit { NSApp.terminate(nil) }
     }

@@ -76,7 +76,8 @@ The app updates itself ([ADR 0033](../docs/adr/0033-app-self-update.md)):
   Skip This Version, Update and Relaunch. *OmacVM › Check for Updates…* asks
   right away.
 - Nothing is replaced while a VM runs from the app: the update waits until
-  the VM is shut down.
+  nothing runs from it any more (after a shutdown or a crash, or at the next
+  start of the app).
 - The new version must start (its QEMU too) within a minute, or the old one
   comes back by itself and that version is skipped. The previous version is
   kept for one step back: *OmacVM › Go Back to <version>…*.

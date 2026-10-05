@@ -68,16 +68,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return nil }
             if self.runner?.isRunning == true { return "The VM runs" }
             if self.state.screen == .building { return "A VM is being built" }
+            if self.quitting { return "Quitting" }
             return nil
         }
-        Updater.shared.start()
+        let starting = state.config.isReady && args.contains("--start")
+        Updater.shared.start(pending: args.contains("--update-now") || args.contains("--update-check") ? .leave
+                             : starting ? .waitUntilIdle : .installNow)
         buildMenu()
         // Scripted update: --update-now (no window; update.log says what happened).
         if args.contains("--update-now") {
             Task { await Updater.shared.runScripted(quitWhenDone: true) }
             return
         }
-        if state.config.isReady && CommandLine.arguments.contains("--start") {
+        if starting {
             startVM()
         } else {
             showWindow()
@@ -171,6 +174,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSApp.terminate(nil)
             } else {
                 self.state.message = "The VM stopped unexpectedly (QEMU exit \(status)). Log: \(self.state.config.folder.path)/logs/qemu.log"
+                // A waiting update goes in after a crash too (if a QEMU of
+                // this app still runs, it keeps waiting).
+                if Updater.shared.installWhenIdle { Updater.shared.install() }
                 self.showWindow()
             }
         }

@@ -75,7 +75,11 @@ Skip This Version and Update and Relaunch. With checks off nothing is shown.
 While a VM runs the launcher has no window: the offer waits for the next
 time the window opens. An update asked for while a VM runs or is being
 built (`--update-now`, a script or later the control centre) waits and goes
-in when the VM has shut down.
+in once nothing runs from the app: when the launcher's VM ends (shut down or
+crashed), on a check every 30 s while the launcher is open (a VM started by
+the CLI, or by a launcher that crashed, has no runner to report its end), and
+at the next launch (the request is kept). A hidden `--update-now` launcher
+does not stay behind to wait.
 
 **Swap and rollback.** `update-swap.sh` runs from a copy outside the bundle
 (bash reads scripts as it runs). It waits for the app to quit, refuses while

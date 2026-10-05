@@ -6,10 +6,11 @@
 #   OMACVM_SIGN_ID=<Developer ID> scripts/build-app.sh --name "OmacVM SU-test" --id org.omacvm.sutest
 #   OMACVM_SIGN_ID=<Developer ID> scripts/dev/self-update-test.sh dist/"OmacVM SU-test.app" WORK
 # Versions made from the build (copied, version changed, signed again):
-# 2.7.0 installed, 2.7.1 good, 2.7.2 without a QEMU library, 2.7.3 whose
-# launcher exits at once. Tests: weekly schedule, silence switch, update
-# held back while a VM runs and applied after, rollback of both broken
-# builds, the one step back, a renamed copy. Exit 0 when all pass.
+# 2.7.0 installed, 2.7.1, 2.7.4 and 2.7.5 good, 2.7.2 without a QEMU
+# library, 2.7.3 whose launcher exits at once. Tests: weekly schedule,
+# silence switch, update held back while a VM runs and applied after (shut
+# down, crash, a QEMU without its launcher, next launch), rollback of both
+# broken builds, the one step back, a renamed copy. Exit 0 when all pass.
 # check() evals its condition: variables used there look unused.
 # shellcheck disable=SC2034
 set -uo pipefail
@@ -77,16 +78,16 @@ make_version() {   # VERSION -> $WORK/v/VERSION/NAME.app
   mkdir -p "$d"; ditto "$SRC" "$d/$NAME.app"
   /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $1" -c "Set :CFBundleVersion $1" "$d/$NAME.app/Contents/Info.plist"
 }
-for v in 2.7.0 2.7.1 2.7.2 2.7.3; do make_version $v; done
+for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do make_version $v; done
 # 2.7.2: QEMU misses a library (dyld stops it).
 rm "$WORK/v/2.7.2/$NAME.app/Contents/Resources/runtime/lib/libvirglrenderer.1.dylib"
 # 2.7.3: a launcher that exits at once.
 printf 'int main(void) { return 3; }\n' > "$WORK/v/exit3.c"
 cc -o "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM" "$WORK/v/exit3.c"
 codesign --force --sign "$SIGN_ID" --options runtime --timestamp=none "$WORK/v/2.7.3/$NAME.app/Contents/MacOS/OmacVM"
-for v in 2.7.0 2.7.1 2.7.2 2.7.3; do resign "$WORK/v/$v/$NAME.app" || die "signing $v"; done
+for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do resign "$WORK/v/$v/$NAME.app" || die "signing $v"; done
 DEVID='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = "722686Y34B"'
-for v in 2.7.0 2.7.1 2.7.2 2.7.3; do
+for v in 2.7.0 2.7.1 2.7.2 2.7.3 2.7.4 2.7.5; do
   check "$v is signed with the Developer ID" 'codesign --verify --deep --strict -R="$DEVID" "$WORK/v/$v/$NAME.app" 2>/dev/null'
 done
 ditto "$WORK/v/2.7.0/$NAME.app" "$APP"
@@ -179,13 +180,17 @@ check "still 2.7.0 while the VM runs" '[[ $(version "$APP") == 2.7.0 ]]'
 check "the VM still runs" 'pgrep -f "$APP/Contents/Resources/runtime/bin/OmacVM" >/dev/null'
 # Shut the VM down (QMP quit: QEMU ends with 0, as after a guest power-off).
 QMP=$(getconf DARWIN_USER_TEMP_DIR)omacvm/$(printf '%s' "$VM" | shasum | cut -c1-8).qmp
-python3 - "$QMP" <<'EOF'
+qmp_quit() {
+  python3 - "$QMP" <<'EOF'
 import json, socket, sys, time
 s = socket.socket(socket.AF_UNIX); s.connect(sys.argv[1]); f = s.makefile('rw')
 f.readline()
 for c in ("qmp_capabilities", "quit"):
     f.write(json.dumps({"execute": c}) + "\n"); f.flush(); time.sleep(0.3)
 EOF
+}
+qemu_runs() { pgrep -f "$APP/Contents/Resources/runtime/bin/OmacVM" >/dev/null; }
+qmp_quit
 check "after the VM stopped: 2.7.1 in place" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.1 ]]"'
 check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.0 2.7.1\" \"\$UPD/update.log\""'
 check "2.7.0 kept for one step back" '[[ $(version "$UPD/previous/$NAME.app") == 2.7.0 ]]'
@@ -248,6 +253,40 @@ check "its signature is valid" 'codesign --verify --deep --strict "$REN" 2>/dev/
 check "its QEMU keeps the Developer ID" 'codesign --verify -R="$DEVID" "$REN/Contents/Resources/runtime/bin/OmacVM" 2>/dev/null'
 check "it started (no rollback)" 'wait_swaps && [[ $(version "$REN") == 2.7.1 ]] && [[ -n $(launcher_pid "$REN") ]]'
 quit_app "$REN"; logtail
+
+# ---- 8. a waiting update after a crash of the VM ----
+log "8. update held back, then the VM's QEMU crashes: 2.7.4 goes in"
+publish 2.7.4
+start_app "$APP" --start --vm SU-test-vm
+check "the test VM runs" 'wait_for 20 qemu_runs'
+start_app "$APP" --update-now
+check "update asked for: held back" 'wait_for 30 "grep -q \"install 2.7.4 deferred\" \"\$UPD/update.log\""'
+pkill -9 -f "$APP/Contents/Resources/runtime/bin/OmacVM"
+check "after the crash: 2.7.4 in place" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.4 ]]"'
+check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.0 2.7.4\" \"\$UPD/update.log\""'
+check "2.7.4 runs" 'wait_for 10 "[[ -n \$(launcher_pid \"\$APP\") ]]"'
+quit_app "$APP"; logtail
+
+# ---- 9. a QEMU without its launcher; the next launch ----
+log "9. QEMU runs without the app's runner: --update-now does not stay hidden; the next launch waits, then installs"
+publish 2.7.5
+start_app "$APP" --start --vm SU-test-vm
+check "the test VM runs" 'wait_for 20 qemu_runs'
+kill -9 "$(launcher_pid "$APP")"; sleep 2
+check "its launcher gone, QEMU still runs" '[[ -z $(launcher_pid "$APP") ]] && qemu_runs'
+start_app "$APP" --update-now
+check "update asked for: held back (QEMU from the bundle)" 'wait_for 30 "grep -q \"install 2.7.5 deferred\" \"\$UPD/update.log\""'
+check "the hidden --update-now launcher quits" 'wait_for 20 "[[ -z \$(launcher_pid \"\$APP\") ]]"'
+check "the request is kept" '[[ $(defaults read $ID updateInstallPending 2>/dev/null) == 2.7.5 ]]'
+check "still 2.7.4" '[[ $(version "$APP") == 2.7.4 ]]'
+start_app "$APP"
+check "next launch: the kept request waits (QEMU runs)" 'wait_for 30 "[[ \$(grep -c \"install 2.7.5 deferred\" \"\$UPD/update.log\") -ge 2 ]]"'
+check "still 2.7.4 while QEMU runs" '[[ $(version "$APP") == 2.7.4 ]]'
+qmp_quit
+check "QEMU stopped: 2.7.5 in place (the app checks every 30 s)" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.5 ]]"'
+check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.4 2.7.5\" \"\$UPD/update.log\""'
+check "the request is cleared" 'wait_swaps && ! defaults read $ID updateInstallPending >/dev/null 2>&1'
+quit_app "$APP"; logtail
 
 log "the installed OmacVM and the shared settings untouched"
 check "fingerprint unchanged" '[[ $(fingerprint) == "$FP_BEFORE" ]]'
