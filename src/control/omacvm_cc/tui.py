@@ -32,8 +32,8 @@ from .local import log_tail
 LOST_AFTER = 120
 # A VM the Mac does not list yet (it just started, or the Bridge did): the
 # Mac looks at its VMs again in the background (for an unknown address at
-# most once a minute), so ask again a while.
-UNKNOWN_TRIES, UNKNOWN_WAIT = 15, 5.0
+# most once a minute, and a run can take a while), so ask again for 100 s.
+UNKNOWN_TRIES, UNKNOWN_WAIT = 20, 5.0
 
 THEME = Theme(
     name="omacvm-ansi", ansi=True, dark=True,
