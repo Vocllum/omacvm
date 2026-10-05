@@ -98,7 +98,7 @@ publish() {   # VERSION: the feed offers it
   rm -f "$FEED"/*.zip
   ditto -c -k --keepParent "$WORK/v/$1/$NAME.app" "$z"
   cat > "$FEED/OmacVM-appcast.json" <<EOF
-{"schema": 1, "version": "$1", "url": "http://127.0.0.1:$PORT/$(basename "$z" | sed 's/ /%20/g')",
+{"schema": 1, "kind": "app-feed", "version": "$1", "url": "http://127.0.0.1:$PORT/$(basename "$z" | sed 's/ /%20/g')",
  "length": $(stat -f %z "$z"), "sha256": "$(shasum -a 256 "$z" | cut -d' ' -f1)", "minimum_macos": "15.0"}
 EOF
   swift "$SIGN" sign "$WORK/test-key" "$FEED/OmacVM-appcast.json" > "$FEED/OmacVM-appcast.json.sig"

@@ -43,6 +43,7 @@ SHA=$(shasum -a 256 "$ZIP" | awk '{ print $1 }')
 cat > "$FEED" <<EOF
 {
   "schema": 1,
+  "kind": "app-feed",
   "version": "$VERSION",
   "url": "$URL",
   "length": $LENGTH,

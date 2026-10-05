@@ -44,8 +44,8 @@ lives inside the bundle; releases are not notarized yet.
 
 Option 2.
 
-**Feed.** Each GitHub release gets `OmacVM-appcast.json` (version, zip URL,
-length, SHA-256, minimum macOS, notes URL) and `OmacVM-appcast.json.sig`
+**Feed.** Each GitHub release gets `OmacVM-appcast.json` (`"kind":
+"app-feed"`, version, zip URL, length, SHA-256, minimum macOS, notes URL) and `OmacVM-appcast.json.sig`
 (Ed25519 over the exact bytes, base64), made by `app/scripts/appcast.sh`
 from `package-release.sh`. The app fetches both from
 `releases/latest/download/` and checks the signature with CryptoKit against
@@ -101,7 +101,9 @@ becomes required from the version that adds it: a constant in the app, never
 a field in the feed.
 
 **Release key** (proposal for both feeds, needs-user): one Ed25519 key for the
-app feed and the control centre's manifest. The private half only on the
+app feed and the control centre's manifest. Both are `{"schema": 1, ...}`
+JSON, so each carries a required `kind` (`app-feed`, `control-manifest`) and
+each parser refuses the other's: a signed manifest never passes as a feed. The private half only on the
 user's Mac, in the login Keychain (`org.omacvm.release-key`), plus one offline
 backup; the release step signs locally, where the Developer ID already lives.
 Not a GitHub Actions secret: anyone who can change a workflow could then sign

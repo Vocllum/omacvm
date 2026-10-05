@@ -37,7 +37,7 @@ let key = Curve25519.Signing.PrivateKey()
 let pub = key.publicKey.rawRepresentation.base64EncodedString()
 let sha = String(repeating: "ab", count: 32)
 func feed(_ fields: [String: Any]) -> Data {
-    var o: [String: Any] = ["schema": 1, "version": "2.9.1", "url": "https://github.com/gillesgoetsch/omacvm/releases/download/v2.9.1/OmacVM-2.9.1.zip",
+    var o: [String: Any] = ["schema": 1, "kind": "app-feed", "version": "2.9.1", "url": "https://github.com/gillesgoetsch/omacvm/releases/download/v2.9.1/OmacVM-2.9.1.zip",
                             "length": 61_234_567, "sha256": sha, "minimum_macos": "15.0",
                             "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1"]
     for (k, val) in fields { o[k] = val is NSNull ? nil : val }
@@ -59,7 +59,8 @@ expect(Appcast.verified(feed: good, signature: sign(good), publicKey: "") == .fa
 let big = Data(repeating: 0x20, count: Appcast.maxFeedBytes + 1)
 expect(Appcast.verified(feed: big, signature: sign(big), publicKey: pub) == .failure(.tooLarge), "oversized feed: refused")
 let bad: [(String, [String: Any])] = [
-    ("schema 2", ["schema": 2]), ("version with a suffix", ["version": "2.9.1-rc1"]),
+    ("schema 2", ["schema": 2]), ("no kind", ["kind": NSNull()]), ("the control centre's manifest", ["kind": "control-manifest"]),
+    ("kind as a number", ["kind": 1]), ("version with a suffix", ["version": "2.9.1-rc1"]),
     ("length as a bool", ["length": true]), ("negative length", ["length": -1]), ("fractional length", ["length": 1.5]),
     ("length over 2 GB", ["length": Int64(3) << 30]), ("upper-case digest", ["sha256": sha.uppercased()]),
     ("short digest", ["sha256": "abc"]), ("http to another host", ["url": "http://example.com/OmacVM.zip"]),

@@ -6,11 +6,14 @@ import Foundation
 /// bytes, base64; docs/adr/0033). Nothing in it is used before the signature
 /// checks out.
 ///
-///     {"schema": 1, "version": "2.9.1",
+///     {"schema": 1, "kind": "app-feed", "version": "2.9.1",
 ///      "url": "https://github.com/gillesgoetsch/omacvm/releases/download/v2.9.1/OmacVM-2.9.1.zip",
 ///      "length": 123456789, "sha256": "<64 hex>", "minimum_macos": "15.0",
 ///      "notes_url": "https://github.com/gillesgoetsch/omacvm/releases/tag/v2.9.1",
 ///      "date": "2026-10-20T12:00:00Z"}
+///
+/// "kind" is required: the same release key signs the control centre's
+/// manifest ("kind": "control-manifest"), and neither may pass for the other.
 public struct Appcast: Equatable, Sendable {
     public var version: Version
     public var url: URL
@@ -19,6 +22,7 @@ public struct Appcast: Equatable, Sendable {
     public var minimumMacOS: Version?
     public var notesURL: URL?
 
+    public static let kind = "app-feed"
     public static let maxFeedBytes = 64 * 1024
     public static let maxSignatureBytes = 1024
     /// More than any OmacVM.app zip will be (about 60 MB now).
@@ -55,6 +59,7 @@ public struct Appcast: Equatable, Sendable {
             return .failure(.malformed("not a JSON object"))
         }
         guard let schema = integer(o["schema"]), schema == 1 else { return .failure(.malformed("schema")) }
+        guard o["kind"] as? String == kind else { return .failure(.malformed("kind")) }
         guard let vs = o["version"] as? String, let version = Version(vs) else { return .failure(.malformed("version")) }
         guard let us = o["url"] as? String, let url = URL(string: us), isAllowedDownload(url) else {
             return .failure(.malformed("url"))
