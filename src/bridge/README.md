@@ -30,7 +30,8 @@ private `IOBluetoothPreferenceSetControllerPowerState` and
 | Permission | For | Grant / revoke |
 |---|---|---|
 | Location Services | macOS only shows Wi-Fi names to apps with it; no location is read | prompt on first start; System Settings › Privacy & Security › Location Services |
-| Accessibility | the event tap that takes the media keys while the VM is full screen | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
+| Accessibility | the event tap that takes the media keys while a VM is in front (logged as `permissions: ...`, shown by `omacvm check`) | prompt on first start; Privacy & Security › Accessibility, or `tccutil reset Accessibility org.omacvm.bridge` |
+| Input Monitoring | the brightness keys read from the keyboard while an OmacVM.app VM is in front (`mac/hid-keys.swift`; on macOS 27 they reach no event tap) | Privacy & Security › Input Monitoring |
 | Bluetooth | connecting, disconnecting, forgetting and switching from the VM (without it the devices are listed read-only, from macOS's system report) | prompt on first start; Privacy & Security › Bluetooth |
 | Camera | the Mac's camera for UTM and VMware Fusion VMs (`GET /camera`) | prompt the first time a Linux app in such a VM uses the camera; Privacy & Security › Camera |
 
@@ -385,21 +386,53 @@ off from the VM keeps the API reachable (tested), so it can switch it back on.
 
 ## Media keys
 
-While **Parallels, UTM or VMware Fusion is frontmost with the VM covering a whole display**, volume
+While **a VM is in front** (an OmacVM.app VM, full screen or in a window;
+Parallels, UTM or VMware Fusion with the VM covering a whole display), volume
 up/down/mute, display brightness and keyboard-light keys are swallowed (no
 macOS popup), applied on the Mac in macOS's 1/16 steps (Shift+Option: 1/64),
-and shown by Omarchy's own OSD in the VM. Anything else, or any key while the
-VM is not full screen, passes through untouched. Switch it off in the
-menu-bar icon or with `"capture_keys": false`.
+and shown by Omarchy's own OSD in the VM. Which key goes where is one tested
+rule, `MediaRoute` in `mac/keys-model.swift` (`mac/test-models.sh`):
+
+- volume and mute on an output without a software volume (an audio interface
+  such as a Scarlett 2i2: `outputVolumeSettable` false) go into an OmacVM.app
+  VM as its own keys (XF86AudioRaiseVolume & co.: the VM's volume with
+  Omarchy's popup), never to macOS's greyed-out panel;
+- play/pause, next and previous (also an Apple keyboard's track keys) go into
+  an OmacVM.app VM (XF86AudioPlay & co.: Omarchy's playerctl), not to macOS's
+  Now Playing;
+- keys go into the VM through QEMU's control socket (QMP `input-send-event`,
+  `mac/vm-keys.swift`): the socket on the VM's QEMU command line, this user's
+  own. A busy socket (OmacVM.app holds it while the Mac sleeps), a paused VM or
+  a refusal hands the key back to macOS. `mac/test-vm-keys.sh` types every key
+  into a real, headless QEMU;
+- a key the Bridge cannot use goes to macOS, and the log says once why
+  (`media key ...: to macOS: ...`).
+
+The tap sits at the HID level (`.cghidEventTap`): on macOS 27 the volume keys
+reach no session-level tap. The brightness keys reach no tap at all there,
+so the Bridge also reads them from the keyboard (`mac/hid-keys.swift`,
+IOHIDManager, never seized: macOS still gets every key; Input Monitoring).
+Apple keyboards send F1/F2; the keyboard's own `FnFunctionUsageMap`
+(IORegistry) and macOS's "standard function keys" setting say when they
+are brightness. Other keyboards' consumer-page brightness keys count too.
+They act only while an OmacVM.app VM is in front, by the same rule; a press
+that also came through the tap acts once, and a display macOS already
+changed itself is not stepped again. Tests: `mac/test-models.sh`,
+`mac/test-hid.sh` (made-up keyboards, and this Mac's own maps read only).
+
+Anything else, or any key while no VM is in front, passes through untouched.
+Switch it off in the menu-bar icon or with `"capture_keys": false`.
 
 With the VM in front on an external display, the display brightness keys
 set that display instead (see External displays): OmacVM.app's VMs also in a
 window, Parallels, UTM and Fusion in full screen; 16 steps (Option: 64),
 read from the display first, writes at most every 50 ms (the latest level),
 never waiting in the key path; Omarchy's popup shows the level (not the
-display's name). A display
-without DDC/CI keeps the keys as before (the Mac's built-in display, in full
-screen). `"external_brightness": false` in `config.json` switches it off.
+display's name). A Mac mini
+whose only display macOS dims itself (LG UltraFine, Studio Display) has it set
+also while the display is not looked at yet (the Bridge's own DisplayServices
+call). A display without DDC/CI keeps the keys as before (the Mac's built-in
+display, in full screen), and the log says once why. `"external_brightness": false` in `config.json` switches it off.
 
 The keyboard light has four more steps below macOS's lowest (1/16): 0.001,
 0.01, 0.02 and 0.04 (`KeyboardSteps` in `mac/keylight.swift`). Measured on a

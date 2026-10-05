@@ -63,7 +63,7 @@ src/tests/mac-install.sh
 src/tests/prebuilt-manifest.sh && src/tests/prebuilt-routes.sh
 src/net/mac/test.sh
 src/gestures/mac/test.sh
-src/bridge/mac/test-models.sh
+src/bridge/mac/test-models.sh && src/bridge/mac/test-hid.sh
 src/tests/app-paths.sh
 app/runtime/Tests/display/test-pointer-guard.sh
 src/tests/app-notch.sh

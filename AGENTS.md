@@ -90,8 +90,8 @@ UTM, or choose their password: hand those over, never work around them.
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
-     is experimental and off by default: offer
-     it, do not decide it.
+     is experimental and on by default; it only ever takes a trackpad's
+     scrolling (mice scroll one to one), so a Mac with only mice is unaffected.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
      (same major version, up to this one; for OmacVM.app only when the
      installed app has `scripts/prebuilt-vm.sh`); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
@@ -210,8 +210,9 @@ GitHub.
 | `src/lib/sign.sh` | Signs Mac apps with `designated => identifier "<id>"`, so TCC grants survive rebuilds |
 | `src/control/` | Feature `control-centre` (docs/adr/0030-0032): `omacvm` in the VM, a Textual TUI (`omacvm_cc/tui.py`; `state.py` = the pure status rules, `controller.py` = data, `bridge.py` = the client with the Bridge's proof, `report.py` + `collect.py` = report a problem with redaction and a gate, also run by the Mac's `omacvm report` with macOS's python3 3.9). `omacvm status [--json]`, `omacvm report`, `omacvm notify` (user timer: one notice per new version unless update checks are off). Guest install (`guest/install.sh`): `python-textual`, `/usr/local/bin/omacvm`, root socket `omacvm-check.socket` (runs `guest/check.sh --tsv` for the desktop user, nothing read from the caller), desktop entry, a marked row in `~/.config/omarchy/extensions/omarchy-menu.jsonc`, bar plugin `plugins/omacvm.control`. Tests: `tests/` (pytest + Textual Pilot against `tests/fakes.py`), `tests/vm_e2e.py` drives the real TUI in a test VM |
 | `src/release/` | Update manifests (ADR 0032): `parts.tsv` (files → parts, first match wins, `core` last), `manifest.py digests|build|parts`, `sign.swift keygen|sign|verify` (Ed25519). `omacvm apply` writes the digests it installed to the VM's `/etc/omacvm/installed.json`. Release key: `src/lib/release-key.pub` (not there yet: the Bridge says "no release key"; tests use `OMACVM_FEED_URL` + `OMACVM_FEED_KEY` in the Bridge's environment) |
+| `src/lib/helpers.sh` | OmacVM.app's prebuilt Bridge and Gestures (`Contents/Helpers`, Developer ID; `app/scripts/build-app.sh` builds and signs them): `src/mac/install.sh` installs them (`install.sh --prebuilt`) when built from the same sources, else builds; `src/tests/prebuilt-helpers.sh` |
 | `src/bridge/` | OmacVM Bridge: `mac/*.swift` (OmacVMBridge.app), `guest/` (client, shared event stream, OSD follower, nightlight and Wi-Fi QR command replacements), `plugins/omacvm.{wifi,audio,wifiqr,nightshift}`. External display brightness (feature `external-brightness`): `mac/external-brightness.swift` (DDC/CI over IOAVService, Apple displays over DisplayServices, found per display at run time; one serial queue, coalesced writes), `mac/external-model.swift` (steps, DDC packets, which display; `mac/test.sh` offline, `--live` on this Mac's displays, always restoring), `/display/external*` in the API, `guest/omacvm-ddcutil` as `/usr/local/bin/ddcutil` in the VM so Omarchy's own DDC path asks the Bridge (`src/tests/external-brightness.sh`). Night light: the Mac's Night Shift only; the guest install hides Omarchy's NightLight indicator (`items` of `omarchy.indicators` in `shell.json`, original kept in `~/.local/state/omacvm/nightlight-indicator`, restored with bridge=off) and stops `hyprsunset`. `mac/control_policy.swift` + `control.swift`: the control centre's fixed request list under `/omacvm/` (ADR 0031; the VM is worked out from the peer address via `omacvm vms --json` and proves itself by signing each request with its own key, which never leaves it, jobs run the CLI named in `~/Library/Application Support/omacvm/cli` (written only by the installed checkout, `cli_for_bridge` in `src/lib/mac.sh`: a worktree that runs `src/mac/install.sh` does not take it over; `OMACVM_SET_CLI=1` forces it) with posix_spawn, own session, responsibility disclaimed so macOS's Local Network privacy lets its ssh through; job files in `omacvm-bridge/jobs/`); `mac/tests/run.sh` tests the policy |
-| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥⌘ Esc brings back the app from before the VM, and in macOS the last full-screen VM; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
+| `src/gestures/` | OmacVM Gestures: `mac/omacvm-gestures.c` (MultitouchSupport + event tap, created again when an OmacVM VM comes to the front; ⌃⌥⌘ Esc swipes the display under the pointer out of the VM (a synthesized Dock swipe; `EscapeSwipe` = `all` in `org.omacvm.gestures`: every display), and back; falls back to the app switch, then to hiding the VM app; `mac/test-escape.c` tests it against a made-up world of displays and Spaces; also hides the Mac's pointer over the full-screen VM; offline tests `mac/test.sh`), `guest/omacvm-gestures` (uinput touchpad; Glide), `guest/glide.sh` + `guest/omacvm_glide.lua` (Glide's Hyprland settings and Chromium flag). The scroll momentum's tuning history: `docs/experiments/trackpad-scrolling.md`, analysis scripts in `docs/experiments/scroll-analysis/` |
 | `src/display/` | Parallels: `parallels-dynres` + `monitors.lua`. `mac-display.swift`: the built-in display below the notch, for UTM |
 | `src/utm/` | UTM guest specifics: guest tools, virtio-gpu environment, fixed display mode |
 | `src/app/guest/` | OmacVM.app's VM side: `omacvm-display-sync` (each output follows its Mac window or display: mode, scale by EDID, position from the Mac's arrangement; Omarchy's zoom only for Virtual-1), `omacvm-displays` (user service on virtio port `org.omacvm.display`: hello and the switch to QEMU, the arrangement from it, Hyprland's outputs back for the pointer; `external on\|off\|toggle`, `status`), `monitor-widget/` (bar widget `omacvm.monitor` = Omarchy's display panel built from the installed Omarchy plus MAC DISPLAYS "Use external displays"; rebuilt by the agent after an Omarchy update), clipboard, guest agent, notch strip |
@@ -272,9 +273,37 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   (the exact name first, else the longest name in the title); without a match
   (older daemons, a VM renamed since its last `omacvm apply`) to every VM of
   that app. The helper captures the trackpad only when those VMs all want it,
-  and the scroll momentum (macOS's continuous scroll events dropped,
-  `A`/`W`/`P` sent, every two-finger frame forwarded) only when they all want
-  that.
+  and the scroll momentum (a trackpad's scroll events dropped, `A`/`W`/`P`
+  sent, every two-finger frame forwarded) only when they all want that.
+  Which scroll is a trackpad's: `mac/scroll-model.h`, per event (phases and
+  momentum of a scroll made while a trackpad has two fingers on it); wheel
+  mice, smooth-scrolling mice and a Magic Mouse always pass to the VM app.
+- OmacVM.app's keyboard: while QEMU's window has the keyboard (full grab, app
+  active, window key) macOS's global shortcuts are off
+  (CGSSetGlobalHotKeyOperatingMode, `omacvm-cocoa-system-shortcuts.patch`;
+  logic in `omacvm-cocoa-shortcuts-logic.patch`, tested against macOS's whole
+  list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
+  `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
+  connection (macOS restores it when QEMU dies); a watchdog thread turns it
+  on after 2 s without the main thread. Off by default since RC11 (not
+  always handed back on the Mac mini): `macShortcuts` (org.omacvm.app,
+  default true) → `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS; false
+  turns the switch on. Gestures' tap still takes ⌃⌥⌘ Esc first; the Bridge
+  still routes media keys.
+- Escape combo (Gestures): every way out of a full-screen VM ends in
+  `verifyOut` (front app not the VM, its full-screen window not on the
+  pointer's display); still in → AXFullScreen false + hide, and the next
+  combo restores full screen (`restoreFull`). An OmacVM.app window with the
+  keyboard: the combo gives it to the app from before / Finder
+  (`COMBO_WINDOW_OUT`), again in macOS brings the window back.
+- Bridge media keys: the tap is at `.cghidEventTap` (macOS 27 sends volume
+  only there). Brightness keys reach no tap on macOS 27: `hid-keys.swift`
+  reads them with IOHIDManager (not seized; Input Monitoring): F1/F2 through
+  the keyboard's own `FnFunctionUsageMap` (IORegistry) and
+  `com.apple.keyboard.fnState`, or the consumer/Apple brightness usages;
+  acted on only with an OmacVM.app VM in front (`MediaRoute`), deduplicated
+  against the tap (`BrightnessOnce`), and not stepped again when macOS
+  changed the display itself.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
@@ -433,7 +462,7 @@ The less obvious ones, with causes and where the fix lives, are in
 | Updated widget does not change | a running shell keeps loaded plugins | `src/lib/install-plugin.sh` flags changes; `src/guest/install.sh` runs `omarchy-restart-shell` |
 | Disabling an old clone brings the stock widget back next to the new one | `clonedFrom` hand-back | rename ids in `shell.json` instead, or disable the stock widget |
 | SSIDs null, `location_authorized: false` | Location Services not granted (new bundle id or reset) | Privacy & Security › Location Services |
-| Media keys still show the macOS popup | Accessibility missing, VM not full screen, or capture switched off in the bridge menu | `media keys:` lines in the bridge log |
+| Media keys still show the macOS popup | Accessibility missing (`permissions:` line, `omacvm check`), no VM in front (Parallels/UTM/Fusion: not full screen), or capture switched off in the bridge menu | `media keys:` / `media key ...: to macOS:` lines in the bridge log |
 | Build stops right after the Omarchy install | Omarchy enables ufw; new SSH connections from the Mac are refused | `src/vm/omarchy-install.sh` adds the rule while its own session is open |
 | `ERROR: problem running` from ufw | rule stored but not applicable live right after the install | ignored on purpose; verified with `ufw show added` |
 | UTM desktop blank after a resolution change | virgl under UTM cannot switch modes live | fixed mode in `monitors.lua`, reboot to change it |

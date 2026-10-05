@@ -174,10 +174,81 @@ in more words.
   user network. Not tested yet: a MacBook, VPNs, sleep and wake, Wi-Fi
   changes, several VMs at once, Omanotch over it.
 - ⌃⌥⌘ Esc in the full-screen VM now takes you straight back to macOS: the
-  app you were in before comes to the front with its Space, no swipe needed
-  (a mouse is enough). Pressed in macOS it takes you back into the VM, full
-  screen, with the trackpad and keys. Before, it only handed the trackpad
+  monitor under the pointer swipes to the Space beside the VM's, with
+  macOS's own animation, and the keyboard follows the pointer's monitor (no
+  trackpad needed, a mouse is enough). Pressed there again it swipes back
+  into the VM, full screen, with the trackpad and keys. OmacVM.app's
+  "Escape combo" setting swipes all monitors instead (other routes:
+  `defaults write org.omacvm.gestures EscapeSwipe all`). If the swipe cannot
+  be made or does not land, the app you were in before comes to the front
+  instead, and if macOS refuses that too, the VM's app is hidden: the
+  keyboard is never stuck in the VM. Before, it only handed the trackpad
   back. OmacVM.app, Parallels, UTM and VMware Fusion.
+- Media keys with an OmacVM.app VM in front, full screen or in a window:
+  volume and mute set the Mac's output; when it has no software volume (an
+  audio interface such as a Focusrite Scarlett), they set the VM's own
+  volume with Omarchy's popup instead of macOS's greyed-out panel.
+  Play/pause, next and previous go to the VM's players, not macOS's Now
+  Playing. The keys reach the VM through QEMU's control socket; if that is
+  busy, the key goes to macOS.
+- Brightness keys on a Mac mini with one Apple-style display (LG UltraFine,
+  Studio Display) set that display with the VM in front, full screen or in a
+  window. A key the Bridge cannot use goes to macOS, and the Bridge's log
+  says once why.
+- OmacVM.app, experimental and off by default: every key combination goes
+  to the VM while it has the keyboard (full screen, or its window in front):
+  macOS's own shortcuts are switched off meanwhile, so screenshots (⌘⇧3/4/5 and the ⌃ variants),
+  Mission Control, App Exposé, Show Desktop (F11, ⌘F11), Launchpad,
+  ⌃-arrows, Spotlight (⌘Space), input sources (⌃Space), ⌘Tab, ⌘\`, ⌘Q/H/M/W
+  and F-keys with any modifier reach Omarchy. The top-row keys macOS knows by
+  their own code (Mission Control, Spotlight, Dictation, Do Not Disturb)
+  arrive as F3-F6. Only ⌃⌥⌘ Esc stays macOS's, and the media keys keep
+  their rules (volume and brightness: the Mac's, else the VM's; play, next,
+  previous: the VM's). Checked against macOS's whole list (405 shortcuts,
+  each typed into a real QEMU). macOS turns its shortcuts back on by itself
+  when the VM's app quits or crashes, and OmacVM turns them on if the VM's
+  window stops answering. On a Mac mini the switch was not always handed
+  back (macOS's brightness keys then stopped working in macOS), so by
+  default macOS keeps its shortcuts, as before. To try it:
+  `defaults write org.omacvm.app macShortcuts -bool false` and a VM restart.
+- ⌃⌥⌘ Esc always gets you out of the full-screen VM: after the swipe (or
+  the app switch) OmacVM Gestures checks that the VM is no longer in front
+  and its Space no longer shows. If it still is (on a Mac mini the swipe did
+  nothing and Finder came to the front without a window), the VM's window
+  leaves full screen and its app is hidden. ⌃⌥⌘ Esc in macOS then brings it
+  back in full screen.
+- ⌃⌥⌘ Esc in an OmacVM.app window gives the keyboard back to macOS (the app
+  you were in before, else Finder); pressed again in macOS, the window comes
+  back with the keyboard.
+- Brightness keys with an OmacVM.app VM in front work on macOS 27 too: there
+  they reach no app at all, so OmacVM Bridge reads them from the keyboard
+  (Input Monitoring; macOS still gets every key) and sets the display the VM
+  is on. With no VM in front macOS handles them as always. The volume keys
+  are taken at the keyboard level now (on macOS 27 they did not reach the
+  Bridge before).
+- Scroll momentum only ever takes a trackpad's scrolling (the built-in one,
+  a Magic Trackpad, also one connected later), decided per scroll: wheel
+  mice, smooth-scrolling mice (Logitech MX and co.) and a Magic Mouse scroll
+  one to one through the VM app again, with nothing added after the wheel
+  stops (before, a smooth-scrolling mouse could jump on after it stopped).
+  So it is now on by default: on a Mac with only mice it does nothing.
+- ⌃⌥⌘ Esc on a Mac with only the desktop and the VM's Space (a Mac mini):
+  a swipe that bounces at the edge is tried the other way once, and the way
+  that works is kept, so the swipe works from the first press. "Swipe all
+  monitors" swipes each display (the pointer visits it and comes back).
+- OmacVM Bridge: Wi-Fi shows connected while the Mac is, also before
+  Location Services is allowed for the Bridge (or when it is not): the
+  interface's link decides then, the network's name stays hidden.
+- OmacVM.app's `apply-vm.sh` takes `--reset-host-key` for a reinstalled VM.
+- OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
+  OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
+  these copies (nothing is compiled on the Mac), and macOS keeps their
+  Accessibility and Input Monitoring permissions across updates. macOS asks
+  once more after the first signed install. A source checkout without the
+  app, or of another version, builds them as before. Both helpers log which
+  permission is missing, and `omacvm check` shows it.
+- OmacVM.app opens the VM's window on the display you are using (under the
+  pointer, else the one with the active menu bar) and gives it the keyboard.
 - After OmacVM.app was restarted, ⌃⌥⌘ Esc and the media keys could stop
   working until the Mac's helpers were restarted: the new VM's own key tap
   sat ahead of theirs. They now take the front place again whenever an

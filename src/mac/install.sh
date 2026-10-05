@@ -49,14 +49,21 @@ mkdir -p "$HOME/.local/share/omacvm/clip" "$STAMPS"
 # Up to 2.7, Gestures kept its list of VMs without a token here; nothing reads it now.
 rm -f ~/Library/Application\ Support/omacvm/gestures-legacy{,.new}
 
-# install_app NAME LAUNCHD_LABEL DIR [ARGS...]: DIR/install.sh unless the same
-# sources and options are already installed and running.
+# install_app NAME LAUNCHD_LABEL DIR [BUNDLE [ARGS...]]: DIR/install.sh unless
+# the same sources and options are already installed and running. BUNDLE
+# (OmacVMBridge.app, OmacVMGestures.app): installed from OmacVM.app's signed
+# copy when the app has one built from these sources (lib/helpers.sh).
 install_app() {
-  local name=$1 label=$2 dir=$3; shift 3
-  local sum
+  local name=$1 label=$2 dir=$3 bundle=${4:-}; shift 3; (( $# )) && shift
+  local sum pre="" before
+  [[ -n $bundle ]] && pre=$(helpers_prebuilt "$R" "$dir" "$bundle")
   # Paths relative to src/, so another copy of the same OmacVM matches too.
-  sum=$( { cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
-           sort -z | xargs -0 shasum; echo "args: $*"; } | shasum | cut -c1-16)
+  # The prebuilt copy's signature counts too: from built here to the app's
+  # signed copy is a change.
+  sum=$( { (cd "$R" && find "$dir" icon lib/sign.sh -type f -not -path '*/build/*' -not -name .DS_Store -print0 |
+            sort -z | xargs -0 shasum); echo "args: $*"
+           if [[ -n $pre ]]; then echo "prebuilt: $(shasum "$pre/Contents/_CodeSignature/CodeResources" "$pre"/Contents/MacOS/* | cut -c1-40)"; fi
+         } | shasum | cut -c1-16)
   if (( ! FORCE )) && [[ $FORCE_APPS != *"|$name|"* ]]; then
     if [[ $(cat "$STAMPS/$name" 2>/dev/null) == "$sum" ]] && launchctl print "gui/$(id -u)/$label" >/dev/null 2>&1; then
       (( QUIET )) || echo "$name: up to date"
@@ -68,23 +75,34 @@ install_app() {
       return 0
     fi
   fi
-  printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m\n' "$name"
+  printf '\033[1;32m==>\033[0m \033[1m%s on the Mac\033[0m%s\n' "$name" "${pre:+ (signed, from OmacVM.app)}"
+  [[ -n $bundle ]] && before=$(helpers_team "$HOME/Applications/$bundle")
   # Each app's install.sh builds before it replaces anything: one that fails
   # leaves the installed one running.
-  if ! "$R/$dir/install.sh" "$@"; then
+  local ok=1
+  if [[ -n $pre ]]; then "$R/$dir/install.sh" --prebuilt "$pre" "$@" || ok=0; else "$R/$dir/install.sh" "$@" || ok=0; fi
+  if (( ! ok )); then
     echo "$sum" > "$STAMPS/$name.failed"
     FAILED+=("$name")
     printf '\033[1;31merror:\033[0m %s did not build or install (see above); when only the build failed, the one installed before keeps running\n' "$name" >&2
     return 0
   fi
   rm -f "$STAMPS/$name.failed"
-  # No stamp yet: a first install, which macOS asks permissions for.
-  [[ -e $STAMPS/$name ]] || INSTALLED+=("$name")
+  # No stamp yet: a first install, which macOS asks permissions for. Another
+  # signature (built here -> OmacVM's Developer ID) is new to macOS too: it
+  # asks once more, then keeps the grants across updates.
+  if [[ ! -e $STAMPS/$name ]]; then INSTALLED+=("$name")
+  elif [[ -n $bundle && -n $before && $before != "$(helpers_team "$HOME/Applications/$bundle")" ]]; then
+    INSTALLED+=("$name"); RESIGNED=1
+  fi
   echo "$sum" > "$STAMPS/$name"
 }
 INSTALLED=()   # installed for the first time (an update keeps the permissions)
+RESIGNED=0     # one now has another signature (the app's signed copy)
 FAILED=()      # did not build or install
 source "$R/lib/mac.sh"
+source "$R/lib/app.sh"
+source "$R/lib/helpers.sh"
 # The omacvm the Bridge runs for the control centre's requests (control.swift
 # checks it belongs to this user and nobody else can write it): only the
 # installed checkout (cli_for_bridge).
@@ -95,12 +113,12 @@ fi
 # The token first: a Bridge starting without one makes its own, and two at
 # once could end up with the file holding another token than the Bridge.
 (( BRIDGE || GESTURES != -1 )) && bridge_token_ensure
-(( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac
+(( BRIDGE )) && install_app "OmacVM Bridge" org.omacvm.bridge bridge/mac OmacVMBridge.app
 # Gestures lets a VM in only when its daemon proves it knows the Bridge's
 # token (made here when the Bridge is not installed).
 case $GESTURES in
-  1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac ;;
-  0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac --keys-only ;;
+  1) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac OmacVMGestures.app ;;
+  0) install_app "OmacVM Gestures" org.omacvm.gestures gestures/mac OmacVMGestures.app --keys-only ;;
 esac
 (( CLIP )) && install_app "OmacVM clipboard" org.omacvm.clip-in clipboard/mac
 # Omanotch's own installer (it builds the app and starts it at login).
@@ -108,6 +126,7 @@ esac
 # The permissions macOS asks for now, once per app (they stay with later updates).
 if [[ " ${INSTALLED[*]:-} " == *" OmacVM Gestures "* || " ${INSTALLED[*]:-} " == *" OmacVM Bridge "* ]]; then
   printf '\n  \033[1mmacOS asks for permissions now (once): please allow them.\033[0m\n'
+  (( RESIGNED )) && printf '  (The helpers are now signed with OmacVM'"'"'s Developer ID: macOS asks once more, then keeps\n   the permissions across updates. An older "OmacVM Bridge"/"OmacVM Gestures" entry there can go: select it, -.)\n'
   printf '  In System Settings > Privacy & Security, turn on:\n'
   [[ " ${INSTALLED[*]} " == *" OmacVM Gestures "* ]] &&
     printf '    * Accessibility and Input Monitoring: OmacVM Gestures (trackpad gestures, scroll momentum, Cmd keys)\n'
