@@ -46,7 +46,7 @@ log() { echo "[edk2-build] $*"; }
 
 native_dir=$(cd "$(dirname "$0")" && pwd -P)
 logo_patch="$native_dir/patches/edk2-logo-omarchy.patch"
-logo_patch_sha256=60747a5a01ff2624f6ebe3e4dbcb0288940152ecec6a06c600728d42a5a72b88
+logo_patch_sha256=cc534da4cf87a7326a9f0a3f2a8cd1db8206229166bb7eeb44574c7eb0c6c306
 nvme_patch="$native_dir/patches/edk2-bootmanager-nvme-identify-align.patch"
 nvme_patch_sha256=f1a494492426f1a1476e96c3682d0d171ef0ca43b386db07ef491e1dd118fda1
 # The logo the patch puts in (checked after applying it).

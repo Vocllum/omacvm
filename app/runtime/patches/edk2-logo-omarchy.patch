@@ -4,24 +4,29 @@ Subject: [PATCH] MdeModulePkg/Logo: Omarchy's logo instead of TianoCore's
 What: replaces the boot logo of edk2-stable202408 (MdeModulePkg/Logo/Logo.bmp,
 the TianoCore logo, 193 x 58, 8-bit) with Omarchy's wordmark: 1215 x 285,
 24-bit, Omarchy green (#a8cd76, the colour of Omarchy's Plymouth logo) on
-black. Nothing else in edk2 changes.
+black. LogoDxe scales it down when the screen is too small for it: the
+biggest whole number of pixels a cell that fits (the logo is 81 x 19
+cells), so the edges stay sharp. Nothing else in edk2 changes.
 
 Why: OmacVM.app boots its VMs through this firmware; the first thing a VM
-shows should be Omarchy, not TianoCore.
+shows should be Omarchy, not TianoCore. At 1920 x 1080 (a cold start) the
+logo is as big as OmacVM.app's start animation draws it. After a reboot the
+firmware draws at the window's pixel size, and BootLogoLib skips a logo
+bigger than the screen: a window under 1215 pixels wide (a small one on a
+non-Retina display) got no logo at all.
 
 How it was made: boot-logo/make-logo-bmp.py from logo.svg of Omarchy
 (github.com/basecamp/omarchy, commit 6520ac7d, MIT, (c) David Heinemeier
 Hansson, boot-logo/LICENSE.omarchy):
   make-logo-bmp.py logo.svg MdeModulePkg/Logo/Logo.bmp 15
-Each cell of the logo's 15-unit grid is a 15 x 15 pixel block, so the edges
-stay sharp. ArmVirtQemu shows it centred at the firmware's 1920 x 1080, as
-big as OmacVM.app's start animation draws it (omacvm-cocoa-boot-splash.patch:
-the animation fades into this picture without the logo moving).
+Each cell of the logo's 15-unit grid is a 15 x 15 pixel block. The smaller
+logo takes each cell's middle pixel (Logo.c, FitLogo).
 
 Upstream: OmacVM only (branding), not for edk2 or QEMU.
 
 Test: Tests/firmware/test-firmware.py boots the built firmware with an empty
-disk and checks that the screen shows exactly this bitmap, centred
+disk and checks that the screen shows exactly this bitmap, centred, at
+1920 x 1080, and the same logo at 13 pixels a cell on a 1100 x 700 screen
 (build-qemu-gpu-runtime.sh runs it; on failure the build keeps QEMU's
 firmware).
 
@@ -473,3 +478,122 @@ z=R^x14}b0lHABw^#o|wftOqslBOE6^z7}WLk8s)tI+ehX0(qbVKf=NApJpaT@%CKh
 zBjkB`Dk*}#0I^(mR=#I)0GPAF^D>{QDF}sHt~)E=sT_nwoE4sz`4n=H=5S_p3331o
 psZq=L&dN7)FA<zw-#W7gU^y%6zRc$tP4kvvoPVFMz}sJe{{eq`w(0-?
 
+diff --git a/MdeModulePkg/Logo/Logo.c b/MdeModulePkg/Logo/Logo.c
+index 8ab874d2dadb87afb908d93ae8fbd53c32c33427..e240c6c4b56546abb12b10fbd3ecd3af991c4779 100644
+--- a/MdeModulePkg/Logo/Logo.c
++++ b/MdeModulePkg/Logo/Logo.c
+@@ -12,8 +12,15 @@ SPDX-License-Identifier: BSD-2-Clause-Patent
+ #include <Protocol/PlatformLogo.h>
+ #include <Protocol/HiiPackageList.h>
+ #include <Library/UefiBootServicesTableLib.h>
++#include <Library/MemoryAllocationLib.h>
+ #include <Library/DebugLib.h>
+ 
++//
++// OmacVM: the logo is Omarchy's wordmark, 81 x 19 square cells.
++//
++#define LOGO_COLS  81
++#define LOGO_ROWS  19
++
+ typedef struct {
+   EFI_IMAGE_ID                             ImageId;
+   EDKII_PLATFORM_LOGO_DISPLAY_ATTRIBUTE    Attribute;
+@@ -45,6 +52,57 @@ LOGO_ENTRY                 mLogos[] = {
+   @retval EFI_SUCCESS      The image was fetched successfully.
+   @retval EFI_NOT_FOUND    The specified image could not be found.
+ **/
++/**
++  OmacVM: scale the logo down to fit the screen, a whole number of pixels a
++  cell (the biggest that fits), so its edges stay sharp. BootLogoLib skips a
++  logo bigger than the screen: a small window after a reboot showed none.
++
++  @param Image  The logo; its bitmap is replaced when it is made smaller.
++**/
++STATIC
++VOID
++FitLogo (
++  IN OUT EFI_IMAGE_INPUT  *Image
++  )
++{
++  EFI_GRAPHICS_OUTPUT_PROTOCOL   *Gop;
++  EFI_GRAPHICS_OUTPUT_BLT_PIXEL  *Small;
++  UINTN                          Cell;
++  UINTN                          NewCell;
++  UINTN                          X;
++  UINTN                          Y;
++
++  if (EFI_ERROR (gBS->HandleProtocol (gST->ConsoleOutHandle, &gEfiGraphicsOutputProtocolGuid, (VOID **)&Gop)) ||
++      (Gop->Mode == NULL) || (Gop->Mode->Info == NULL) ||
++      ((Image->Width % LOGO_COLS) != 0) || (Image->Height != Image->Width / LOGO_COLS * LOGO_ROWS))
++  {
++    return;
++  }
++
++  Cell    = Image->Width / LOGO_COLS;
++  NewCell = MIN (Gop->Mode->Info->HorizontalResolution / LOGO_COLS, Gop->Mode->Info->VerticalResolution / LOGO_ROWS);
++  if ((NewCell >= Cell) || (NewCell == 0)) {
++    return;
++  }
++
++  Small = AllocatePool (LOGO_COLS * NewCell * LOGO_ROWS * NewCell * sizeof (*Small));
++  if (Small == NULL) {
++    return;
++  }
++
++  for (Y = 0; Y < LOGO_ROWS * NewCell; Y++) {
++    for (X = 0; X < LOGO_COLS * NewCell; X++) {
++      Small[Y * LOGO_COLS * NewCell + X] =
++        Image->Bitmap[((Y / NewCell) * Cell + Cell / 2) * Image->Width + (X / NewCell) * Cell + Cell / 2];
++    }
++  }
++
++  FreePool (Image->Bitmap);
++  Image->Bitmap = Small;
++  Image->Width  = (UINT16)(LOGO_COLS * NewCell);
++  Image->Height = (UINT16)(LOGO_ROWS * NewCell);
++}
++
+ EFI_STATUS
+ EFIAPI
+ GetImage (
+@@ -56,7 +114,8 @@ GetImage (
+   OUT INTN                                   *OffsetY
+   )
+ {
+-  UINT32  Current;
++  UINT32      Current;
++  EFI_STATUS  Status;
+ 
+   if ((Instance == NULL) || (Image == NULL) ||
+       (Attribute == NULL) || (OffsetX == NULL) || (OffsetY == NULL))
+@@ -73,7 +132,12 @@ GetImage (
+   *Attribute = mLogos[Current].Attribute;
+   *OffsetX   = mLogos[Current].OffsetX;
+   *OffsetY   = mLogos[Current].OffsetY;
+-  return mHiiImageEx->GetImageEx (mHiiImageEx, mHiiHandle, mLogos[Current].ImageId, Image);
++  Status     = mHiiImageEx->GetImageEx (mHiiImageEx, mHiiHandle, mLogos[Current].ImageId, Image);
++  if (!EFI_ERROR (Status)) {
++    FitLogo (Image);
++  }
++
++  return Status;
+ }
+ 
+ EDKII_PLATFORM_LOGO_PROTOCOL  mPlatformLogo = {
+diff --git a/MdeModulePkg/Logo/LogoDxe.inf b/MdeModulePkg/Logo/LogoDxe.inf
+index 41215d25d85309b738b005a1a84b433c69349b00..2257ed00f556752256bf65f9f9e039abf7c7f0be 100644
+--- a/MdeModulePkg/Logo/LogoDxe.inf
++++ b/MdeModulePkg/Logo/LogoDxe.inf
+@@ -39,10 +39,12 @@
+ 
+ [LibraryClasses]
+   UefiBootServicesTableLib
++  MemoryAllocationLib
+   UefiDriverEntryPoint
+   DebugLib
+ 
+ [Protocols]
++  gEfiGraphicsOutputProtocolGuid     ## SOMETIMES_CONSUMES
+   gEfiHiiDatabaseProtocolGuid        ## CONSUMES
+   gEfiHiiImageExProtocolGuid         ## CONSUMES
+   gEfiHiiPackageListProtocolGuid     ## PRODUCES CONSUMES
