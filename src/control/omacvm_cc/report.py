@@ -3,10 +3,13 @@ take out what is personal, show it, then open a pre-filled GitHub issue.
 Nothing is uploaded by OmacVM: the browser opens a form the person submits.
 
 Redaction, in this order:
- 1. Known values (exact, case-insensitive, longest first): user and full
-    names, host names, VM names, Wi-Fi names and BSSIDs, Bluetooth names and
-    addresses, the Bridge token, home folders.
- 2. Patterns: PEM blocks, SSH keys, bearer tokens, key=value secrets, e-mail
+ 1. Known values (exact, case-insensitive, longest first): user, full and
+    first names, host names (and the owner in "Anna's MacBook Pro"), VM
+    names, Wi-Fi names and BSSIDs, Bluetooth names and addresses, the Bridge
+    token, home folders.
+ 2. Patterns: an owner's name before a device word ("Anna's AirPods", known
+    or not), PEM blocks, SSH keys, bearer/Basic/GitHub tokens, key=value
+    and "--passphrase value" secrets, e-mail
     addresses, hardware addresses, UUIDs, serial numbers, IPv4/IPv6
     addresses (the Mac's VM-network addresses get a label), long hex and
     base64 runs.
@@ -64,11 +67,14 @@ class Known:
             if len(v) >= 2 and not self.has(v):
                 lst.append(v)
             # A full name's parts too ("Zorro Testmann": "Zorro", "Testmann"),
-            # and the owner in a device name ("Zorro's AirPods": "Zorro", a
-            # person's name, also where it stands alone).
-            if kind in ("user", "bt"):
+            # and the owner in a device or Mac name ("Zorro's AirPods",
+            # "Zorro's MacBook Pro": "Zorro", a person's name, also where it
+            # stands alone). Of a host name only its owner.
+            if kind in ("user", "bt", "host"):
                 for word in re.split(r"[\s_]+", v):
                     owner = POSSESSIVE.match(word)
+                    if kind == "host" and not owner:
+                        continue
                     part, k = (owner.group(1), "user") if owner else (word.strip("-"), kind)
                     if " " not in v and not owner:
                         continue   # a one-word value is in already
@@ -87,7 +93,8 @@ class Known:
 
 # Words in device and person names that are not personal on their own.
 COMMON = {"airpods", "pro", "max", "macbook", "magic", "keyboard", "mouse", "trackpad", "iphone", "ipad",
-          "the", "and", "von", "van", "der", "mini", "air", "studio", "imac", "headphones", "speaker"}
+          "the", "and", "von", "van", "der", "mini", "air", "studio", "imac", "headphones", "speaker",
+          "apple", "logitech", "bose", "sony", "beats", "my", "your", "new", "old", "work", "home"}
 
 
 # Names of the products OmacVM works with, and the defaults they come with
@@ -108,16 +115,29 @@ POSSESSIVE = re.compile(r"^(.+?)'s?$", re.IGNORECASE)
 # Apostrophes macOS and others put in device names ("Zorro’s AirPods").
 APOSTROPHES = str.maketrans({"\u2019": "'", "\u2018": "'", "\u02bc": "'", "\u2032": "'", "\uff07": "'", "`": "'"})
 UESCAPE = re.compile(r"\\u([0-9a-fA-F]{4})")
+# \xHH runs (systemd-escape, Python and C strings): UTF-8 bytes.
+XESCAPE = re.compile(r"(?:\\+x[0-9a-fA-F]{2})+")
 
 
 def norm(s: str) -> str:
     """NFKC (full-width and other look-alike forms become plain letters),
-    JSON's \\uXXXX escapes decoded ("Zorro\\u2019s" in a log line is
-    "Zorro's"), every apostrophe a plain one."""
+    JSON's \\uXXXX and \\xHH escapes decoded ("Zorro\\u2019s" in a log line
+    is "Zorro's", "ZorroNet\\x205G" in a unit name "ZorroNet 5G",
+    "J\\xc3\\xbcrgen" "Jürgen"), every apostrophe a plain one. Control
+    characters stay escaped."""
     def esc(m: re.Match) -> str:
         c = int(m.group(1), 16)
         return chr(c) if c >= 0x20 and not 0xD800 <= c <= 0xDFFF else m.group(0)   # no control characters
+
+    def xesc(m: re.Match) -> str:
+        raw = bytes(int(h, 16) for h in re.findall(r"x([0-9a-fA-F]{2})", m.group(0)))
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = raw.decode("latin-1")   # "J\\xfcrgen"
+        return "".join(c if ord(c) >= 0x20 and ord(c) != 0x7F else "\\x%02x" % ord(c) for c in text)
     s = UESCAPE.sub(esc, s)
+    s = XESCAPE.sub(xesc, s)
     return unicodedata.normalize("NFKC", s).translate(APOSTROPHES)
 
 
@@ -149,6 +169,8 @@ PATTERNS = [
     ("key", re.compile(r"\b(?:ssh-(?:ed25519|rsa|dss)|ecdsa-sha2-[a-z0-9-]+|sk-[a-z0-9@.-]+)\s+[A-Za-z0-9+/=]{16,}(?:\s+\S+)?"), "<ssh-key>"),
     ("email", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "<email>"),
     ("secret", re.compile(r"(?i)\b(Bearer)\s+[^\s\"']+"), r"\1 <secret>"),
+    # GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_).
+    ("secret", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"), "<secret>"),
     # name = value, name: value, "name": "value", 'name': 'value' (YAML, INI,
     # JSON, Python), also with escaped quotes (\"value\" in a logged command
     # line): the value goes, quoted (also with spaces) or not.
@@ -156,6 +178,17 @@ PATTERNS = [
                           r"""(?P<sep>\\*["']?\s*[=:]\s*)(?:(?P<q>\\*["'])(?P<v>[^\n]*?)(?P=q)|(?P<bare>(?!<)(?!\\*["'])[^\s"',;}\\]+))"""),
      lambda m: m.group(0) if m.group("v") == "<secret>" else
      m.group("name") + m.group("sep") + (m.group("q") or "") + "<secret>" + (m.group("q") or "")),
+    # Basic auth: base64 that does not look like a word ("Basic setup" stays).
+    ("secret", re.compile(r"\b((?i:Basic))\s+((?=[A-Za-z0-9+/]*(?:[0-9+/=]|[A-Z][a-z]*[A-Z]))[A-Za-z0-9+/]{6,}={0,2})"),
+     r"\1 <secret>"),
+    # The value as the next argument: --passphrase X, -password X, a
+    # settings key ("wifi-sec.psk X"); "password X" alone only when X is no
+    # plain lower-case word ("password incorrect" stays).
+    ("secret", re.compile(r"(?<![\w-])((?i:--?(?:[a-z0-9]+-)*(?:password|passwd|passphrase|psk|secret|token)"
+                          r"|(?:[a-z0-9]+[.-])*[a-z0-9]+\.(?:psk|password|passphrase)))(\s+)(?![<=:])"
+                          r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<]+)"), r"\1\2<secret>"),
+    ("secret", re.compile(r"(?<![\w.-])((?i:password|passphrase|psk))(\s+)(?![<=:])(?=[^\s]*[^a-z\s])"
+                          r"(?:\"[^\"\n]*\"|'[^'\n]*'|[^\s\"'<]+)"), r"\1\2<secret>"),
     ("serial", re.compile(r"(?i)(IOPlatformSerialNumber\"?\s*=?\s*\"?|Serial Number(?: \(system\))?:\s*)([A-Z0-9]{6,})"), r"\1<serial>"),
     ("uuid", re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<uuid>"),
     ("hw", re.compile(r"\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"), "<hw-addr>"),
@@ -170,6 +203,29 @@ PATTERNS = [
      r"\1<hw-addr>"),
     ("secret", re.compile(r"\b[0-9a-fA-F]{32,}\b"), "<secret>"),
 ]
+# The owner in a device name nobody told us about ("Anna's AirPods" when the
+# Bridge is down, or a guest's device): "<user>'s AirPods". Also macOS's host
+# name form ("Annas-MacBook-Pro").
+DEVICE_WORDS = r"(?:AirPods|iPhone|iPad|MacBook|iMac|Mac|Magic|Keyboard|Mouse|Trackpad|Watch|Beats|HomePod|AirTag|Pencil)"
+DEVICE_OWNER = re.compile(r"(?<![\w<'])([^\W\d_][\w.-]*?)'s?(?=[\s_-]+" + DEVICE_WORDS + r"\b)", re.IGNORECASE)
+HOST_OWNER = re.compile(r"(?<![\w<-])([A-Z][^\W\d_]+?)s?(?=-(?:MacBook|iMac|Mac-mini|Mac-Studio|Mac-Pro|iPhone|iPad)\b)")
+
+
+def device_owners(text: str) -> tuple[str, int]:
+    n = 0
+
+    def owner(m: re.Match) -> str:
+        nonlocal n
+        w = m.group(1)
+        if w.casefold() in COMMON or product_only(w) or product_only(w + "s"):
+            return m.group(0)
+        n += 1
+        return "<user>" + m.group(0)[len(w):]
+    text = DEVICE_OWNER.sub(owner, text)
+    text = HOST_OWNER.sub(owner, text)
+    return text, n
+
+
 # Base64 runs of 40 or more: only with digits and both cases, so a long path
 # (letters and slashes) stays.
 B64 = re.compile(r"(?<![A-Za-z0-9+/])[A-Za-z0-9+/]{40,}={0,2}")
@@ -206,7 +262,9 @@ def redact(text: str, known: Known, mac_addrs: dict | None = None) -> tuple[str,
         for w in variants(v):
             text, n = _value_re(w).subn(LABELS[kind], text)
             bump(kind, n)
-    # 2. Patterns.
+    # 2. Patterns: device owners first, then the rest.
+    text, n = device_owners(text)
+    bump("user", n)
     for kind, rx, repl in PATTERNS[3:]:
         text, n = rx.subn(repl, text)
         bump(kind, n)

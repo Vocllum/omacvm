@@ -206,3 +206,103 @@ def test_bluez_percent_encoded_and_zero_padded():
 
 def test_escapes_of_control_characters_stay_escaped():
     assert R.redact("ESC \\u001b[0m", R.Known())[0] == "ESC \\u001b[0m"
+
+
+def test_mac_name_gives_its_owner():
+    """ComputerName "Anna's MacBook Pro": Anna is a user name, also alone."""
+    k = R.Known()
+    k.add("user", "tester")
+    k.add("host", "Anna’s MacBook Pro", "Annas-MacBook-Pro")
+    out, _ = R.redact("Anna's iPhone paired; Anna said hi; host Annas-MacBook-Pro.local", k)
+    R.gate(out, k)
+    assert "Anna" not in out and "Annas" not in out
+    assert "MacBook" not in R.redact("Mac: Anna's MacBook Pro", k)[0].replace("<host>", "")
+
+
+def test_device_owner_without_known_values():
+    """The Bridge is down (or a guest's own device): the owner's name before a
+    device word goes by its form alone; product and plain words stay."""
+    k = R.Known()
+    for line, want in [
+        ("/bluetooth/connect from 10.211.55.9: connected Anna’s AirPods", "connected <user>'s AirPods"),
+        ("Anna's iPhone paired", "<user>'s iPhone paired"),
+        ("James' Magic Keyboard", "<user>' Magic Keyboard"),
+        ("host Annas-MacBook-Pro.local", "host <user>s-MacBook-Pro.local"),
+    ]:
+        out, counts = R.redact(line, k)
+        assert want in out and counts.get("user") == 1, out
+    for line in ("Magic Keyboard connected", "Apple's Magic Mouse", "My iPhone", "Parallels-Mac", "omarchy-MacBook"):
+        assert R.redact(line, k)[0] == line
+
+
+@pytest.mark.parametrize("line,gone", [
+    ("unit omacvm-wifi@ZorroNet\\x205G.service started", "ZorroNet"),
+    ("user J\\xc3\\xbcrgen logged in", "rgen"),
+    ("user J\\xfcrgen (latin-1)", "rgen"),
+    ('json "ZorroNet\\\\x205G"', "ZorroNet"),
+])
+def test_hex_escapes_decoded(line, gone):
+    k = R.Known()
+    k.add("wifi", "ZorroNet 5G")
+    k.add("user", "Jürgen")
+    out, _ = R.redact(line, k)
+    R.gate(out, k)
+    assert gone not in out, out
+
+
+def test_hex_escapes_gate():
+    k = R.Known()
+    k.add("user", "Jürgen")
+    with pytest.raises(R.RedactionFailed):
+        R.gate("J\\xc3\\xbcrgen", k)
+    assert R.redact("ESC \\x1b[0m", R.Known())[0] == "ESC \\x1b[0m"
+
+
+@pytest.mark.parametrize("line,kept", [
+    ("iwctl --passphrase hunter2 station wlan0 connect X", "iwctl --passphrase <secret> station wlan0 connect X"),
+    ("nmcli dev wifi connect X password hunter2", "nmcli dev wifi connect X password <secret>"),
+    ("nmcli con modify x wifi-sec.psk hunter2", "nmcli con modify x wifi-sec.psk <secret>"),
+    ("nmcli con modify x 802-11-wireless-security.psk 'two words'", "nmcli con modify x 802-11-wireless-security.psk <secret>"),
+    ("tool -password Hunter --x", "tool -password <secret> --x"),
+    ("Authorization: Basic dXNlcjpwYXNz", "Authorization: Basic <secret>"),
+    ("token ghp_abcdefghijklmnopqrstuvwxyz0123456789 used", "token <secret> used"),
+    ("github_pat_11ABCDEFG0123456789_abcdefghijklmnopqrstuv", "<secret>"),
+    ("gho_ABCDEFGHIJKLMNOPQRSTUVWX12", "<secret>"),
+])
+def test_secret_as_next_argument_and_tokens(line, kept):
+    out, counts = R.redact(line, R.Known())
+    assert out == kept and counts.get("secret") == 1, out
+
+
+def test_secret_words_in_plain_text_stay():
+    for line in ("the password was wrong", "password incorrect", "Basic setup done", "Basic Configuration",
+                 "--password-file /etc/x", "psk mismatch"):
+        assert R.redact(line, R.Known())[0] == line
+
+
+def test_mac_known_without_bridge(monkeypatch):
+    """omacvm report on the Mac with the Bridge down: names from the Mac itself
+    (full and first name, the Mac's name's owner, Bluetooth via system_profiler)."""
+    import json
+    from omacvm_cc import collect, bridge
+    sp = json.dumps({"SPBluetoothDataType": [{"controller_properties": {"controller_address": "AA:BB:CC:DD:EE:FF"},
+                                               "device_connected": [{"Bea’s AirPods Pro": {"device_address": "11:22:33:44:55:66"}}],
+                                               "device_not_connected": [{"Living Room Speaker": {}}]}]})
+    outs = {"id": "Al Testmann", "dscl": "FirstName: Al\nNo such key: LastName", "scutil": "Cleo’s MacBook Pro",
+            "system_profiler": sp}
+
+    def fake_run(cmd, timeout=10.0):
+        return outs.get(cmd[0], "")
+    monkeypatch.setattr(collect, "run", fake_run)
+
+    def down(self, *a, **kw):
+        raise OSError("connection refused")
+    monkeypatch.setattr(bridge.Bridge, "call", down)
+    k = collect.mac_known("/nonexistent/omacvm")
+    text = ("Al opened it; Al Testmann; Cleo's iPad; Cleo alone; Bea alone; Bea's AirPods Pro (11:22:33:44:55:66); "
+            "Living Room Speaker on; Dana's AirPods")
+    out, _ = R.redact(text, k)
+    R.gate(out, k)
+    for name in ("Al ", "Testmann", "Cleo", "Bea", "Living Room", "11:22:33", "Dana"):
+        assert name not in out, (name, out)
+    assert "No such key" not in " ".join(v for _, v in k.items())

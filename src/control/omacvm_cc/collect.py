@@ -180,10 +180,45 @@ def vm_sections(local, rows, checks, hello=None, job_lines=None, what: str = "")
 
 # ---- on the Mac ----
 
+def mac_bt_values(text: str):
+    """Bluetooth devices this Mac knows (system_profiler SPBluetoothDataType
+    -json: device_connected, device_not_connected, ...): names and addresses."""
+    try:
+        data = json.loads(text or "{}")
+    except ValueError:
+        return
+    for item in data.get("SPBluetoothDataType", []) if isinstance(data, dict) else []:
+        for key, devs in item.items() if isinstance(item, dict) else ():
+            if not key.startswith("device_") or not isinstance(devs, list):
+                continue
+            for d in devs:
+                for name, props in d.items() if isinstance(d, dict) else ():
+                    yield "bt", name
+                    if isinstance(props, dict) and props.get("device_address"):
+                        yield "bt", props["device_address"]
+
+
+def user_names(user: str) -> list:
+    """This Mac user's full name, its first word (also a short one, "Al"),
+    and the first and last names the account has."""
+    full = run(["id", "-F"]).strip()
+    names = [full, full.split()[0] if full else ""]
+    out = run(["dscl", ".", "-read", "/Users/" + user, "FirstName", "LastName"])
+    for line in out.splitlines():
+        # "FirstName: Anna", or the value on the next line (" Anna Maria");
+        # "No such key: FirstName" when the account has none.
+        if line.startswith("No such key"):
+            continue
+        v = line.split(":", 1)[1] if re.match(r"^(FirstName|LastName):", line) else line
+        names.append(v.strip())
+    return names
+
+
 def mac_known(omacvm: str) -> Known:
     k = Known()
     user = getpass.getuser()
-    k.add("user", user, run(["id", "-F"]).strip())
+    k.add("user", user, *user_names(user))
+    # The Mac's name gives its owner too ("Anna's MacBook Pro": Anna).
     for what in ("ComputerName", "LocalHostName", "HostName"):
         k.add("host", run(["scutil", "--get", what]).strip())
     host = socket.gethostname()
@@ -211,8 +246,13 @@ def mac_known(omacvm: str) -> Known:
         try:
             for kind, v in fn(b.call("GET", path, timeout=4.0)):
                 k.add(kind, v)
-        except Exception:   # no Bridge: nothing more to know
+        except Exception:   # no Bridge: nothing more to know from it
             break
+    # Also without the Bridge (a likely moment to report a problem): the
+    # devices macOS knows. Owners nobody lists are taken out by their form
+    # ("Anna's AirPods", report.device_owners).
+    for kind, v in mac_bt_values(run(["system_profiler", "SPBluetoothDataType", "-json"], 20)):
+        k.add(kind, v)
     for line in run(["networksetup", "-listpreferredwirelessnetworks", "en0"], 10).splitlines()[1:]:
         k.add("wifi", line.strip())
     return k
