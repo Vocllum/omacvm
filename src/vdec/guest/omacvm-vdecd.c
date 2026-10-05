@@ -590,19 +590,19 @@ static bool output_frames(struct inst *in)
 		struct capbuf *c;
 
 		if (!in->fmt_set || f->width != in->vis_width || f->height != in->vis_height) {
-			/* A new size: the frames before it are out; the app gets an
-			 * empty LAST buffer, then the new format. */
-			if (in->ncap) {
-				c = cap_get(in);
-				if (!c)
-					return progress;
-				c->free = false;
-				done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST);
-				cap_free(in);
-			}
+			/* A new size: the frames before it are out. The app gets the
+			 * new format (SOURCE_CHANGE), then an empty LAST buffer. */
+			c = NULL;
+			if (in->ncap && !(c = cap_get(in)))
+				return progress;
 			if (!set_format(in, f)) {
 				frames_drop(in);
 				return true;
+			}
+			if (c) {
+				c->free = false;
+				done(OVD_IOC_CAPTURE_DONE, in, c - in->cap, c->seq, 0, OVD_DONE_LAST);
+				cap_free(in);
 			}
 			return true;
 		}
@@ -714,6 +714,10 @@ static void pump(struct inst *in)
 static void handle(const struct ovd_msg *m, const uint8_t *data)
 {
 	struct inst *in = inst_find(m->inst);
+
+	if (debug && m->type != OVD_MSG_BITSTREAM && m->type != OVD_MSG_CAPTURE_QUEUED)
+		log_msg("vdecd: inst %u: message %u (in %d, out %d)", m->inst, m->type,
+			in ? in->nin : -1, in ? in->nout : -1);
 
 	if (m->type == OVD_MSG_OPEN) {
 		if (in)
