@@ -2,8 +2,8 @@
 
 In OmacVM.app, videos in the VM are decoded by the Mac's own video decoder
 (the media engine) instead of the VM's CPU. YouTube in 4K at 60 frames per
-second plays in Google Chrome and in Omarchy's own Chromium with the VM's CPU
-nearly idle: 0.3 to 0.4 cores busy instead of 1.0 to 1.6 (see
+second keeps the VM's CPU far less busy: about 0.3 cores in Google Chrome
+and 0.4 to 0.6 in Omarchy's own Chromium, instead of 1.0 to 1.6 (see
 [Numbers](#numbers) and [Chromium](#chromium-from-arch-linux-arm)). Firefox
 decodes in hardware too, but its VM stays at about 0.9 cores.
 
@@ -148,31 +148,47 @@ Chromium ◀─ its GPU buffer (ARGB) ◀─ GPU pass in omacvm-vdecd
 
 YouTube *Big Buck Bunny* at 60 fps, Arch Linux ARM's Chromium 153, 60
 seconds with `src/bench/video-bench.py` (`--quality hd1080` for 1080p), in a
-test VM (8 CPUs, 16 GB) on an M4 Max. CPU in cores busy:
+test VM (8 CPUs, 16 GB) on an M4 Max, Chromium without media logging. Two
+series, each with the benchmark lock held for every run and the media
+engine and CPU runs taken in turn (3 + 3 per row and series). The Mac was not
+quiet in either: in the first other test VMs kept running (the lock pauses
+only some), in the second (with this page's fixes in the decoder) few other
+VMs ran but Spotlight indexing took about one core all along. CPU in cores
+busy, the range over both series (6 runs per row):
 
 | | Codec | Dropped | VM's CPU | QEMU on the Mac |
 |---|---|---|---|---|
-| 4K, CPU decoding (before) | VP9 | 0.0 % | 1.03–1.11 | 1.44–1.62 |
-| 4K, Mac's media engine | VP9 | 0.0–0.6 % | 0.34–0.43 | 0.43–0.58 |
+| 4K, CPU decoding (before) | VP9 | 0.0–7.7 % | 1.00–1.11 | 1.41–1.62 |
+| 4K, Mac's media engine | VP9 | 0.1–7.2 % | 0.41–0.62 | 0.49–0.90 |
 | 1080p, CPU decoding (before: YouTube sent AV1) | AV1 | 0.0 % | 0.64–0.69 | 0.83–0.93 |
-| 1080p, CPU decoding | VP9 | 0.0 % | 0.57–0.71 | 0.80–1.03 |
-| 1080p, Mac's media engine | VP9 | 0.0 % | 0.35 | 0.42 |
+| 1080p, CPU decoding | VP9 | 0.0 % | 0.57–0.75 | 0.80–1.09 |
+| 1080p, Mac's media engine | VP9 | 0.0–1.4 % | 0.35–0.63 | 0.42–0.91 |
 
-Ranges over 2 to 4 runs each, with the benchmark lock held (other test VMs
-on the Mac kept running). When those VMs kept the Mac's GPU busy, the media
-engine rows rose to about 0.6 cores in the VM and 0.9 for QEMU, with 1 to 7 %
-of the frames dropped; CPU decoding was not affected. So: in hardware, 4K
-takes a third of the CPU, and 1080p about half, but the hardware path shares
-the Mac's GPU with everything else. Google Chrome's VA-API path, for
-comparison: 0.33 and 0.45 at 4K (above).
+(The AV1 row is 2 runs from an earlier series, same lock.) So: at 4K the
+media engine takes about half of the VM's CPU and of QEMU's; at 1080p the
+gain is smaller (0.1 to 0.2 cores) and in single runs none. The media engine
+path drops frames when the Mac is busy (up to 7 % at 4K), the CPU path at 4K
+did too in the second series. The hardware path shares the Mac's GPU with
+everything else: the busier the Mac, the closer its CPU numbers come to CPU
+decoding. Google Chrome's VA-API path, for comparison: 0.33 and 0.45 at 4K
+(above, single runs). The results files: `yt-locked3.jsonl` and
+`yt-locked4.jsonl` in the track's results (not in the repository); a quiet
+Mac is still to be measured.
 
-Switches: `OMACVM_VIDEO_DECODE=0` on the Mac turns it off with the rest (the
-daemon then finds no decoders and Chromium decodes on the CPU); in the VM
-`src/vdec/guest/install.sh USER off` takes it all out, the flags file
-included. `OMACVM_VDEC_DEBUG=1` in the service's environment logs every
-frame with its times. `src/vdec/guest/test/vdec-test FILE` checks the device
-against FFmpeg's software decoder (every picture, a seek, a drain, a size
-change).
+Switches: the feature `chromium-video` (on in OmacVM.app VMs):
+`omacvm disable chromium-video` takes it all out, the flags file included,
+and it stays out on later `omacvm apply` runs. `OMACVM_VIDEO_DECODE=0` on the
+Mac turns it off with the rest (the daemon then finds no decoders and
+Chromium decodes on the CPU). `OMACVM_VDEC_DEBUG=1` in the service's
+environment logs every frame with its times.
+
+Tests: `src/vdec/guest/test/vdec-test FILE` checks the device against
+FFmpeg's software decoder (every picture, a seek, a drain, a size change).
+Its modes check the failures: `--churn` (a busy decoder closes while the next
+opens), `--early-drain` (a drain before the first picture), `--expect-fail`
+(a picture under 64 pixels fails at once), `--stall` (the daemon stopped
+mid-video: an error within seconds, then the next video decodes), `--flood`
+(1000 drain commands: the module fails that decoder instead of growing).
 
 Limits:
 
@@ -185,8 +201,16 @@ Limits:
   4K and 10 per video (8 MB each at 1080p).
 - **At most 8 videos** decode this way at once; more play on the CPU. One
   daemon thread serves them in turn.
-- **If the daemon stops**, the video playing reports a decode error (reload
-  the page); systemd starts the daemon again within 2 seconds.
+- **Pictures under 64 pixels** wide or high: that video plays on the CPU.
+- **When something goes wrong** with one video (a stream VA-API cannot take,
+  the Mac's GPU not finishing a picture within a second), that video reports
+  a decode error and Chromium plays it on the CPU; the others go on.
+- **If the daemon stops or hangs**, the videos playing report a decode error
+  (reload the page). systemd's watchdog kills a daemon that hangs for 5
+  seconds and starts it again 2 seconds later.
+- **An update while a video plays**: the new module loads at the next VM
+  start; until then the old one keeps working and `omacvm check` says an
+  update waits. `omacvm apply` restarts the daemon only when it changed.
 - **A new kernel** without its headers in Arch Linux ARM's repository yet:
   Chromium decodes on the CPU until `omacvm apply` finds them.
 

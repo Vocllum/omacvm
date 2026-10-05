@@ -91,7 +91,14 @@ Option 6, everything in the VM, nothing new on the Mac:
 - The daemon parses video from web pages: it runs as its own user, without
   network, in a sandboxed service. One thread serves all videos; at most 8
   decoders are open at once (more fall back to the CPU).
-- If the daemon dies, the video playing gets a decode error (the page
-  reloads it), systemd starts the daemon again within 2 s.
+- Failures end in a decode error, never a frozen video: one video that goes
+  wrong (a picture under 64 px, a stream VA-API cannot take, the GPU not
+  finishing a picture within 1 s) fails alone and Chromium plays it on the
+  CPU. If the daemon dies or hangs (systemd's watchdog, 5 s), every open
+  video gets a decode error and systemd starts the daemon again 2 s later.
+- The module and the daemon trust each other only as far as the protocol
+  goes: the module checks every size, index and buffer the daemon hands in,
+  never reuses a decoder id, bounds what it queues for the daemon, and a
+  daemon of another build is refused (protocol version).
 - If Arch Linux ARM builds Chromium with VA-API one day, Chromium uses VA-API
   directly and this can go; nothing here depends on that.
