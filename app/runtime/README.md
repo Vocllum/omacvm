@@ -45,8 +45,8 @@ commit 82927e9. Changes here:
   logs (`OMACVM_LOGS`) and qemu.log gets a warning. `OMACVM_BOOT_SPLASH=0`
   shows QEMU's text again. The cells are the firmware's
   (`boot-logo/make-logo-bmp.py logo.svg --rows`), the animation's table is
-  `boot-logo/make-splash-morph.py`'s; the build checks both and the
-  animation's core (`Tests/display/`, also `check-boot-splash.sh` in CI)
+  `boot-logo/make-splash-morph.py`'s; the build checks both, the
+  animation's core and its fade (`Tests/display/`, also `check-boot-splash.sh` in CI)
 - `patches/virgl-texture-integer-samplers.patch`: shaders that read integer
   textures (`usampler2D`) compile on the Mac's OpenGL. Before, Apple's
   compiler refused them and the guest's GL context stopped for good: Chrome's

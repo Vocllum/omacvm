@@ -63,7 +63,10 @@ Tests/display/test-boot-splash-morph.c (the core starts as OMACVM, holds it
 about 0.6 s, flies 2.5 to 3 s and ends as the logo, still, on the pixels GL's
 nearest sampling gives at several window sizes, square cells; no jumps; the
 glow comes and goes; the desktop is told apart from the firmware's logo,
-a console full of text and Hyprland's grey). The build runs all three;
+a console full of text and Hyprland's grey); Tests/display/
+test-boot-splash-fade.m (the layer's no-action list has "opacity", so the
+fade into the desktop is only its own 0.4 s one: CA's implicit 0.25 s fade
+ended first and the logo came back at ~25 %). The build runs all four;
 Tests/display/check-boot-splash.sh runs them from this patch alone (CI).
 The core's cells and glow at any time are the earlier core's (which matched
 the preview's frames) at the preview's time, frame for frame at 120 Hz.
@@ -95,7 +98,7 @@ logo's to the pixel.
      }
      return self;
  }
-@@ -2975,8 +2978,709 @@
+@@ -2975,8 +2978,712 @@
  #endif
  
      CGLDestroyContext(ctx);
@@ -556,7 +559,10 @@ logo's to the pixel.
 +        NSDictionary *none = @{ @"path": [NSNull null], @"bounds": [NSNull null],
 +                                @"position": [NSNull null], @"contents": [NSNull null],
 +                                @"contentsScale": [NSNull null], @"hidden": [NSNull null],
-+                                @"backgroundColor": [NSNull null], @"fillColor": [NSNull null] };
++                                @"backgroundColor": [NSNull null], @"fillColor": [NSNull null],
++                                /* -fade's own animation only: CA's implicit 0.25 s one would
++                                 * end first and the logo come back at 25 % for a moment. */
++                                @"opacity": [NSNull null] };
 +
 +        t = still ? INTRO_END : 0;
 +        opened = CACurrentMediaTime();
@@ -805,7 +811,7 @@ logo's to the pixel.
  static void cocoa_gl_update(DisplayChangeListener *dcl,
                              int x, int y, int w, int h)
  {
-@@ -2984,6 +3688,7 @@
+@@ -2984,6 +3691,7 @@
          surface_gl_update_texture(dgc.gls, surface, x, y, w, h);
          gl_dirty = true;
      });
@@ -813,7 +819,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_switch(DisplayChangeListener *dcl,
-@@ -2996,6 +3701,7 @@
+@@ -2996,6 +3704,7 @@
  
      cocoa_switch(dcl, new_surface);
      gl_dirty = true;
@@ -821,7 +827,7 @@ logo's to the pixel.
  }
  
  static void cocoa_gl_render(void)
-@@ -3073,6 +3779,8 @@
+@@ -3073,6 +3782,8 @@
              glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &fb);
              cocoa_gl_log("after texture blit fb=%d err=0x%x", fb, blit_err);
          }
@@ -830,7 +836,7 @@ logo's to the pixel.
      } else {
          glBindTexture(GL_TEXTURE_2D, surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -3123,6 +3831,7 @@
+@@ -3123,6 +3834,7 @@
  {
      gl_scanout_borrow = NULL;
      gl_dirty = true;
@@ -838,7 +844,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout disable");
  }
-@@ -3135,7 +3844,12 @@
+@@ -3135,7 +3847,12 @@
  {
      gl_scanout_id = backing_id;
      gl_scanout_borrow = backing_borrow;
@@ -851,7 +857,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -3146,6 +3860,7 @@
+@@ -3146,6 +3863,7 @@
                                     uint32_t w, uint32_t h)
  {
      gl_dirty = true;
@@ -859,7 +865,7 @@ logo's to the pixel.
  
      cocoa_gl_log("scanout flush region=%ux%u+%u+%u", w, h, x, y);
  }
-@@ -3711,6 +4426,8 @@
+@@ -3711,6 +4429,8 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
          qemu_gl_run_texture_blit(dgc.gls, texture.y_0_top);
@@ -868,7 +874,7 @@ logo's to the pixel.
      } else if (hd->surface && hd->surface->texture) {
          glBindTexture(GL_TEXTURE_2D, hd->surface->texture);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
-@@ -4641,6 +5358,10 @@
+@@ -4641,6 +5361,10 @@
  
          dgc.gls = qemu_gl_init_shader();
          dcl.ops = &dcl_gl_ops;

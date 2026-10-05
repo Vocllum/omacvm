@@ -616,6 +616,13 @@ python3 "$native_dir/boot-logo/make-splash-morph.py" --check "$source_dir/ui/oma
 cc -Wall -Wextra -Werror -I"$source_dir/ui" "$native_dir/Tests/display/test-boot-splash-morph.c" \
   -o "$display_tests/test-boot-splash-morph"
 "$display_tests/test-boot-splash-morph"
+# The logo layer's fade into the desktop runs once ("opacity" in its no-action list).
+awk '/NSDictionary \*none = @\{/ { on = 1 } on { print } on && /\};$/ { exit }' "$source_dir/ui/cocoa.m" |
+  sed -e 's/.*NSDictionary \*none = //' -e 's/};$/}/' > "$display_tests/intro-actions.inc"
+cc -fobjc-arc -Wall -Wextra -Werror -Wno-deprecated-declarations -I"$display_tests" \
+  "$native_dir/Tests/display/test-boot-splash-fade.m" -framework Foundation -framework QuartzCore \
+  -framework OpenGL -o "$display_tests/test-boot-splash-fade"
+"$display_tests/test-boot-splash-fade"
 # OmacVM: 2D resources (the guest's dumb buffers: console, plymouth, dumb
 # screens and cursors) are made with the SCANOUT bind, so the guest memory
 # budget's display reserve covers them (test-resource-budget checks the reserve
