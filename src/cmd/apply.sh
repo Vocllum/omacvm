@@ -383,7 +383,7 @@ if [[ $TYPE == app ]] && (( NAMED )) && d=$(app_dir "$VM"); then
   # no port to the Mac's helpers and nothing on its virtio port (MacLinks.swift).
   feats=$(for ((i = 0; i < ${#FN[@]}; i++)); do printf '%s=%s ' "${FN[$i]}" "${FV[$i]}"; done)
   # The app reads them only when the VM starts: say which ones wait for that.
-  app_features_write "$d" "${feats% }"
+  app_features_write "$d" "${feats% }" || true   # 1 = unchanged (set -e)
   if app_running_dir "$d"; then
     l=$(app_links_stale "$d" "${feats% }" on)
     [[ -z $l ]] || info "OmacVM.app: $l only from the VM's next start: shut it down and start it again"

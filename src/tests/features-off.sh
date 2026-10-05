@@ -244,6 +244,10 @@ app_features_write "$T/vm" "bridge=off gestures=on omanotch=off battery=off came
 expect "app: features written" "bridge=off gestures=on omanotch=off battery=off camera=on mac-clock=on" "$(cat "$T/vm/features")"
 app_features_write "$T/vm" "bridge=off gestures=on omanotch=off battery=off camera=on mac-clock=on"
 expect "app: unchanged features: status 1" 1 "$?"
+# apply.sh runs under set -e: status 1 (unchanged, every re-apply) must not end it.
+grep -qE '^ +app_features_write "\$d" "\$\{feats% \}" \|\| true' "$R/src/cmd/apply.sh" &&
+  echo "ok   apply.sh: unchanged features do not stop apply (set -e)" ||
+  { echo "FAIL apply.sh: app_features_write's status 1 (unchanged) ends apply under set -e"; fail=1; }
 if command -v swiftc >/dev/null; then
   cat > "$T/main.swift" <<'EOF'
 import Foundation
