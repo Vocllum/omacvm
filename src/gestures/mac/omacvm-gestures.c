@@ -536,7 +536,12 @@ static void updateCapture(CFRunLoopTimerRef t, void *info) {
   int other = isOther(pid, net, name, net < 0 && pid > 0 && ns_is_regular(pid));
   if (other) win = frontWindow(pid);
   frontChanged(pid, net, front, title, win, other);
-  if (t) CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  if (t) {
+    // Every 0.2 s while a VM app is in front, else every 2 s; the slow look
+    // may come up to 0.5 s late so macOS can batch it with other wake-ups.
+    CFRunLoopTimerSetTolerance(t, net >= 0 ? 0.02 : 0.5);
+    CFRunLoopTimerSetNextFireDate(t, CFAbsoluteTimeGetCurrent() + (net >= 0 ? 0.2 : 2.0));
+  }
 }
 
 // ---- the macOS pointer over the full-screen VM ----
