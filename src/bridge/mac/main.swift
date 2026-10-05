@@ -85,8 +85,8 @@ let supportDir = FileManager.default.homeDirectoryForCurrentUser
   .appendingPathComponent("Library/Application Support/omacvm-bridge").path
 let tokenPath = supportDir + "/token"
 
-func loadToken() -> String {
-  if let s = try? String(contentsOfFile: tokenPath, encoding: .utf8) {
+func loadSecret(_ path: String) -> String {
+  if let s = try? String(contentsOfFile: path, encoding: .utf8) {
     let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
     if t.count >= 32 { return t }
   }
@@ -95,12 +95,17 @@ func loadToken() -> String {
   let t = bytes.map { String(format: "%02x", $0) }.joined()
   try? FileManager.default.createDirectory(atPath: supportDir, withIntermediateDirectories: true,
                                            attributes: [.posixPermissions: 0o700])
-  guard FileManager.default.createFile(atPath: tokenPath, contents: Data((t + "\n").utf8),
-                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(tokenPath)") }
-  log("created token \(tokenPath)")
+  guard FileManager.default.createFile(atPath: path, contents: Data((t + "\n").utf8),
+                                       attributes: [.posixPermissions: 0o600]) else { fatalError("cannot write \(path)") }
+  log("created \(path)")
   return t
 }
-let token = Array(loadToken().utf8)
+let token = Array(loadSecret(tokenPath).utf8)
+// OmacVM.app relays requests from its VMs' control port (virtio-serial
+// org.omacvm.control) with this key; unlike the token, no VM ever gets it
+// (control.swift: the app names the VM, a guest cannot).
+let relayKeyPath = supportDir + "/relay-key"
+let relayKey = Array(loadSecret(relayKeyPath).utf8)
 
 // ---- JSON helpers ----
 func nn(_ v: Any?) -> Any { v ?? NSNull() }

@@ -44,13 +44,22 @@ func fromThisMac(_ fd: Int32, peer: String) -> Bool {
   return false
 }
 
+func sameSecret(_ given: [UInt8], _ want: [UInt8]) -> Bool {
+  guard given.count == want.count, !want.isEmpty else { return false }
+  var diff: UInt8 = 0
+  for i in 0..<given.count { diff |= given[i] ^ want[i] }   // constant time
+  return diff == 0
+}
+
 func authorized(_ header: String?) -> Bool {
   guard let h = header, h.hasPrefix("Bearer ") else { return false }
-  let given = Array(h.dropFirst(7).trimmingCharacters(in: .whitespaces).utf8)
-  guard given.count == token.count else { return false }
-  var diff: UInt8 = 0
-  for i in 0..<given.count { diff |= given[i] ^ token[i] }   // constant time
-  return diff == 0
+  return sameSecret(Array(h.dropFirst(7).trimmingCharacters(in: .whitespaces).utf8), token)
+}
+
+/// OmacVM.app relaying a VM's control port request (X-OmacVM-Relay).
+func relayAuthorized(_ header: String?) -> Bool {
+  guard let h = header else { return false }
+  return sameSecret(Array(h.trimmingCharacters(in: .whitespaces).utf8), relayKey)
 }
 
 // ---- sockets ----

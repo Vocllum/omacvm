@@ -270,8 +270,9 @@ For `omacvm` in Omarchy (docs/adr/0031). A fixed list; anything else is 404,
 and nothing the VM sends reaches a command line except feature names that are
 in the Mac's own `features.tsv`. The VM is never named by the request: the
 Bridge finds the one running VM that OmacVM set up at the request's address
-(none or two: 409). Requests carry `X-OmacVM-Proto: 1`; bodies are strict JSON
-up to 4 KB, unknown keys refused.
+(none or two: 409), and the request must carry that VM's own key
+(`X-OmacVM-VM-Key`; `omacvm apply` makes it, 403 without it). Requests carry
+`X-OmacVM-Proto: 1`; bodies are strict JSON up to 4 KB, unknown keys refused.
 
 | Request | What it does |
 |---|---|
@@ -280,11 +281,14 @@ up to 4 KB, unknown keys refused.
 | `GET /omacvm/updates` | the last update check: `checks_enabled`, `checked_at`, `ok`, `offline`, `error`, the verified manifest |
 | `POST /omacvm/updates/check` | fetch and verify the manifest now (once a minute) |
 | `POST /omacvm/settings/update-checks` `{"enabled": bool}` | the one switch for update checks and notices |
-| `POST /omacvm/jobs` `{"action": "enable"\|"disable"\|"reinstall", "features": [...]}` or `{"action": "update"}` | runs `omacvm enable/disable F... --vm VM --yes --transaction`, `omacvm apply --vm VM --transaction` or `omacvm update --vm VM --transaction --commit C` (C from the verified manifest); 202 with the job. One per VM at a time, 20 an hour; toggles only when the Mac and the VM run the same OmacVM (else 409 `update-first`) |
-| `GET /omacvm/jobs/<id>` | `{"state": "running"\|"done"\|"failed"\|"rolled-back", "step", "text", "lines"}`, this VM's jobs only |
+| `POST /omacvm/jobs` `{"action": "enable"\|"disable"\|"reinstall", "features": [...]}` or `{"action": "update"}` | runs `omacvm enable/disable F... --vm VM --yes --transaction`, `omacvm apply --vm VM --transaction --yes --reinstall F...` or `omacvm update --vm VM --transaction --yes --commit C` (C from the verified manifest); 202 with the job. One per VM at a time, 20 an hour; toggles only when the Mac and the VM run the same OmacVM (else 409 `update-first`); with update checks off, update only after a check in the last hour (else 409 `stale-update`) |
+| `GET /omacvm/jobs/<id>` | `{"state": "running"\|"done"\|"failed"\|"rolled-back", "step", "of", "text", "lines"}`, this VM's jobs only. The state comes from the exit code (4 = rolled back); step n of m from the CLI's progress lines |
 
-From 127.0.0.1 (OmacVM.app's VMs, or any Mac program) everything but `hello`
-is refused. Every request goes to the log with the VM and the answer.
+From 127.0.0.1 (OmacVM.app's guests, or any Mac program) everything but
+`hello` is refused, except OmacVM.app relaying a request from a VM's control
+port (`org.omacvm.control`): `X-OmacVM-Relay` with the key in
+`relay-key` beside the token (no VM gets it) and `X-OmacVM-App-VM` (the VM's
+name, base64). Every request goes to the log with the VM and the answer.
 
 ### Not built: Wi-Fi control
 

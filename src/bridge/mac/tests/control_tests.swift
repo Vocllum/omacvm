@@ -68,6 +68,7 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     if case .failure(let e) = negotiateProto("0") { expect(e.code == "proto", "older than min") } else { expect(false, "proto 0") }
 
     // ---- which VM ----
+    let appA = VMEntry(name: "Omarchy", type: "app", state: "running", ip: "127.0.0.1:2222", omacvm: "2.9.0", setup: true)
     let a = VMEntry(name: "A", type: "parallels", state: "running", ip: "10.211.55.5", omacvm: "2.9.0", setup: true)
     let b = VMEntry(name: "B", type: "parallels", state: "running", ip: "10.211.55.6", omacvm: "2.9.0", setup: true)
     let stranger = VMEntry(name: "C", type: "utm", state: "running", ip: "10.211.55.7", omacvm: "", setup: false)
@@ -78,14 +79,55 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     let twin = VMEntry(name: "A2", type: "utm", state: "running", ip: "10.211.55.5", omacvm: "2.9.0", setup: true)
     if case .failure(let e) = vmForPeer("10.211.55.5", [a, twin]) { expect(e.code == "ambiguous-vm", "two VMs on one address") } else { expect(false, "twin") }
     if case .failure(let e) = vmForPeer("127.0.0.1", [a]) { expect(e.status == 403, "127.0.0.1") } else { expect(false, "loopback") }
+    if case .failure(let e) = vmForPeer("127.0.0.1", [appA]) { expect(e.code == "app-vm", "an app VM's address is no identity") } else { expect(false, "app loopback") }
 
     // ---- argv ----
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .enable, features: ["gestures"]), vm: "My VM", commit: nil)
            == ["/c/omacvm", "enable", "gestures", "--vm", "My VM", "--yes", "--transaction"], "enable argv")
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .update, features: []), vm: "V", commit: String(repeating: "a", count: 40))
-           == ["/c/omacvm", "update", "--vm", "V", "--transaction", "--commit", String(repeating: "a", count: 40)], "update argv")
+           == ["/c/omacvm", "update", "--vm", "V", "--transaction", "--yes", "--commit", String(repeating: "a", count: 40)], "update argv")
     expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["bridge"]), vm: "V", commit: nil)
-           == ["/c/omacvm", "apply", "--vm", "V", "--transaction"], "reinstall argv")
+           == ["/c/omacvm", "apply", "--vm", "V", "--transaction", "--yes", "--reinstall", "bridge"], "reinstall: that feature only")
+    expect(jobArgv(cli: "/c/omacvm", JobRequest(action: .reinstall, features: ["gestures", "mac-clock"]), vm: "V", commit: nil).suffix(4)
+           == ["--reinstall", "gestures", "--reinstall", "mac-clock"], "reinstall two")
+
+    // ---- the VM's own key (a VM that takes another one's address) ----
+    let k = String(repeating: "5a", count: 32)
+    expect(vmKeyCheck(given: k, stored: k + "\n") == nil, "its key")
+    expect(vmKeyCheck(given: String(repeating: "5b", count: 32), stored: k)?.code == "vm-key", "another VM's key")
+    expect(vmKeyCheck(given: nil, stored: k)?.code == "vm-key", "no key sent")
+    expect(vmKeyCheck(given: String(k.prefix(63)), stored: k)?.code == "vm-key", "a shorter key")
+    expect(vmKeyCheck(given: k, stored: nil)?.code == "no-vm-key", "no key on the Mac: refused")
+    expect(vmKeyCheck(given: "", stored: "")?.code == "no-vm-key", "empty is no key")
+    // As lib/mac.sh vm_key_file: printf '%s/%s' parallels "My VM" | shasum -a 256 | cut -c1-32
+    expect(vmKeyName(type: "parallels", name: "My VM") == "6904477035f2e239f66f28d2d8ff406a", "key file name: \(vmKeyName(type: "parallels", name: "My VM"))")
+
+    // ---- OmacVM.app's VMs (the app names them; its relay key) ----
+    let appOff = VMEntry(name: "Off", type: "app", state: "stopped", ip: "", omacvm: "", setup: false)
+    if case .success(let v) = vmForApp("Omarchy", [a, appA]) { expect(v == appA, "app VM by name") } else { expect(false, "app VM") }
+    if case .failure(let e) = vmForApp("A", [a, appA]) { expect(e.code == "unknown-vm", "a Parallels VM is no app VM") } else { expect(false, "type") }
+    if case .failure(let e) = vmForApp("Off", [appOff]) { expect(e.code == "unknown-vm", "stopped app VM") } else { expect(false, "stopped") }
+
+    // ---- job state: the exit code alone ----
+    expect(jobState(rc: nil, alive: true) == "running" && jobState(rc: nil, alive: false) == "failed", "running / gone")
+    expect(jobState(rc: 0, alive: false) == "done" && jobState(rc: 4, alive: false) == "rolled-back", "done / rolled back")
+    expect(jobState(rc: 1, alive: false) == "failed" && jobState(rc: 3, alive: false) == "failed", "failed")
+
+    // ---- progress lines ----
+    let (p, rest) = progress(["==> OmacVM Bridge on the Mac", #"{"omacvm_progress": 1, "step": "mac", "n": 1, "of": 4, "text": "the Mac side"}"#,
+                              "pacman: rolled back nothing", #"{"omacvm_progress": 1, "step": "vm", "n": 3, "of": 4, "text": "the VM side"}"#])
+    expect(p == Progress(n: 3, of: 4, text: "the VM side"), "last progress line")
+    expect(rest == ["==> OmacVM Bridge on the Mac", "pacman: rolled back nothing"], "progress lines are not shown as output")
+    expect(progress([#"{"omacvm_progress": 1, "n": 500, "of": 4, "text": "x"}"#]).0 == nil, "nonsense counts")
+    expect(progress(["{\"omacvm_progress\": 1, broken"]).0 == nil, "broken line")
+
+    // ---- updates with checks off ----
+    let now = Date()
+    expect(updateGate(checksEnabled: true, checkedAt: nil, now: now) == nil, "checks on: the weekly result")
+    expect(updateGate(checksEnabled: false, checkedAt: now.addingTimeInterval(-300), now: now) == nil, "off, checked 5 min ago")
+    expect(updateGate(checksEnabled: false, checkedAt: now.addingTimeInterval(-7200), now: now)?.code == "stale-update", "off, 2 h old")
+    expect(updateGate(checksEnabled: false, checkedAt: nil, now: now)?.code == "stale-update", "off, never checked")
+    expect(updateGate(checksEnabled: false, checkedAt: now.addingTimeInterval(86400), now: now)?.code == "stale-update", "a time in the future")
 
     // ---- limits ----
     var lim = JobLimiter()

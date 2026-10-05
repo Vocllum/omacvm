@@ -124,10 +124,11 @@ struct VMEntry: Equatable {
 }
 
 /// The VM a request came from: exactly one running VM OmacVM set up at the
-/// peer's address. The guest never names a VM.
+/// peer's address. The guest never names a VM. Its key (vmKeyCheck) proves
+/// it is that VM and not one that took its address.
 func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError> {
   if peer.hasPrefix("127.") {
-    return .failure(PolicyError(403, "app-vm", "OmacVM.app's VMs switch features through the app (not yet): use omacvm on the Mac"))
+    return .failure(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
   }
   let hits = vms.filter { $0.state == "running" && $0.setup && $0.ip == peer }
   switch hits.count {
@@ -137,17 +138,87 @@ func vmForPeer(_ peer: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError>
   }
 }
 
+/// An OmacVM.app VM, named by the app (which knows which VM's control port a
+/// request came through; the guest never names it): running and set up.
+func vmForApp(_ name: String, _ vms: [VMEntry]) -> Result<VMEntry, PolicyError> {
+  let hits = vms.filter { $0.type == "app" && $0.name == name }
+  guard let v = hits.first, hits.count == 1 else { return .failure(PolicyError(409, "unknown-vm", "no such OmacVM.app VM")) }
+  guard v.state == "running", v.setup else {
+    return .failure(PolicyError(409, "unknown-vm", "this VM is not running, or OmacVM did not set it up"))
+  }
+  return .success(v)
+}
+
+/// The file name of a VM's control key (lib/mac.sh vm_key_file): the first
+/// 32 hex digits of SHA-256("<type>/<name>").
+func vmKeyName(type: String, name: String) -> String {
+  String(SHA256.hash(data: Data("\(type)/\(name)".utf8)).map { String(format: "%02x", $0) }.joined().prefix(32))
+}
+
+/// The key a VM sent (X-OmacVM-VM-Key) against the one the Mac keeps for it
+/// (made by omacvm apply). Constant time; nil: it matches.
+func vmKeyCheck(given: String?, stored: String?) -> PolicyError? {
+  guard let stored = stored?.trimmingCharacters(in: .whitespacesAndNewlines), stored.utf8.count >= 32 else {
+    return PolicyError(403, "no-vm-key", "the Mac has no control centre key for this VM yet: omacvm apply on the Mac")
+  }
+  let a = Array((given ?? "").trimmingCharacters(in: .whitespaces).utf8), b = Array(stored.utf8)
+  guard a.count == b.count else { return PolicyError(403, "vm-key", "this VM's control centre key does not match: omacvm apply on the Mac") }
+  var diff: UInt8 = 0
+  for i in 0..<a.count { diff |= a[i] ^ b[i] }
+  return diff == 0 ? nil : PolicyError(403, "vm-key", "this VM's control centre key does not match: omacvm apply on the Mac")
+}
+
 /// The exact command for a job: a fixed argv, no shell. `commit` only for
-/// update, from the manifest the Mac verified itself.
+/// update, from the manifest the Mac verified itself. reinstall repairs the
+/// named features only.
 func jobArgv(cli: String, _ r: JobRequest, vm: String, commit: String?) -> [String] {
   switch r.action {
   case .enable, .disable:
     return [cli, r.action.rawValue] + r.features + ["--vm", vm, "--yes", "--transaction"]
   case .reinstall:
-    return [cli, "apply", "--vm", vm, "--transaction"]
+    return [cli, "apply", "--vm", vm, "--transaction", "--yes"] + r.features.flatMap { ["--reinstall", $0] }
   case .update:
-    return [cli, "update", "--vm", vm, "--transaction"] + (commit.map { ["--commit", $0] } ?? [])
+    return [cli, "update", "--vm", vm, "--transaction", "--yes"] + (commit.map { ["--commit", $0] } ?? [])
   }
+}
+
+/// A job's state from its exit code (nil: not ended): apply and update end
+/// with 4 when they went back to what the VM had (--transaction).
+func jobState(rc: Int32?, alive: Bool) -> String {
+  switch rc {
+  case nil: return alive ? "running" : "failed"
+  case 0: return "done"
+  case 4: return "rolled-back"
+  default: return "failed"
+  }
+}
+
+struct Progress: Equatable { let n: Int, of: Int, text: String }
+
+/// The CLI's progress lines (OMACVM_PROGRESS=json: {"omacvm_progress": 1,
+/// "step", "n", "of", "text"}): the last one, and the other lines without them.
+func progress(_ lines: [String]) -> (Progress?, [String]) {
+  var last: Progress?, rest: [String] = []
+  for l in lines {
+    if l.hasPrefix("{\"omacvm_progress\""), let o = (try? JSONSerialization.jsonObject(with: Data(l.utf8))) as? [String: Any],
+       let n = o["n"] as? Int, let of = o["of"] as? Int, let t = o["text"] as? String,
+       (0...99).contains(n), (0...99).contains(of) {
+      last = Progress(n: n, of: max(of, n), text: String(t.prefix(120)))
+    } else {
+      rest.append(l)
+    }
+  }
+  return (last, rest)
+}
+
+/// With update checks off, an update installs only from a check the person
+/// asked for in the last hour (never from an old cached result).
+func updateGate(checksEnabled: Bool, checkedAt: Date?, now: Date = Date()) -> PolicyError? {
+  if checksEnabled { return nil }
+  guard let at = checkedAt, now.timeIntervalSince(at) < 3600, now >= at.addingTimeInterval(-60) else {
+    return PolicyError(409, "stale-update", "update checks are off and the last result may be old: check for updates first")
+  }
+  return nil
 }
 
 /// One job per VM at a time, at most `jobsPerHour` per VM per hour.

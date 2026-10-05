@@ -186,11 +186,6 @@ final class Control {
     let proto: Int
     switch negotiateProto(headers["x-omacvm-proto"]) { case .success(let p): proto = p; case .failure(let e): return refuse(e) }
     let version = macVersion(cli)
-    // Programs on this Mac (and OmacVM.app's VMs, which all come from
-    // 127.0.0.1) get hello only: the rest is for VMs.
-    if route != .hello && fromThisMac(fd, peer: peer) {
-      return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs switch features through the app (not yet): use omacvm on the Mac"))
-    }
 
     if route == .hello {
       let v = ProcessInfo.processInfo.operatingSystemVersion
@@ -199,6 +194,23 @@ final class Control {
                           "features": known.sorted(), "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                           "chip": chipName()])
     }
+    // Everything else is about the VM that asked, also the Mac-wide update
+    // settings: only a VM OmacVM set up, which proves it with its own key.
+    // Programs on this Mac (and OmacVM.app's guests, which all come from
+    // 127.0.0.1) get hello only, except OmacVM.app relaying a request from a
+    // VM's control port (relay key; the app names the VM).
+    let vm: VMEntry
+    if fromThisMac(fd, peer: peer) {
+      guard relayAuthorized(headers["x-omacvm-relay"]), let b64 = headers["x-omacvm-app-vm"],
+            let d = Data(base64Encoded: b64), let name = String(data: d, encoding: .utf8), !name.isEmpty, name.count <= 200 else {
+        return refuse(PolicyError(403, "app-vm", "OmacVM.app's VMs ask through the app's control port: update OmacVM.app"))
+      }
+      switch vmForApp(name, vmList(cli, refreshFor: "app/" + name)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
+    } else {
+      switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
+      if let e = vmKeyCheck(given: headers["x-omacvm-vm-key"], stored: storedVMKey(vm)) { vmName = vm.name; return refuse(e) }
+    }
+    vmName = vm.name
     switch route {
     case .updates: return answer(200, updatesAnswer(version))
     case .updatesCheck:
@@ -213,14 +225,6 @@ final class Control {
     case .setUpdateChecks(let on):
       setUpdateChecks(on)
       return answer(200, updatesAnswer(version), on ? "checks on" : "checks off")
-    default: break
-    }
-
-    // Everything else is about the VM that asked.
-    let vm: VMEntry
-    switch vmForPeer(peer, vmList(cli, refreshFor: peer)) { case .success(let v): vm = v; case .failure(let e): return refuse(e) }
-    vmName = vm.name
-    switch route {
     case .status:
       answer(200, statusAnswer(cli, vm, version))
     case .job(let id):
@@ -233,6 +237,8 @@ final class Control {
         guard let m = verifiedManifest() else {
           return refuse(PolicyError(409, "no-update", "no verified update on the Mac: check for updates first"))
         }
+        let at = (lastResult()["checked_at"] as? String).flatMap { isoFormat.date(from: $0) }
+        if let e = updateGate(checksEnabled: updateChecks(), checkedAt: at) { return refuse(e) }
         commit = m.commit
       }
       // A job started before a Bridge restart (an update reinstalls the Bridge) still counts.
@@ -252,14 +258,37 @@ final class Control {
   // ---- which VM ----
   private func vmKey(_ v: VMEntry) -> String { "\(v.type)/\(v.name)" }
 
+  /// The control key `omacvm apply` made for this VM (lib/mac.sh
+  /// vm_key_ensure): only when this user's alone.
+  private func storedVMKey(_ v: VMEntry) -> String? {
+    let path = omacvmSupport + "/vm-keys/" + vmKeyName(type: v.type, name: v.name)
+    var st = stat()
+    guard lstat(path, &st) == 0, (st.st_mode & S_IFMT) == S_IFREG, st.st_uid == getuid(), st.st_mode & 0o077 == 0,
+          st.st_size < 256 else { return nil }
+    return try? String(contentsOfFile: path, encoding: .utf8)
+  }
+
   /// `omacvm vms --json`, cached for a minute; asked again (at most every
-  /// 10 s) when a peer is not in it, e.g. a VM that just started.
+  /// 10 s) when a peer is not in it, e.g. a VM that just started. One run at
+  /// a time: requests meanwhile wait for it (each run uses SSH to every VM).
+  private var vmsRunning = false, vmsFailed = Date.distantPast
+  private let vmsDone = NSCondition()
   private func vmList(_ cli: String, refreshFor peer: String) -> [VMEntry] {
+    func known(_ list: [VMEntry]) -> Bool { list.contains { $0.ip == peer || "app/" + $0.name == peer } }
+    vmsDone.lock()
+    while vmsRunning { vmsDone.wait() }
     let (cached, age) = q.sync { (vms.list, Date().timeIntervalSince(vms.at)) }
-    if age < 60 && (cached.contains { $0.ip == peer } || age < 10) { return cached }
+    // Fresh enough, or a run failed a moment ago (not again right away).
+    if (age < 60 && (known(cached) || age < 10)) || Date().timeIntervalSince(vmsFailed) < 10 { vmsDone.unlock(); return cached }
+    vmsRunning = true
+    vmsDone.unlock()
+    defer { vmsDone.lock(); vmsRunning = false; vmsDone.broadcast(); vmsDone.unlock() }
     guard let (rc, out) = runCLI([cli, "vms", "--json"], timeout: 90), rc == 0,
           let o = (try? JSONSerialization.jsonObject(with: out)) as? [String: Any],
-          let list = o["vms"] as? [[String: Any]] else { return cached }
+          let list = o["vms"] as? [[String: Any]] else {
+      vmsDone.lock(); vmsFailed = Date(); vmsDone.unlock()
+      return cached
+    }
     let fresh = list.map { v in
       VMEntry(name: v["name"] as? String ?? "", type: v["type"] as? String ?? "", state: v["state"] as? String ?? "",
               ip: v["ip"] as? String ?? "", omacvm: v["omacvm"] as? String ?? "",
@@ -314,7 +343,7 @@ final class Control {
     guard fd >= 0 else { return nil }
     defer { close(fd) }
     // omacvm writes its exit code there, also when the Bridge restarts meanwhile (an update).
-    guard let pid = spawn(argv, env: cliEnvironment(extra: ["OMACVM_JOB_STATUS": j.rcPath]), out: fd) else { return nil }
+    guard let pid = spawn(argv, env: cliEnvironment(extra: ["OMACVM_JOB_STATUS": j.rcPath, "OMACVM_PROGRESS": "json"]), out: fd) else { return nil }
     j.pid = pid
     let meta: [String: Any] = ["id": id, "vm": j.vm, "action": j.action, "features": j.features,
                                "started": isoFormat.string(from: j.started), "pid": Int(pid)]
@@ -364,19 +393,15 @@ final class Control {
 
   private func jobAnswer(_ j: JobRun) -> [String: Any] {
     let data = (try? Data(contentsOf: URL(fileURLWithPath: j.logPath))) ?? Data()
-    let lines = cleanLines(data.suffix(65536))
-    let steps = lines.filter { $0.hasPrefix("==> ") }
+    let (step, lines) = progress(cleanLines(data.suffix(65536)))
     var rc = q.sync { j.rc }
     if rc == nil, let s = try? String(contentsOfFile: j.rcPath, encoding: .utf8) { rc = Int32(s.trimmingCharacters(in: .whitespacesAndNewlines)) }
-    var state: String
-    switch rc {
-    case nil: state = (j.pid > 0 && kill(j.pid, 0) == 0) ? "running" : "failed"
-    case 0: state = "done"
-    default: state = lines.contains { $0.contains("rolled back") } ? "rolled-back" : "failed"
-    }
-    let text = state == "running" ? String((steps.last ?? "starting").dropFirst(steps.isEmpty ? 0 : 4))
+    // The state comes from the exit code alone (4: rolled back), never from the output.
+    let state = jobState(rc: rc, alive: j.pid > 0 && kill(j.pid, 0) == 0)
+    let last = lines.last(where: { $0.hasPrefix("==> ") }).map { String($0.dropFirst(4)) }
+    let text = state == "running" ? (step?.text ?? last ?? "starting")
       : state == "done" ? "done" : (lines.last ?? "failed")
-    return ["id": j.id, "action": j.action, "features": j.features, "state": state, "step": steps.count, "of": 0,
+    return ["id": j.id, "action": j.action, "features": j.features, "state": state, "step": step?.n ?? 0, "of": step?.of ?? 0,
             "text": text, "rc": rc.map { Int($0) } ?? NSNull(), "lines": Array(lines.suffix(20))]
   }
 
