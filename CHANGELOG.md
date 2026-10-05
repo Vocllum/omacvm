@@ -3,13 +3,17 @@
 What's new in each OmacVM release. The release notes on GitHub say the same
 in more words.
 
-## 2.9.0 (unreleased)
+## 3.0.0 (unreleased)
 
 - OmacVM.app: an app whose texture or buffer goes past the VM's GPU memory
   budget loses its GPU context at once, and QEMU's log says why. With the
   VM's reset-aware Mesa (`src/app/guest/mesa`, not installed by default) a
   robust app reads `GL_GUILTY_CONTEXT_RESET` and can start over. Vulkan
-  (Venus) memory now counts against the same budget.
+  (Venus) memory now counts against the same budget, for as long as anything
+  in the VM still holds it (a kept dma-buf or mapping too).
+
+## 2.9.0 (unreleased)
+
 - Video decoding: up to 32 hardware decoders per VM (Chrome's 16 plus one
   Firefox's 16). Past that, a video decodes on the CPU instead of playing
   black (the VM's VA-API driver knows the Mac's limit). The copy of each
