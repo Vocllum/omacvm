@@ -115,8 +115,9 @@ commit 82927e9. Changes here:
   build checks the patched source
 - `patches/qemu-cocoa-idle-refresh.patch`: QEMU's refresh tick (every 8 ms on
   a 120 Hz display, for every output) slows to 500 ms after a second without
-  a display update and comes back with the next one. virtio-gpu pushes its
-  frames, so nothing needed the tick on an idle desktop; it woke QEMU 60-120
+  work for it (2D updates, new scanouts, the extra outputs' windows) and comes
+  back with the next. The main window's GL frames are pushed and never needed
+  it, so an idle desktop (or a blinking cursor) no longer wakes QEMU 60-120
   times a second. `OMACVM_IDLE_REFRESH=0` keeps the display's rate. Numbers:
   the idle-power PR
 - `patches/virgl-test-shader-fault.patch`: test runtimes only

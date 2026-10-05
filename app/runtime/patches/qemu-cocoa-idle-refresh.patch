@@ -1,25 +1,29 @@
 From: OmacVM
-Subject: [PATCH] cocoa: the refresh tick slows down while the guest shows nothing new
+Subject: [PATCH] cocoa: the refresh tick slows down while it has nothing to do
 
 What: QEMU's display refresh timer (gui_update) runs at the Mac display's
-rate for every listener (8 ms on a 120 Hz panel). After a second without a
-display update (a GL frame, a 2D update, a new scanout, on any output) the
-listeners tick every 500 ms instead; the next update brings the display's
-rate back at once (QEMU re-arms the timer when a listener's interval drops).
-OMACVM_IDLE_REFRESH=0 keeps the display's rate. GL mode only.
+rate for every listener (8 ms on a 120 Hz panel). It now slows to 500 ms
+after a second without work for it: a 2D update or a new scanout (boot,
+consoles), an update of an extra output's window (those draw on the tick),
+a main-window frame not shown yet, or OMACVM_GL_PRESENT_ON_TICK. The next
+such update brings the display's rate back at once (QEMU re-arms the timer
+when a listener's interval drops). The main window's GL frames do not
+count: dpy_gl_update puts them on screen (or the present timer and the
+display link do), so a blinking cursor keeps the slow tick.
+OMACVM_IDLE_REFRESH=0 keeps the display's rate. GL mode only; QEMU's log
+says which.
 
-Why: with virtio-gpu nothing needs the tick while the screen does not
-change: GL frames go on screen from dpy_gl_update, and the device's
-gfx_update does nothing. The tick only checked the pasteboard and woke
-QEMU's main loop 60-120 times a second on an idle Omarchy desktop, also
-with the window minimised or hidden.
+Why: with virtio-gpu the tick has nothing to do while the screen does not
+change (the device's gfx_update does nothing). It only checked the
+pasteboard and woke QEMU's main loop 60-120 times a second on an idle
+Omarchy desktop, also with the window minimised or hidden.
 
 Upstream: not sent (QEMU's VNC server slows its own refresh the same way;
-the Cocoa listener and OmacVM's extra outputs are OmacVM patches).
+the Cocoa GL present path and OmacVM's extra outputs are OmacVM patches).
 Test: idle wakeups and CPU of QEMU per process (proc_pid_rusage) before and
-after, window shown and minimised (numbers in the PR); typing, the cursor and
-a video still update at once (tracks/idle-power notes). Applies after
-qemu-cocoa-gl-present-color.patch.
+after, window shown and minimised (numbers in the idle-power PR); typing,
+the cursor, a console switch and a video still update at once (notes:
+tracks/idle-power). Applies after qemu-cocoa-gl-present-color.patch.
 --- a/ui/cocoa.m
 +++ b/ui/cocoa.m
 @@ -99,6 +99,8 @@ static void cocoa_switch(DisplayChangeListener *dcl,
@@ -61,12 +65,12 @@ qemu-cocoa-gl-present-color.patch.
  }
  @end
  
-+static void cocoa_refresh_tick(void);
++static void cocoa_refresh_tick(bool pending);
 +
  static void cocoa_gl_refresh(DisplayChangeListener *dcl)
  {
      cocoa_refresh(dcl);
-+    cocoa_refresh_tick();
++    cocoa_refresh_tick(gl_dirty);
  
      if (gl_dirty) {
  
@@ -86,28 +90,32 @@ qemu-cocoa-gl-present-color.patch.
  
      cocoa_gl_log("scanout texture id=%u region=%ux%u+%u+%u",
                   backing_id, w, h, x, y);
-@@ -4211,6 +4219,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
-                                    uint32_t w, uint32_t h)
- {
-     gl_dirty = true;
-+    cocoa_refresh_activity();
- 
-     /*
-      * Show the guest's frame now, not on the next 30 ms refresh tick:
-@@ -4329,6 +4338,94 @@ static bool omacvm_is_head_console(unsigned int index)
+@@ -4229,6 +4237,7 @@ static void cocoa_gl_scanout_flush(DisplayChangeListener *dcl,
+ #endif
+     if (on_tick) {
+         /* cocoa_gl_refresh draws it. */
++        cocoa_refresh_activity();
+     } else if (present_ctx) {
+         if (present_vsync) {
+             os_unfair_lock_lock(&present_lock);
+@@ -4329,6 +4338,104 @@ static bool omacvm_is_head_console(unsigned int index)
  static bool omacvm_guest_known;
  static NSString *omacvm_last_layout;
  
 +/*
 + * QEMU's refresh tick (gui_update) runs at the Mac display's rate for every
 + * listener: 120 wakeups a second on a ProMotion panel, also while the guest
-+ * shows nothing new. With virtio-gpu nothing needs it then: GL frames come
-+ * through dpy_gl_update and go on screen at once, and the device's gfx_update
-+ * does nothing. After a second without a display update (a frame, a 2D update,
-+ * a new scanout, on any output) the listeners tick every 500 ms; the next
-+ * update brings the display's rate back at once (re-arming the timer).
-+ * OMACVM_IDLE_REFRESH=0 keeps the display's rate. Only in GL mode: other
-+ * devices may need the tick to see changes. All of it with the BQL.
++ * shows nothing new. With virtio-gpu the main window's GL frames do not need
++ * it (dpy_gl_update puts them on screen, or the present timer and display
++ * link do) and the device's gfx_update does nothing. What still needs the
++ * tick: 2D updates and new scanouts (boot, consoles), the extra outputs'
++ * windows (drawn on the tick), a frame that could not be shown yet, and
++ * OMACVM_GL_PRESENT_ON_TICK. After a second without any of these the
++ * listeners tick every 500 ms; the next one brings the display's rate back
++ * at once (re-arming the timer). A blinking cursor or a clock on the main
++ * output keeps the slow tick. OMACVM_IDLE_REFRESH=0 keeps the display's
++ * rate. Only in GL mode: other devices may need the tick to see changes.
++ * All of it with the BQL.
 + */
 +#define COCOA_REFRESH_SLOW_MS  500
 +#define COCOA_REFRESH_QUIET_MS 1000
@@ -168,13 +176,19 @@ qemu-cocoa-gl-present-color.patch.
 +    }
 +}
 +
-+/* Every tick of the main listener (inside gui_update). */
-+static void cocoa_refresh_tick(void)
++/*
++ * Every tick of the main listener (inside gui_update). pending: the main
++ * window has a frame it has not shown yet (this tick tries again).
++ */
++static void cocoa_refresh_tick(bool pending)
 +{
 +    int64_t now = qemu_clock_get_ms(QEMU_CLOCK_REALTIME);
 +
 +    if (!cocoa_refresh_idle_enabled()) {
 +        return;
++    }
++    if (pending) {
++        cocoa_refresh_activity();
 +    }
 +    if (cocoa_refresh_busy) {
 +        cocoa_refresh_busy = false;
@@ -189,7 +203,7 @@ qemu-cocoa-gl-present-color.patch.
  static void omacvm_send_layout(void);
  static void omacvm_full_next(void);
  
-@@ -4720,6 +4817,7 @@ static void omacvm_head_gfx_update(DisplayChangeListener *dcl,
+@@ -4720,6 +4827,7 @@ static void omacvm_head_gfx_update(DisplayChangeListener *dcl,
          surface_gl_update_texture(dgc.gls, hd->surface, x, y, w, h);
      });
      hd->dirty = true;
@@ -197,7 +211,7 @@ qemu-cocoa-gl-present-color.patch.
  }
  
  static void omacvm_head_gfx_switch(DisplayChangeListener *dcl,
-@@ -4735,6 +4833,7 @@ static void omacvm_head_gfx_switch(DisplayChangeListener *dcl,
+@@ -4735,6 +4843,7 @@ static void omacvm_head_gfx_switch(DisplayChangeListener *dcl,
      });
      hd->surface = new_surface;
      hd->dirty = true;
@@ -205,7 +219,7 @@ qemu-cocoa-gl-present-color.patch.
  }
  
  static void omacvm_head_refresh(DisplayChangeListener *dcl)
-@@ -4756,6 +4855,7 @@ static void omacvm_head_scanout_disable(DisplayChangeListener *dcl)
+@@ -4756,6 +4865,7 @@ static void omacvm_head_scanout_disable(DisplayChangeListener *dcl)
  
      hd->borrow = NULL;
      hd->dirty = true;
@@ -213,7 +227,7 @@ qemu-cocoa-gl-present-color.patch.
  }
  
  static void omacvm_head_scanout_texture(DisplayChangeListener *dcl,
-@@ -4769,6 +4869,7 @@ static void omacvm_head_scanout_texture(DisplayChangeListener *dcl,
+@@ -4769,6 +4879,7 @@ static void omacvm_head_scanout_texture(DisplayChangeListener *dcl,
      hd->scanout_id = backing_id;
      hd->borrow = backing_borrow;
      hd->dirty = true;
@@ -221,7 +235,7 @@ qemu-cocoa-gl-present-color.patch.
  }
  
  static void omacvm_head_scanout_flush(DisplayChangeListener *dcl,
-@@ -4776,6 +4877,7 @@ static void omacvm_head_scanout_flush(DisplayChangeListener *dcl,
+@@ -4776,6 +4887,7 @@ static void omacvm_head_scanout_flush(DisplayChangeListener *dcl,
                                        uint32_t w, uint32_t h)
  {
      ((OmacVMHead *)dcl)->dirty = true;
@@ -229,7 +243,7 @@ qemu-cocoa-gl-present-color.patch.
  }
  
  static const DisplayChangeListenerOps omacvm_head_gl_ops = {
-@@ -5127,8 +5229,8 @@ static void omacvm_heads_ui_info(void)
+@@ -5127,8 +5239,8 @@ static void omacvm_heads_ui_info(void)
      with_bql(^{
          for (int i = 1; i < omacvm_outputs; i++) {
              if (prefresh[i]) {
