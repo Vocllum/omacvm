@@ -24,14 +24,16 @@
 // Each VM says on connect what it wants (the handshake below). Capture
 // only covers a full-screen VM whose connected daemon wants the trackpad, so a
 // VM with gestures off (or not connected yet) leaves macOS its gestures.
-// Glide (experimental, per VM): two-finger scrolling goes to the guest too.
-// While fingers touch the built-in trackpad, their raw positions do (every
-// two-finger frame, precise to hundredths of a millimetre) along with macOS's
-// own scroll for them ("A", macOS's acceleration); after they lift, macOS's
-// momentum goes as point deltas ("W"), which the guest continues the touch
-// with. macOS's own scroll events then do not reach the VM app. Other
-// continuous scrolling (Magic Mouse) goes as W deltas as a whole; a wheel
-// mouse (discrete steps) still scrolls through the VM app.
+// Glide (scroll momentum, per VM): a trackpad's two-finger scrolling goes to
+// the guest too. While fingers touch a trackpad (built-in or Magic Trackpad,
+// also one connected later), their raw positions do (every two-finger frame,
+// precise to hundredths of a millimetre) along with macOS's own scroll for
+// them ("A", macOS's acceleration); after they lift, macOS's momentum goes as
+// point deltas ("W"), which the guest continues the touch with. macOS's own
+// scroll events then do not reach the VM app. Every other scroll (wheel mice,
+// smooth-scrolling mice, a Magic Mouse) still scrolls through the VM app,
+// one to one: decided per event by whether a trackpad's fingers made it
+// (scroll-model.h).
 // --keys-only: no trackpad for any VM (macOS keeps every gesture); on UTM, Cmd
 // still reaches the guest as Super (below). --record: the built-in trackpad's
 // frames and macOS's scroll events to ~/Library/Logs/omacvm-input.tsv (Glide
@@ -41,10 +43,10 @@
 // Parallels, 192.168.64.1 on UTM, .1 of Fusion's NAT network), one line per message:
 //   F <n> [<id> <x> <y> <size>]...   x/y 0..1 with y down, size >= 0
 //   S <on|off|esc>                    capture state changes
-//   O <natural> <w> <h>               on connect: macOS's natural scrolling (1/0) and the
-//                                     trackpad's size in 1/100 mm
+//   O <natural> <w> <h>               on connect (and when another trackpad touches): macOS's
+//                                     natural scrolling (1/0) and the trackpad's size in 1/100 mm
 //   A <dx> <dy>                       Glide: macOS's scroll while the fingers touch (points)
-//   W <dx> <dy>                       Glide: macOS's momentum (and Magic Mouse) in points
+//   W <dx> <dy>                       Glide: macOS's momentum after a trackpad's fingers lifted (points)
 //   P                                 Glide: macOS recognized a pinch (magnify)
 //   K <code> <0|1|2>                  UTM: a Cmd shortcut as Super+key (Linux keycode)
 // and first, the handshake (any VM on these networks, and any Mac program on
@@ -78,6 +80,8 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <pthread.h>
+#include <time.h>
+#include "scroll-model.h"
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -107,6 +111,8 @@ extern void MTRegisterContactFrameCallback(MTDeviceRef, MTFrameCallback);
 extern void MTDeviceStart(MTDeviceRef, int);
 extern bool MTDeviceIsBuiltIn(MTDeviceRef);
 extern int MTDeviceGetSensorSurfaceDimensions(MTDeviceRef, int *, int *);   // 1/100 mm
+extern int MTDeviceGetDeviceID(MTDeviceRef, uint64_t *);
+extern bool MTDeviceIsRunning(MTDeviceRef);
 
 #ifndef PORT
 #define PORT 47830
@@ -184,7 +190,16 @@ static int trackpad = 1;          // 0 with --keys-only
 static int tpW = 15600, tpH = 9600;   // built-in trackpad, 1/100 mm
 static FILE *rec;                 // --record: trackpad frames and macOS's scroll, for analysis
 static double unixNow(void) { return CFAbsoluteTimeGetCurrent() + kCFAbsoluteTimeIntervalSince1970; }
-static volatile int fingers;      // contacts in the built-in trackpad's last frame
+static volatile int fingers;      // contacts in the touching trackpad's last frame
+// The trackpads (built-in, Magic Trackpads, also ones connected later): the
+// one touching now has its frames sent; scroll momentum takes only scrolling
+// that a trackpad's fingers make (scroll-model.h), never a mouse's.
+#define MAX_PADS 8
+static struct { MTDeviceRef dev; uint64_t id; int w, h, fingers; } pads[MAX_PADS];
+static int nPads, activePad = -1;
+static ScrollState scrollSt;
+static pthread_mutex_t padLock = PTHREAD_MUTEX_INITIALIZER;   // pads' fingers, activePad, scrollSt
+static double monoNow(void) { return (double)clock_gettime_nsec_np(CLOCK_UPTIME_RAW) / 1e9; }
 static int pinchSent;             // P sent for the current two-finger touch
 
 static void logf_(const char *fmt, ...) {
@@ -289,6 +304,22 @@ static int glideOn(void) { return frontNet >= 0 && wants(1); }
 
 static void sendLine(const char *line, size_t len) { sendTo(0, line, len); }
 
+// "O <natural> <w> <h>": the Mac's scrolling direction and the touching
+// trackpad's size, so the guest scales finger movement for it (OmacVM's
+// tuning is relative to a 156 x 96 mm trackpad with natural scrolling).
+static int sizeLine(char *b, size_t cap) {
+  CFPropertyListRef nat = CFPreferencesCopyAppValue(CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication);
+  int natural = nat ? CFBooleanGetValue((CFBooleanRef)nat) : 1;
+  if (nat) CFRelease(nat);
+  return snprintf(b, cap, "O %d %d %d\n", natural, tpW, tpH);
+}
+
+// Another trackpad (another size) is the one touching now: every VM learns it.
+static void sendSize(void) {
+  char b[64]; int n = sizeLine(b, sizeof b);
+  sendTo(1, b, (size_t)n);
+}
+
 // "on"/"esc" concern the front VM; "off" goes to every VM.
 static void sendState(const char *s) {
   char b[16]; int n = snprintf(b, sizeof b, "S %s\n", s);
@@ -303,9 +334,25 @@ static float d0, cx0, cy0;
 static int touching(const MTTouch *t) { return t->state >= 1 && t->state <= 5 && t->zTotal > 0.0f; }
 
 static int frameCb(MTDeviceRef dev, MTTouch *touches, int n, double ts, int frame) {
-  (void)dev; (void)ts; (void)frame;
+  (void)ts; (void)frame;
   MTTouch *c[16]; int k = 0;
   for (int i = 0; i < n && k < 16; i++) if (touching(&touches[i])) c[k++] = &touches[i];
+
+  // One trackpad at a time: another one's frames count once this one is free.
+  pthread_mutex_lock(&padLock);
+  int pad = -1;
+  for (int i = 0; i < nPads; i++) if (pads[i].dev == dev) pad = i;
+  if (pad >= 0) pads[pad].fingers = k;
+  int switched = 0;
+  if (pad != activePad) {
+    if (pad < 0 || k == 0 || (activePad >= 0 && pads[activePad].fingers > 0)) { pthread_mutex_unlock(&padLock); return 0; }
+    activePad = pad;
+    switched = pads[pad].w != tpW || pads[pad].h != tpH;
+    if (switched) { tpW = pads[pad].w; tpH = pads[pad].h; }
+  }
+  scrollFingers(&scrollSt, k, monoNow());
+  pthread_mutex_unlock(&padLock);
+  if (switched) sendSize();   // the guest scales finger movement to this trackpad
 
   int send = 0;
   if (k != 2) pinchSent = 0;
@@ -1252,17 +1299,24 @@ static CGEventRef tapCb(CGEventTapProxy p, CGEventType type, CGEventRef e, void 
             CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1),
             CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous), capturing);
   if (type == kCGEventScrollWheel) {
-    // Glide: continuous (trackpad, Magic Mouse) scrolling, as macOS shaped it,
-    // goes to the guest; a wheel mouse's discrete steps pass to the VM app.
+    // Glide: a trackpad's scrolling, as macOS shaped it, goes to the guest;
+    // everything else (wheel mice, smooth-scrolling mice, a Magic Mouse)
+    // passes to the VM app as it is (scroll-model.h).
     if (!(capturing && glideOn())) return e;
-    if (!CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous)) return e;
+    ScrollEvent se = { (int)CGEventGetIntegerValueField(e, kCGScrollWheelEventIsContinuous),
+                       (int)CGEventGetIntegerValueField(e, kCGScrollWheelEventScrollPhase),
+                       (int)CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase), monoNow() };
+    pthread_mutex_lock(&padLock);
+    int route = scrollRoute(&scrollSt, &se);
+    pthread_mutex_unlock(&padLock);
+    if (route == SCROLL_PASS) return e;
     double dy = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis1);
     double dx = CGEventGetDoubleValueField(e, kCGScrollWheelEventPointDeltaAxis2);
     if (dx != 0 || dy != 0) {
-      // Fingers on the built-in trackpad: their raw frames carry this scroll;
-      // the guest only learns from it how much macOS accelerates right now.
-      int touch = fingers >= 2 && !CGEventGetIntegerValueField(e, kCGScrollWheelEventMomentumPhase);
-      char b[64]; int n = snprintf(b, sizeof b, "%c %.2f %.2f\n", touch ? 'A' : 'W', dx, dy);
+      // While fingers touch, their raw frames carry this scroll; the guest
+      // only learns from it how much macOS accelerates right now ("A").
+      // After they lift, macOS's momentum ("W").
+      char b[64]; int n = snprintf(b, sizeof b, "%c %.2f %.2f\n", route == SCROLL_TOUCH ? 'A' : 'W', dx, dy);
       sendLine(b, (size_t)n);
     }
     return NULL;
@@ -1390,13 +1444,7 @@ static void addClient(int c, int net, const char *ip, int gestures, int glide, c
   const char *st = capturing && front ? "on\n" : "off\n";
   char b[96]; int n = snprintf(b, sizeof b, "S %s", st);
   send(c, b, (size_t)n, MSG_NOSIGNAL);
-  // The Mac's scrolling direction and the trackpad's size, so the guest
-  // scales finger movement for this Mac (OmacVM's tuning is relative to a
-  // 156 x 96 mm trackpad with natural scrolling).
-  CFPropertyListRef nat = CFPreferencesCopyAppValue(CFSTR("com.apple.swipescrolldirection"), kCFPreferencesAnyApplication);
-  int natural = nat ? CFBooleanGetValue((CFBooleanRef)nat) : 1;
-  if (nat) CFRelease(nat);
-  n = snprintf(b, sizeof b, "O %d %d %d\n", natural, tpW, tpH);
+  n = sizeLine(b, sizeof b);   // the Mac's scrolling direction and the trackpad's size
   send(c, b, (size_t)n, MSG_NOSIGNAL);
 }
 
@@ -1521,35 +1569,59 @@ static void *serverThread(void *arg) {
   return NULL;
 }
 
-// ---- the trackpad: the built-in one, else an external Magic Trackpad ----
+// ---- the trackpads: the built-in one and every Magic Trackpad ----
 // MultitouchSupport lists every multi-touch surface, the Magic Mouse's too; a
 // trackpad is told apart by its size (a Magic Trackpad is 160 x 115 mm, a Magic
-// Mouse's surface well under 100 mm wide).
+// Mouse's surface well under 100 mm wide). Looked for again every 10 s, so a
+// Magic Trackpad connected later (or again) is taken too.
 static int trackpadStarted;
 
-static void startTrackpad(void) {
+static int isTrackpad(MTDeviceRef d, int *w, int *h) {
+  if (MTDeviceGetSensorSurfaceDimensions(d, w, h) != 0) *w = *h = 0;
+  return MTDeviceIsBuiltIn(d) || *w >= 10000;
+}
+
+static void startTrackpads(void) {
   CFArrayRef list = MTDeviceCreateList();
-  MTDeviceRef pick = NULL; int pw = 0, ph = 0;
-  for (int pass = 0; pass < 2 && !pick; pass++) {
-    for (CFIndex i = 0; list && i < CFArrayGetCount(list) && !pick; i++) {
-      MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
-      int w = 0, h = 0;
-      if (MTDeviceGetSensorSurfaceDimensions(d, &w, &h) != 0) w = h = 0;
-      if (pass == 0 ? MTDeviceIsBuiltIn(d) : (!MTDeviceIsBuiltIn(d) && w >= 10000)) { pick = d; pw = w; ph = h; }
+  int added = 0;
+  for (CFIndex i = 0; list && i < CFArrayGetCount(list); i++) {
+    MTDeviceRef d = (MTDeviceRef)CFArrayGetValueAtIndex(list, i);
+    int w = 0, h = 0;
+    uint64_t id = 0;
+    if (!isTrackpad(d, &w, &h)) continue;
+    MTDeviceGetDeviceID(d, &id);
+    int slot = -1, known = 0;
+    pthread_mutex_lock(&padLock);
+    for (int k = 0; k < nPads; k++) {
+      if (pads[k].id != id) continue;
+      // The same trackpad connected again comes as a new device: take that one.
+      if (pads[k].dev == d || MTDeviceIsRunning(pads[k].dev)) known = 1; else slot = k;
     }
+    if (!known && slot < 0 && nPads < MAX_PADS) slot = nPads++;
+    if (!known && slot >= 0) {
+      pads[slot].dev = d; pads[slot].id = id; pads[slot].fingers = 0;
+      pads[slot].w = w > 0 ? w : 15600; pads[slot].h = h > 0 ? h : 9600;
+      if (activePad < 0 || MTDeviceIsBuiltIn(d)) {
+        activePad = slot;
+        tpW = pads[slot].w; tpH = pads[slot].h;
+      }
+    }
+    pthread_mutex_unlock(&padLock);
+    if (known || slot < 0) continue;
+    MTRegisterContactFrameCallback(d, frameCb);
+    MTDeviceStart(d, 0);
+    added++;
+    logf_("trackpad: %s, %d x %d mm (scroll momentum: its scrolling only, never a mouse's)",
+          MTDeviceIsBuiltIn(d) ? "built-in" : "Magic Trackpad", pads[slot].w / 100, pads[slot].h / 100);
   }
-  if (!pick) return;
-  if (pw > 0 && ph > 0) { tpW = pw; tpH = ph; }
-  MTRegisterContactFrameCallback(pick, frameCb);
-  MTDeviceStart(pick, 0);
-  trackpadStarted = 1;
-  logf_("trackpad: %s, %d x %d mm", MTDeviceIsBuiltIn(pick) ? "built-in" : "Magic Trackpad", tpW / 100, tpH / 100);
+  // Devices with a callback must stay: keep a list that gave us one.
+  if (list && !added) CFRelease(list);
+  if (nPads) trackpadStarted = 1;
 }
 
 static void retryTrackpad(CFRunLoopTimerRef t, void *info) {
-  (void)info;
-  if (!trackpadStarted) startTrackpad();
-  if (trackpadStarted) CFRunLoopTimerInvalidate(t);
+  (void)t; (void)info;
+  startTrackpads();
 }
 
 static void appActivated(void) { updateCapture(captureTimer, NULL); }
@@ -1596,15 +1668,15 @@ int main(int argc, char **argv) {
   // MacBook that stalled the built-in keyboard and trackpad (one device) until
   // the user granted Accessibility, which they then could not click.
   if (trackpad) {
-    startTrackpad();
-    if (!trackpadStarted) {
-      // A Mac without a built-in trackpad (Mac mini, iMac, Studio) and no
-      // Magic Trackpad connected yet: keys only until one is (checked again
-      // every 10 s), instead of exiting into a launchd restart loop.
-      logf_("no trackpad found: keys only until a Magic Trackpad connects");
-      CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
-      CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
-    }
+    scrollStateInit(&scrollSt);
+    startTrackpads();
+    // A Mac without a built-in trackpad (Mac mini, iMac, Studio) and no
+    // Magic Trackpad connected yet: keys only until one is, instead of
+    // exiting into a launchd restart loop. Mice scroll as they are.
+    if (!trackpadStarted) logf_("no trackpad found: keys only until a Magic Trackpad connects; mice scroll as they are");
+    // Every 10 s: a Magic Trackpad connected later, or again.
+    CFRunLoopTimerRef t = CFRunLoopTimerCreate(NULL, CFAbsoluteTimeGetCurrent() + 10, 10, 0, 0, retryTrackpad, NULL);
+    CFRunLoopAddTimer(CFRunLoopGetCurrent(), t, kCFRunLoopCommonModes);
   }
 
 
