@@ -84,7 +84,9 @@ does not stay behind to wait.
 **Swap and rollback.** `update-swap.sh` runs from a copy outside the bundle
 (bash reads scripts as it runs). It waits for the app to quit, refuses while
 any process runs from inside the bundle, moves the app to `previous/` and the
-new one into its place (renames on one volume), and starts it with
+new one into its place (renames on one volume; right after the first rename
+it looks again, and if something was started in between, everything goes
+back), and starts it with
 `--update-check TOKEN`. The new app starts its QEMU with `--version` (that
 loads every library) and writes `launch-TOKEN`: "ok", or "fail" and exits.
 Without "ok" within 60 s the script stops whatever runs from the bundle, puts

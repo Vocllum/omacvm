@@ -70,6 +70,15 @@ rm -rf "$HOME_DIR/previous.old"
 keep_old() { rm -rf "$HOME_DIR/previous"; [[ ! -e $HOME_DIR/previous.old ]] || mv "$HOME_DIR/previous.old" "$HOME_DIR/previous"; }
 mkdir -p "$HOME_DIR/previous"
 if ! mv "$APP" "$PREV"; then keep_old; abort "could not move $BASE aside"; fi
+# The check above and the moves are not one step: something started from
+# APP just before the move now runs from PREV, and one started from the
+# kept version (previous/, by its path) would be deleted with previous.old.
+# Look again; on a hit, everything goes back where it was.
+if [[ -n $(running_from "$APP") || -n $(running_from "$PREV") ]]; then
+  mv "$PREV" "$APP" || log "the old app is at $PREV"
+  keep_old
+  abort "$BASE was started during the update: it waits until nothing runs from it"
+fi
 if ! mv "$NEW" "$APP"; then
   mv "$PREV" "$APP" || log "the old app is at $PREV"
   keep_old

@@ -10,7 +10,8 @@
 # library, 2.7.3 whose launcher exits at once. Tests: weekly schedule,
 # silence switch, update held back while a VM runs and applied after (shut
 # down, crash, a QEMU without its launcher, next launch), rollback of both
-# broken builds, the one step back, a renamed copy. Exit 0 when all pass.
+# broken builds, the one step back, a renamed copy, an app started during
+# a swap. Exit 0 when all pass.
 # check() evals its condition: variables used there look unused.
 # shellcheck disable=SC2034
 set -uo pipefail
@@ -286,6 +287,27 @@ qmp_quit
 check "QEMU stopped: 2.7.5 in place (the app checks every 30 s)" 'wait_for 60 "[[ \$(version \"\$APP\") == 2.7.5 ]]"'
 check "swap result: installed" 'wait_for 30 "grep -q \"result: installed 2.7.4 2.7.5\" \"\$UPD/update.log\""'
 check "the request is cleared" 'wait_swaps && ! defaults read $ID updateInstallPending >/dev/null 2>&1'
+quit_app "$APP"; logtail
+
+# ---- 10. something starts from the app during the swap ----
+# A process from the kept version (previous/) stands in for an app opened
+# between the swap's first check and its moves: the check after the move
+# sees it and puts everything back.
+log "10. a process from the kept version during a swap: nothing moves"
+printf 'int main(void) { for (;;) pause(); }\n' > "$WORK/v/sleep.c"
+mkdir -p "$UPD/previous/$NAME.app/Contents/MacOS"
+cc -include unistd.h -o "$UPD/previous/$NAME.app/Contents/MacOS/sleeper" "$WORK/v/sleep.c"
+"$UPD/previous/$NAME.app/Contents/MacOS/sleeper" & SLEEPER=$!
+rm -rf "$UPD/incoming"; mkdir -p "$UPD/incoming"; ditto "$WORK/v/2.7.1/$NAME.app" "$UPD/incoming/$NAME.app"
+OMACVM_COCOA_HIDDEN=1 OMACVM_SETTINGS_DIR=$SETTINGS OMACVM_APPCAST_KEY=$(cat "$WORK/test-key.pub") \
+  OMACVM_APPCAST_URL=http://127.0.0.1:$PORT/OmacVM-appcast.json \
+  bash "$APP/Contents/Resources/scripts/update-swap.sh" install "$APP" "$UPD/incoming/$NAME.app" "$UPD" 99999 "$(openssl rand -hex 16)" \
+  >> "$UPD/update.log" 2>&1
+check "swap result: aborted, started during the update" 'grep -q "result: aborted $NAME.app was started during the update" "$UPD/update.log"'
+check "2.7.5 still in place" '[[ $(version "$APP") == 2.7.5 ]]'
+check "the kept version still in previous/" '[[ -x "$UPD/previous/$NAME.app/Contents/MacOS/sleeper" && ! -e "$UPD/previous.old" ]]'
+check "the new app not moved" '[[ $(version "$UPD/incoming/$NAME.app") == 2.7.1 ]]'
+kill "$SLEEPER" 2>/dev/null; wait "$SLEEPER" 2>/dev/null
 quit_app "$APP"; logtail
 
 log "the installed OmacVM and the shared settings untouched"
