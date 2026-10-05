@@ -54,6 +54,11 @@ jobs:
       - name: Omanotch offline tests
         run: src/omanotch/mac/test.sh
 
+      - name: External display brightness offline tests (Bridge and VM side)
+        run: |
+          src/bridge/mac/test.sh
+          src/tests/external-brightness.sh
+
       - name: Which VM --vm NAME means
         run: src/tests/vm-names.sh
 
