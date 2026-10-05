@@ -131,7 +131,7 @@ let builtinFull = FrontVM(omacvm: true, fullScreen: true, display: 1, builtin: t
 let builtinWin = FrontVM(omacvm: true, fullScreen: false, display: 1, builtin: true, vmKeys: true)
 let extFull = FrontVM(omacvm: true, fullScreen: true, display: 2, builtin: false, vmKeys: true)
 check(route(.brightnessUp, builtinFull, mac: 1) == .mac, "MacBook full screen: the built-in's brightness, by the Bridge (no macOS popup)")
-check(route(.brightnessUp, builtinWin, mac: 1) == .macOS(nil), "MacBook windowed on the built-in: macOS's own (its popup)")
+check(route(.brightnessUp, builtinWin, mac: 1) == .mac, "MacBook windowed on the built-in: the Bridge sets it (macOS's shortcuts are off while the VM has the keyboard)")
 check(route(.brightnessUp, extFull, mac: 1, external: .works) == .external(2), "MacBook, VM on the Pi-X9: DDC/CI")
 check(route(.brightnessUp, extFull, mac: 1, external: .no("no DDC")) == .macOS("no DDC"), "MacBook, Pi-X9 without DDC: macOS, with why")
 check(route(.brightnessUp, extFull, mac: 1, external: .off) != .mac, "MacBook: the built-in is never set for a VM on the external")
