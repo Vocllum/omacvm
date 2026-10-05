@@ -314,9 +314,12 @@ left out), range in brackets.
 | QEMU CPU during the session | 106 % | 130 % |
 | testufo on a virtual 120 Hz display, new frames a second | 88.8-90.6 | 116.6-119.6 |
 
-The chart in the README shows RC2's Aquarium and Basemark against the Mac's
-full-screen numbers above, tagged "2.9.0 RC", because they are not taken the
-same way: the release run in full screen, with the VM alone, replaces them.
+The chart in the README shows RC2's Aquarium against the Mac's full-screen
+numbers above, tagged "2.9.0 RC", because it is not taken the same way. RC2's
+Basemark is not in the chart: in a window it came out above the other apps'
+full-screen numbers, and that is not a fair comparison (the page size was not
+recorded; see the 2157 run above). The release run in full screen, with the
+VM alone, fills both.
 
 ## Fast network (OmacVM.app)
 
