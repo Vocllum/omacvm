@@ -35,10 +35,11 @@ def report_cli(args: list) -> int:
         if mac:
             root = args[args.index("--root") + 1]
             vm = args[args.index("--vm") + 1] if "--vm" in args else ""
+            vm_type = args[args.index("--vm-type") + 1] if "--vm-type" in args else ""
             cli = os.path.join(root, "omacvm")
             print("collecting: omacvm check, versions, logs ...", file=sys.stderr)
             known = collect.mac_known(cli)
-            rep = report.build(collect.mac_sections(cli, root, vm), known, "Problem with OmacVM on the Mac")
+            rep = report.build(collect.mac_sections(cli, root, vm, vm_type=vm_type), known, "Problem with OmacVM on the Mac")
         else:
             from omacvm_cc.controller import Controller
             c = Controller()

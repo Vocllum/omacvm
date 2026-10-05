@@ -666,7 +666,10 @@ class ControlCentre(App):
         """An omacvm command for this VM, to run on the Mac."""
         import shlex
         name = self.c.vm_name()
-        return f"omacvm {command} --vm {shlex.quote(name) if name else 'NAME'}"
+        # The app too: the Mac refuses a name that is in two apps without it.
+        kind = self.c.local.vm_type
+        which = f" --vm-type {kind}" if kind in ("parallels", "utm", "fusion", "app") else ""
+        return f"omacvm {command} --vm {shlex.quote(name) if name else 'NAME'}{which}"
 
     def outcome(self, what: str, action: str, job: S.Job) -> str:
         """The banner after a job that did not work: what failed, where the VM

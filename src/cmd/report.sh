@@ -1,5 +1,5 @@
 #!/bin/bash
-# omacvm report [--vm NAME] [--print | --save FILE]: report a problem. Collects
+# omacvm report [--vm NAME [--vm-type TYPE]] [--print | --save FILE]: report a problem. Collects
 # omacvm check, versions (OmacVM, OmacVM.app, Parallels, macOS, chip) and the
 # last lines of OmacVM's logs on this Mac, takes out personal data (user and
 # host names, VM names, addresses, Wi-Fi and Bluetooth names, tokens, keys,

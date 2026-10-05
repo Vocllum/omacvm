@@ -286,7 +286,7 @@ def mac_wifi_names() -> list:
     return names
 
 
-def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "") -> list:
+def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "", vm_type: str = "") -> list:
     ver = open_text(os.path.join(root, "src", "VERSION")) or "?"
     chip = run(["sysctl", "-n", "machdep.cpu.brand_string"]).strip()
     mem = run(["sysctl", "-n", "hw.memsize"]).strip()
@@ -296,7 +296,8 @@ def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "") -> list:
     versions = "\n".join([f"OmacVM {ver} on the Mac" + (f" · OmacVM.app {app}" if app else ""),
                           f"macOS {platform.mac_ver()[0]} · {chip} · {mem}",
                           prl or "no Parallels Desktop"])
-    args = [omacvm, "check", "--json"] + (["--vm", vm] if vm else [])
+    which = (["--vm", vm] if vm else []) + (["--vm-type", vm_type] if vm and vm_type else [])
+    args = [omacvm, "check", "--json"] + which
     try:
         data = json.loads(run(args, 180) or "{}")
         lines = [f"{'ok  ' if c.get('status') == 'ok' else 'FAIL' if c.get('status') == 'fail' else 'skip'} "
@@ -306,7 +307,7 @@ def mac_sections(omacvm: str, root: str, vm: str = "", what: str = "") -> list:
         check = "\n".join(lines + [f"{ok} checks ok"]) + f"\nVM type: {data.get('type') or '?'}"
     except ValueError:
         check = "omacvm check gave no answer"
-    feats = run([omacvm, "features", "--json"] + (["--vm", vm] if vm else []), 60)
+    feats = run([omacvm, "features", "--json"] + which, 60)
     try:
         table = "\n".join(f"{f['name']:16} {'on ' if f.get('on') else 'off'} "
                           f"{'' if f.get('available') else 'unavailable: ' + str(f.get('reason', ''))}"
