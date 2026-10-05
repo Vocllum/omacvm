@@ -85,7 +85,7 @@ final class Runner {
               "-device", "virtserialport,bus=vser0.0,nr=4,chardev=cam0,name=org.omacvm.camera",
               // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
               "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=5,chardev=ctl0,name=org.omacvm.control"]
+              "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
         return a
     }
 
