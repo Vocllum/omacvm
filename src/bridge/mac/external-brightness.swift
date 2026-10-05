@@ -11,6 +11,9 @@
 // at least `gap` apart; writes are coalesced (a held key sends the latest
 // level only). The key path (main thread, event tap) only reads the cache under
 // `lock` and queues work: it never waits for a display.
+//
+// Off (external_brightness false): no DDC traffic at all, not even reads: no
+// look at start, after a display change or for omacvm check.
 import AppKit
 import IOKit
 
@@ -56,9 +59,11 @@ final class ExternalBrightness {
   /// Called after a brightness key changed a display: percent 0-100, its name.
   /// (A request from the VM shows Omarchy's own popup there.)
   var onKey: ((Int, String) -> Void)?
-  static let gap = 0.05          // seconds between two DDC transfers
   static let fresh = 10.0        // a level read longer ago is read again before a step
-  static let retryNone = 60.0    // a display that did not answer is asked again after this
+  static var retryNone = 60.0    // a display that did not answer is asked again after this (tests shorten it)
+
+  private let enabled: () -> Bool
+  init(enabled: @escaping () -> Bool) { self.enabled = enabled }
 
   private let io = DispatchQueue(label: "omacvm-bridge.external-brightness")
   private let lock = NSLock()
@@ -70,42 +75,53 @@ final class ExternalBrightness {
   private var pending: [CGDirectDisplayID: Int] = [:]          // io: raw levels to write
   private var flushQueued = false                              // io
   private var lastTransfer = Date.distantPast                  // io
+  private var lastWrite = Date.distantPast                     // io
+  private var pendingFromVM = false                            // io: a queued write the VM asked for
+  private var lookCount = 0                                    // io: probes so far
   private var failures: [CGDirectDisplayID: Int] = [:]         // io
 
   private func locked<T>(_ f: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return f() }
 
-  /// Finds what works on each display now and after every display change.
+  /// Finds what works on each display now and after every display change (while on).
   func start() {
     CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
       if !flags.contains(.beginConfigurationFlag) { externalBrightness.displaysChanged() }
     }, nil)
-    io.asyncAfter(deadline: .now() + 1) { self.probeAll() }
+    io.asyncAfter(deadline: .now() + 1) { if self.enabled() { self.probeAll() } }
   }
 
-  /// Plugged in, unplugged, rearranged, woken: forget everything, look again
-  /// once the displays settled (one look per burst of callbacks).
+  /// Plugged in, unplugged, rearranged, woken, or the feature switched: forget
+  /// everything, look again once the displays settled (one look per burst of
+  /// callbacks), if the feature is on then.
   func displaysChanged() {
     let g: Int = locked { known = [:]; generation += 1; return generation }
     io.async {
       self.services = [:]; self.servicesLoaded = false; self.pending = [:]; self.failures = [:]
     }
     io.asyncAfter(deadline: .now() + 2) {
-      if self.locked({ self.generation }) == g { self.probeAll() }
+      if self.locked({ self.generation }) == g, self.enabled() { self.probeAll() }
     }
   }
 
   /// The key path: what works on this display, from the cache only. nil = not
   /// known yet (a look is queued; the key goes to macOS meanwhile).
   func method(_ id: CGDirectDisplayID) -> Method? {
+    guard enabled() else { return nil }
     let (d, ask): (Display?, Bool) = locked {
       let d = known[id]
-      let stale = d == nil || (!(d!.method.works) && Date().timeIntervalSince(d!.probedAt) > Self.retryNone)
-      let ask = stale && !probing.contains(id)
+      let ask = due(d) && !probing.contains(id)
       if ask { probing.insert(id) }
       return (d, ask)
     }
-    if ask { io.async { _ = self.probe(id) } }
+    if ask { io.async { _ = self.probe(id, again: d != nil) } }
     return d?.method
+  }
+
+  /// How many times a display was looked at (each look may read it over DDC/CI): tests.
+  var looks: Int { io.sync { lookCount } }
+
+  private func due(_ d: Display?) -> Bool {
+    ProbeRule.due(works: d?.method.works, probedAt: d?.probedAt ?? .distantPast, now: Date(), retry: Self.retryNone)
   }
 
   // ---- looking at the displays (io) ----
@@ -120,29 +136,32 @@ final class ExternalBrightness {
     for id in externalIDs() { _ = probe(id) }
   }
 
+  /// `again`: a look after one that found nothing; an AV service missing then
+  /// may be there now, so the services are loaded again.
   @discardableResult
-  private func probe(_ id: CGDirectDisplayID) -> Display {
+  private func probe(_ id: CGDirectDisplayID, again: Bool = false) -> Display {
     defer { locked { _ = probing.remove(id) } }
-    if !servicesLoaded { loadServices() }
+    lookCount += 1
+    if !servicesLoaded || (again && services[id] == nil) { loadServices() }
     let name = displayName(id)
     var d: Display
     let info = displayInfo?(id)?.takeRetainedValue() as? [String: Any]
     if CGDisplayIsBuiltin(id) != 0 {
-      d = Display(method: .none("the built-in display (the brightness keys stay macOS's)"), name: name)
+      d = Display(method: .none(NotSettable.builtin), name: name)
     } else if info?["kCGDisplayIsVirtualDevice"] as? Bool == true || info?["kCGDisplayIsAirPlay"] as? Bool == true {
-      d = Display(method: .none("a virtual or AirPlay display"), name: name)
+      d = Display(method: .none(NotSettable.virtual), name: name)
     } else if dsCan?(id) == true, let v = appleLevel(id) {
       d = Display(method: .apple, name: name, level: v, readAt: Date())
     } else if let av = services[id] {
       if let (cur, max) = ddcRead(av) {
         d = Display(method: .ddc, name: name, max: max, level: BrightnessStep.level(cur, max: max), readAt: Date())
       } else {
-        d = Display(method: .none("it does not answer DDC/CI (switched off in its own menu, or asleep)"), name: name)
+        d = Display(method: .none(NotSettable.noAnswer), name: name)
       }
     } else if avCreate == nil || avRead == nil || avWrite == nil {
-      d = Display(method: .none("this macOS has no IOAVService for DDC/CI"), name: name)
+      d = Display(method: .none(NotSettable.noIOAV), name: name)
     } else {
-      d = Display(method: .none("no DDC/CI on this connection (some Macs' HDMI ports have none: try USB-C/DisplayPort)"), name: name)
+      d = Display(method: .none(NotSettable.noService), name: name)
     }
     let before: Method? = locked { let b = known[id]?.method; known[id] = d; return b }
     if before != d.method {
@@ -216,7 +235,7 @@ final class ExternalBrightness {
   // ---- DDC/CI (io) ----
 
   private func pace() {
-    let wait = Self.gap - Date().timeIntervalSince(lastTransfer)
+    let wait = WritePace.gap - Date().timeIntervalSince(lastTransfer)
     if wait > 0 { usleep(UInt32(wait * 1_000_000)) }
   }
 
@@ -250,19 +269,28 @@ final class ExternalBrightness {
       if transfer(avWrite, av, &p) { ok = true }
       if i == 0 { usleep(10_000) }
     }
-    lastTransfer = Date()
+    lastTransfer = Date(); lastWrite = lastTransfer
     return ok
   }
 
-  private func queueWrite(_ id: CGDirectDisplayID, _ raw: Int) {
+  private func queueWrite(_ id: CGDirectDisplayID, _ raw: Int, fromVM: Bool) {
     pending[id] = raw
+    pendingFromVM = pendingFromVM || fromVM
     guard !flushQueued else { return }
     flushQueued = true
-    io.asyncAfter(deadline: .now() + max(0, Self.gap - Date().timeIntervalSince(lastTransfer))) { self.flush() }
+    io.asyncAfter(deadline: .now() + writeDelay()) { self.flush() }
+  }
+
+  private func writeDelay() -> Double {
+    WritePace.delay(sinceTransfer: Date().timeIntervalSince(lastTransfer), sinceWrite: Date().timeIntervalSince(lastWrite),
+                    fromVM: pendingFromVM)
   }
 
   private func flush() {
-    flushQueued = false
+    // A key's write may be queued first, then the VM's: wait for the VM's pace.
+    let wait = writeDelay()
+    if wait > 0 { io.asyncAfter(deadline: .now() + wait) { self.flush() }; return }
+    flushQueued = false; pendingFromVM = false
     let work = pending
     pending = [:]
     for (id, raw) in work {
@@ -278,9 +306,12 @@ final class ExternalBrightness {
 
   // ---- reading and setting (io) ----
 
-  private func entry(_ id: CGDirectDisplayID) -> Display? {
+  /// What works on this display, looked at again on the same rule as the
+  /// key path (never looked, or nothing found over a minute ago).
+  private func entry(_ id: CGDirectDisplayID) -> Display {
     let d = locked { known[id] }
-    return d ?? probe(id)
+    if let d, !due(d) { return d }
+    return probe(id, again: d != nil)
   }
 
   /// The level now: from the cache while fresh and while writes are on their way.
@@ -300,13 +331,13 @@ final class ExternalBrightness {
     return d.level
   }
 
-  private func write(_ id: CGDirectDisplayID, _ d: inout Display, _ v: Double) -> Bool {
+  private func write(_ id: CGDirectDisplayID, _ d: inout Display, _ v: Double, fromVM: Bool) -> Bool {
     switch d.method {
     case .apple:
       guard let dsSet, dsSet(id, Float(v)) == 0 else { return false }
     case .ddc:
       guard services[id] != nil else { return false }
-      queueWrite(id, BrightnessStep.raw(v, max: d.max))
+      queueWrite(id, BrightnessStep.raw(v, max: d.max), fromVM: fromVM)
     case .none:
       return false
     }
@@ -319,9 +350,11 @@ final class ExternalBrightness {
   /// A brightness key (main thread): one step on that display, queued.
   func step(_ id: CGDirectDisplayID, up: Bool, fine: Bool) {
     io.async {
-      guard var d = self.entry(id), d.method.works, let now = self.level(id, &d, maxAge: Self.fresh) else { return }
+      guard self.enabled() else { return }
+      var d = self.entry(id)
+      guard d.method.works, let now = self.level(id, &d, maxAge: Self.fresh) else { return }
       let to = BrightnessStep.next(now, up: up, fine: fine)
-      guard self.write(id, &d, to) else { return }
+      guard self.write(id, &d, to, fromVM: false) else { return }
       self.store(id, d)
       self.onKey?(BrightnessStep.percent(to), d.name)
       log("media key brightness on \(d.name)\(fine ? " (fine)" : "") -> \(BrightnessStep.percent(to)) %")
@@ -331,7 +364,8 @@ final class ExternalBrightness {
   /// The guest's request: the level now (percent), fresh (1 s) for a read.
   func get(_ id: CGDirectDisplayID) throws -> [String: Any] {
     try io.sync {
-      guard var d = entry(id) else { throw APIError(404, "no such display") }
+      guard enabled() else { throw APIError(409, Self.off) }
+      var d = entry(id)
       guard d.method.works else { throw APIError(409, "\(d.name): \(reason(d.method))") }
       guard let v = level(id, &d, maxAge: 1) else { throw APIError(503, "\(d.name) did not answer") }
       store(id, d)
@@ -342,7 +376,8 @@ final class ExternalBrightness {
   /// The guest's request: set (percent 0-100) or move by delta (percent).
   func set(_ id: CGDirectDisplayID, percent: Double?, delta: Double?) throws -> [String: Any] {
     try io.sync {
-      guard var d = entry(id) else { throw APIError(404, "no such display") }
+      guard enabled() else { throw APIError(409, Self.off) }
+      var d = entry(id)
       guard d.method.works else { throw APIError(409, "\(d.name): \(reason(d.method))") }
       var target = (percent ?? 0) / 100
       if let delta {
@@ -350,19 +385,22 @@ final class ExternalBrightness {
         target = now + delta / 100
       }
       target = max(0, min(1, target))
-      guard write(id, &d, target) else { throw APIError(503, "\(d.name) did not take it") }
+      guard write(id, &d, target, fromVM: true) else { throw APIError(503, "\(d.name) did not take it") }
       store(id, d)
       return ["brightness": BrightnessStep.percent(target), "display": d.name, "method": d.method.name]
     }
   }
 
+  static let off = "off on this Mac (external_brightness in the Bridge's config.json)"
   private func reason(_ m: Method) -> String { if case .none(let why) = m { return why }; return "" }
 
-  /// Every external display and what works on it (omacvm check, the menu).
+  /// Every external display and what works on it (omacvm check). Off: none,
+  /// and no display is asked.
   func report() -> [[String: Any]] {
-    io.sync {
+    guard enabled() else { return [] }
+    return io.sync {
       externalIDs().map { id in
-        var d = locked { known[id] } ?? probe(id)
+        var d = entry(id)
         let level = d.method.works ? self.level(id, &d, maxAge: Self.fresh) : nil
         store(id, d)
         var o: [String: Any] = ["id": Int(id), "name": d.name, "method": d.method.name,
@@ -397,14 +435,16 @@ enum VMScreens {
     return ids.prefix(Int(n)).map { MacDisplay(id: $0, bounds: CGDisplayBounds($0), builtin: CGDisplayIsBuiltin($0) != 0) }
   }
 
+  /// macOS's list of on-screen windows, front to back (a copy each call).
+  static func windowList() -> [[String: Any]] {
+    CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+  }
+
   /// On-screen normal windows of the processes `keep` accepts, front to back.
   static func windows(_ keep: (pid_t) -> Bool) -> [CGRect] {
-    guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
-    return list.compactMap { w in
-      guard let pid = w[kCGWindowOwnerPID as String] as? Int32, w[kCGWindowLayer as String] as? Int == 0, keep(pid),
-            let b = w[kCGWindowBounds as String] as? NSDictionary, let r = CGRect(dictionaryRepresentation: b),
-            r.width > 100, r.height > 100 else { return nil }
-      return r
+    windowList().compactMap { w in
+      guard let pid = w[kCGWindowOwnerPID as String] as? Int32, keep(pid) else { return nil }
+      return WindowList.rects([w], pid: pid).first
     }
   }
 
@@ -412,10 +452,9 @@ enum VMScreens {
 
   /// The display the VM app in front shows its VM on (keys: OmacVM.app also
   /// windowed, the others full screen; guest: windowed too). nil: no VM app in front.
-  static func front(windowed guest: Bool) -> (display: MacDisplay, fullScreen: Bool)? {
-    guard let app = NSWorkspace.shared.frontmostApplication, let kind = VMApp.of(app) else { return nil }
-    let pid = app.processIdentifier
-    return DisplayPick.focused(windows: windows { $0 == pid }, displays: displays(), pointer: pointer(),
+  static func front(windowed guest: Bool, _ front: FrontWindows = FrontWindows()) -> (display: MacDisplay, fullScreen: Bool)? {
+    guard let app = front.app, let kind = VMApp.of(app) else { return nil }
+    return DisplayPick.focused(windows: front.windows, displays: displays(), pointer: pointer(),
                                windowed: guest || kind == .omacvm)
   }
 
@@ -430,4 +469,16 @@ enum VMScreens {
     }
     return DisplayPick.forBox(box, windows: wins, displays: displays())
   }
+}
+
+/// The app in front and, on first use, its windows: one copy of macOS's
+/// window list per key event, shared by every question about it (main thread).
+final class FrontWindows {
+  let app: NSRunningApplication?
+  private let copy: () -> [[String: Any]]
+  init(app: NSRunningApplication? = NSWorkspace.shared.frontmostApplication,
+       copy: @escaping () -> [[String: Any]] = VMScreens.windowList) {
+    self.app = app; self.copy = copy
+  }
+  lazy var windows: [CGRect] = app.map { WindowList.rects(copy(), pid: $0.processIdentifier) } ?? []
 }

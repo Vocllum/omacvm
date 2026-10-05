@@ -11,7 +11,20 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 swiftc -O -swift-version 5 -o "$T/external-test" "$HERE/external-model.swift" "$HERE/tests/offline/main.swift"
 "$T/external-test"
+# The real class, switched off and on, against a made-up display only.
+swiftc -O -swift-version 5 -o "$T/external-gate" "$HERE/external-model.swift" "$HERE/external-brightness.swift" \
+  "$HERE/tests/gate/main.swift" -framework AppKit -framework IOKit
+"$T/external-gate"
 [[ ${1:-} == --live ]] || exit 0
+
+# Never two DDC/CI processes at once (2026-10-05: a read during another one's
+# traffic may be wrong). A running Bridge with DDC code shares the bus: stop it first.
+for pid in $(pgrep -x omacvm-bridge || true); do
+  exe=$(ps -o comm= -p "$pid" || true)
+  if [[ -n $exe ]] && grep -qa IOAVServiceReadI2C "$exe" 2>/dev/null; then
+    echo "an omacvm-bridge with DDC/CI runs (pid $pid, $exe): stop it before --live"; exit 1
+  fi
+done
 
 swiftc -O -swift-version 5 -o "$T/external-live" "$HERE/external-model.swift" "$HERE/external-brightness.swift" \
   "$HERE/tests/live/main.swift" -framework AppKit -framework IOKit

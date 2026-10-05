@@ -112,5 +112,42 @@ check(!DisplayPick.validBox(CGRect(x: 0, y: 0, width: 0, height: 10)), "zero wid
 check(!DisplayPick.validBox(CGRect(x: 1e9, y: 0, width: 10, height: 10)), "far away refused")
 check(!DisplayPick.validBox(CGRect(x: 0, y: 0, width: CGFloat.infinity, height: 10)), "infinite refused")
 
+// ---- when to look at a display again (the key path, the VM's requests and omacvm check alike) ----
+let t0 = Date(timeIntervalSince1970: 1_000_000)
+check(ProbeRule.due(works: nil, probedAt: .distantPast, now: t0, retry: 60), "never looked: look")
+check(!ProbeRule.due(works: true, probedAt: t0, now: t0.addingTimeInterval(3600), retry: 60), "settable: not asked again")
+check(!ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(30), retry: 60), "nothing found 30 s ago: not yet")
+check(ProbeRule.due(works: false, probedAt: t0, now: t0.addingTimeInterval(61), retry: 60), "nothing found over a minute ago: again")
+
+// ---- write pace: 50 ms for anything, 250 ms between writes the VM asked for ----
+check(WritePace.delay(sinceTransfer: 1, sinceWrite: 1, fromVM: false) == 0, "idle: at once")
+check(abs(WritePace.delay(sinceTransfer: 0.01, sinceWrite: 0.01, fromVM: false) - 0.04) < 1e-9, "key: 50 ms after the last transfer")
+check(abs(WritePace.delay(sinceTransfer: 0.1, sinceWrite: 0.1, fromVM: true) - 0.15) < 1e-9, "VM: 250 ms after the last write")
+check(abs(WritePace.delay(sinceTransfer: 0.01, sinceWrite: 2, fromVM: true) - 0.04) < 1e-9, "VM after a long pause: only the 50 ms gap")
+// A VM posting 16 times a second for 2 s: writes at most every 250 ms (coalesced to the latest level).
+var clock = 0.0, lastW = -10.0, writes = 0, nextFlush: Double? = nil
+for i in 0..<32 {
+  let now = Double(i) / 16
+  while let f = nextFlush, f <= now { clock = f; lastW = clock; writes += 1; nextFlush = nil }
+  if nextFlush == nil { nextFlush = now + WritePace.delay(sinceTransfer: now - lastW, sinceWrite: now - lastW, fromVM: true) }
+}
+check(writes <= 9, "VM at 16 requests/s for 2 s: \(writes) writes, at most 9")
+
+// ---- why not settable: the HDMI port is named when a display does not answer ----
+check(NotSettable.noAnswer.contains("HDMI") && NotSettable.noAnswer.contains("USB-C"),
+      "no answer names the HDMI port too (M1/M2 Mac mini: AV service there, no DDC)")
+check(NotSettable.noService.contains("HDMI"), "no AV service names the HDMI port")
+
+// ---- one window list per key event: rects of one process, front to back ----
+func win(_ pid: Int32, _ r: CGRect, layer: Int = 0) -> [String: Any] {
+  [kCGWindowOwnerPID as String: pid, kCGWindowLayer as String: layer, kCGWindowBounds as String: r.dictionaryRepresentation as NSDictionary]
+}
+let list = [win(7, fullExternal), win(8, fullBuiltin), win(7, CGRect(x: 0, y: 0, width: 50, height: 50)),
+            win(7, windowOnExternal, layer: 3), win(7, windowOnExternal)]
+check(WindowList.rects(list, pid: 7) == [fullExternal, windowOnExternal], "pid 7: layer 0, not tiny, in order")
+check(WindowList.rects(list, pid: 9).isEmpty, "another pid: none")
+check(DisplayPick.spansOne(WindowList.rects(list, pid: 7), displays.map(\.bounds)), "the media keys' full-screen rule from the same list")
+check(!DisplayPick.spansOne([windowOnExternal], displays.map(\.bounds)), "...a window is not full screen")
+
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("external brightness: all offline tests passed")
