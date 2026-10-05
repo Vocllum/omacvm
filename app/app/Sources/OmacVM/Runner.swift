@@ -95,7 +95,10 @@ final class Runner {
               // the VM says where its outputs are and whether it wants the
               // external displays (omacvm-displays in the VM).
               "-chardev", "socket,id=disp0,path=\(q(c.displaySocket.path)),server=on,wait=off",
-              "-device", "virtserialport,bus=vser0.0,nr=5,chardev=disp0,name=org.omacvm.display"]
+              "-device", "virtserialport,bus=vser0.0,nr=5,chardev=disp0,name=org.omacvm.display",
+              // The control centre's requests (omacvm in the VM), passed on to OmacVM Bridge.
+              "-chardev", "socket,id=ctl0,path=\(q(c.controlSocket.path)),server=on,wait=off",
+              "-device", "virtserialport,bus=vser0.0,nr=6,chardev=ctl0,name=org.omacvm.control"]
         // The fast network: an empty PCIe slot for the user network's NIC
         // should vmnet fail while the VM runs (useUserNetwork). Last,
         // so no other device moves.
@@ -181,6 +184,7 @@ final class Runner {
                 self?.stopObserving()
                 self?.clipboard?.stop()
                 self?.battery?.stop()
+                self?.control?.stop()
                 self?.onExit?(status)
             }
         }
@@ -198,6 +202,7 @@ final class Runner {
         // A feature that is off: nothing of the Mac on its port.
         if links.battery { startBattery() }
         if links.camera { startCamera() }
+        startControl()
     }
 
     /// What of the Mac this start of the VM may use (its features).
@@ -418,6 +423,27 @@ final class Runner {
                 if FileManager.default.fileExists(atPath: path),
                    let bridge = try? NativeBatteryBridge(socketPath: path) {
                     DispatchQueue.main.sync { self?.battery = bridge }
+                    try? bridge.run()
+                    bridge.stop()
+                }
+                Thread.sleep(forTimeInterval: 1)
+            }
+        }
+    }
+
+    // MARK: The control centre's port (NativeControlBridge.swift), reconnected while QEMU runs.
+
+    private var control: NativeControlBridge?
+
+    private func startControl() {
+        let path = config.controlSocket.path, name = config.name
+        Thread.detachNewThread { [weak self] in
+            while true {
+                let running = DispatchQueue.main.sync { self?.isRunning ?? false }
+                guard running else { return }
+                if FileManager.default.fileExists(atPath: path),
+                   let bridge = try? NativeControlBridge(socketPath: path, vmName: name) {
+                    DispatchQueue.main.sync { self?.control = bridge }
                     try? bridge.run()
                     bridge.stop()
                 }

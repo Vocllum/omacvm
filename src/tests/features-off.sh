@@ -28,6 +28,7 @@ camera:camera/guest/install.sh off on every apply; OmacVM.app does not serve the
 battery:battery/guest/install.sh off on every apply; OmacVM.app does not serve the battery port
 external-brightness:install.sh removes OmacVM's ddcutil on every apply; apply sets the Bridge's external_brightness false, so no DDC (src/tests/external-brightness.sh)
 chromium-video:vdec/guest/install.sh off on every apply of an app VM; never on the other routes; nothing of it talks to the Mac
+control-centre:control/guest/install.sh off removes omacvm, its check socket, menu row and bar item (install.sh runs it while any of them is there); nothing left in the VM asks the Mac
 idle-lock:nothing of it talks to the Mac
 autologin:nothing of it talks to the Mac
 thp-kernel:nothing of it talks to the Mac
@@ -157,16 +158,39 @@ done
 # guest/install.sh runs the off steps whenever a feature is off (not only when
 # one marker of it is there).
 inst=$R/src/guest/install.sh
+# Each block starts "if ! want F" (a repair of other features only: nothing),
+# then "elif [[ ${F[F]} == on ]]" and a plain else.
 for f in gestures bridge wallpaper omanotch; do
-  b=$(awk -v f="$f" 'index($0, "if [[ ${F[" f "]} == on ]]; then") == 1 {on = 1} on {print} on && /^fi$/ {exit}' "$inst")
-  [[ $(grep -c '^else$' <<<"$b") == 1 && $(grep -cE "^  ${f}_off( |$)" <<<"$b") == 1 && $(grep -c '^elif' <<<"$b") == 0 ]] &&
+  b=$(awk -v f="$f" 'index($0, "elif [[ ${F[" f "]} == on ]]; then") == 1 {on = 1} on {print} on && /^fi$/ {exit}' "$inst")
+  [[ $(grep -c '^else$' <<<"$b") == 1 && $(grep -cE "^  ${f}_off( |$)" <<<"$b") == 1 && $(tail -n +2 <<<"$b" | grep -c '^elif') == 0 ]] &&
     echo "ok   install.sh: $f off -> ${f}_off, always" || { echo "FAIL install.sh: $f off does not always run ${f}_off"; fail=1; }
 done
-b=$(awk 'index($0, "if [[ ${F[battery]} == on ]]; then") == 1 {on = 1} on {print} on && /^fi$/ {exit}' "$inst")
-[[ $b == *$'\nelse\n'*'battery/guest/install.sh" off'* && $b != *elif* ]] && echo "ok   install.sh: battery off -> its installer's off, always" ||
+b=$(awk 'index($0, "elif [[ ${F[battery]} == on ]]; then") == 1 {on = 1} on {print} on && /^fi$/ {exit}' "$inst")
+[[ $b == *$'\nelse\n'*'battery/guest/install.sh" off'* && $(tail -n +2 <<<"$b") != *elif* ]] && echo "ok   install.sh: battery off -> its installer's off, always" ||
   { echo "FAIL install.sh: battery off does not always run its installer's off"; fail=1; }
-grep -q '^"$R/camera/guest/install.sh" "$U" "$TYPE" "${F\[camera\]}"' "$inst" && echo "ok   install.sh: camera's installer on every apply, with the choice" ||
+grep -q '^ *"$R/camera/guest/install.sh" "$U" "$TYPE" "${F\[camera\]}"' "$inst" && echo "ok   install.sh: camera's installer on every apply, with the choice" ||
   { echo "FAIL install.sh: camera's installer not run with the choice"; fail=1; }
+
+# The control centre's repair (install.sh --only F): a repair of other
+# features leaves Gestures alone; one of scroll momentum (which needs
+# gestures) still applies gestures off.
+block=$(awk '/^if ! want gestures && ! want scroll-momentum; then$/ {on = 1} on {print} on && /^fi$/ {exit}' "$inst")
+[[ $block == *'gestures/guest/install.sh'* && $block == *'gestures_off'* ]] ||
+  { echo "FAIL install.sh: gestures block (repair mode) not found"; fail=1; }
+block=${block//'${F[gestures]}'/'$FG'}   # macOS's bash 3.2: no associative arrays
+repair() {   # GESTURES ONLY -> what the block did
+  ( FG=$1 ONLY=$2 R=/repo U=me CALLS=""
+    log() { :; }
+    want() { [[ -z $ONLY || $ONLY == *",$1,"* ]]; }   # as in src/guest/install.sh
+    gestures_off() { CALLS+="gestures_off "; }
+    /repo/gestures/guest/install.sh() { CALLS+="install "; }
+    eval "$block"
+    echo "${CALLS% }" )
+}
+expect "repair of the Bridge only: gestures left alone" "" "$(repair off ,bridge,)"
+expect "repair of scroll momentum, gestures off: gestures_off" gestures_off "$(repair off ,scroll-momentum,)"
+expect "repair of gestures, on: installed" install "$(repair on ,gestures,)"
+expect "full apply, gestures off: gestures_off" gestures_off "$(repair off "")"
 
 # clock.sh off: also a clock queued for the next login goes.
 mkdir -p "$T/bin" "$T/home/.local/state/omacvm"
@@ -177,7 +201,7 @@ expect "mac-clock off: the queued clock goes" no "$( [[ -e $T/home/.local/state/
 
 # ---------- omacvm check in the VM: off says off ----------
 # The Omanotch rows (check.sh) with the VM's state replaced.
-om=$(awk '/^section "Omanotch"$/ {on = 1; next} on && /^elif \[\[ \$OMANOTCH == on/ {exit} on {print}' "$R/src/guest/check.sh")
+om=$(awk '/^section "Omanotch"$/ {on = 1; next} on && /^FEATURE=/ {next} on && /^elif \[\[ \$OMANOTCH == on/ {exit} on {print}' "$R/src/guest/check.sh")
 [[ $om == 'if [[ $OMANOTCH == off ]]; then'* ]] || { echo "FAIL check.sh: no Omanotch off rows"; fail=1; }
 om_check() {   # NOTCHCAST(active|none) QUEUED(enabled|disabled) -> the row
   ( A=$1 Q=$2 OMANOTCH=off HOST=10.0.2.2 U=me

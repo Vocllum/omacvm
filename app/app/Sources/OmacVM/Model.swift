@@ -181,6 +181,7 @@ struct VMConfig: Equatable {
     var batterySocket: URL { Paths.runDir.appendingPathComponent("\(id).batt") }
     var cameraSocket: URL { Paths.runDir.appendingPathComponent("\(id).cam") }
     var displaySocket: URL { Paths.runDir.appendingPathComponent("\(id).disp") }
+    var controlSocket: URL { Paths.runDir.appendingPathComponent("\(id).ctl") }
 
     func write() throws {
         try VMsFolder.prepare(folder.deletingLastPathComponent(), home: VMsFolder.home)

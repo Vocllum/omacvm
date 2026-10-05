@@ -2,16 +2,20 @@
 # omacvm check: is every OmacVM feature in place and working, on the Mac and
 # in a running VM (Parallels, UTM or VMware Fusion)? Read-only; run it after a build or an
 # apply, or whenever something seems off:
-#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY] [--json]
+#   omacvm check [--vm NAME | --ip IP] [--vm-type parallels|utm|fusion|app] [--user NAME] [--key PRIVATE_KEY]
+#                [--json] [--mac-only]
 # VM, user and key as in omacvm apply (a stopped VM is not started). One line
 # per feature (ok / WARN / FAIL / skip); exits 1 if anything failed (WARN:
 # works, but on a fallback). The desktop user must be logged in to the VM.
+# --mac-only: the Mac's side for that VM, not the checks inside it.
 # --json: {"vm", "type", "ip", "ok", "checks": [{"section", "name", "status"
-# (ok, warn, fail, skip), "detail", "needs_human"}]}; needs_human = only a person can fix it (a macOS
-# permission, a Parallels setting).
+# (ok, warn, fail, skip), "detail", "needs_human", "feature"}]}; needs_human =
+# only a person can fix it (a macOS permission, a Parallels setting: the
+# detail says where); feature = the features.tsv name the check belongs to
+# ("" = the Mac or VM in general).
 set -uo pipefail
 R=$(cd "$(dirname "$0")/../.." && pwd)
-VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; JSON=0
+VM=""; IP=""; TYPE=""; U=""; KEY=~/.ssh/omacvm; JSON=0; MAC_ONLY=0
 while (( $# )); do
   case $1 in
     --vm) VM=$2; shift 2 ;;
@@ -20,7 +24,8 @@ while (( $# )); do
     --user) U=$2; shift 2 ;;
     --key) KEY=$2; shift 2 ;;
     --json) JSON=1; shift ;;
-    -h|--help) sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    --mac-only) MAC_ONLY=1; shift ;;
+    -h|--help) sed -n '2,15s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) echo "omacvm check: unknown option $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -31,7 +36,7 @@ export OMA_KEY=$KEY
 # stop RC MESSAGE: no VM to check. With --json also the JSON, one failed check.
 stop() {
   if (( JSON )); then
-    printf '{"vm": %s, "type": %s, "ip": "", "ok": false, "checks": [\n  {"section": "Mac", "name": "VM", "status": "fail", "detail": %s, "needs_human": false}\n]}\n' \
+    printf '{"vm": %s, "type": %s, "ip": "", "ok": false, "checks": [\n  {"section": "Mac", "name": "VM", "status": "fail", "detail": %s, "needs_human": false, "feature": ""}\n]}\n' \
       "$( [[ -n $VM ]] && json_str "$VM" || echo null)" "$( [[ -n $TYPE ]] && json_str "$TYPE" || echo null)" "$(json_str "$2")"
   fi
   echo "omacvm check: $2" >&2
@@ -71,10 +76,13 @@ case $TYPE in
 esac
 export OMA_KEY=$KEY
 
-fails=0; ROWS=""; SECTION=Mac
+fails=0; ROWS=""; SECTION=Mac; FEATURE=""   # FEATURE: what the next lines belong to
+# ROWS: one check per line, fields split by US (\037): unlike a tab, read
+# keeps an empty field.
+US=$'\037'
 # line STATUS LABEL NAME DETAIL [human]
 line() {
-  if (( JSON )); then ROWS+="$1"$'\t'"$SECTION"$'\t'"$3"$'\t'"$4"$'\t'"${5:+1}"$'\n'
+  if (( JSON )); then ROWS+="$1$US$SECTION$US$3$US$4$US${5:+1}$US$FEATURE"$'\n'
   else printf '  %-5s %-24s %s\n' "$2" "$3" "$4"; fi
 }
 ok()   { line ok ok "$1" "${2:-}"; }
@@ -84,12 +92,13 @@ skip() { line skip skip "$1" "${2:-}" "${3:-}"; }
 warn() { line warn WARN "$1" "${2:-}" "${3:-}"; }
 say_() { (( JSON )) || echo "$@"; }
 json_out() {   # the collected rows as JSON
-  local first=1 st sec name detail human
+  local first=1 st sec name detail human feature
   printf '{"vm": %s, "type": "%s", "ip": %s, "ok": %s, "checks": [' "$(json_str "${VM:-}")" "$TYPE" "$(json_str "${IP:-}")" "$1"
-  while IFS=$'\t' read -r st sec name detail human; do
+  while IFS=$US read -r st sec name detail human feature; do
     [[ -n $st ]] || continue
-    printf '%s\n  {"section": %s, "name": %s, "status": "%s", "detail": %s, "needs_human": %s}' \
-      "$( ((first)) || echo ,)" "$(json_str "$sec")" "$(json_str "$name")" "$st" "$(json_str "$detail")" "$( [[ $human == 1 ]] && echo true || echo false)"
+    printf '%s\n  {"section": %s, "name": %s, "status": "%s", "detail": %s, "needs_human": %s, "feature": %s}' \
+      "$( ((first)) || echo ,)" "$(json_str "$sec")" "$(json_str "$name")" "$st" "$(json_str "$detail")" \
+      "$( [[ $human == 1 ]] && echo true || echo false)" "$(json_str "$feature")"
     first=0
   done <<<"$ROWS"
   printf '\n]}\n'
@@ -149,6 +158,7 @@ BRIDGE=$(feat bridge); GESTURES=$(feat gestures); GLIDE=$(feat scroll_momentum "
 FAST_NET=$(feat fast_network off)
 if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then [[ -s $d/fast-network ]] && FAST_NET=on || FAST_NET=off; fi
 
+FEATURE=fast-network
 # OmacVM.app's fast network: the service on the Mac, and which network this
 # start of the VM took (the app writes it to logs/network).
 netd_said() {   # omacvm-netd's last refusal or failure of the last 10 minutes, as "; omacvm-netd: ..."
@@ -178,6 +188,7 @@ if [[ $TYPE == app ]]; then
   else skip "fast network" "off (experimental: omacvm enable fast-network)"; fi
 fi
 
+FEATURE=bridge
 if [[ $BRIDGE == on ]]; then
   if running org.omacvm.bridge; then
     a=$(listeners 47831)
@@ -215,6 +226,7 @@ if [[ $BRIDGE == on ]]; then
   # External displays: which ones the brightness keys set while the VM is on
   # them (DDC/CI, an Apple display's own control), and why not.
   # Asked only while the feature is on: the Bridge then reads each display over DDC/CI.
+  FEATURE=external-brightness
   if [[ $(feat external_brightness on) != on ]]; then skip "external brightness" "off (omacvm enable external-brightness)"
   else
     ex=""; declare -F bget >/dev/null && ex=$(bget /display/external)
@@ -231,8 +243,10 @@ if [[ $BRIDGE == on ]]; then
       done < <(jq -r '.displays[] | [.name, .method, (.reason // "")] | @tsv' <<<"$ex")
     fi
   fi
+  FEATURE=bridge
 else skip "Bridge" "off (chosen at setup)"; fi
 # The camera of UTM and Fusion VMs comes through the Bridge (also with its bar features off).
+FEATURE=camera
 if [[ $(feat camera off) == on && ( $TYPE == utm || $TYPE == fusion ) ]]; then
   running org.omacvm.bridge && ok "camera (Bridge)" "OmacVM Bridge passes the Mac's camera" \
     || bad "camera (Bridge)" "OmacVM Bridge is not running (omacvm apply --vm \"$VM\")"
@@ -240,7 +254,7 @@ fi
 [[ $(feat camera off) == off ]] && skip "camera" "off for this VM (chosen at setup)"
 # The microphone: the VM's app records only with macOS's permission, and its
 # recording helper cannot ask (docs/troubleshooting.md, finding 22). Its log says so.
-miclog=""
+FEATURE=""; miclog=""
 case $TYPE in
   fusion) x=$(fusion_vmx "$VM" 2>/dev/null) && miclog="$(dirname "$x")/vmware.log"; micapp="VMware Fusion" ;;
   app) d=$(app_dir "$VM" 2>/dev/null) && miclog="$d/logs/qemu.log"; micapp="OmacVM" ;;
@@ -292,6 +306,7 @@ if [[ $TYPE == app && -n $miclog && -f $miclog ]]; then
     *) ok "Vulkan (Venus)" "${v#vulkan driver: }" ;;
   esac
 fi
+FEATURE=gestures
 # With gestures off the VM's daemon is off too (also on UTM, Fusion and
 # OmacVM.app), so this VM needs no Gestures on the Mac.
 if [[ $GESTURES == on ]]; then
@@ -319,11 +334,13 @@ if [[ $GESTURES == on ]]; then
       esac
     fi
     if [[ $GESTURES == on && $GLIDE == on ]]; then
+      FEATURE=scroll-momentum
       # OmacVM.app's VMs all connect from 127.0.0.1: this VM's own line first.
       g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | grep -F "VM \"$VM\")" | tail -1)
       [[ -n $g ]] || g=$(grep "guest connected: ${IP%:*} " "$L/omacvm-gestures.log" 2>/dev/null | tail -1)
       if [[ $g == *"scroll momentum on"* || $g == *"Glide on"* ]]; then ok "scroll momentum (Mac)" "scrolling goes to this VM in full screen"
       else bad "scroll momentum (Mac)" "the helper does not scroll for this VM yet (omacvm apply --vm \"$VM\")"; fi
+      FEATURE=gestures
     fi
     # The helper listens only once it has its permissions, so a later
     # "listening" line overrides a "waiting" one (e.g. a restart while waiting).
@@ -331,7 +348,8 @@ if [[ $GESTURES == on ]]; then
     [[ -z $p || $p == *granted* || $p == listening* ]] && ok "keyboard/trackpad access" "Accessibility + Input Monitoring" \
       || bad "keyboard/trackpad access" "${p}: System Settings > Privacy & Security" human
   else bad "Gestures" "OmacVM Gestures is not running (src/mac/install.sh)"; fi
-else skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+else FEATURE=gestures; skip "Gestures" "trackpad gestures off (chosen at setup)"; fi
+FEATURE=battery
 # The Mac's battery: the Bridge serves it to UTM and Fusion VMs, OmacVM.app
 # passes it on its own port; Parallels gives the VM its own.
 if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
@@ -355,6 +373,7 @@ if [[ $(feat battery off) == on && $TYPE != parallels ]]; then
   fi
 fi
 [[ $(feat battery off) == off && $TYPE != parallels ]] && skip "battery (Mac)" "off for this VM (chosen at setup)"
+FEATURE=""
 # macOS's "Automatically hide and show the menu bar: Never" keeps the Mac's
 # menu bar over the full-screen VM: a hint (it is the person's setting).
 if [[ $(defaults read NSGlobalDomain AppleMenuBarVisibleInFullscreen 2>/dev/null) == 1 ]]; then
@@ -384,6 +403,7 @@ utm)
     *) bad "UTM renderer" "Chrome gets no GPU: UTM › Settings › Display › Renderer Backend: Default, then restart UTM" ;;
   esac ;;
 esac
+FEATURE=omanotch
 if [[ $(feat omanotch off) == off ]]; then
   skip "Omanotch" "off for this VM (chosen at setup)"
 elif pgrep -xq omanotch; then
@@ -417,6 +437,7 @@ if [[ $TYPE == app ]] && d=$(app_dir "$VM" 2>/dev/null); then
     else ok "Mac links (app)" "$l"; fi
   fi
 fi
+FEATURE=""
 if [[ $TYPE == app ]]; then
   # The app's "Use the notch for the menu bar": on unless switched off, only with a notch
   # (Omanotch then leaves the strip alone).
@@ -426,13 +447,17 @@ if [[ $TYPE == app ]]; then
   else skip "notch strip (app)" "off: full screen in its own Space, Omanotch fills the strip"; fi
 fi
 (( fails )) && mac_failed=1 || mac_failed=0
+if (( MAC_ONLY )); then
+  (( JSON )) && json_out "$( (( mac_failed )) && echo false || echo true)"
+  (( ! mac_failed )); exit
+fi
 
 if (( JSON )); then
   out=$(gssh "$IP" "bash -s -- --user '$U' --tsv" < "$R/src/guest/check.sh"); guest=$?
-  while IFS=$'\t' read -r a b c d; do
+  while IFS=$US read -r a b c d e; do
     if [[ $a == section ]]; then SECTION="VM: $b"
-    elif [[ -n $a ]]; then ROWS+="$a"$'\t'"$SECTION"$'\t'"$b"$'\t'"$c"$'\t'"$d"$'\n'; fi
-  done <<<"$out"
+    elif [[ -n $a ]]; then ROWS+="$a$US$SECTION$US$b$US$c$US$d$US$e"$'\n'; fi
+  done < <(tr '\t' '\037' <<<"$out")
   json_out "$( (( guest == 0 && ! mac_failed )) && echo true || echo false)"
   (( guest == 0 && ! mac_failed )); exit
 fi

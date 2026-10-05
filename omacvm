@@ -12,14 +12,25 @@
 #   omacvm update                this checkout, the Mac side and your VMs
 #   omacvm check [--vm NAME]     is everything working, on the Mac and in the VM
 #   omacvm vms                   your VMs and their OmacVM state
+#   omacvm report [--vm NAME]    report a problem: what goes into the GitHub issue,
+#                                without personal data, shown before it opens
 #   omacvm uninstall [--purge]   OmacVM off this Mac (your VMs stay as they are)
 #   omacvm help COMMAND          the options of a command (or COMMAND --help)
 #   omacvm --version
 #
 # For scripts and coding agents: --json on vms, features, check, resources and build
 # --plan; --yes (or no terminal) never asks; exit codes 0 done, 1 failed,
-# 2 usage, 3 needs a person. See AGENTS.md.
+# 2 usage, 3 needs a person, 4 failed and rolled back (--transaction). See AGENTS.md.
 set -euo pipefail
+# A job from the control centre (OmacVM Bridge, src/bridge/mac/control.swift):
+# the exit code goes to this file, also when an update restarts the Bridge
+# that started it.
+if [[ -n ${OMACVM_JOB_STATUS:-} ]]; then
+  st=$OMACVM_JOB_STATUS; unset OMACVM_JOB_STATUS
+  rc=0; "$0" "$@" || rc=$?
+  echo "$rc" > "$st"
+  exit "$rc"
+fi
 # The checkout, also when omacvm is called through a symlink on the PATH.
 src=$0
 while [[ -L $src ]]; do
@@ -33,13 +44,15 @@ case $cmd in
   build|apply|check|vms|update|resources) exec "$C/$cmd.sh" "$@" ;;
   features|enable|disable) exec "$C/features.sh" "$cmd" "$@" ;;
   uninstall) exec "$R/src/mac/uninstall.sh" "$@" ;;
+  report) exec "$C/report.sh" "$@" ;;
   --version|-v|version) echo "OmacVM $(cat "$R/src/VERSION")"; exit 0 ;;
   help|-h|--help)
     case ${1:-} in
-      "") sed -n '2,21s/^# \{0,1\}//p' "$0" ;;
+      "") sed -n '2,23s/^# \{0,1\}//p' "$0" ;;
       features|enable|disable) exec "$C/features.sh" "$1" --help ;;
       build|apply|check|vms|update|resources) exec "$C/$1.sh" --help ;;
       uninstall) exec "$R/src/mac/uninstall.sh" --help ;;
+      report) exec "$C/report.sh" --help ;;
       *) echo "omacvm help: no command '$1'" >&2; exit 2 ;;
     esac ;;
   *) echo "omacvm: no command '$cmd' (omacvm help)" >&2; exit 2 ;;

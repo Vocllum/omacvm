@@ -58,6 +58,7 @@ Return to confirm):
    | Omarchy's own screensaver and lock after idle (off: the Mac's lock protects the VM) | on |
    | Autologin | off |
    | Memory-optimized kernel: Arch Linux ARM's kernel rebuilt with transparent huge pages and MGLRU (its own has neither), for memory-heavy work; adds about 10 minutes to the build | off |
+   | The OmacVM control centre: `omacvm` in Omarchy, also in the Omarchy menu and the bar | on |
 
 5. **Your user name, full name and password.** Omarchy's own first-boot setup
    is not used.
@@ -106,6 +107,15 @@ omacvm enable scroll-momentum   # or straight away
 omacvm disable gestures --vm "Omarchy ARM"
 ```
 
+Or in Omarchy itself: `omacvm` (or OmacVM in the Omarchy menu, or the OmacVM
+item in the bar) opens the control centre. Space switches the feature under
+the cursor; the Mac does the same as `omacvm enable/disable` there, and macOS
+still asks for its permissions on the Mac. `r` repairs the feature under the
+cursor (only that one). If a change fails, the VM goes back to what it had
+and the control centre says what to try next. A VM from before the control
+centre gets it with its next `omacvm apply` or `omacvm update` (one question,
+default yes; `--yes` takes the default without asking).
+
 Every feature can be switched on or off later, one at a time, and the VM keeps
 your choices across updates. OmacVM installs what a feature needs on the Mac
 too, and switching one takes well under a minute (the memory-optimized kernel
@@ -147,6 +157,13 @@ omacvm update
 Pulls the newest OmacVM (when your copy has no local changes), updates the Mac
 side and every running VM that has OmacVM, keeping each VM's choices. Stopped
 VMs are listed; `omacvm update --vm NAME` starts one and updates it.
+
+In the control centre, `U` shows what an update changes, feature by feature,
+and installs it (the Mac and that VM). The Mac checks once a week; `s` there
+turns the checks and the update notice off entirely: no marks and no prompts,
+and an update is installed only right after `c` checked again. (Releases do
+not carry their signed update list yet: until then the control centre says
+"no release key yet" and `omacvm update` on the Mac is the way.)
 
 ## Check
 
