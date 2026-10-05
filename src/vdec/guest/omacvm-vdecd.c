@@ -146,11 +146,13 @@ struct srcimg {			/* a decoder surface, imported once */
 	struct plane pl[2];
 };
 
+/* A bitstream buffer as read() left it: the message, then the data (and
+ * FFmpeg's padding) in one pooled buffer that FFmpeg takes by reference. */
 struct pkt {
 	struct pkt *next;
 	uint32_t index, size;
 	uint64_t seq, ts;
-	uint8_t *data;
+	AVBufferRef *buf;
 };
 
 struct frame {
@@ -253,7 +255,7 @@ static void input_drop(struct inst *in)
 
 	while ((p = in->in)) {
 		in->in = p->next;
-		free(p->data);
+		av_buffer_unref(&p->buf);
 		free(p);
 	}
 	in->in_tail = &in->in;
@@ -740,9 +742,11 @@ static bool feed_input(struct inst *in)
 		AVPacket *ap = av_packet_alloc();
 		int r;
 
-		if (!ap)
+		if (!ap || !(ap->buf = av_buffer_ref(p->buf))) {
+			av_packet_free(&ap);
 			return progress;
-		ap->data = p->data;
+		}
+		ap->data = p->buf->data + sizeof(struct ovd_msg);
 		ap->size = p->size;
 		ap->pts = p->ts;
 		double t0 = debug ? now_ms() : 0;
@@ -763,7 +767,7 @@ static bool feed_input(struct inst *in)
 		if (!in->in)
 			in->in_tail = &in->in;
 		in->nin--;
-		free(p->data);
+		av_buffer_unref(&p->buf);
 		free(p);
 		receive_all(in);
 		progress = true;
@@ -841,7 +845,8 @@ static void inst_close(struct inst *in)
 	free(in);
 }
 
-static void handle(const struct ovd_msg *m, const uint8_t *data)
+/* One message; a BITSTREAM one takes *buf (it holds the data). */
+static void handle(const struct ovd_msg *m, AVBufferRef **buf)
 {
 	struct inst *in = inst_find(m->inst);
 
@@ -885,15 +890,15 @@ static void handle(const struct ovd_msg *m, const uint8_t *data)
 		}
 		break;
 	case OVD_MSG_BITSTREAM: {
-		struct pkt *p = calloc(1, sizeof(*p));
+		struct pkt *p = in->nin < MAX_PENDING_INPUT ? calloc(1, sizeof(*p)) : NULL;
 
-		if (!p || in->nin >= MAX_PENDING_INPUT || !(p->data = malloc(m->size + AV_INPUT_BUFFER_PADDING_SIZE))) {
-			free(p);
+		if (!p) {
 			done(OVD_IOC_OUTPUT_DONE, in, m->index, m->seq, 0, OVD_DONE_ERROR);
 			break;
 		}
-		memcpy(p->data, data, m->size);
-		memset(p->data + m->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+		p->buf = *buf;
+		*buf = NULL;
+		memset(p->buf->data + sizeof(*m) + m->size, 0, AV_INPUT_BUFFER_PADDING_SIZE);
 		p->size = m->size;
 		p->index = m->index;
 		p->seq = m->seq;
@@ -1020,15 +1025,19 @@ int main(void)
 {
 	struct ovd_caps caps = { .max_width = OVD_MAX_WIDTH, .max_height = OVD_MAX_HEIGHT,
 				 .version = OVD_VERSION };
+	/* read() fills a pooled buffer: a bitstream stays in it until FFmpeg
+	 * is done (no copy here); the pages a buffer touched stay mapped. */
 	size_t bufsize = sizeof(struct ovd_msg) + OVD_MAX_BITSTREAM;
-	uint8_t *buf = malloc(bufsize);
+	AVBufferPool *pool = av_buffer_pool_init(bufsize + AV_INPUT_BUFFER_PADDING_SIZE, NULL);
+	AVBufferRef *buf = NULL;
+	char codecs[32];
 	uint64_t wd_usec = 0;
 	int wd_ms = -1;		/* systemd's watchdog: ping every third of it */
 	double pinged = 0;
 
 	debug = getenv("OMACVM_VDEC_DEBUG") && *getenv("OMACVM_VDEC_DEBUG") == '1';
 	signal(SIGPIPE, SIG_IGN);
-	if (!buf)
+	if (!pool)
 		return 1;
 	if (!gpu_init()) {
 		log_msg("vdecd: no GPU video (VA-API, EGL or GBM on %s): exiting, apps decode on the CPU",
@@ -1054,10 +1063,10 @@ int main(void)
 		log_msg("vdecd: set caps: %s", strerror(errno));
 		return 1;
 	}
-	snprintf((char *)buf, bufsize, "%s%s%s", caps.codecs & OVD_CODEC_H264 ? " H.264" : "",
+	snprintf(codecs, sizeof(codecs), "%s%s%s", caps.codecs & OVD_CODEC_H264 ? " H.264" : "",
 		 caps.codecs & OVD_CODEC_HEVC ? " HEVC" : "", caps.codecs & OVD_CODEC_VP9 ? " VP9" : "");
-	log_msg("vdecd: ready:%s", (char *)buf);
-	write_status((char *)buf + 1);
+	log_msg("vdecd: ready:%s", codecs);
+	write_status(codecs + 1);
 	if (sd_watchdog_enabled(0, &wd_usec) > 0 && wd_usec >= 3000)
 		wd_ms = (int)(wd_usec / 3000);
 
@@ -1080,16 +1089,20 @@ int main(void)
 		}
 		if (!r)
 			continue;
-		n = read(ctl, buf, bufsize);
+		if (!buf && !(buf = av_buffer_pool_get(pool))) {
+			log_msg("vdecd: out of memory");
+			return 1;
+		}
+		n = read(ctl, buf->data, bufsize);
 		if (n < 0 && errno == EINTR)
 			continue;
 		if (n < (ssize_t)sizeof(m)) {
 			log_msg("vdecd: read: %s", n < 0 ? strerror(errno) : "short");
 			return 1;
 		}
-		memcpy(&m, buf, sizeof(m));
+		memcpy(&m, buf->data, sizeof(m));
 		if (m.type == OVD_MSG_BITSTREAM && (size_t)n != sizeof(m) + m.size)
 			continue;
-		handle(&m, buf + sizeof(m));
+		handle(&m, &buf);
 	}
 }

@@ -21,6 +21,11 @@
  * completes one again. Events go to the app's fh under slock and only while
  * !closing: release sets closing before the fh goes. The daemon's ioctls
  * hold a kref, which keeps the struct, not the fh or the queues.
+ * Bitstream is not copied here: the daemon's read() copies it straight out of
+ * the app's OUTPUT buffer (the one copy on its way to the decoder). The read
+ * checks under slock that the buffer is still queued and counts itself in
+ * inst->copying; stop_streaming takes the buffers back first, then waits for
+ * that count to drop, so vb2 never frees a buffer the daemon is reading.
  * dev->lock guards the instance table and the daemon's file; dev->msg_lock
  * the message list and dev->online. Order: dev->lock, then slock; inst->lock,
  * then slock; msg_lock innermost.
@@ -35,7 +40,6 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
-#include <linux/vmalloc.h>
 #include <media/v4l2-ctrls.h>
 #include <media/v4l2-device.h>
 #include <media/v4l2-event.h>
@@ -81,7 +85,7 @@ struct ovd_inst;
 struct ovd_kmsg {
 	struct list_head list;
 	struct ovd_msg hdr;
-	void *data;
+	const void *data;		/* BITSTREAM: the OUTPUT buffer, not ours */
 	struct ovd_inst *inst;		/* holds a reference */
 };
 
@@ -99,6 +103,8 @@ struct ovd_inst {
 	struct mutex lock;		/* vb2 queues + format ioctls */
 	struct v4l2_ctrl_handler hdl;
 	atomic_t nmsgs;			/* unread by the daemon */
+	atomic_t copying;		/* daemon reads out of an OUTPUT buffer */
+	wait_queue_head_t copy_wq;
 
 	u32 codec;			/* OUTPUT fourcc */
 	u32 out_width, out_height, out_sizeimage;
@@ -212,7 +218,6 @@ static void msg_free(struct ovd_kmsg *m)
 {
 	atomic_dec(&m->inst->nmsgs);
 	kref_put(&m->inst->ref, inst_free);
-	kvfree(m->data);
 	kfree(m);
 }
 
@@ -229,22 +234,18 @@ static void msg_free_list(struct list_head *gone)
  * failed decoder (but its CLOSE). A decoder past MAX_INST_MSGS unread
  * messages fails: kernel memory stays bounded whatever the app does.
  */
-static int msg_send(struct ovd_inst *inst, const struct ovd_msg *hdr, void *data)
+static int msg_send(struct ovd_inst *inst, const struct ovd_msg *hdr, const void *data)
 {
 	struct ovd_dev *dev = inst->dev;
 	bool close = hdr->type == OVD_MSG_CLOSE;
 	struct ovd_kmsg *m;
 	int ret = 0;
 
-	if (!close && READ_ONCE(inst->dead)) {
-		kvfree(data);
+	if (!close && READ_ONCE(inst->dead))
 		return -ENODEV;
-	}
 	m = kzalloc(sizeof(*m), GFP_KERNEL);
-	if (!m) {
-		kvfree(data);
+	if (!m)
 		return -ENOMEM;
-	}
 	m->hdr = *hdr;
 	m->data = data;
 	m->inst = inst;
@@ -260,7 +261,6 @@ static int msg_send(struct ovd_inst *inst, const struct ovd_msg *hdr, void *data
 	}
 	spin_unlock(&dev->msg_lock);
 	if (ret) {
-		kvfree(data);
 		kfree(m);
 		if (ret == -ENOSPC) {
 			dev_warn_ratelimited(&dev->pdev->dev,
@@ -518,30 +518,22 @@ static void ovd_buf_queue(struct vb2_buffer *vb)
 	struct vb2_v4l2_buffer *vbuf = to_vb2_v4l2_buffer(vb);
 	struct ovd_buf *b = container_of(vbuf, struct ovd_buf, m2m.vb);
 	struct ovd_msg hdr = { .inst = inst->id, .index = vb->index };
-	void *data = NULL;
+	const void *data = NULL;
 	u32 size = 0;
 	u64 seq;
 
 	if (V4L2_TYPE_IS_OUTPUT(vb->vb2_queue->type)) {
-		void *src = vb2_plane_vaddr(vb, 0);
-
+		data = vb2_plane_vaddr(vb, 0);
 		size = vb2_get_plane_payload(vb, 0);
-		if (size == 0 || size > OVD_MAX_BITSTREAM || !src) {
+		if (size == 0 || size > OVD_MAX_BITSTREAM || !data) {
 			vb2_buffer_done(vb, size ? VB2_BUF_STATE_ERROR : VB2_BUF_STATE_DONE);
 			return;
 		}
-		data = kvmalloc(size, GFP_KERNEL);
-		if (!data) {
-			vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
-			return;
-		}
-		memcpy(data, src, size);
 	}
 
 	spin_lock(&inst->slock);
 	if (inst->dead) {
 		spin_unlock(&inst->slock);
-		kvfree(data);
 		vb2_buffer_done(vb, VB2_BUF_STATE_ERROR);
 		return;
 	}
@@ -608,6 +600,9 @@ static void ovd_stop_streaming(struct vb2_queue *q)
 	for (i = 0; i < VB2_MAX_FRAME; i++)
 		buf_give_back(tab[i], VB2_BUF_STATE_ERROR);
 	spin_unlock(&inst->slock);
+	/* A read() that started before may still copy out of one of them. */
+	if (out)
+		wait_event(inst->copy_wq, !atomic_read(&inst->copying));
 	msg_simple(inst, out ? OVD_MSG_FLUSH : OVD_MSG_CAPTURE_STOP);
 }
 
@@ -970,7 +965,9 @@ static int ovd_open(struct file *file)
 	mutex_init(&inst->lock);
 	spin_lock_init(&inst->slock);
 	init_waitqueue_head(&inst->setup_wq);
+	init_waitqueue_head(&inst->copy_wq);
 	atomic_set(&inst->nmsgs, 0);
+	atomic_set(&inst->copying, 0);
 	inst->out_width = 1280;
 	inst->out_height = 720;
 	inst->out_sizeimage = 1u << 20;
@@ -1121,6 +1118,30 @@ static int daemon_release(struct inode *inode, struct file *file)
 	return 0;
 }
 
+/* A BITSTREAM message is read only while its buffer is still with us (not
+ * taken back by a stream off or a failure since): the copy then counts in
+ * inst->copying until bits_done. */
+static bool bits_hold(struct ovd_kmsg *m)
+{
+	struct ovd_inst *inst = m->inst;
+	struct ovd_buf *b;
+	bool ok;
+
+	spin_lock(&inst->slock);
+	b = m->hdr.index < VB2_MAX_FRAME ? inst->out[m->hdr.index] : NULL;
+	ok = b && b->queued && b->seq == m->hdr.seq;
+	if (ok)
+		atomic_inc(&inst->copying);
+	spin_unlock(&inst->slock);
+	return ok;
+}
+
+static void bits_done(struct ovd_inst *inst)
+{
+	if (atomic_dec_and_test(&inst->copying))
+		wake_up(&inst->copy_wq);
+}
+
 static ssize_t daemon_read(struct file *file, char __user *buf, size_t len, loff_t *off)
 {
 	struct ovd_dev *dev = file->private_data;
@@ -1139,8 +1160,12 @@ static ssize_t daemon_read(struct file *file, char __user *buf, size_t len, loff
 		if (m)
 			list_del(&m->list);
 		spin_unlock(&dev->msg_lock);
-		if (m)
+		if (m && (m->hdr.type != OVD_MSG_BITSTREAM || bits_hold(m)))
 			break;
+		if (m) {		/* the app has that buffer back: stale */
+			msg_free(m);
+			continue;
+		}
 		if (file->f_flags & O_NONBLOCK)
 			return -EAGAIN;
 		ret = wait_event_interruptible(dev->msg_wq, !list_empty(&dev->msgs));
@@ -1151,6 +1176,8 @@ static ssize_t daemon_read(struct file *file, char __user *buf, size_t len, loff
 	if (copy_to_user(buf, &m->hdr, sizeof(m->hdr)) ||
 	    (m->hdr.size && copy_to_user(buf + sizeof(m->hdr), m->data, m->hdr.size)))
 		ret = -EFAULT;
+	if (m->hdr.type == OVD_MSG_BITSTREAM)
+		bits_done(m->inst);
 	msg_free(m);
 	return ret;
 }

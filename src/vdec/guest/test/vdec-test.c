@@ -8,7 +8,8 @@
  * Per file: OUTPUT buffers with one frame each, CAPTURE buffers taken from
  * the driver (MMAP) and exported (EXPBUF), each picture read back through EGL
  * the way the compositor imports it, compared with FFmpeg's software picture
- * converted to RGB (PSNR, lowest of all frames). Then a seek (OUTPUT
+ * converted to RGB (PSNR, lowest of all frames; "pictures" is a hash of every
+ * picture in order, the same for two builds that decode the same). Then a seek (OUTPUT
  * STREAMOFF/STREAMON from the first key frame), then a drain (DEC_CMD_STOP:
  * an empty LAST buffer and the EOS event). A size change in the stream must
  * come as LAST + SOURCE_CHANGE. Prints one JSON line per file; exit 1 when a
@@ -266,6 +267,7 @@ static bool cap_setup(void)
 struct result {
 	int frames, sizes, seeks, errors;
 	double min_psnr;
+	uint64_t hash;		/* FNV-1a of every picture read back, in order */
 	bool drained, eos;
 	bool failed;		/* the decoder refused buffers (an error came back) */
 	bool timeout;		/* no progress: a hang */
@@ -379,6 +381,8 @@ static void compare(struct ref *r, struct result *res, int idx, int64_t ts)
 	px = realloc(px, (size_t)vis_w * vis_h * 4);
 	glBindFramebuffer(GL_FRAMEBUFFER, caps[idx].fbo);
 	glReadPixels(0, 0, vis_w, vis_h, GL_RGBA, GL_UNSIGNED_BYTE, px);
+	for (size_t i = 0; i < (size_t)vis_w * vis_h * 4; i++)
+		res->hash = (res->hash ^ px[i]) * 0x100000001b3ull;
 	r->sws = sws_getCachedContext(r->sws, sf->width, sf->height, sf->format, sf->width, sf->height,
 				      AV_PIX_FMT_RGBA, SWS_BILINEAR | SWS_ACCURATE_RND | SWS_FULL_CHR_H_INT,
 				      NULL, NULL, NULL);
@@ -433,6 +437,7 @@ static void run(const char *path, struct result *res, int stop_after)
 
 	memset(res, 0, sizeof(*res));
 	res->min_psnr = 99;
+	res->hash = 0xcbf29ce484222325ull;
 	ref_open(&r, path);
 	seek_at = r.fc->streams[r.stream]->nb_frames > 40 ? 30 : -1;
 	tb = r.fc->streams[r.stream]->time_base;
@@ -442,7 +447,9 @@ static void run(const char *path, struct result *res, int stop_after)
 	f.fmt.pix_mp.width = r.cc->width;
 	f.fmt.pix_mp.height = r.cc->height;
 	f.fmt.pix_mp.num_planes = 1;
-	f.fmt.pix_mp.plane_fmt[0].sizeimage = 2 << 20;
+	/* 2 MB as Chromium asks for HD; VDEC_TEST_OUTPUT_MB for streams with bigger packets. */
+	f.fmt.pix_mp.plane_fmt[0].sizeimage = (getenv("VDEC_TEST_OUTPUT_MB") ?
+					       atoi(getenv("VDEC_TEST_OUTPUT_MB")) : 2) << 20;
 	if (xioctl(VIDIOC_S_FMT, &f) || xioctl(VIDIOC_SUBSCRIBE_EVENT, &sub))
 		die("S_FMT OUTPUT / subscribe");
 	sub.type = V4L2_EVENT_EOS;
@@ -529,6 +536,8 @@ static void run(const char *path, struct result *res, int stop_after)
 			b.timestamp.tv_sec = us / 1000000;
 			b.timestamp.tv_usec = us % 1000000;
 			pl[0].bytesused = pending->size;
+			if ((uint32_t)pending->size > f.fmt.pix_mp.plane_fmt[0].sizeimage)
+				die("a packet is bigger than the OUTPUT buffers (VDEC_TEST_OUTPUT_MB)");
 			memcpy(out_map[i], pending->data, pending->size);
 			pending->pts = us * 1000;	/* the driver's ns */
 			ref_decode(&r, pending);
@@ -726,10 +735,10 @@ static void print(const char *file, const char *what, const struct result *res, 
 {
 	printf("{\"file\": \"%s\", \"test\": \"%s\", \"ok\": %s, \"frames\": %d, \"min_psnr_rgb\": %.1f, "
 	       "\"sizes\": %d, \"seeks\": %d, \"drained\": %s, \"eos\": %s, \"errors\": %d, \"failed\": %s, "
-	       "\"timeout\": %s, \"fail_ms\": %.0f}\n", file, what, ok ? "true" : "false", res->frames,
+	       "\"timeout\": %s, \"fail_ms\": %.0f, \"pictures\": \"%016llx\"}\n", file, what, ok ? "true" : "false", res->frames,
 	       res->min_psnr, res->sizes, res->seeks, res->drained ? "true" : "false",
 	       res->eos ? "true" : "false", res->errors, res->failed ? "true" : "false",
-	       res->timeout ? "true" : "false", res->fail_ms);
+	       res->timeout ? "true" : "false", res->fail_ms, (unsigned long long)res->hash);
 	fflush(stdout);
 }
 
