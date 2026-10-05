@@ -89,6 +89,27 @@ _ = w.take(wifi(true), link: true, event: nil, now: at(1040))
 r1 = w.take(wifi(false), link: true, event: nil, now: at(1070))
 check(connected(r1.state) && r1.held, "wifi: a good read between restarts the minute")
 
+// Without Location Services (not decided after a new Bridge, or "Don't Allow"; the Mac mini on
+// macOS 27): CoreWLAN reads a channel with no signal and no SSID most of the time, now and then
+// a signal. The link state decides; the bar never flips while the link is up.
+check(WiFiRead.connected(power: true, channel: true, rssi: 0, locationOK: false, link: true), "wifi read: no Location, link up: connected")
+check(!WiFiRead.connected(power: true, channel: true, rssi: -51, locationOK: false, link: false), "wifi read: no Location, link down: not connected")
+check(WiFiRead.connected(power: true, channel: true, rssi: -51, locationOK: false, link: nil), "wifi read: no Location, link not known: CoreWLAN's read")
+check(!WiFiRead.connected(power: true, channel: true, rssi: 0, locationOK: true, link: true), "wifi read: with Location, CoreWLAN's read (WiFiSteady holds it)")
+check(!WiFiRead.connected(power: false, channel: false, rssi: 0, locationOK: false, link: true), "wifi read: power off: not connected")
+var nl = WiFiSteady(), nlFlips = 0, nlLast = false
+for i in 0..<120 {   // 10 minutes of reads every 5 s, a signal in one read of six
+  let rssi = i % 6 == 0 ? -51 : 0
+  let c = WiFiRead.connected(power: true, channel: true, rssi: rssi, locationOK: false, link: true)
+  var raw = wifi(c, ssid: nil, rssi: rssi, location: false)
+  if rssi == 0 { raw["rssi"] = NSNull() }
+  let s = nl.take(raw, link: true, event: nil, now: at(Double(i) * 5)).state
+  if i > 0 && connected(s) != nlLast { nlFlips += 1 }
+  nlLast = connected(s)
+  if i == 7 { check(s["rssi"] as? Int == -51, "wifi: no Location: a read without a signal keeps the last one known") }
+}
+check(nlFlips == 0 && nlLast, "wifi: no Location, link up, 10 minutes of mostly empty reads: connected, 0 flips")
+
 // ---- MediaRoute: where each media key goes ----
 func route(_ k: MediaKey, _ vm: FrontVM?, volume: Bool = true, mute: Bool = true, mac: UInt32? = nil,
            external: ExternalState = .unknown, light: Bool = false) -> KeyRoute {
