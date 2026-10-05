@@ -49,6 +49,10 @@ reviews, measuring pitfalls, how the VM apps work inside) are in
   for trackpads only and passes every mouse's scrolling one to one; this was
   a smooth-scrolling mouse (Logitech MX and co.) taken as a trackpad before
   2.9.0. Update the Mac's helpers (`omacvm update`).
+- **Omarchy's bar shows Wi-Fi without its name**: OmacVM Bridge has no
+  Location Services permission (macOS needs it for the network's name). The
+  bar still shows connected from the Mac's link. Allow it in System
+  Settings › Privacy & Security › Location Services › OmacVM Bridge.
 - **Permissions asked again after updating to 2.9.0**: OmacVM Bridge and
   OmacVM Gestures now come signed with OmacVM's Developer ID, which macOS
   treats as a new app once. Turn them on again in System Settings › Privacy &
