@@ -124,6 +124,98 @@ enum MediaRoute {
   }
 }
 
+// ---- brightness keys read from the keyboard itself (keys.swift: BrightnessKeys) ----
+// On macOS 27 (Mac mini, Magic Keyboard) the brightness keys reach no event
+// tap at all, not even at the HID level: macOS handles them below. So the
+// Bridge also reads them from the keyboard (IOHIDManager, not seized: macOS
+// still gets every key). Apple keyboards send F1/F2 (keyboard page) and macOS
+// turns them into brightness by the keyboard's own "FnFunctionUsageMap"
+// (IORegistry; on this MacBook: 0x0007003a -> 0x00ff0005, 0x0007003b ->
+// 0x00ff0004, Apple's top-case page) unless "Use F1, F2, etc. keys as standard
+// function keys" is on (then fn + F1/F2 are brightness). Other keyboards send
+// the consumer page's brightness usages (0x0C 0x6F/0x70) directly.
+
+/// A HID usage as page << 16 | usage, as FnFunctionUsageMap writes it.
+enum HIDUsage {
+  static let f1: UInt32 = 0x0007_003A, f2: UInt32 = 0x0007_003B
+  /// fn: Apple's top-case page (MacBook, Magic Keyboard) or Apple's keyboard page.
+  static let fn: Set<UInt32> = [0x00FF_0003, 0xFF01_0003]
+  /// Brightness up/down: consumer page, Apple's top-case page, Apple's keyboard page.
+  static let up: Set<UInt32> = [0x000C_006F, 0x00FF_0004, 0xFF01_0020]
+  static let down: Set<UInt32> = [0x000C_0070, 0x00FF_0005, 0xFF01_0021]
+  static func of(page: UInt32, usage: UInt32) -> UInt32 { page << 16 | (usage & 0xFFFF) }
+}
+
+enum HIDBrightness {
+  /// An Apple keyboard without the property: F1 down, F2 up, as on all of them.
+  static let appleDefault: [UInt32: UInt32] = [HIDUsage.f1: 0x00FF_0005, HIDUsage.f2: 0x00FF_0004]
+
+  /// FnFunctionUsageMap: "0xFROM,0xTO,0xFROM,0xTO,...". Pairs that do not
+  /// parse are left out; an odd last entry is ignored.
+  static func fnMap(_ s: String?) -> [UInt32: UInt32] {
+    guard let s else { return [:] }
+    let v = s.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+      .map { UInt32($0.lowercased().hasPrefix("0x") ? String($0.dropFirst(2)) : $0, radix: 16) }
+    var m: [UInt32: UInt32] = [:]
+    var i = 0
+    while i + 1 < v.count {
+      if let a = v[i], let b = v[i + 1] { m[a] = b }
+      i += 2
+    }
+    return m
+  }
+
+  static func key(_ usage: UInt32) -> MediaKey? {
+    HIDUsage.up.contains(usage) ? .brightnessUp : HIDUsage.down.contains(usage) ? .brightnessDown : nil
+  }
+}
+
+/// Each keyboard's fn key and what a press means. `map`: that keyboard's
+/// FnFunctionUsageMap (empty: none). `fnState`: macOS's "standard function
+/// keys" setting. A press that is a brightness key gives it, nil otherwise.
+struct HIDKeyboards {
+  private var fnDown: Set<UInt64> = []
+
+  mutating func value(device: UInt64, usage: UInt32, pressed: Bool, map: [UInt32: UInt32], fnState: Bool) -> MediaKey? {
+    if HIDUsage.fn.contains(usage) {
+      if pressed { fnDown.insert(device) } else { fnDown.remove(device) }
+      return nil
+    }
+    guard pressed else { return nil }
+    if let k = HIDBrightness.key(usage) { return k }
+    // F1/F2 are brightness when fn is up with special keys (macOS's default),
+    // or fn is down with standard function keys. Any keyboard's fn counts: a
+    // keyboard may send fn from another of its HID interfaces than F1.
+    guard let to = map[usage], !fnDown.isEmpty == fnState else { return nil }
+    return HIDBrightness.key(to)
+  }
+}
+
+/// One press can reach the Bridge twice: from the keyboard (IOHIDManager) and
+/// as macOS's media-key event (the tap), where a Mac delivers both. Whichever
+/// comes first acts; the other path's copy within `window` s is dropped.
+struct BrightnessOnce {
+  enum Path { case keyboard, tap }
+  static let window = 0.3
+  private var last: (path: Path, key: MediaKey, at: Double)?
+
+  mutating func take(_ path: Path, _ key: MediaKey, at now: Double) -> Bool {
+    if let l = last, l.path != path, l.key == key, now - l.at < BrightnessOnce.window {
+      last = nil   // matched: the next press acts again
+      return false
+    }
+    last = (path, key, now)
+    return true
+  }
+
+  /// macOS changed the brightness itself meanwhile (read before and a moment
+  /// after the key): then the Bridge does not step it again.
+  static func macOSDidIt(before: Float?, after: Float?) -> Bool {
+    guard let before, let after else { return false }
+    return abs(after - before) >= 0.004
+  }
+}
+
 /// Says each reason once (per display), so a held key is not a log line per press.
 struct OnceLog {
   private var said: Set<String> = []

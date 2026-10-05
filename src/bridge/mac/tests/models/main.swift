@@ -167,6 +167,61 @@ check(route(.play, parFull) == .macOS(nil), "Parallels: play stays as it was (it
 var once = OnceLog()
 check(once.first("a") && !once.first("a") && once.first("b"), "a reason is logged once")
 
+// ---- brightness keys read from the keyboard (HIDBrightness, HIDKeyboards, BrightnessOnce) ----
+// The MacBook Pro M4 Max's own keyboard map (ioreg, FnFunctionUsageMap).
+let macbookMap = HIDBrightness.fnMap("0x0007003a,0x00ff0005,0x0007003b,0x00ff0004,0x0007003c,0xff010010,0x0007003d,0x000c0221,"
+  + "0x0007003e,0x000c00cf,0x0007003f,0x0001009b,0x00070040,0x000c00b4,0x00070041,0x000c00cd,0x00070042,0x000c00b3,"
+  + "0x00070043,0x000c00e2,0x00070044,0x000c00ea,0x00070045,0x000c00e9")
+check(macbookMap.count == 12 && macbookMap[HIDUsage.f1] == 0x00FF_0005 && macbookMap[HIDUsage.f2] == 0x00FF_0004,
+      "hid: the MacBook's FnFunctionUsageMap: F1 -> top-case brightness down, F2 -> up (12 keys)")
+check(HIDBrightness.fnMap(nil).isEmpty && HIDBrightness.fnMap("").isEmpty && HIDBrightness.fnMap("0x0007003a").isEmpty,
+      "hid: no map, an empty one, an odd one: nothing")
+check(HIDBrightness.fnMap("zz,0x00ff0005,0x0007003b,0x00ff0004") == [HIDUsage.f2: 0x00FF_0004], "hid: a pair that does not parse is left out")
+check(HIDBrightness.key(0x000C_006F) == .brightnessUp && HIDBrightness.key(0x000C_0070) == .brightnessDown,
+      "hid: consumer page 0x6F/0x70 are brightness up/down")
+check(HIDBrightness.key(0x00FF_0004) == .brightnessUp && HIDBrightness.key(0xFF01_0021) == .brightnessDown,
+      "hid: Apple's top-case and keyboard pages too")
+check(HIDBrightness.key(HIDUsage.f1) == nil && HIDBrightness.key(0x000C_00E9) == nil, "hid: F1 itself and volume up are not")
+var kb = HIDKeyboards()
+func hid(_ d: UInt64, _ u: UInt32, _ p: Bool, _ m: [UInt32: UInt32] = macbookMap, fnState: Bool = false) -> MediaKey? {
+  kb.value(device: d, usage: u, pressed: p, map: m, fnState: fnState)
+}
+// MacBook / Magic Keyboard, macOS's default (special keys on top).
+check(hid(1, HIDUsage.f1, true) == .brightnessDown && hid(1, HIDUsage.f1, false) == nil, "hid: F1 pressed: brightness down; released: nothing")
+check(hid(1, HIDUsage.f2, true) == .brightnessUp, "hid: F2: brightness up")
+check(hid(1, 0x0007_003C, true) == nil && hid(1, 0x0007_0044, true) == nil, "hid: F3 (Mission Control), F11 (volume): not brightness")
+_ = hid(1, 0x00FF_0003, true)
+check(hid(1, HIDUsage.f1, true) == nil, "hid: fn + F1: plain F1, no brightness")
+_ = hid(1, 0x00FF_0003, false)
+check(hid(1, HIDUsage.f1, true) == .brightnessDown, "hid: fn released: F1 is brightness again")
+// "Use F1, F2, etc. keys as standard function keys".
+check(hid(1, HIDUsage.f1, true, fnState: true) == nil, "hid: standard F-keys: F1 is F1")
+_ = hid(1, 0xFF01_0003, true)
+check(hid(1, HIDUsage.f2, true, fnState: true) == .brightnessUp, "hid: standard F-keys: fn (Apple keyboard page) + F2 is brightness up")
+_ = hid(1, 0xFF01_0003, false)
+// fn from another interface of the keyboard than F1.
+_ = hid(7, 0x00FF_0003, true)
+check(hid(8, HIDUsage.f1, true) == nil, "hid: fn on one interface, F1 on another: still fn + F1")
+_ = hid(7, 0x00FF_0003, false)
+// A Magic Keyboard without the property: Apple's default map.
+check(hid(2, HIDUsage.f2, true, HIDBrightness.appleDefault) == .brightnessUp, "hid: Apple keyboard with no map: F2 is brightness up")
+// A PC keyboard: no map, its own consumer-page brightness keys; its F1 stays F1.
+check(hid(3, HIDUsage.f1, true, [:]) == nil, "hid: another keyboard's F1 is F1")
+check(hid(3, 0x000C_0070, true, [:]) == .brightnessDown && hid(3, 0x000C_0070, false, [:]) == nil,
+      "hid: its brightness key (consumer page) pressed: down; released: nothing")
+// One press seen by both paths: the first acts, the copy is dropped.
+var once2 = BrightnessOnce()
+check(once2.take(.keyboard, .brightnessUp, at: 10) && !once2.take(.tap, .brightnessUp, at: 10.05),
+      "hid: keyboard first, the tap's copy 50 ms later: once")
+check(once2.take(.tap, .brightnessUp, at: 11) && !once2.take(.keyboard, .brightnessUp, at: 11.02), "hid: tap first: once too")
+check(once2.take(.keyboard, .brightnessUp, at: 12) && once2.take(.keyboard, .brightnessUp, at: 12.1) && once2.take(.keyboard, .brightnessUp, at: 12.2),
+      "hid: quick presses from the keyboard alone (macOS 27: no tap event): each acts")
+check(once2.take(.keyboard, .brightnessUp, at: 13) && once2.take(.tap, .brightnessDown, at: 13.05), "hid: another key: acts")
+check(once2.take(.keyboard, .brightnessUp, at: 14) && once2.take(.tap, .brightnessUp, at: 14.5), "hid: the tap 0.5 s later: a new press")
+check(BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5625) && !BrightnessOnce.macOSDidIt(before: 0.5, after: 0.5)
+      && !BrightnessOnce.macOSDidIt(before: nil, after: 0.6) && !BrightnessOnce.macOSDidIt(before: 0.5, after: nil),
+      "hid: macOS stepped it already (1/16): not again; unchanged or unreadable (DDC): the Bridge steps")
+
 // ---- QEMU's control socket ----
 check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])
       == "/Users/a/Library/Caches/OmacVM/run/x.qmp", "QMP: the socket from the command line")
