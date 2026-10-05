@@ -74,5 +74,98 @@ _ = w.take(wifi(true), link: true, event: nil, now: at(800))
 r1 = w.take(wifi(false, location: false), link: true, event: nil, now: at(805))
 check(connected(r1.state) && r1.state["location_authorized"] as? Bool == false, "wifi: Location Services from the newest read while held")
 
+// Bad reads only, for a minute, while the link still says up: believed then.
+_ = w.take(wifi(true), link: true, event: nil, now: at(900))
+r1 = w.take(wifi(false), link: true, event: nil, now: at(905))
+check(connected(r1.state) && r1.held, "wifi: link up, a bad read: held")
+r1 = w.take(wifi(false), link: true, event: nil, now: at(950))
+check(connected(r1.state) && r1.held, "wifi: link up, bad reads for 45 s: still held")
+r1 = w.take(wifi(false), link: true, event: nil, now: at(966))
+check(!connected(r1.state) && !r1.held, "wifi: link up, only bad reads for \(Int(WiFiSteady.linkHold)) s: believed")
+// ... but one good read in between starts the minute again.
+_ = w.take(wifi(true), link: true, event: nil, now: at(1000))
+_ = w.take(wifi(false), link: true, event: nil, now: at(1005))
+_ = w.take(wifi(true), link: true, event: nil, now: at(1040))
+r1 = w.take(wifi(false), link: true, event: nil, now: at(1070))
+check(connected(r1.state) && r1.held, "wifi: a good read between restarts the minute")
+
+// ---- MediaRoute: where each media key goes ----
+func route(_ k: MediaKey, _ vm: FrontVM?, volume: Bool = true, mute: Bool = true, mac: UInt32? = nil,
+           external: ExternalState = .unknown, light: Bool = false) -> KeyRoute {
+  MediaRoute.route(k, vm: vm, volumeSettable: volume, muteSettable: mute, macBrightness: mac, external: external, keyboardLight: light)
+}
+// A Mac mini M4 with ONE display, an LG UltraFine 5K (display 5, external, set
+// through DisplayServices), no built-in display, no keyboard light; audio
+// through a Focusrite Scarlett 2i2 (no software volume, no mute).
+let uf: UInt32 = 5
+let miniFull = FrontVM(omacvm: true, fullScreen: true, display: uf, builtin: false, vmKeys: true)
+let miniWin = FrontVM(omacvm: true, fullScreen: false, display: uf, builtin: false, vmKeys: true)
+for (vm, how) in [(miniFull, "full screen"), (miniWin, "windowed")] {
+  check(route(.brightnessUp, vm, mac: uf, external: .works) == .external(uf), "mini \(how): brightness sets the UltraFine (its own control)")
+  check(route(.brightnessDown, vm, mac: uf, external: .unknown) == .mac,
+        "mini \(how): not looked at yet: the Bridge's own call on the same display (never dropped)")
+  check(route(.brightnessUp, vm, mac: uf, external: .off) == .mac, "mini \(how): external brightness off: still the UltraFine")
+  check(route(.volumeUp, vm, volume: false, mute: false) == .vm("volumeup"), "mini \(how): Scarlett, volume up: the VM's own volume")
+  check(route(.volumeDown, vm, volume: false, mute: false) == .vm("volumedown"), "mini \(how): Scarlett, volume down: the VM's")
+  check(route(.mute, vm, volume: false, mute: false) == .vm("audiomute"), "mini \(how): Scarlett, mute: the VM's")
+  check(route(.volumeUp, vm) == .mac && route(.mute, vm) == .mac, "mini \(how): speakers with a volume: the Mac's")
+  check(route(.play, vm) == .vm("audioplay") && route(.next, vm) == .vm("audionext") && route(.previous, vm) == .vm("audioprev"),
+        "mini \(how): play/pause, next, previous: the VM's players")
+  check(route(.fast, vm) == .vm("audionext") && route(.rewind, vm) == .vm("audioprev"), "mini \(how): an Apple keyboard's track keys too")
+  check(route(.keyboardUp, vm) == .macOS(nil), "mini \(how): no keyboard light: macOS's")
+}
+// The UltraFine says no (asleep): to macOS with the reason, and the Bridge's own call when it reaches it.
+check(route(.brightnessUp, miniWin, mac: nil, external: .no("asleep")) == .macOS("asleep"), "mini: cannot be set: to macOS, with why")
+check(route(.brightnessUp, miniWin, mac: uf, external: .no("asleep")) == .mac, "mini: no DDC but DisplayServices reaches it: the Bridge's")
+// No VM in front: everything stays macOS's.
+for k in [MediaKey.volumeUp, .mute, .play, .brightnessUp, .keyboardUp] {
+  check(route(k, nil, volume: false, mac: uf, external: .works, light: true) == .macOS(nil), "no VM in front: \(k) is macOS's")
+}
+// The VM takes no keys (its control socket not found): to macOS, with why.
+var noKeys = miniWin; noKeys.vmKeys = false
+if case .macOS(let why) = route(.volumeUp, noKeys, volume: false) { check(why != nil, "VM without a control socket: volume to macOS, with why") }
+else { check(false, "VM without a control socket: volume to macOS, with why") }
+
+// A MacBook Pro (built-in 1, notch) with an external Pi-X9 (2, DDC/CI).
+let builtinFull = FrontVM(omacvm: true, fullScreen: true, display: 1, builtin: true, vmKeys: true)
+let builtinWin = FrontVM(omacvm: true, fullScreen: false, display: 1, builtin: true, vmKeys: true)
+let extFull = FrontVM(omacvm: true, fullScreen: true, display: 2, builtin: false, vmKeys: true)
+check(route(.brightnessUp, builtinFull, mac: 1) == .mac, "MacBook full screen: the built-in's brightness, by the Bridge (no macOS popup)")
+check(route(.brightnessUp, builtinWin, mac: 1) == .macOS(nil), "MacBook windowed on the built-in: macOS's own (its popup)")
+check(route(.brightnessUp, extFull, mac: 1, external: .works) == .external(2), "MacBook, VM on the Pi-X9: DDC/CI")
+check(route(.brightnessUp, extFull, mac: 1, external: .no("no DDC")) == .macOS("no DDC"), "MacBook, Pi-X9 without DDC: macOS, with why")
+check(route(.brightnessUp, extFull, mac: 1, external: .off) != .mac, "MacBook: the built-in is never set for a VM on the external")
+check(route(.keyboardUp, builtinFull, light: true) == .mac, "MacBook: Shift+brightness, the keyboard light")
+check(route(.volumeUp, builtinWin) == .mac, "MacBook windowed: volume, the Mac's (with the VM's popup)")
+// Parallels, UTM, Fusion: full screen only, and no keys typed into them.
+let parFull = FrontVM(omacvm: false, fullScreen: true, display: 1, builtin: true, vmKeys: false)
+let parWin = FrontVM(omacvm: false, fullScreen: false, display: 1, builtin: true, vmKeys: false)
+check(route(.volumeUp, parFull) == .mac && route(.volumeUp, parWin) == .macOS(nil), "Parallels: the Mac's volume in full screen only")
+check(route(.play, parFull) == .macOS(nil), "Parallels: play stays as it was (its own)")
+
+var once = OnceLog()
+check(once.first("a") && !once.first("a") && once.first("b"), "a reason is logged once")
+
+// ---- QEMU's control socket ----
+check(QMPKeys.socketPath(["-name", "Omarchy", "-qmp", "unix:/Users/a/Library/Caches/OmacVM/run/x.qmp,server=on,wait=off"])
+      == "/Users/a/Library/Caches/OmacVM/run/x.qmp", "QMP: the socket from the command line")
+check(QMPKeys.socketPath(["-qmp", "unix:/tmp/a,,b.qmp,server=on"]) == "/tmp/a,b.qmp", "QMP: a doubled comma is a comma")
+check(QMPKeys.socketPath(["-qmp", "tcp:127.0.0.1:4444"]) == nil && QMPKeys.socketPath(["-qmp"]) == nil && QMPKeys.socketPath([]) == nil,
+      "QMP: no Unix socket, nothing")
+check(QMPKeys.socketPath(["-qmp", "unix:/" + String(repeating: "x", count: 200)]) == nil, "QMP: too long for a socket address")
+check(QMPKeys.commands("volumeup").count == 3 && QMPKeys.commands("volumeup")[1].contains(#""down":true"#)
+      && QMPKeys.commands("volumeup")[2].contains(#""down":false"#), "QMP: capabilities, down, up")
+check(QMPKeys.kind(#"{"QMP": {"version": {}}}"#) == "greeting" && QMPKeys.kind(#"{"return": {}}"#) == "ok"
+      && QMPKeys.kind(#"{"error": {"class": "x"}}"#) == "error" && QMPKeys.kind(#"{"event": "RESUME"}"#) == nil
+      && QMPKeys.kind("garbage") == nil, "QMP: replies told apart (events skipped)")
+func procargs(_ args: [String], exe: String = "/x/OmacVM") -> [UInt8] {
+  var b: [UInt8] = [UInt8(args.count), 0, 0, 0] + Array(exe.utf8) + [0, 0, 0]
+  for a in args { b += Array(a.utf8) + [0] }
+  return b + Array("HOME=/Users/a".utf8) + [0]
+}
+check(ProcArgs.parse(procargs(["OmacVM", "-qmp", "unix:/s"])) == ["OmacVM", "-qmp", "unix:/s"], "procargs: argv, no environment")
+check(ProcArgs.parse([]) == nil && ProcArgs.parse([2, 0, 0, 0, 65, 0, 66]) == nil && ProcArgs.parse([0, 0, 0, 0]) == nil,
+      "procargs: short, cut off or empty: nothing")
+
 if failed > 0 { print("\(failed) failed"); exit(1) }
 print("models: all ok")
