@@ -68,3 +68,6 @@ jobs:
 
       - name: Gestures off means no Gestures link from the VM
         run: src/tests/gestures-off.sh
+
+      - name: Benchmark chart and the pages that quote it agree
+        run: src/tests/bench-docs.sh
