@@ -597,30 +597,61 @@ struct LogLimiter {
 
 // ---- connections being handled ----
 
-/// Requests being handled at once, one thread each: at most `total`. A VM
-/// the Mac knows (by its address in the VM list), and this Mac (127.x), at
-/// most `perKey` each. Addresses it does not know at most `perUnknown` each
-/// and `unknownTotal` together: a guest can add any number of addresses,
-/// and with them it must never take the places of the known VMs.
+/// Requests being handled at once, one thread each. Every VM the Mac knows
+/// (by its address in the VM list), and this Mac (127.x: OmacVM.app's relay),
+/// has `reserved` places nobody else can take; past them it shares `total`
+/// with everyone, at most `perKey` in all. Addresses the list does not have
+/// take at most `unknownTotal` of `total` together and `perUnknown` each: a
+/// guest can add any number of addresses. So a guest holding all it can (its
+/// own 12 and all 16 unknown places, 24 of the 48 shared) never keeps another
+/// VM or the app relay out. Threads: at most total + reserved per known VM.
+/// Long requests (a wallpaper upload, a Wi-Fi password dialog) at most
+/// `perKeySlow` per VM or address at once: they wait on the person or a big
+/// body, and a VM must not hold its places with them.
 struct ConnectionGate {
-  let total: Int, perKey: Int, perUnknown: Int, unknownTotal: Int
-  private var all = 0, unknown = 0, per: [String: Int] = [:]
-  init(total: Int = 32, perKey: Int = 16, perUnknown: Int = 8, unknownTotal: Int = 16) {
-    self.total = total; self.perKey = perKey; self.perUnknown = perUnknown; self.unknownTotal = unknownTotal
+  let total: Int, perKey: Int, reserved: Int, perUnknown: Int, unknownTotal: Int, perKeySlow: Int
+  private var shared = 0, unknown = 0, per: [String: Int] = [:], slow: [String: Int] = [:]
+  init(total: Int = 48, perKey: Int = 12, reserved: Int = 4, perUnknown: Int = 8, unknownTotal: Int = 16, perKeySlow: Int = 2) {
+    self.total = total; self.perKey = perKey; self.reserved = reserved
+    self.perUnknown = perUnknown; self.unknownTotal = unknownTotal; self.perKeySlow = perKeySlow
   }
 
   mutating func enter(_ key: String, known: Bool) -> Bool {
     let n = per[key, default: 0]
-    guard all < total, n < (known ? perKey : perUnknown), known || unknown < unknownTotal else { return false }
-    all += 1; per[key] = n + 1
-    if !known { unknown += 1 }
+    if known {
+      guard n < perKey else { return false }
+      if n >= reserved {   // past its own places: from the shared ones
+        guard shared < total else { return false }
+        shared += 1
+      }
+    } else {
+      guard n < perUnknown, unknown < unknownTotal, shared < total else { return false }
+      unknown += 1; shared += 1
+    }
+    per[key] = n + 1
     return true
   }
 
+  /// With the same key and known as enter.
   mutating func leave(_ key: String, known: Bool) {
-    all -= 1
-    if !known { unknown -= 1 }
-    let n = per[key, default: 1] - 1
-    per[key] = n > 0 ? n : nil
+    let n = per[key, default: 0]
+    guard n > 0 else { return }
+    if !known { unknown -= 1; shared -= 1 } else if n > reserved { shared -= 1 }
+    per[key] = n > 1 ? n - 1 : nil
   }
+
+  /// A request already let in turns out to be a long one.
+  mutating func enterSlow(_ key: String) -> Bool {
+    let n = slow[key, default: 0]
+    guard n < perKeySlow else { return false }
+    slow[key] = n + 1
+    return true
+  }
+
+  mutating func leaveSlow(_ key: String) {
+    let n = slow[key, default: 0]
+    slow[key] = n > 1 ? n - 1 : nil
+  }
+
+  var sharedInUse: Int { shared }
 }

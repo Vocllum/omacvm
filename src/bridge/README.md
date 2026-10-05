@@ -304,9 +304,15 @@ Which VM asked comes from `omacvm vms --json`, cached: a request never waits
 for it. It is read again in the background, one run at a time, when the list
 is a minute old, after a job, and for an address the list does not have (a
 VM that just started) at most once a minute, since any guest can add
-addresses. Connections being handled: 32 in all, 16 per VM the list knows
-(and 16 for 127.0.0.1), 8 per unknown address and 16 for all unknown
-addresses together, so added addresses never take a known VM's place.
+addresses.
+
+Connections being handled: every VM the list knows, and 127.0.0.1 (this Mac:
+OmacVM.app's relay and its guests), has 4 places of its own; past them it
+shares 48 places with the rest, at most 12 in all. Unknown addresses take at
+most 16 of the 48 together and 8 each. So a guest that holds all it can (its
+own 12 and the 16 unknown places) leaves the other VMs and the relay all
+theirs. Long requests (`POST /wallpaper` with its 120 s body,
+`GET /wifi/password` waiting on the dialog) at most two at once per VM (429).
 
 ### Not built: Wi-Fi control
 

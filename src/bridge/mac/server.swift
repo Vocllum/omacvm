@@ -89,6 +89,8 @@ final class Gate {
   private var g = ConnectionGate()
   func enter(_ key: String, known: Bool) -> Bool { lock.lock(); defer { lock.unlock() }; return g.enter(key, known: known) }
   func leave(_ key: String, known: Bool) { lock.lock(); defer { lock.unlock() }; g.leave(key, known: known) }
+  func enterSlow(_ key: String) -> Bool { lock.lock(); defer { lock.unlock() }; return g.enterSlow(key) }
+  func leaveSlow(_ key: String) { lock.lock(); defer { lock.unlock() }; g.leaveSlow(key) }
 }
 let gate = Gate()
 
@@ -339,6 +341,19 @@ func handle(_ fd: Int32, peer: String) {
   }
   let limit = path == "/wallpaper" ? 48 << 20 : path.hasPrefix("/omacvm/") ? controlBodyMax : 65536
   guard wanted <= limit else { respond(fd, 413, ["error": "body too large"]); return }
+  // Long requests (a big body, a password dialog) at most two at once per VM:
+  // they must not hold all its places (ConnectionGate).
+  var slowKey: String?
+  defer { if let k = slowKey { gate.leaveSlow(k) } }
+  if (method == "POST" && path == "/wallpaper") || (method == "GET" && path == "/wifi/password") {
+    let key = control.connectionKey(peer).key
+    guard gate.enterSlow(key) else {
+      logRefusal("slow \(key)", "busy: \(logSafe(path)) from \(peer) while two of its own run")
+      respond(fd, 429, ["error": "busy: wait for this VM's last \(path == "/wallpaper" ? "wallpaper" : "Wi-Fi password") request"])
+      return
+    }
+    slowKey = key
+  }
   deadline = Date().addingTimeInterval(path == "/wallpaper" ? 120 : 5)
   while buf.count - headEnd.upperBound < wanted, readMore() {}
   let body = buf[headEnd.upperBound...].prefix(wanted)

@@ -322,7 +322,7 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     for i in 0..<10_000 where ll.admit("addr\(i % 500)", now: t0 + 62 + Double(i) / 100) != nil { lines += 1 }
     expect(lines <= 8, "a flood from 500 addresses for 100 s: a few lines (\(lines))")
 
-    // ---- connection limits ----
+    // ---- connection limits (final review point 2) ----
     var g = ConnectionGate()
     var held = 0
     for _ in 0..<40 where g.enter("address 10.211.55.200", known: false) { held += 1 }
@@ -330,18 +330,41 @@ func err(_ r: Result<ControlRoute, PolicyError>) -> PolicyError? { if case .fail
     for _ in 0..<40 where g.enter("address 10.211.55.201", known: false) { held += 1 }
     for _ in 0..<40 where g.enter("address 10.211.55.202", known: false) { held += 1 }
     expect(held == 16, "unknown addresses together: 16")
-    expect(g.enter("vm parallels/A", known: true), "a known VM still gets in")
-    var inA = 1
+    // One guest holds all it can: its own 12 and the 16 unknown places.
+    var inA = 0
     for _ in 0..<40 where g.enter("vm parallels/A", known: true) { inA += 1 }
-    expect(inA == 16 && !g.enter("vm parallels/B", known: true), "16 per VM, 32 in all")
-    g.leave("vm parallels/A", known: true)
-    expect(g.enter("vm parallels/B", known: true), "a place freed: B gets in")
-    expect(!g.enter("vm parallels/C", known: true) && !g.enter("address 10.211.55.203", known: false), "all 32 taken: nobody else")
-    g.leave("vm parallels/B", known: true)
-    expect(!g.enter("address 10.211.55.203", known: false), "a known VM's place freed: still not for the unknown pool")
-    expect(g.enter("vm parallels/C", known: true), "but for a known VM")
-    g.leave("address 10.211.55.200", known: false)
-    expect(g.enter("address 10.211.55.203", known: false), "a place in the unknown pool again")
+    expect(inA == 12, "12 per VM (\(inA))")
+    expect(g.sharedInUse == 8 + 16, "A's 8 past its own 4 and the 16 unknown share the 48 (\(g.sharedInUse))")
+    var inB = 0, inMac = 0
+    for _ in 0..<40 where g.enter("vm parallels/B", known: true) { inB += 1 }
+    for _ in 0..<40 where g.enter("mac", known: true) { inMac += 1 }
+    expect(inB == 12 && inMac == 12, "another VM and the app relay still get all theirs (\(inB), \(inMac))")
+    // Many known VMs fill the shared places: each still has its own 4.
+    var g2 = ConnectionGate()
+    for v in 0..<10 { for _ in 0..<12 { _ = g2.enter("vm parallels/V\(v)", known: true) } }
+    expect(g2.sharedInUse == 48, "the shared places are all taken")
+    expect(!g2.enter("vm parallels/V0", known: true) && !g2.enter("address 10.211.55.9", known: false),
+           "nobody past their own places now")
+    var own = 0
+    for _ in 0..<10 where g2.enter("mac", known: true) { own += 1 }
+    for _ in 0..<10 where g2.enter("vm parallels/NEW", known: true) { own += 1 }
+    expect(own == 8, "the relay and a VM that comes later: their own 4 each (\(own))")
+    g2.leave("vm parallels/V3", known: true)
+    expect(g2.sharedInUse == 47 && g2.enter("address 10.211.55.9", known: false), "a shared place freed: anyone")
+    // Leave gives back the right kind of place.
+    var g3 = ConnectionGate()
+    for _ in 0..<6 { _ = g3.enter("vm parallels/A", known: true) }
+    expect(g3.sharedInUse == 2, "6 in: 4 own + 2 shared")
+    for _ in 0..<6 { g3.leave("vm parallels/A", known: true) }
+    g3.leave("vm parallels/A", known: true)   // one too many: ignored
+    expect(g3.sharedInUse == 0 && g3.enter("vm parallels/A", known: true), "all back")
+    // Long requests: two at once per VM.
+    expect(g3.enterSlow("vm parallels/A") && g3.enterSlow("vm parallels/A") && !g3.enterSlow("vm parallels/A"),
+           "two long requests per VM")
+    expect(g3.enterSlow("vm parallels/B"), "another VM's long request")
+    g3.leaveSlow("vm parallels/A")
+    expect(g3.enterSlow("vm parallels/A"), "one ended: another")
+
     }
 
     print("control policy: \(passed) passed, \(failures) failed")
