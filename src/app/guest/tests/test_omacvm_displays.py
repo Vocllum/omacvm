@@ -295,6 +295,21 @@ class Agent(unittest.TestCase):
             self.run_for(a, od.REPAIR_EVERY)
         self.assertEqual(len(self.started), 1)
 
+    def test_good_look_after_repair_allows_another(self):
+        a = self.make(["Virtual-2"])
+        a.look_in(1)
+        self.run_for(a, 10)
+        self.assertEqual(len(self.started), 1)    # repaired once
+        self.problems = []
+        a.look_in(1)
+        self.run_for(a, 10)                       # the new shell draws
+        self.problems = ["Virtual-2"]             # later the same output goes grey again
+        for _ in range(2):                        # (once the 2-minute gap is over)
+            a.look_in(1)
+            self.run_for(a, od.REPAIR_EVERY)
+        self.assertEqual(len(self.started), 2)
+        self.assertEqual(a.repairs, 2)
+
     def test_at_most_three(self):
         a = self.make(["Virtual-2"])
         for i in range(20):
