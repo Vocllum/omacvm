@@ -107,6 +107,26 @@ in more words.
   Studio Display) set that display with the VM in front, full screen or in a
   window. A key the Bridge cannot use goes to macOS, and the Bridge's log
   says once why.
+- OmacVM.app: every key combination goes to the VM while it has the
+  keyboard (full screen, or its window in front): macOS's own shortcuts
+  are switched off meanwhile, so screenshots (⌘⇧3/4/5 and the ⌃ variants),
+  Mission Control, App Exposé, Show Desktop (F11, ⌘F11), Launchpad,
+  ⌃-arrows, Spotlight (⌘Space), input sources (⌃Space), ⌘Tab, ⌘\`, ⌘Q/H/M/W
+  and F-keys with any modifier reach Omarchy. The top-row keys macOS knows by
+  their own code (Mission Control, Spotlight, Dictation, Do Not Disturb)
+  arrive as F3-F6. Only ⌃⌥⌘ Esc stays macOS's, and the media keys keep
+  their rules (volume and brightness: the Mac's, else the VM's; play, next,
+  previous: the VM's). Checked against macOS's whole list (405 shortcuts,
+  each typed into a real QEMU). macOS turns its shortcuts back on by itself
+  when the VM's app quits or crashes, and OmacVM turns them on if the VM's
+  window stops answering. To keep them with macOS:
+  `defaults write org.omacvm.app macShortcuts -bool true`.
+- Scroll momentum only ever takes a trackpad's scrolling (the built-in one,
+  a Magic Trackpad, also one connected later), decided per scroll: wheel
+  mice, smooth-scrolling mice (Logitech MX and co.) and a Magic Mouse scroll
+  one to one through the VM app again, with nothing added after the wheel
+  stops (before, a smooth-scrolling mouse could jump on after it stopped).
+  So it is now on by default: on a Mac with only mice it does nothing.
 - OmacVM.app carries OmacVM Bridge and OmacVM Gestures built and signed with
   OmacVM's Developer ID: `omacvm apply`, `omacvm update` and the app install
   these copies (nothing is compiled on the Mac), and macOS keeps their

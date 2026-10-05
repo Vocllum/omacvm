@@ -90,8 +90,8 @@ UTM, or choose their password: hand those over, never work around them.
      titles and summaries; without `--vm` it also reads a running VM's state,
      so pass `--vm NAME` whenever there are VMs). Ask for their password (never invent one) and
      what they want changed. macOS-native scroll momentum (`scroll-momentum`)
-     is experimental and off by default: offer
-     it, do not decide it.
+     is experimental and on by default; it only ever takes a trackpad's
+     scrolling (mice scroll one to one), so a Mac with only mice is unaffected.
      `prebuilt.available` in the plan: a prebuilt VM exists for this app
      (same major version, up to this one; never for OmacVM.app); offer it (`--prebuilt`: a 3.5-6 GB download, then a few
      minutes) or a build here (`--build`, the default with `--yes`).
@@ -269,9 +269,21 @@ OmacVM.app (QEMU's window code): virtio port ◀───▶ omacvm-displays (us
   (the exact name first, else the longest name in the title); without a match
   (older daemons, a VM renamed since its last `omacvm apply`) to every VM of
   that app. The helper captures the trackpad only when those VMs all want it,
-  and the scroll momentum (macOS's continuous scroll events dropped,
-  `A`/`W`/`P` sent, every two-finger frame forwarded) only when they all want
-  that.
+  and the scroll momentum (a trackpad's scroll events dropped, `A`/`W`/`P`
+  sent, every two-finger frame forwarded) only when they all want that.
+  Which scroll is a trackpad's: `mac/scroll-model.h`, per event (phases and
+  momentum of a scroll made while a trackpad has two fingers on it); wheel
+  mice, smooth-scrolling mice and a Magic Mouse always pass to the VM app.
+- OmacVM.app's keyboard: while QEMU's window has the keyboard (full grab, app
+  active, window key) macOS's global shortcuts are off
+  (CGSSetGlobalHotKeyOperatingMode, `omacvm-cocoa-system-shortcuts.patch`;
+  logic in `omacvm-cocoa-shortcuts-logic.patch`, tested against macOS's whole
+  list by `app/runtime/Tests/keys/test-shortcuts.sh` and in a real QEMU by
+  `src/tests/vm-shortcuts.sh`). The switch belongs to QEMU's window-server
+  connection (macOS restores it when QEMU dies); a watchdog thread turns it
+  on after 2 s without the main thread. `macShortcuts` (org.omacvm.app) →
+  `OMACVM_MAC_SHORTCUTS=1` keeps them with macOS. Gestures' tap still takes
+  ⌃⌥⌘ Esc first; the Bridge still routes media keys.
 - SSH: `gssh` checks each VM's host key, remembered the first time OmacVM sets
   the VM up (`~/Library/Application Support/omacvm/known_hosts/`, `vm_pin`);
   another key stops with exit 3 and `omacvm apply --vm NAME --reset-host-key`.
