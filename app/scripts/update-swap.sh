@@ -6,7 +6,7 @@
 # It waits for the app (PID) to quit and never swaps while a process runs
 # from APP (a VM's QEMU). Then it starts the swapped-in app with
 # --update-check TOKEN; that app writes HOME/launch-TOKEN ("ok" once its
-# QEMU starts). No "ok" within a minute: the app that was there before goes
+# QEMU starts). No "ok" within 90 s: the app that was there before goes
 # back. HOME/result tells the app that runs at the end what happened.
 set -uo pipefail
 MODE=${1:-} APP=${2:-} NEW=${3:-} HOME_DIR=${4:-} OLD_PID=${5:-} TOKEN=${6:-}
@@ -18,7 +18,9 @@ PREV=$HOME_DIR/previous/$BASE
 INCOMING=$HOME_DIR/incoming/$BASE
 FAILED=$HOME_DIR/failed
 MARKER=$HOME_DIR/launch-$TOKEN
-WAIT=${OMACVM_UPDATE_WAIT:-60}
+# 90 s: a first launch can be slow (XProtect scans the new bundle, an 8 GB
+# Mac under memory pressure); a false rollback skips a good version.
+WAIT=${OMACVM_UPDATE_WAIT:-90}
 LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
 
 log() { printf '%s swap: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }

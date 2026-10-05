@@ -14,7 +14,7 @@ import OmacVMUpdate
 /// Installing hands over to update-swap.sh (copied out of the bundle first):
 /// it waits for this app to quit, keeps it as the previous version, puts the
 /// new one in its place and starts it with --update-check. The new app checks
-/// that its QEMU starts and writes a marker; without one within a minute the
+/// that its QEMU starts and writes a marker; without one within 90 s the
 /// script puts the previous version back and the version is skipped. The
 /// previous version stays for one step back (menu: Go Back to ...).
 ///

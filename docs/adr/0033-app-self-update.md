@@ -89,8 +89,11 @@ it looks again, and if something was started in between, everything goes
 back), and starts it with
 `--update-check TOKEN`. The new app starts its QEMU with `--version` (that
 loads every library) and writes `launch-TOKEN`: "ok", or "fail" and exits.
-Without "ok" within 60 s the script stops whatever runs from the bundle, puts
-the old app back, and the old app skips that version. The version kept from
+Without "ok" within 90 s the script stops whatever runs from the bundle, puts
+the old app back, and the old app skips that version. 90 s, not 60: the first
+launch of a new bundle can be slow (XProtect scans it; an 8 GB M1 under
+memory pressure), and a false rollback is safe but skips a good version until
+the next one (or Check for Updates… by hand, which offers it again). The version kept from
 before stays aside until the new one has started. `previous/` gives one step
 back (app menu: Go Back to X), with the same script and checks. A copy
 installed under its own name keeps it: the new app gets the name and is
